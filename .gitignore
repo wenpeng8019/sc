@@ -1,0 +1,16 @@
+# 构建产物
+compiler/build/
+*.o
+*.out
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 示例编译产物
+examples/demo

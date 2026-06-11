@@ -1,0 +1,219 @@
+// ============================================================
+// 词法分析器 —— 源码字符串 → Token 序列
+// ============================================================
+// 核心功能：
+//   1. 缩进处理（类 Python 的 INDENT/DEDENT 机制）
+//   2. 关键字识别（哈希表查表，O(1)）
+//   3. 字面量扫描（字符串、字符、整数、浮点、十六进制）
+//   4. 运算符最长匹配（识别 >>= 而非单独的 > 和 >=）
+//   5. 注释跳过（# 到行尾）
+//   6. 括号内缩进抑制（parenDepth > 0 时不产生 Indent/Dedent）
+//
+// 缩进算法：
+//   用 indents 栈记录每级缩进级别（Tab数 或 4空格组数）。
+//   每遇到非空非注释行：
+//     - 缩进 > 栈顶 → 推入新级别，产生 Indent
+//     - 缩进 < 栈顶 → 连续弹出并产生 Dedent
+//     - 缩进只能逐级增加（不允许跳级）
+// ============================================================
+#include "lexer.h"
+#include "error.h"
+#include <cctype>
+#include <unordered_map>
+
+namespace {
+
+// 关键字映射表 —— 标识符扫描后查此表判断是否为关键字
+const std::unordered_map<std::string, Tok> kKeywords = {
+    {"def", Tok::KwDef},   {"fnc", Tok::KwFnc},
+    {"var", Tok::KwVar},   {"let", Tok::KwLet},
+    {"return", Tok::KwReturn}, {"if", Tok::KwIf},
+    {"else", Tok::KwElse}, {"while", Tok::KwWhile},
+    {"for", Tok::KwFor},   {"break", Tok::KwBreak},
+    {"continue", Tok::KwContinue},
+};
+
+// Lexer 内部类 —— 封装所有词法分析状态
+struct Lexer {
+    const std::string& s;         // 源码引用（不拷贝）
+    size_t i = 0;                 // 当前扫描位置
+    int line = 1;                 // 当前行号（1-based）
+    int parenDepth = 0;           // 括号嵌套深度，>0 时抑制缩进/换行处理
+    std::vector<int> indents{0};  // 缩进级别栈，0=文件顶层
+    std::vector<Token> out;       // 输出 token 序列
+
+    explicit Lexer(const std::string& src) : s(src) {}
+
+    char peek(size_t off = 0) const { return i + off < s.size() ? s[i + off] : '\0'; }
+    char get() { return i < s.size() ? s[i++] : '\0'; }
+    void push(Tok k, std::string t = "") { out.push_back({k, std::move(t), line}); }
+
+    [[noreturn]] void err(const std::string& m) { throw CompileError{m, line}; }
+
+    // 行首缩进计算 —— 产生 Indent/Dedent 的核心逻辑
+    void handleIndent() {
+        for (;;) {
+            size_t start = i;
+            int level = 0;
+            // 统计行首空白：Tab 计1级，连续4空格折算1级
+            while (peek() == '\t' || peek() == ' ') {
+                if (get() == '\t') level++;
+                else {
+                    int sp = 1;
+                    while (peek() == ' ') { get(); sp++; }
+                    level += sp / 4;  // 整数除法：3空格=0级，4空格=1级，7空格=1级
+                    break;
+                }
+            }
+            // 跳过注释行和空行（它们不改变缩进级别）
+            if (peek() == '#') { while (peek() && peek() != '\n') get(); }
+            if (peek() == '\n') { get(); line++; continue; }
+            if (peek() == '\0') { i = start; return; }  // 文件尾纯空白行忽略
+            applyLevel(level);
+            return;
+        }
+    }
+
+    // 比较当前缩进与栈顶，产生 Indent/Dedent/报错
+    void applyLevel(int level) {
+        if (level > indents.back()) {
+            if (level != indents.back() + 1) err("缩进只能逐级增加");
+            indents.push_back(level);
+            push(Tok::Indent);
+        } else {
+            while (level < indents.back()) { indents.pop_back(); push(Tok::Dedent); }
+            if (level != indents.back()) err("缩进级别不匹配");
+        }
+    }
+
+    // 扫描字符串/字符字面量："..." 或 '...'
+    // 支持反斜杠转义（\" \' \\ \n \t 等），会原样保留到 token 文本中
+    void lexString(char quote) {
+        std::string v(1, quote);
+        get();  // 跳过开始的引号
+        while (peek() && peek() != quote) {
+            if (peek() == '\\') v += get();  // 转义符：原样记录反斜杠
+            if (peek() == '\n') err("字符串不能跨行");
+            v += get();
+        }
+        if (!peek()) err("字符串未闭合");
+        get();  // 跳过结束的引号
+        v += quote;
+        push(quote == '"' ? Tok::Str : Tok::Char, v);
+    }
+
+    // 扫描数字字面量：支持十进制整数、浮点数、十六进制整数
+    void lexNumber() {
+        std::string v;
+        bool isFloat = false;
+        // 十六进制前缀 0x / 0X
+        if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
+            v += get(); v += get();
+            while (isxdigit((unsigned char)peek())) v += get();
+        } else {
+            // 十进制整数部分
+            while (isdigit((unsigned char)peek())) v += get();
+            // 小数点 + 小数部分 → 浮点数
+            if (peek() == '.' && isdigit((unsigned char)peek(1))) {
+                isFloat = true;
+                v += get();
+                while (isdigit((unsigned char)peek())) v += get();
+            }
+        }
+        push(isFloat ? Tok::Float : Tok::Int, v);
+    }
+
+    // 扫描标识符：字母或下划线开头，后跟字母数字下划线
+    // 扫描完后查 kKeywords 表判断是否为关键字
+    void lexIdent() {
+        std::string v;
+        while (isalnum((unsigned char)peek()) || peek() == '_') v += get();
+        auto it = kKeywords.find(v);
+        if (it != kKeywords.end()) push(it->second, v);  // 命中关键字
+        else push(Tok::Ident, v);                         // 普通标识符
+    }
+
+    // 多字符运算符识别 —— 最长匹配原则
+    // 按长度从长到短尝试：先试3字符运算符（<<= >>=），再试2字符，最后单字符
+    // → 单独处理为 Arrow token，不在 Op 中
+    bool lexOp() {
+        // 三字符运算符（优先级最高）
+        static const char* ops3[] = {"<<=", ">>="};
+        // 二字符运算符（按优先级排列，先匹配的优先）
+        static const char* ops2[] = {"->", "==", "!=", "<=", ">=", "&&", "||",
+                                     "+=", "-=", "*=", "/=", "%=", "&=", "|=",
+                                     "^=", "<<", ">>", "++", "--"};
+        // 尝试三字符匹配
+        for (auto* op : ops3)
+            if (s.compare(i, 3, op) == 0) { push(Tok::Op, op); i += 3; return true; }
+        // 尝试二字符匹配
+        for (auto* op : ops2)
+            if (s.compare(i, 2, op) == 0) {
+                if (std::string(op) == "->") push(Tok::Arrow, op);  // -> 特殊处理
+                else push(Tok::Op, op);
+                i += 2;
+                return true;
+            }
+        // 单字符运算符
+        static const std::string single = "+-*/%<>=!&|^~.?";
+        if (single.find(peek()) != std::string::npos) {
+            push(Tok::Op, std::string(1, get()));
+            return true;
+        }
+        return false;  // 不是运算符，让调用者继续尝试其他 token 类型
+    }
+
+    // 主扫描循环 —— 按当前字符分派到对应的扫描函数
+    void run() {
+        handleIndent();  // 先处理第一行的缩进
+        while (i < s.size()) {
+            char c = peek();
+            // ---- 换行：括号内仍产生 Newline 但抑制 Indent/Dedent ----
+            if (c == '\n') {
+                get(); line++;
+                push(Tok::Newline);
+                if (parenDepth == 0) handleIndent();  // 仅在非括号内处理缩进
+                continue;
+            }
+            // ---- 空白字符：跳过 ----
+            if (c == ' ' || c == '\t' || c == '\r') { get(); continue; }
+            // ---- 注释：# 到行尾 ----
+            if (c == '#') { while (peek() && peek() != '\n') get(); continue; }
+            // ---- 字面量 ----
+            if (c == '"' || c == '\'') { lexString(c); continue; }
+            if (isdigit((unsigned char)c)) { lexNumber(); continue; }
+            if (isalpha((unsigned char)c) || c == '_') { lexIdent(); continue; }
+            // ---- 分隔符（括号需追踪深度）----
+            switch (c) {
+                case '(': get(); parenDepth++; push(Tok::LParen, "("); continue;
+                case ')': get(); if (parenDepth) parenDepth--; push(Tok::RParen, ")"); continue;
+                case '{': get(); push(Tok::LBrace, "{"); continue;
+                case '}': get(); push(Tok::RBrace, "}"); continue;
+                case '[': get(); push(Tok::LBracket, "["); continue;
+                case ']': get(); push(Tok::RBracket, "]"); continue;
+                case ',': get(); push(Tok::Comma, ","); continue;
+                case ';': get(); push(Tok::Semi, ";"); continue;
+                case ':': get(); push(Tok::Colon, ":"); continue;
+            }
+            // ---- 运算符（最长匹配）----
+            if (lexOp()) continue;
+            // ---- 无法识别 ----
+            err(std::string("无法识别的字符: '") + c + "'");
+        }
+        // 文件尾收尾：
+        //   确保最后一条语句有换行结束（简化 parser 逻辑）
+        if (!out.empty() && out.back().kind != Tok::Newline) push(Tok::Newline);
+        //   弹出所有剩余缩进级别（自动闭合未结束的块）
+        while (indents.size() > 1) { indents.pop_back(); push(Tok::Dedent); }
+        push(Tok::End);  // 文件结束标记
+    }
+};
+
+} // namespace
+
+// 对外接口：创建 Lexer 实例并执行扫描
+std::vector<Token> lex(const std::string& src) {
+    Lexer lx(src);
+    lx.run();
+    return std::move(lx.out);
+}

@@ -1,0 +1,30 @@
+{
+    "name": "sc-lang",
+    "displayName": "sc Language",
+    "description": "sc 语言（基于 C 理念的结构化语言）语法高亮",
+    "version": "0.1.0",
+    "publisher": "sc-lang",
+    "engines": { "vscode": "^1.75.0" },
+    "categories": ["Programming Languages"],
+    "contributes": {
+        "languages": [
+            {
+                "id": "sc",
+                "aliases": ["sc", "sc-lang"],
+                "extensions": [".sc"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icons/sc-icon-dark.svg",
+                    "dark": "./icons/sc-icon.svg"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "sc",
+                "scopeName": "source.sc",
+                "path": "./syntaxes/sc.tmLanguage.json"
+            }
+        ]
+    }
+}

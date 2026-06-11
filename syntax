@@ -1,0 +1,173 @@
+
+## 理念
+程序即结构，核心在于程序的结构
+其他表达式、关键字和 C 对齐
+基本原则：
+    - 程序结构对象包括：类型、函数、变量、常量
+    - 程序是一个由程序结构对象构成的树
+    - 程序结构对象，在程序树中，是一个递归的子节点
+    - 程序结构对象节点的基本定义原则：sytax-key name:type
+      - sytax-key:
+        - def 定义一个类型（枚举/结构/联合/引用）
+        - fnc 定义一个函数
+        - var 定义一个变量
+        - let 定义一个常量
+    - 变量的元类型（这里元类型是自创的概念，具体如下）
+      - 命名以 & 结尾表示指针类型
+      - 命名以 [] 结尾表示数组类型
+
+### 基本类型
+```sh
+i1: int8_t
+i2: int16_t
+i4: int32_t
+i8: int64_t
+u1: uint8_t
+u2: uint16_t
+u4: uint32_t
+u8: uint64_t
+f4: float
+f8: double
+```
+
+### 基本结构
+```sh
+# 对象
+name
+
+# 指针
+name&
+
+# 数组
+name[]
+
+```
+
+### 枚举/结构/联合
+```sh
+def enum_type: i1
+    Name1 = 0
+    Name2
+
+def struct_type: {
+    name1:
+    name2&:
+    name3: i1
+    name4&: i2 
+}
+def union_type: (
+    name1
+    name2&:
+    name3: i1
+    name4&: i2 
+)
+
+```
+
+### 自定义类型
+```sh
+def type_name -> i1
+```
+
+### 函数
+```sh
+
+# 类型定义
+fnc func_type:
+    param1&:
+    param2:
+
+# 实现预定义类型的函数
+fnc func_name -> func_type
+    ...
+    return
+
+# 直接定义并实现
+fnc func_name:
+    param&:
+    Param:v
+    -
+    return 1
+```
+
+### 变量/常量
+```sh
+var abc:i8
+let abc:i8 = 12
+
+# 无类型对象默认为 char*
+var abc:
+
+# 无类型指针默认为 void*
+var abc&:
+
+
+# 内联结构定义
+var name: {
+    name1
+    name2&
+    name3: i1
+    name4&: i2 
+}
+
+# 内联联合定义
+var name (
+    name1
+    name2&
+    name3: i1
+    name4&: i2
+)
+
+# 无名结构/联合定义
+name {
+    {
+        name1
+        name2&
+    }
+    (
+        name3: i1
+        name4&: i2 
+    )
+}
+```
+
+### 语法规则
+核心原则
+- 通过 \t 缩进来表示结构
+- 以行来表示一个完整语义：定义、表达式、调用
+- 空格不计入语法
+
+关于行内和换行
+1. 表达式或语句以行为单位
+2. 同一个表达式/语句的子项
+   - 通过多行加缩进表达
+   - 通过单行加 ',' 间隔
+3. 子表达式或语句，需要换行加缩进
+4. 同一个表达式/语句的多行子项，与子表达式或语句直接通过一个同级别缩进的 '-' 来分隔
+```sh
+# 单行多变量定义
+var a:i1, b&:i1, c[32]:i1
+
+# 多行多变量定义
+var a:i1
+    b&:i1
+    c[32]:i1
+
+# 单行结构/联合体定义
+def struct_type: { name1:, name2&:, name3: i1, name4&: i2 }
+def union_type: （ name1:, name2&:, name3: i1, name4&: i2 ）
+
+# 单行条件表达式
+if a>1 && b<2
+    ....
+
+# 多行条件表达式
+if a>1 
+    && b<2
+    -
+    ....
+
+# 单行函数定义
+fnc func_name: i4, param&:, Param:v
+    ....
+```

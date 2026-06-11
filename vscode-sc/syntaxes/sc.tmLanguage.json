@@ -1,0 +1,125 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "sc",
+    "scopeName": "source.sc",
+    "patterns": [
+        { "include": "#comment" },
+        { "include": "#def-decl" },
+        { "include": "#fnc-decl" },
+        { "include": "#var-decl" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#strings" },
+        { "include": "#chars" },
+        { "include": "#numbers" },
+        { "include": "#function-call" },
+        { "include": "#meta-suffix" },
+        { "include": "#operators" }
+    ],
+    "repository": {
+        "comment": {
+            "name": "comment.line.number-sign.sc",
+            "match": "#.*$"
+        },
+        "def-decl": {
+            "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.def.sc" },
+                "2": { "name": "entity.name.type.sc" }
+            }
+        },
+        "fnc-decl": {
+            "match": "\\b(fnc)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.function.sc" },
+                "2": { "name": "entity.name.function.sc" }
+            }
+        },
+        "var-decl": {
+            "match": "\\b(var|let)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.var.sc" },
+                "2": { "name": "variable.other.declaration.sc" }
+            }
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.sc",
+                    "match": "\\b(if|else|while|for|return|break|continue)\\b"
+                },
+                {
+                    "name": "keyword.declaration.sc",
+                    "match": "\\b(def|fnc|var|let)\\b"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "storage.type.primitive.sc",
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|f4|f8|v)\\b"
+                },
+                {
+                    "name": "entity.name.type.annotated.sc",
+                    "match": "(?<=:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(])"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.sc",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                { "name": "constant.character.escape.sc", "match": "\\\\." }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.sc",
+            "begin": "'",
+            "end": "'",
+            "patterns": [
+                { "name": "constant.character.escape.sc", "match": "\\\\." }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                { "name": "constant.numeric.hex.sc", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
+                { "name": "constant.numeric.float.sc", "match": "\\b[0-9]+\\.[0-9]+\\b" },
+                { "name": "constant.numeric.integer.sc", "match": "\\b[0-9]+\\b" }
+            ]
+        },
+        "function-call": {
+            "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+            "captures": { "1": { "name": "entity.name.function.call.sc" } }
+        },
+        "meta-suffix": {
+            "patterns": [
+                {
+                    "name": "storage.modifier.pointer.sc",
+                    "match": "(?<=[A-Za-z0-9_\\]])&"
+                },
+                {
+                    "name": "storage.modifier.array.sc",
+                    "match": "(?<=[A-Za-z0-9_])\\[[0-9A-Za-z_]*\\]"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "punctuation.separator.item.sc",
+                    "match": "^\\s*-\\s*$"
+                },
+                {
+                    "name": "keyword.operator.arrow.sc",
+                    "match": "->"
+                },
+                {
+                    "name": "keyword.operator.sc",
+                    "match": "(<<=|>>=|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<|>>|\\+\\+|--|[+\\-*/%<>=!&|^~?])"
+                }
+            ]
+        }
+    }
+}

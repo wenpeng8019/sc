@@ -1,0 +1,59 @@
+{
+    "name": "sc-ast-view",
+    "displayName": "sc AST View",
+    "description": "实时显示 sc 源码的 AST 结构树，并可切换查看基于树结构再生成的源码",
+    "version": "0.1.0",
+    "publisher": "sc-lang",
+    "engines": { "vscode": "^1.75.0" },
+    "categories": ["Programming Languages", "Visualization"],
+    "main": "./extension.js",
+    "activationEvents": ["onLanguage:sc"],
+    "contributes": {
+        "views": {
+            "explorer": [
+                {
+                    "id": "scAstView",
+                    "name": "SC AST",
+                    "icon": "$(list-tree)",
+                    "contextualTitle": "SC AST"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "scAst.refresh",
+                "title": "SC AST: 刷新",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "scAst.toggleTreeSource",
+                "title": "SC AST: 切换树结构源码视图",
+                "icon": "$(code)"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "scAst.toggleTreeSource",
+                    "when": "view == scAstView",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "scAst.refresh",
+                    "when": "view == scAstView",
+                    "group": "navigation@2"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "SC AST",
+            "properties": {
+                "scAst.sccPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "scc 编译器路径；留空时依次查找工作区 compiler/build/scc 与 PATH 中的 scc"
+                }
+            }
+        }
+    }
+}
