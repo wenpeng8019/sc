@@ -4,6 +4,8 @@
     "scopeName": "source.sc",
     "patterns": [
         { "include": "#comment" },
+        { "include": "#inc-decl" },
+        { "include": "#export-prefix" },
         { "include": "#def-decl" },
         { "include": "#fnc-decl" },
         { "include": "#var-decl" },
@@ -20,6 +22,17 @@
         "comment": {
             "name": "comment.line.number-sign.sc",
             "match": "#.*$"
+        },
+        "inc-decl": {
+            "match": "^\\s*(inc)\\s+(\\S+)",
+            "captures": {
+                "1": { "name": "keyword.control.import.sc" },
+                "2": { "name": "string.unquoted.include.sc" }
+            }
+        },
+        "export-prefix": {
+            "name": "storage.modifier.export.sc",
+            "match": "^\\s*(@)(?=def|fnc|var|let)"
         },
         "def-decl": {
             "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -50,7 +63,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|var|let)\\b"
+                    "match": "\\b(def|fnc|var|let|inc)\\b"
                 }
             ]
         },

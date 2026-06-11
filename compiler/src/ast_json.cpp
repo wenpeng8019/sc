@@ -96,13 +96,17 @@ std::string stmtNode(const Stmt& s) {
 }
 
 std::string declNode(const Decl& d) {
+    // @导出对象在 detail 前加 "@" 标记
+    const std::string X = d.exported ? "@ " : "";
     switch (d.kind) {
+        case Decl::IncD:
+            return node("inc", d.name, "", d.line);
         case Decl::EnumD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("item", f.name,
                                  f.init ? "= " + exprToStr(*f.init) : "", f.line));
-            return node("enum", d.name, ": " + typeToStr(d.type), d.line, c);
+            return node("enum", d.name, X + ": " + typeToStr(d.type), d.line, c);
         }
         case Decl::StructD:
         case Decl::UnionD: {
@@ -110,16 +114,16 @@ std::string declNode(const Decl& d) {
             for (auto& f : d.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, false), f.line));
             return node(d.kind == Decl::StructD ? "struct" : "union",
-                        d.name, "", d.line, c);
+                        d.name, X, d.line, c);
         }
         case Decl::AliasD:
-            return node("alias", d.name, "-> " + typeToStr(d.type), d.line);
+            return node("alias", d.name, X + "-> " + typeToStr(d.type), d.line);
         case Decl::FuncTypeD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
             std::string ret = typeToStr(d.retType);
-            return node("fnctype", d.name, ret.empty() ? "" : ": " + ret, d.line, c);
+            return node("fnctype", d.name, ret.empty() ? X : X + ": " + ret, d.line, c);
         }
         case Decl::FuncD: {
             std::vector<std::string> c;
@@ -132,14 +136,14 @@ std::string declNode(const Decl& d) {
                 std::string ret = typeToStr(d.retType);
                 if (!ret.empty()) detail = ": " + ret;
             }
-            return node("fnc", d.name, detail, d.line, c);
+            return node("fnc", d.name, X + detail, d.line, c);
         }
         case Decl::VarD:
         case Decl::LetD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
-            return node(d.kind == Decl::VarD ? "var" : "let", "", "", d.line, c);
+            return node(d.kind == Decl::VarD ? "var" : "let", "", X, d.line, c);
         }
     }
     return "{}";

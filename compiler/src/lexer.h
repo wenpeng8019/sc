@@ -35,6 +35,7 @@ enum class Tok {
     KwFnc,      // fnc  — 定义函数
     KwVar,      // var  — 定义变量
     KwLet,      // let  — 定义常量
+    KwInc,      // inc  — 引入头文件（对齐 C 的 #include，后跟行尾文本）
     KwReturn,   // return
     KwIf,       // if
     KwElse,     // else
@@ -57,9 +58,10 @@ enum class Tok {
 
     // ---- 运算符（由 lexOp() 最长匹配产生）----
     Op,         // 其余运算符，具体拼写保存在 Token::text 中
-                // 包括: + - * / % < > = ! & | ^ ~ ? .
+                // 包括: + - * / % < > = ! & | ^ ~ ? . @
                 //       == != <= >= && || ++ --
                 //       += -= *= /= %= &= |= ^= <<= >>=
+                // @ 仅用于顶层声明前缀（导出标记）
 };
 
 // Token 结构体 —— 词法分析的最小输出单元

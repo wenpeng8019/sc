@@ -63,7 +63,6 @@ fnc main: i4
 	r.rb.x = 10, r.rb.y = 5
 
 	var r_ptr&: rect = &r
-	
 
 	var msg: = "hello sc"
 	printf("%s\n", msg)

@@ -27,6 +27,7 @@ namespace {
 const std::unordered_map<std::string, Tok> kKeywords = {
     {"def", Tok::KwDef},   {"fnc", Tok::KwFnc},
     {"var", Tok::KwVar},   {"let", Tok::KwLet},
+    {"inc", Tok::KwInc},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},
     {"else", Tok::KwElse}, {"while", Tok::KwWhile},
     {"for", Tok::KwFor},   {"break", Tok::KwBreak},
@@ -129,7 +130,20 @@ struct Lexer {
         std::string v;
         while (isalnum((unsigned char)peek()) || peek() == '_') v += get();
         auto it = kKeywords.find(v);
-        if (it != kKeywords.end()) push(it->second, v);  // 命中关键字
+        if (it != kKeywords.end()) {
+            push(it->second, v);  // 命中关键字
+            // inc 特殊处理：头文件名（如 stdio.h、"my.h"）不是常规 token，
+            // 直接捕获其后到行尾/注释前的原始文本作为一个 Str token
+            if (it->second == Tok::KwInc) {
+                while (peek() == ' ' || peek() == '\t') get();
+                std::string h;
+                while (peek() && peek() != '\n' && peek() != '#') h += get();
+                while (!h.empty() && (h.back() == ' ' || h.back() == '\t' ||
+                                      h.back() == '\r')) h.pop_back();
+                if (h.empty()) err("inc 后期望头文件名");
+                push(Tok::Str, h);
+            }
+        }
         else push(Tok::Ident, v);                         // 普通标识符
     }
 
@@ -154,8 +168,8 @@ struct Lexer {
                 i += 2;
                 return true;
             }
-        // 单字符运算符
-        static const std::string single = "+-*/%<>=!&|^~.?";
+        // 单字符运算符（@ 为顶层声明的导出前缀）
+        static const std::string single = "+-*/%<>=!&|^~.?@";
         if (single.find(peek()) != std::string::npos) {
             push(Tok::Op, std::string(1, get()));
             return true;

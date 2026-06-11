@@ -76,8 +76,9 @@ struct TypeRef {
     std::string name;
 
     int ptr = 0;             // 指针层数（源码中 name 后面 & 的个数）
-    bool isArray = false;    // 是否为数组类型
-    std::string arraySize;   // 数组长度表达式（空 = 未指定长度）
+    // 数组维度列表：name[x][y] → {"x","y"}；空字符串表示未指定长度（name[]）
+    // 非空即为数组类型，与 C 的多维数组对齐
+    std::vector<std::string> arrayDims;
 
     // 内联结构/联合 —— 类型直接写在变量声明处，无需预先 def
     //   var obj: {x:i4, y:i4}  → hasInline=true, inlineUnion=false
@@ -156,9 +157,15 @@ struct Decl {
         // -- var/let 全局变量/常量 --
         VarD,       // 全局变量   var name:type [= init]
         LetD,       // 全局常量   let name:type = init
+
+        // -- inc 头文件引入 --
+        IncD,       // 引入头文件  inc stdio.h → #include <stdio.h>
+                    //              inc "my.h"  → #include "my.h"
     } kind;
 
-    std::string name;            // 类型名 / 函数名
+    std::string name;            // 类型名 / 函数名；IncD 时为头文件文本
+
+    bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
 
     TypeRef type;                // AliasD: 别名指向的目标类型
                                  // EnumD:  枚举的底层整数基类型

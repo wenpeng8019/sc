@@ -27,3 +27,9 @@
 // 后续规划：二期基于同一 AST 增加 LLVM IR 后端，AST 与后端完全解耦。
 // ============================================================
 std::string emitC(const Program& prog);
+
+// 生成 C 头文件内容：仅包含 @导出对象的声明
+//   导出类型 → 完整 typedef；导出变量/常量 → extern 声明；导出函数 → 原型
+// 程序中没有任何 @导出对象时返回空字符串。
+// guardName: include guard 宏名（由调用方从输出文件名推导）
+std::string emitCHeader(const Program& prog, const std::string& guardName);

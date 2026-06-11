@@ -1,11 +1,13 @@
 {
     "name": "sc-lang",
     "displayName": "sc Language",
-    "description": "sc 语言（基于 C 理念的结构化语言）语法高亮",
+    "description": "sc 语言（基于 C 理念的结构化语言）语法高亮与自动完成",
     "version": "0.1.0",
     "publisher": "sc-lang",
     "engines": { "vscode": "^1.75.0" },
     "categories": ["Programming Languages"],
+    "main": "./extension.js",
+    "activationEvents": ["onLanguage:sc"],
     "contributes": {
         "languages": [
             {

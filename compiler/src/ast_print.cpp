@@ -70,7 +70,7 @@ std::string fieldDetail(const Field& f, bool withInit) {
     std::string s;
     if (!f.type.hasInline)
         for (int i = 0; i < f.type.ptr; i++) s += "&";
-    if (f.type.isArray) s += "[" + f.type.arraySize + "]";
+    for (auto& dim : f.type.arrayDims) s += "[" + dim + "]";
     if (f.type.hasInline) {
         s += ": " + inlineStr(f.type);
     } else {

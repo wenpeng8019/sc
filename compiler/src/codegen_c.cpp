@@ -64,7 +64,7 @@ struct CGen {
             indent();
             out << "}";
             if (!f.name.empty()) out << " " << f.name;
-            if (f.type.isArray) out << "[" << f.type.arraySize << "]";
+            for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
         }
         std::string base; int ptr;
@@ -73,7 +73,7 @@ struct CGen {
         out << base << " ";
         for (int i = 0; i < ptr; i++) out << "*";
         out << f.name;
-        if (f.type.isArray) out << "[" << f.type.arraySize << "]";
+        for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
     }
 
     // ---------------- 表达式 ----------------
@@ -336,6 +336,16 @@ struct CGen {
         out << "}\n\n";
     }
 
+    // inc 头文件引入 → #include 行
+    //   inc stdio.h    → #include <stdio.h>
+    //   inc "my.h"     → #include "my.h"
+    //   inc <stdio.h>  → #include <stdio.h>（原样）
+    void emitInclude(const Decl& d) {
+        const std::string& h = d.name;
+        if (!h.empty() && (h[0] == '"' || h[0] == '<')) out << "#include " << h << "\n";
+        else out << "#include <" << h << ">\n";
+    }
+
     // ---------------- 主流程：两遍扫描输出 ----------------
     // 第一遍：类型定义 + 全局变量 + 函数原型声明（forward declaration）
     // 第二遍：函数体实现
@@ -347,7 +357,12 @@ struct CGen {
             << "#include <stdbool.h>\n"
             << "#include <stdio.h>\n"
             << "#include <stdlib.h>\n"
-            << "#include <string.h>\n\n";
+            << "#include <string.h>\n";
+
+        // 用户 inc 引入的头文件
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::IncD) emitInclude(*d);
+        out << "\n";
 
         // 收集函数类型
         for (auto& d : prog.decls)
@@ -369,6 +384,7 @@ struct CGen {
                         out << ";\n";
                     }
                     break;
+                case Decl::IncD: break;  // 已在顶部输出
             }
         }
         out << "\n";
@@ -377,6 +393,55 @@ struct CGen {
             if (d->kind == Decl::FuncD) emitFunc(*d);
         return out.str();
     }
+
+    // ---------------- 头文件生成（@导出对象） ----------------
+    // 导出类型 → 完整 typedef；导出变量/常量 → extern；导出函数 → 原型
+    std::string runHeader(const std::string& guard) {
+        bool any = false;
+        for (auto& d : prog.decls) if (d->exported) { any = true; break; }
+        if (!any) return "";
+
+        out << "/* 由 scc 生成，请勿手工修改 —— @导出对象声明 */\n"
+            << "#ifndef " << guard << "\n"
+            << "#define " << guard << "\n\n"
+            << "#include <stdint.h>\n"
+            << "#include <stddef.h>\n"
+            << "#include <stdbool.h>\n\n";
+
+        // 函数类型表（导出函数可能引用未导出的函数类型签名）
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncTypeD) funcTypes[d->name] = d.get();
+
+        for (auto& d : prog.decls) {
+            if (!d->exported) continue;
+            switch (d->kind) {
+                case Decl::EnumD: case Decl::StructD:
+                case Decl::UnionD: case Decl::AliasD:
+                case Decl::FuncTypeD:
+                    emitTypeDecl(*d);
+                    break;
+                case Decl::VarD: emitExternVars(d->fields, false); break;
+                case Decl::LetD: emitExternVars(d->fields, true); break;
+                case Decl::FuncD:
+                    emitFuncSig(*d);
+                    out << ";\n";
+                    break;
+                case Decl::IncD: break;  // inc 不可导出（parser 已拦截）
+            }
+        }
+        out << "\n#endif /* " << guard << " */\n";
+        return out.str();
+    }
+
+    // extern 变量声明（头文件用：不带初值）
+    void emitExternVars(const std::vector<Field>& decls, bool asConst) {
+        for (auto& f : decls) {
+            indent();
+            out << "extern ";
+            emitDeclarator(f, asConst);
+            out << ";\n";
+        }
+    }
 };
 
 } // namespace
@@ -384,4 +449,9 @@ struct CGen {
 std::string emitC(const Program& prog) {
     CGen g(prog);
     return g.run();
+}
+
+std::string emitCHeader(const Program& prog, const std::string& guardName) {
+    CGen g(prog);
+    return g.runHeader(guardName);
 }

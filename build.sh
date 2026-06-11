@@ -32,9 +32,12 @@ do_build() {
 do_test() {
     do_build
     echo "==> 端到端验证 examples/demo.sc"
+    echo "--- 默认模式（编译+执行）---"
+    "$BUILD_DIR/scc" "$ROOT/examples/demo.sc"
+    echo "--- --emit-c 模式（转译 C 后手动编译）---"
     local tmp
     tmp="$(mktemp -d)"
-    "$BUILD_DIR/scc" "$ROOT/examples/demo.sc" -o "$tmp/demo.c"
+    "$BUILD_DIR/scc" "$ROOT/examples/demo.sc" --emit-c -o "$tmp/demo.c"
     cc "$tmp/demo.c" -o "$tmp/demo"
     "$tmp/demo"
     rm -rf "$tmp"

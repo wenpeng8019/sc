@@ -243,16 +243,24 @@ struct Parser {
     //   3. 支持内联结构/联合（直接在变量声明处定义 {}/() 类型）
     //   4. 未指定类型时由代码生成阶段推断默认类型
 
-    // 解析名字后的元类型后缀：连续的 &（指针）和 [size]（数组）
+    // 解析名字后的元类型后缀：连续的 &（指针）和 [size]...（数组，可多维）
+    // 注意：词法器按最长匹配将 && 识别为单个 token，故此处需同时接受
+    // & （一级）和 &&（两级），如 name&&: 即指针的指针
     void parseMeta(TypeRef& ty) {
-        while (acceptOp("&")) ty.ptr++;  // 每个 & 增加一级指针
-        if (accept(Tok::LBracket)) {
+        for (;;) {
+            if (acceptOp("&")) ty.ptr++;            // 每个 & 增加一级指针
+            else if (acceptOp("&&")) ty.ptr += 2;   // && 为两级指针
+            else break;
+        }
+        // 多维数组：name[x][y] 与 C 对齐，每个 [维度] 追加一维
+        while (accept(Tok::LBracket)) {
+            std::string dim;
             if (!at(Tok::RBracket)) {
                 if (!at(Tok::Int) && !at(Tok::Ident)) err("期望数组大小");
-                ty.arraySize = advance().text;  // 数组大小（数字或常量标识符）
+                dim = advance().text;  // 维度大小（数字或常量标识符）
             }
             expect(Tok::RBracket, "']'");
-            ty.isArray = true;
+            ty.arrayDims.push_back(std::move(dim));
         }
     }
 
@@ -268,7 +276,12 @@ struct Parser {
         }
         if (!at(Tok::Ident)) err("期望类型名");
         ty.name = advance().text;
-        while (acceptOp("&")) ty.ptr++;  // 类型名后可跟 & 表示指针（如 i4& = int32_t*）
+        // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
+        for (;;) {
+            if (acceptOp("&")) ty.ptr++;
+            else if (acceptOp("&&")) ty.ptr += 2;
+            else break;
+        }
         return ty;
     }
 
@@ -310,8 +323,8 @@ struct Parser {
                 TypeRef ty = parseTypeRef();
                 // 合并元类型信息：名字后的 & 和 [] 与冒号后的类型信息合并
                 ty.ptr += f.type.ptr;
-                ty.isArray = ty.isArray || f.type.isArray;
-                if (ty.arraySize.empty()) ty.arraySize = f.type.arraySize;
+                ty.arrayDims.insert(ty.arrayDims.end(),
+                                    f.type.arrayDims.begin(), f.type.arrayDims.end());
                 f.type = std::move(ty);
             }
         }
@@ -330,8 +343,8 @@ struct Parser {
             if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
                 TypeRef ty = parseTypeRef();
                 ty.ptr += f.type.ptr;
-                ty.isArray = ty.isArray || f.type.isArray;
-                if (ty.arraySize.empty()) ty.arraySize = f.type.arraySize;
+                ty.arrayDims.insert(ty.arrayDims.end(),
+                                    f.type.arrayDims.begin(), f.type.arrayDims.end());
                 f.type = std::move(ty);
             }
         } else if (at(Tok::LBrace) || at(Tok::LParen)) {
@@ -436,7 +449,7 @@ struct Parser {
         size_t q = p + 1;
         while (q < t.size()) {
             const Token& tk = t[q];
-            if (tk.kind == Tok::Op && tk.text == "&") { q++; continue; }
+            if (tk.kind == Tok::Op && (tk.text == "&" || tk.text == "&&")) { q++; continue; }
             if (tk.kind == Tok::LBracket) {  // 跳过 [size]
                 q++;
                 while (q < t.size() && t[q].kind != Tok::RBracket &&
@@ -669,18 +682,36 @@ struct Parser {
     }
 
     // ---------------- 程序顶层解析 ----------------
-    // sc 程序的顶层结构：连续的 def/fnc/var/let 声明
+    // sc 程序的顶层结构：连续的 inc/def/fnc/var/let 声明
+    // 声明前可加 @ 前缀表示导出对象（--emit-c 时生成 .h 声明）
     Program parseProgram() {
         Program prog;
         for (;;) {
             skipNewlines();
             if (at(Tok::End)) break;
+            // @ 导出前缀：作用于紧随的 def/fnc/var/let
+            bool exported = acceptOp("@");
             switch (cur().kind) {
+                case Tok::KwInc: {
+                    // inc 头文件引入：lexer 已将头文件名捕获为 Str token
+                    if (exported) err("inc 不支持 @ 导出前缀");
+                    auto d = std::make_unique<Decl>();
+                    d->line = cur().line;
+                    d->kind = Decl::IncD;
+                    advance();  // 跳过 inc 关键字
+                    if (!at(Tok::Str)) err("inc 后期望头文件名");
+                    d->name = advance().text;
+                    expect(Tok::Newline, "换行");
+                    prog.decls.push_back(std::move(d));
+                    break;
+                }
                 case Tok::KwDef:
                     prog.decls.push_back(parseDef());   // 类型定义
+                    prog.decls.back()->exported = exported;
                     break;
                 case Tok::KwFnc:
                     prog.decls.push_back(parseFnc());   // 函数定义
+                    prog.decls.back()->exported = exported;
                     break;
                 case Tok::KwVar:
                 case Tok::KwLet: {
@@ -688,14 +719,15 @@ struct Parser {
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
                     d->kind = cur().kind == Tok::KwVar ? Decl::VarD : Decl::LetD;
+                    d->exported = exported;
                     advance();
                     parseVarList(d->fields);  // 解析一项或多项（逗号或多行）
                     prog.decls.push_back(std::move(d));
                     break;
                 }
                 default:
-                    // 顶层只允许程序结构对象的四种关键字
-                    err("顶层只允许 def/fnc/var/let，得到 '" + cur().text + "'");
+                    // 顶层只允许程序结构对象的几种关键字
+                    err("顶层只允许 inc/def/fnc/var/let，得到 '" + cur().text + "'");
             }
         }
         return prog;

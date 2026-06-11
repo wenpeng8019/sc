@@ -83,9 +83,13 @@ struct SGen {
     }
 
     void emitDecl(const Decl& d) {
+        const char* X = d.exported ? "@" : "";  // 导出前缀
         switch (d.kind) {
+            case Decl::IncD:
+                ind(); out << "inc " << d.name << "\n";
+                break;
             case Decl::EnumD:
-                ind(); out << "def " << d.name << ": " << typeToStr(d.type) << "\n";
+                ind(); out << X << "def " << d.name << ": " << typeToStr(d.type) << "\n";
                 depth++;
                 for (auto& f : d.fields) {
                     ind();
@@ -99,7 +103,7 @@ struct SGen {
             case Decl::UnionD: {
                 const char* open = d.kind == Decl::StructD ? "{" : "(";
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
-                ind(); out << "def " << d.name << ": " << open << "\n";
+                ind(); out << X << "def " << d.name << ": " << open << "\n";
                 depth++;
                 for (auto& f : d.fields) { ind(); out << fieldToStr(f, false) << "\n"; }
                 depth--;
@@ -107,23 +111,23 @@ struct SGen {
                 break;
             }
             case Decl::AliasD:
-                ind(); out << "def " << d.name << " -> " << typeToStr(d.type) << "\n";
+                ind(); out << X << "def " << d.name << " -> " << typeToStr(d.type) << "\n";
                 break;
             case Decl::FuncTypeD:
-                ind(); out << "fnc " << d.name << ":" << fncItems(d) << "\n";
+                ind(); out << X << "fnc " << d.name << ":" << fncItems(d) << "\n";
                 break;
             case Decl::FuncD:
                 ind();
                 if (!d.funcTypeName.empty())
-                    out << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
+                    out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
-                    out << "fnc " << d.name << ":" << fncItems(d) << "\n";
+                    out << X << "fnc " << d.name << ":" << fncItems(d) << "\n";
                 depth++;
                 emitStmts(d.body);
                 depth--;
                 break;
-            case Decl::VarD: emitVarLine("var", d.fields); break;
-            case Decl::LetD: emitVarLine("let", d.fields); break;
+            case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.fields); break;
+            case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.fields); break;
         }
     }
 
