@@ -4,7 +4,7 @@ inc stdio.h
 # 伪 class：带方法字段的结构体
 def obj: {
     abc: i4
-    func: fnc: i4, x:i4, y:i4
+    func:: fnc: i4, x:i4, y:i4
 }
 
 # 方法实现：首参隐式接收者，函数体内用 this 访问

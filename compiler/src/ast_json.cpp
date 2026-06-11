@@ -145,7 +145,7 @@ std::string declNode(const Decl& d) {
         case Decl::UnionD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
-                c.push_back(node("field", f.name, fieldDetail(f, false), f.line));
+                c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
                            d.name, X, d.line, d.external, d.origin, c);
         }

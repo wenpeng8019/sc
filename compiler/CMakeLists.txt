@@ -12,6 +12,7 @@ add_executable(scc
     src/ast_json.cpp
     src/codegen_c.cpp
     src/codegen_sc.cpp
+    src/semantic.cpp
 )
 
 target_compile_options(scc PRIVATE -Wall -Wextra)

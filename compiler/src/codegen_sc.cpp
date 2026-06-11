@@ -125,7 +125,7 @@ struct SGen {
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
                 ind(); out << X << "def " << d.name << ": " << open << "\n";
                 depth++;
-                for (auto& f : d.fields) { ind(); out << fieldToStr(f, false) << "\n"; }
+                for (auto& f : d.fields) { ind(); out << fieldToStr(f, true) << "\n"; }
                 depth--;
                 ind(); out << close << "\n";
                 break;

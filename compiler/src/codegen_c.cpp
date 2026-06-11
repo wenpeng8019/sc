@@ -10,6 +10,7 @@
 // ============================================================
 #include "codegen_c.h"
 #include "error.h"
+#include <cctype>
 #include <sstream>
 #include <unordered_map>
 
@@ -30,6 +31,16 @@ std::string mapBase(const std::string& n) {
 bool endsWith(const std::string& s, const std::string& suffix) {
     return s.size() >= suffix.size() &&
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+std::string moduleFileToken(const std::string& s) {
+    std::string out = "scm_";
+    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
+    return out;
+}
+
+std::string moduleHeaderName(const std::string& s) {
+    return moduleFileToken(s) + ".h";
 }
 
 // CGen 内部类 —— 封装 C 代码生成的状态
@@ -130,6 +141,11 @@ struct CGen {
 
     static bool hasMethods(const Decl* d) {
         for (auto& f : d->fields) if (f.type.fnKind == TypeRef::FncKind::MethodPtr) return true;
+        return false;
+    }
+
+    static bool hasFieldDefaults(const Decl* d) {
+        for (auto& f : d->fields) if (f.init) return true;
         return false;
     }
 
@@ -267,10 +283,18 @@ struct CGen {
             if (f.init) {
                 out << " = ";
                 emitExpr(*f.init, true);
-            } else if (f.type.ptr == 0 && f.type.arrayDims.empty() && !f.type.hasInline) {
-                // 含方法字段的结构变量默认零初始化（方法指针默认 nil）
+            } else {
                 const Decl* sd = aggrOf(f.type.name);
-                if (sd && hasMethods(sd)) out << " = {0}";
+                if (sd && (sd->kind == Decl::StructD || sd->kind == Decl::UnionD)) {
+                    if (sd->kind == Decl::StructD && hasFieldDefaults(sd)) {
+                        out << " = " << sd->name << "__default()";
+                    } else {
+                        out << " = {0}";
+                    }
+                } else if (f.type.ptr == 0 && f.type.arrayDims.empty() && !f.type.hasInline) {
+                    // 含方法字段的结构变量默认零初始化（方法指针默认 nil）
+                    if (sd && hasMethods(sd)) out << " = {0}";
+                }
             }
             out << ";\n";
         }
@@ -436,6 +460,22 @@ struct CGen {
                 emitFieldList(d.fields);
                 indent();
                 out << "} " << d.name << ";\n\n";
+                if (d.kind == Decl::StructD && hasFieldDefaults(&d)) {
+                    indent();
+                    out << "static inline " << d.name << " " << d.name << "__default(void) {\n";
+                    depth++;
+                    indent(); out << d.name << " _v = {0};\n";
+                    for (auto& f : d.fields) {
+                        if (!f.init) continue;
+                        indent();
+                        out << "_v." << f.name << " = ";
+                        emitExpr(*f.init, true);
+                        out << ";\n";
+                    }
+                    indent(); out << "return _v;\n";
+                    depth--;
+                    indent(); out << "}\n\n";
+                }
                 break;
             case Decl::AliasD: {
                 std::string base; int ptr;
@@ -525,7 +565,11 @@ struct CGen {
     //   inc <stdio.h>  → #include <stdio.h>（原样）
     void emitInclude(const Decl& d) {
         const std::string& h = d.name;
-        if (endsWith(h, ".sc")) return;
+        if (endsWith(h, ".sc")) {
+            const std::string key = d.origin.empty() ? h : d.origin;
+            out << "#include \"" << moduleHeaderName(key) << "\"\n";
+            return;
+        }
         if (!h.empty() && (h[0] == '"' || h[0] == '<')) out << "#include " << h << "\n";
         else out << "#include <" << h << ">\n";
     }

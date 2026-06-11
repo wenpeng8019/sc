@@ -22,6 +22,7 @@
 #include "error.h"
 #include "lexer.h"
 #include "parser.h"
+#include "semantic.h"
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 #include <iostream>
 #include <filesystem>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -184,47 +186,188 @@ static Program parseSourceText(const std::string& src) {
     return parse(lex(src));
 }
 
-static void expandImports(Program& prog, const std::filesystem::path& srcPath,
-                          std::unordered_set<std::string>& visited) {
-    std::vector<DeclPtr> merged;
-    const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path() : std::filesystem::current_path();
+static std::string moduleFileToken(const std::string& s) {
+    std::string out = "scm_";
+    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
+    return out;
+}
+
+static std::string moduleHeaderName(const std::string& s) {
+    return moduleFileToken(s) + ".h";
+}
+
+static std::string guardFromHeaderName(const std::string& hname) {
+    std::string g;
+    for (char ch : hname) g += std::isalnum((unsigned char)ch) ? (char)std::toupper(ch) : '_';
+    return g;
+}
+
+static bool writeTextFile(const std::filesystem::path& p, const std::string& content) {
+    std::ofstream f(p);
+    if (!f) return false;
+    f << content;
+    return true;
+}
+
+struct UnitInfo {
+    std::filesystem::path path;
+    Program prog;
+    std::vector<std::filesystem::path> deps;
+};
+
+static std::vector<std::filesystem::path> resolveUnitDeps(Program& prog,
+                                                          const std::filesystem::path& srcPath) {
+    std::vector<std::filesystem::path> deps;
+    const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path()
+                                                    : std::filesystem::current_path();
     for (auto& d : prog.decls) {
-        if (d->kind != Decl::IncD) {
-            merged.push_back(std::move(d));
-            continue;
-        }
-
+        if (d->kind != Decl::IncD) continue;
         auto modPath = resolveModulePath(d->name, baseDir);
-        if (modPath.empty() || !endsWith(modPath.string(), ".sc")) {
+        if (!modPath.empty() && endsWith(modPath.string(), ".sc")) {
+            d->external = true;
+            d->origin = modPath.string();
+            prog.externSymbols.push_back(modPath.string());
+            deps.push_back(modPath);
+        } else {
             d->external = false;
-            merged.push_back(std::move(d));
-            continue;
-        }
-
-        d->external = true;
-        d->origin = modPath.string();
-        merged.push_back(std::move(d));
-
-        const std::string key = modPath.string();
-        if (!visited.insert(key).second) continue;
-
-        auto imported = parseSourceText(readWholeFile(modPath));
-        expandImports(imported, modPath, visited);
-        prog.externSymbols.push_back(key);
-        for (auto& sym : imported.externSymbols) prog.externSymbols.push_back(sym);
-        for (auto& child : imported.decls) {
-            if (child->kind == Decl::IncD && !endsWith(child->name, ".sc")) {
-                child->external = false;
-                if (child->origin.empty()) child->origin = key;
-            } else {
-                child->external = true;
-                if (child->origin.empty()) child->origin = key;
-                if (!child->name.empty()) prog.externSymbols.push_back(child->name);
-            }
-            merged.push_back(std::move(child));
         }
     }
-    prog.decls = std::move(merged);
+    return deps;
+}
+
+static bool loadUnitGraph(const std::filesystem::path& srcPath,
+                          std::unordered_map<std::string, UnitInfo>& units,
+                          std::unordered_set<std::string>& visiting,
+                          std::string& errMsg) {
+    const auto canon = std::filesystem::weakly_canonical(srcPath);
+    const std::string key = canon.string();
+    if (units.find(key) != units.end()) return true;
+    if (!visiting.insert(key).second) {
+        errMsg = "检测到循环模块依赖: " + key;
+        return false;
+    }
+
+    const std::string src = readWholeFile(canon);
+    if (src.empty()) {
+        errMsg = "无法读取模块文件: " + key;
+        visiting.erase(key);
+        return false;
+    }
+
+    UnitInfo u;
+    u.path = canon;
+    u.prog = parseSourceText(src);
+    semanticCheck(u.prog);
+    u.deps = resolveUnitDeps(u.prog, canon);
+
+    for (auto& dep : u.deps) {
+        if (!loadUnitGraph(dep, units, visiting, errMsg)) {
+            visiting.erase(key);
+            return false;
+        }
+    }
+    units[key] = std::move(u);
+    visiting.erase(key);
+    return true;
+}
+
+static int compileAndRunProject(const std::filesystem::path& rootPath,
+                                const std::vector<std::string>& progArgs) {
+    std::unordered_map<std::string, UnitInfo> units;
+    std::unordered_set<std::string> visiting;
+    std::string err;
+    if (!loadUnitGraph(rootPath, units, visiting, err)) {
+        std::cerr << "错误: " << err << "\n";
+        return 1;
+    }
+
+    char tmpTemplate[] = "/tmp/scc_units_XXXXXX";
+    char* dirC = mkdtemp(tmpTemplate);
+    if (!dirC) {
+        std::cerr << "错误: 无法创建临时目录\n";
+        return 1;
+    }
+    const std::filesystem::path tmpDir(dirC);
+    std::vector<std::filesystem::path> objects;
+    struct UnitArtifact {
+        std::filesystem::path cpath;
+        std::filesystem::path hpath;
+        std::filesystem::path opath;
+    };
+    std::vector<UnitArtifact> arts;
+
+    // 第一阶段：为每个模块生成 .c/.h 单元
+    for (auto& kv : units) {
+        const std::string token = moduleFileToken(kv.first);
+        const std::string hname = moduleHeaderName(kv.first);
+        const std::filesystem::path cpath = tmpDir / (token + ".c");
+        const std::filesystem::path hpath = tmpDir / hname;
+        const std::filesystem::path opath = tmpDir / (token + ".o");
+
+        const std::string csrc = emitC(kv.second.prog);
+        if (!writeTextFile(cpath, csrc)) {
+            std::cerr << "错误: 无法写入 " << cpath << "\n";
+            std::filesystem::remove_all(tmpDir);
+            return 1;
+        }
+
+        std::string hsrc = emitCHeader(kv.second.prog, guardFromHeaderName(hname));
+        if (hsrc.empty()) {
+            const std::string guard = guardFromHeaderName(hname);
+            hsrc = "#ifndef " + guard + "\n#define " + guard + "\n#endif\n";
+        }
+        if (!writeTextFile(hpath, hsrc)) {
+            std::cerr << "错误: 无法写入 " << hpath << "\n";
+            std::filesystem::remove_all(tmpDir);
+            return 1;
+        }
+        arts.push_back({cpath, hpath, opath});
+    }
+
+    // 第二阶段：统一编译所有 .c -> .o
+    for (auto& a : arts) {
+        const std::string ccCmd = pickCC() + " -I " + tmpDir.string() +
+                                  " -c " + a.cpath.string() + " -o " + a.opath.string();
+        if (std::system(ccCmd.c_str()) != 0) {
+            std::cerr << "错误: C 单元编译失败（" << ccCmd << "）\n";
+            std::filesystem::remove_all(tmpDir);
+            return 1;
+        }
+        objects.push_back(a.opath);
+    }
+
+    // 链接所有对象文件
+    const std::filesystem::path bin = tmpDir / "run.out";
+    std::string linkCmd = pickCC();
+    for (auto& o : objects) linkCmd += " " + o.string();
+    linkCmd += " -o " + bin.string();
+    if (std::system(linkCmd.c_str()) != 0) {
+        std::cerr << "错误: 链接失败（" << linkCmd << "）\n";
+        std::filesystem::remove_all(tmpDir);
+        return 1;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        std::cerr << "错误: fork 失败\n";
+        std::filesystem::remove_all(tmpDir);
+        return 1;
+    }
+    if (pid == 0) {
+        std::vector<char*> argv;
+        std::string binS = bin.string();
+        argv.push_back(const_cast<char*>(binS.c_str()));
+        for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+        execv(binS.c_str(), argv.data());
+        _exit(127);
+    }
+
+    int st = 0;
+    waitpid(pid, &st, 0);
+    std::filesystem::remove_all(tmpDir);
+    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
 }
 
 int main(int argc, char** argv) {
@@ -266,19 +409,20 @@ int main(int argc, char** argv) {
         auto toks = lex(ss.str());
         // 3b. 语法分析：token 流 → AST 程序树
         auto prog = parse(toks);
-        // 3b.1 解析 sc 模块导入：把外部模块展开到当前单元 AST 中，并记录外部符号
-        if (input != "-") {
-            std::unordered_set<std::string> visited;
-            visited.insert(std::filesystem::weakly_canonical(std::filesystem::path(input)).string());
-            expandImports(prog, std::filesystem::path(input), visited);
-        }
+        // 3b.0 语义检查：类型兼容/指针安全边界
+        semanticCheck(prog);
+        // 3b.1 记录当前单元的模块依赖信息（不展开源码）
+        if (input != "-") resolveUnitDeps(prog, std::filesystem::path(input));
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         auto c = mode == "ast" ? emitAstJson(prog)   // AST→JSON
                : mode == "sc"  ? emitSc(prog)         // AST→规范化sc
                                : emitC(prog);         // AST→C（run/--emit-c）
 
         // 3d. run 模式：不保存中间文件，直接编译并执行
-        if (mode == "run") return compileAndRun(c, progArgs);
+        if (mode == "run") {
+            if (input == "-") return compileAndRun(c, progArgs);
+            return compileAndRunProject(std::filesystem::path(input), progArgs);
+        }
 
         // 3e. --emit-c 且指定了输出文件：若存在 @导出对象，额外生成 .h 头文件
         if (mode == "c" && !output.empty()) {

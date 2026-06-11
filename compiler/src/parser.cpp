@@ -293,7 +293,9 @@ struct Parser {
             skipLayout();
             if (at(close)) break;
             if (at(Tok::End)) err("结构/联合未闭合");
-            out.push_back(parseFieldItem());
+            Field f = parseFieldItem();
+            if (acceptOp("=")) f.init = parseExpr();
+            out.push_back(std::move(f));
             skipLayout();
             accept(Tok::Comma);  // 逗号分隔是可选的（也可纯粹以换行分隔）
         }
