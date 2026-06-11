@@ -116,7 +116,8 @@ inc io.sc
 
 ## 6. 导出
 
-`@` 前缀表示导出对象，`--emit-c` 时会额外生成头文件声明。
+`@` 前缀表示导出对象，`--emit-c` 时会额外生成头文件声明；
+`@inc` 也生效，会把该 include 同步输出到生成的 `.h`。
 
 ```sc
 @def Point: {
@@ -128,6 +129,8 @@ inc io.sc
 
 @fnc add: i4, a:i4, b:i4
     return a + b
+
+@inc stdio.h
 ```
 
 导出规则：

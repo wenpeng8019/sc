@@ -35,7 +35,7 @@
         },
         "export-prefix": {
             "name": "storage.modifier.export.sc",
-            "match": "^\\s*(@)(?=def|fnc|var|let)"
+            "match": "^\\s*(@)(?=inc|def|fnc|var|let)"
         },
         "def-decl": {
             "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",

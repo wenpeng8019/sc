@@ -880,7 +880,7 @@ struct Parser {
         for (;;) {
             skipNewlines();
             if (at(Tok::End)) break;
-            // @ 导出前缀：作用于紧随的 def/fnc/var/let
+            // @ 导出前缀：作用于紧随的 inc/def/fnc/var/let
             bool exported = acceptOp("@");
             switch (cur().kind) {
                 case Tok::KwInc: {
@@ -897,6 +897,7 @@ struct Parser {
                         // 这里先把 sc 模块导入当作外部符号记录，后端会进一步展开
                         prog.externSymbols.push_back(d->name);
                     }
+                    d->exported = exported;
                     expect(Tok::Newline, "换行");
                     prog.decls.push_back(std::move(d));
                     break;

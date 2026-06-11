@@ -118,7 +118,7 @@ struct SGen {
         const char* X = d.exported ? "@" : "";  // 导出前缀
         switch (d.kind) {
             case Decl::IncD:
-                ind(); out << "inc " << d.name << "\n";
+                ind(); out << (d.exported ? "@inc " : "inc ") << d.name << "\n";
                 break;
             case Decl::EnumD:
                 ind(); out << X << "def " << d.name << ": " << typeToStr(d.type) << "\n";

@@ -726,7 +726,9 @@ struct CGen {
                     emitFuncSig(*d);
                     out << ";\n";
                     break;
-                case Decl::IncD: break;  // inc 不可导出（parser 已拦截）
+                case Decl::IncD:
+                    emitInclude(*d);
+                    break;
             }
         }
         out << "\n#endif /* " << guard << " */\n";
