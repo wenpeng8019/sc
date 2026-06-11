@@ -173,6 +173,19 @@ struct Checker {
         return false;
     }
 
+    bool rootedAtGlobal(const Expr& e,
+                        const std::unordered_map<std::string, Ty>& locals) const {
+        if (e.kind == Expr::Ident) {
+            if (locals.find(e.text) != locals.end()) return false;
+            return globals.find(e.text) != globals.end();
+        }
+        if ((e.kind == Expr::Member || e.kind == Expr::Index) && e.a)
+            return rootedAtGlobal(*e.a, locals);
+        if (e.kind == Expr::Unary && e.a && (e.op == "*" || e.op == "&"))
+            return rootedAtGlobal(*e.a, locals);
+        return false;
+    }
+
     Ty declaredOrInferredType(const Field& f,
                               const std::unordered_map<std::string, Ty>& locals) {
         const bool declared = f.type.hasInline || !f.type.name.empty() ||
@@ -216,6 +229,12 @@ struct Checker {
                    const Ty& retTy) {
         switch (s.kind) {
             case Stmt::ExprS:
+                if (s.expr && s.expr->kind == Expr::Binary && isAssignOp(s.expr->op)) {
+                    if (containsAddrOfLocal(*s.expr->b, locals) &&
+                        rootedAtGlobal(*s.expr->a, locals)) {
+                        err(s.line, "禁止将局部变量地址写入全局存储");
+                    }
+                }
                 (void)inferExpr(*s.expr, locals, s.line);
                 break;
             case Stmt::VarS:
