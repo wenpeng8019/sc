@@ -329,6 +329,12 @@ struct CGen {
     }
 
     void emitStmt(const Stmt& s) {
+        // 行号映射：为每个语句添加行号注释，便于调试时关联回原始 SC 源代码
+        if (s.line > 0) {
+            indent();
+            out << "/* line " << s.line << " */\n";
+        }
+        
         switch (s.kind) {
             case Stmt::ExprS:
                 indent();

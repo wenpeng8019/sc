@@ -72,6 +72,39 @@ static std::string readConfig(const std::string& key) {
     return "";
 }
 
+// 诊断辅助函数
+// ============================================================
+// 从源代码中提取指定行号的代码行（用于错误诊断展示）
+static std::string getSourceLine(const std::string& src, int lineNum) {
+    if (lineNum <= 0) return "";
+    int curLine = 1;
+    for (size_t i = 0; i < src.size(); i++) {
+        if (curLine == lineNum) {
+            size_t lineEnd = src.find('\n', i);
+            if (lineEnd == std::string::npos) lineEnd = src.size();
+            std::string line = src.substr(i, lineEnd - i);
+            // 去掉行尾空白
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
+                line.pop_back();
+            }
+            return line;
+        }
+        if (src[i] == '\n') curLine++;
+    }
+    return "";
+}
+
+// 为编译错误添加诊断信息（源代码行和错误建议）
+static void enrichError(CompileError& e, const std::string& src, const std::string& filename) {
+    if (e.file.empty()) e.file = filename;
+    if (e.srcLine.empty()) {
+        std::string srcLine = getSourceLine(src, e.line);
+        if (!srcLine.empty()) {
+            e.srcLine = srcLine;
+        }
+    }
+}
+
 // 选择系统 C 编译器：环境变量 SCC_CC > CC > .sc 配置文件 cc 项 > 缺省 gcc
 static std::string pickCC() {
     const char* cc = std::getenv("SCC_CC");
@@ -94,7 +127,8 @@ static int compileAndRun(const std::string& csrc,
     close(fd);
 
     // 2. 通过管道把 C 源码送给编译器，不落盘中间 .c 文件
-    std::string cmd = pickCC() + " -x c - -o " + bin;
+    // 添加 -g 标志生成调试符号，便于 gdb/lldb 进行源代码级调试
+    std::string cmd = pickCC() + " -g -x c - -o " + bin;
     FILE* pipe = popen(cmd.c_str(), "w");
     if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(bin); return 1; }
     fwrite(csrc.data(), 1, csrc.size(), pipe);
@@ -326,7 +360,8 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
 
     // 第二阶段：统一编译所有 .c -> .o
     for (auto& a : arts) {
-        const std::string ccCmd = pickCC() + " -I " + tmpDir.string() +
+        // 添加 -g 标志生成调试符号
+        const std::string ccCmd = pickCC() + " -g -I " + tmpDir.string() +
                                   " -c " + a.cpath.string() + " -o " + a.opath.string();
         if (std::system(ccCmd.c_str()) != 0) {
             std::cerr << "错误: C 单元编译失败（" << ccCmd << "）\n";
@@ -338,7 +373,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
 
     // 链接所有对象文件
     const std::filesystem::path bin = tmpDir / "run.out";
-    std::string linkCmd = pickCC();
+    std::string linkCmd = pickCC() + " -g";  // 添加 -g 保留调试符号
     for (auto& o : objects) linkCmd += " " + o.string();
     linkCmd += " -o " + bin.string();
     if (std::system(linkCmd.c_str()) != 0) {
@@ -404,9 +439,12 @@ int main(int argc, char** argv) {
     }
 
     // ---- 3. 编译流水线 + 输出 ----
+    // 提取源代码字符串用于错误诊断（catch 块中需要）
+    std::string src = ss.str();
+    
     try {
         // 3a. 词法分析：源码 → token 流
-        auto toks = lex(ss.str());
+        auto toks = lex(src);
         // 3b. 语法分析：token 流 → AST 程序树
         auto prog = parse(toks);
         // 3b.0 语义检查：类型兼容/指针安全边界
@@ -458,10 +496,18 @@ int main(int argc, char** argv) {
             }
             fout << c;
         }
-    } catch (const CompileError& e) {
-        // 统一错误格式：文件:行号: 错误: 消息
-        // VSCode 等 IDE 可解析此格式实现点击跳转到错误行
-        std::cerr << input << ":" << e.line << ": 错误: " << e.msg << "\n";
+    } catch (CompileError e) {
+        // 为错误添加诊断信息：源代码行 + 文件名
+        enrichError(e, src, input);
+        // 详细诊断输出：文件:行号: 错误: 消息 + 上下文代码 + 修复建议
+        std::cerr << (e.file.empty() ? input : e.file) << ":" << e.line 
+                  << ": \033[1;31m错误\033[0m: " << e.msg << "\n";
+        if (!e.srcLine.empty()) {
+            std::cerr << "  |  " << e.srcLine << "\n";
+        }
+        if (!e.hint.empty()) {
+            std::cerr << "  \033[1;36m提示\033[0m: " << e.hint << "\n";
+        }
         return 1;
     }
     return 0;
