@@ -149,6 +149,30 @@ struct Checker {
         if (!lp && rp) err(line, "标量不能赋值为指针/数组");
     }
 
+    bool isAddrOfLocalExpr(const Expr& e,
+                           const std::unordered_map<std::string, Ty>& locals) const {
+        if (e.kind != Expr::Unary || e.op != "&" || !e.a) return false;
+        if (e.a->kind == Expr::Ident) {
+            auto it = locals.find(e.a->text);
+            if (it != locals.end()) return true;
+        }
+        if (e.a->kind == Expr::Member && e.a->a && e.a->a->kind == Expr::Ident) {
+            auto it = locals.find(e.a->a->text);
+            if (it != locals.end()) return true;
+        }
+        return false;
+    }
+
+    bool containsAddrOfLocal(const Expr& e,
+                             const std::unordered_map<std::string, Ty>& locals) const {
+        if (isAddrOfLocalExpr(e, locals)) return true;
+        if (e.a && containsAddrOfLocal(*e.a, locals)) return true;
+        if (e.b && containsAddrOfLocal(*e.b, locals)) return true;
+        if (e.c && containsAddrOfLocal(*e.c, locals)) return true;
+        for (auto& x : e.args) if (x && containsAddrOfLocal(*x, locals)) return true;
+        return false;
+    }
+
     Ty declaredOrInferredType(const Field& f,
                               const std::unordered_map<std::string, Ty>& locals) {
         const bool declared = f.type.hasInline || !f.type.name.empty() ||
@@ -200,6 +224,8 @@ struct Checker {
                 break;
             case Stmt::ReturnS:
                 if (s.expr) {
+                    if (containsAddrOfLocal(*s.expr, locals))
+                        err(s.line, "禁止返回局部变量地址");
                     Ty rt = inferExpr(*s.expr, locals, s.line);
                     checkAssignable(retTy, rt, s.line);
                 }
