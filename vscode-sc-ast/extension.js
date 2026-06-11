@@ -10,7 +10,8 @@ let currentDoc = null; // 当前跟踪的 sc 文档
 
 // ---------------- scc 调用 ----------------
 function findScc() {
-    const cfg = vscode.workspace.getConfiguration('scAst').get('sccPath');
+    const cfg = vscode.workspace.getConfiguration('scAst').get('sccPath') ||
+                vscode.workspace.getConfiguration('sc').get('sccPath');
     if (cfg) return cfg;
     for (const f of vscode.workspace.workspaceFolders || []) {
         const p = path.join(f.uri.fsPath, 'compiler', 'build', 'scc');
@@ -34,11 +35,14 @@ function runScc(args, input) {
 
 // ---------------- AST 树视图 ----------------
 const ICONS = {
+    inc: 'package',
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
     alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function',
     var: 'symbol-variable', let: 'symbol-constant',
     param: 'symbol-parameter', field: 'symbol-field', item: 'symbol-enum-member',
+    case: 'list-selection', arm: 'list-flat', through: 'arrow-right',
     if: 'git-branch', else: 'git-branch', while: 'sync', for: 'sync',
+    'do-while': 'sync-ignored', goto: 'arrow-swap', label: 'tag',
     return: 'arrow-left', break: 'debug-step-out', continue: 'debug-continue',
     expr: 'symbol-operator', error: 'error',
 };

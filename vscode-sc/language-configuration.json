@@ -22,12 +22,12 @@
         ["'", "'"]
     ],
     "indentationRules": {
-        "increaseIndentPattern": "^\\s*(def|fnc|if|else|while|for)\\b.*$",
+        "increaseIndentPattern": "(^\\s*(def|fnc|if|else|while|do|for|case)\\b.*$)|(^\\s*[A-Za-z_][A-Za-z0-9_]*:\\s*(#.*)?$)",
         "decreaseIndentPattern": "^\\s*$"
     },
     "onEnterRules": [
         {
-            "beforeText": "^\\s*(def|fnc|if|else|while|for)\\b.*$",
+            "beforeText": "(^\\s*(def|fnc|if|else|while|do|for|case)\\b.*$)|(^\\s*[A-Za-z_][A-Za-z0-9_]*:\\s*(#.*)?$)",
             "action": { "indent": "indent" }
         }
     ]

@@ -31,6 +31,8 @@ const KEYWORDS = [
     ['case', '分支匹配（替代 switch）'],
     ['through', 'case 分支贯穿到下一分支'],
     ['goto', '跳转到标签'],
+    ['sizeof', '返回表达式或类型的字节大小'],
+    ['offsetof', '返回字段在类型中的偏移量'],
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
 ];
@@ -46,6 +48,13 @@ const TYPES = [
     ['u1', 'uint8_t'], ['u2', 'uint16_t'], ['u4', 'uint32_t'], ['u8', 'uint64_t'],
     ['b', 'bool / u1'],
     ['f4', 'float'], ['f8', 'double'], ['v', 'void'],
+    ['va_list', '可变参数列表类型（透传 stdarg.h）'],
+    ['adt_obj', '内置 ADT 公共对象头'],
+    ['string', '内置 ADT 字符串对象'],
+    ['list', '内置 ADT 列表对象'],
+    ['dict', '内置 ADT 字典对象'],
+    ['dim', '内置 ADT 多维数组对象'],
+    ['json', '内置 ADT JSON 对象'],
 ];
 
 // ---------------- scc 调用与 AST 缓存 ----------------

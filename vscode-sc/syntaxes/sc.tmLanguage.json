@@ -9,7 +9,10 @@
         { "include": "#def-decl" },
         { "include": "#fnc-decl" },
         { "include": "#var-decl" },
+        { "include": "#label-decl" },
         { "include": "#keywords" },
+        { "include": "#builtins" },
+        { "include": "#constants" },
         { "include": "#types" },
         { "include": "#strings" },
         { "include": "#chars" },
@@ -55,6 +58,12 @@
                 "2": { "name": "variable.other.declaration.sc" }
             }
         },
+        "label-decl": {
+            "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:(?=\\s*(#.*)?$)",
+            "captures": {
+                "1": { "name": "entity.name.label.sc" }
+            }
+        },
         "keywords": {
             "patterns": [
                 {
@@ -67,6 +76,22 @@
                 }
             ]
         },
+        "builtins": {
+            "patterns": [
+                {
+                    "name": "support.function.builtin.sc",
+                    "match": "\\b(sizeof|offsetof)\\b"
+                }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                {
+                    "name": "constant.language.sc",
+                    "match": "\\b(true|false|nil)\\b"
+                }
+            ]
+        },
         "types": {
             "patterns": [
                 {
@@ -74,8 +99,16 @@
                     "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b"
                 },
                 {
+                    "name": "storage.type.library.sc",
+                    "match": "\\b(va_list|adt_obj|string|list|dict|dim|json)\\b"
+                },
+                {
                     "name": "storage.type.primitive.sc",
                     "match": "(?<=:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b(?!\\s*[:(\\n])"
+                },
+                {
+                    "name": "storage.type.library.sc",
+                    "match": "(?<=:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json)\\b(?!\\s*[:(\\n])"
                 },
                 {
                     "name": "entity.name.type.annotated.sc",
@@ -86,10 +119,6 @@
         "strings": {
             "name": "string.quoted.double.sc",
             "begin": "\"",
-                {
-                    "name": "keyword.operator.sc",
-                    "match": "::"
-                },
             "end": "\"",
             "patterns": [
                 { "name": "constant.character.escape.sc", "match": "\\\\." }
@@ -97,10 +126,6 @@
         },
         "chars": {
             "name": "string.quoted.single.sc",
-                },
-                {
-                    "name": "constant.language.sc",
-                    "match": "\\b(true|false|nil)\\b"
             "begin": "'",
             "end": "'",
             "patterns": [
@@ -139,6 +164,14 @@
                 {
                     "name": "keyword.operator.arrow.sc",
                     "match": "->"
+                },
+                {
+                    "name": "punctuation.definition.ellipsis.sc",
+                    "match": "\\.\\.\\."
+                },
+                {
+                    "name": "keyword.operator.sc",
+                    "match": "::"
                 },
                 {
                     "name": "keyword.operator.sc",
