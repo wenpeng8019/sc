@@ -27,6 +27,16 @@
                 "scopeName": "source.sc",
                 "path": "./syntaxes/sc.tmLanguage.json"
             }
-        ]
+        ],
+        "configuration": {
+            "title": "SC Language",
+            "properties": {
+                "sc.sccPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to scc executable used for diagnostics, formatting and language features."
+                }
+            }
+        }
     }
 }

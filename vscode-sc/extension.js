@@ -50,7 +50,8 @@ const TYPES = [
 
 // ---------------- scc 调用与 AST 缓存 ----------------
 function findScc() {
-    const cfg = vscode.workspace.getConfiguration('scAst').get('sccPath');
+    const cfg = vscode.workspace.getConfiguration('sc').get('sccPath') ||
+                vscode.workspace.getConfiguration('scAst').get('sccPath');
     if (cfg) return cfg;
     for (const f of vscode.workspace.workspaceFolders || []) {
         const p = path.join(f.uri.fsPath, 'compiler', 'build', 'scc');
@@ -212,6 +213,45 @@ function fallbackItems(doc) {
     return items;
 }
 
+function stripAnsi(s) {
+    return String(s || '').replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function getWordAt(doc, pos) {
+    const r = doc.getWordRangeAtPosition(pos, /[A-Za-z_]\w*/);
+    if (!r) return null;
+    return { word: doc.getText(r), range: r };
+}
+
+function toMarkdownType(detail) {
+    const d = (detail || '').trim();
+    return d ? `类型: ${d}` : '类型信息不可用';
+}
+
+function parseErrorDiagnostic(errText, doc) {
+    const s = stripAnsi(errText);
+    const lines = s.split('\n');
+    let lineNum = 1;
+    let msg = s.trim() || '语法/语义错误';
+
+    for (const l of lines) {
+        const m = l.match(/:(\d+):\s*错误:\s*(.+)$/);
+        if (m) {
+            lineNum = Number(m[1]);
+            msg = m[2].trim();
+            break;
+        }
+    }
+    lineNum = Math.max(1, Math.min(doc.lineCount, lineNum));
+    const range = new vscode.Range(lineNum - 1, 0, lineNum - 1, doc.lineAt(lineNum - 1).text.length);
+    return new vscode.Diagnostic(range, msg, vscode.DiagnosticSeverity.Error);
+}
+
+function lineToPos(doc, oneBasedLine) {
+    const l = Math.max(1, Math.min(doc.lineCount, oneBasedLine || 1));
+    return new vscode.Position(l - 1, 0);
+}
+
 // ---------------- 补全提供器 ----------------
 function activate(context) {
     const K = vscode.CompletionItemKind;
@@ -294,11 +334,130 @@ function activate(context) {
     context.subscriptions.push(
         vscode.languages.registerCompletionItemProvider('sc', provider, ':', '.', '>'));
 
+    // 文档符号：展示顶层声明，支持大纲导航
     context.subscriptions.push(vscode.languages.registerDocumentSymbolProvider('sc', {
-        provideDocumentSymbols(doc) {
-            return [];
+        async provideDocumentSymbols(doc) {
+            const ast = await getAst(doc, -1);
+            if (!ast) return [];
+            const kindMap = {
+                struct: vscode.SymbolKind.Struct,
+                union: vscode.SymbolKind.Struct,
+                enum: vscode.SymbolKind.Enum,
+                alias: vscode.SymbolKind.TypeParameter,
+                fnctype: vscode.SymbolKind.Interface,
+                fnc: vscode.SymbolKind.Function,
+                var: vscode.SymbolKind.Variable,
+                let: vscode.SymbolKind.Constant,
+            };
+            const out = [];
+            for (const n of ast.c || []) {
+                const p = lineToPos(doc, n.l || 1);
+                const r = new vscode.Range(p, p);
+                const name = n.n || n.k;
+                out.push(new vscode.DocumentSymbol(name, n.d || n.k,
+                    kindMap[n.k] || vscode.SymbolKind.Object, r, r));
+            }
+            return out;
         }
     }));
+
+    // 悬停：显示符号类型与来源
+    context.subscriptions.push(vscode.languages.registerHoverProvider('sc', {
+        async provideHover(doc, pos) {
+            const w = getWordAt(doc, pos);
+            if (!w) return null;
+            const ast = await getAst(doc, pos.line);
+            if (!ast) return null;
+            const idx = buildIndex(ast);
+            const locals = scopeVars(idx, pos.line + 1);
+            const local = locals.get(w.word);
+            if (local) {
+                return new vscode.Hover(new vscode.MarkdownString(
+                    `**${w.word}**\n\n局部符号\n\n${toMarkdownType(local.detail)}`));
+            }
+            const g = idx.globals.get(w.word);
+            if (g) {
+                return new vscode.Hover(new vscode.MarkdownString(
+                    `**${w.word}**\n\n全局符号\n\n${toMarkdownType(g.detail)}`));
+            }
+            const t = idx.types.get(w.word);
+            if (t) {
+                return new vscode.Hover(new vscode.MarkdownString(
+                    `**${w.word}**\n\n类型定义 (${t.k})`));
+            }
+            const f = idx.funcs.get(w.word);
+            if (f) {
+                return new vscode.Hover(new vscode.MarkdownString(
+                    `**${w.word}**\n\n函数\n\n${(f.d || '').trim()}`));
+            }
+            return null;
+        }
+    }));
+
+    // 定义跳转：支持类型/函数/全局符号跳转
+    context.subscriptions.push(vscode.languages.registerDefinitionProvider('sc', {
+        async provideDefinition(doc, pos) {
+            const w = getWordAt(doc, pos);
+            if (!w) return null;
+            const ast = await getAst(doc, pos.line);
+            if (!ast) return null;
+            const idx = buildIndex(ast);
+            const lookup = [idx.types.get(w.word), idx.funcs.get(w.word), idx.globals.get(w.word)];
+            for (const hit of lookup) {
+                if (!hit) continue;
+                const p = lineToPos(doc, hit.l || hit.line || 1);
+                return new vscode.Location(doc.uri, p);
+            }
+            return null;
+        }
+    }));
+
+    // 文档格式化：调用 scc --emit-sc 生成规范化源码
+    context.subscriptions.push(vscode.languages.registerDocumentFormattingEditProvider('sc', {
+        async provideDocumentFormattingEdits(doc) {
+            try {
+                const formatted = await runScc(['-', '--emit-sc'], doc.getText());
+                const full = new vscode.Range(
+                    new vscode.Position(0, 0),
+                    doc.lineAt(Math.max(0, doc.lineCount - 1)).range.end);
+                return [vscode.TextEdit.replace(full, formatted)];
+            } catch (e) {
+                vscode.window.showErrorMessage('SC 格式化失败: ' + String(e.message || e));
+                return [];
+            }
+        }
+    }));
+
+    // 实时诊断：在编辑时运行 scc --ast，失败时产出问题面板诊断
+    const diagnostics = vscode.languages.createDiagnosticCollection('sc');
+    context.subscriptions.push(diagnostics);
+    const timers = new Map();
+    const refreshDiagnostics = async (doc) => {
+        if (!doc || doc.languageId !== 'sc') return;
+        try {
+            await runScc(['-', '--ast'], doc.getText());
+            diagnostics.set(doc.uri, []);
+        } catch (e) {
+            diagnostics.set(doc.uri, [parseErrorDiagnostic(String(e.message || e), doc)]);
+        }
+    };
+    const scheduleDiagnostics = (doc) => {
+        if (!doc || doc.languageId !== 'sc') return;
+        const k = doc.uri.toString();
+        const old = timers.get(k);
+        if (old) clearTimeout(old);
+        timers.set(k, setTimeout(() => {
+            timers.delete(k);
+            refreshDiagnostics(doc);
+        }, 250));
+    };
+
+    context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(scheduleDiagnostics));
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => scheduleDiagnostics(e.document)));
+    context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(doc => diagnostics.delete(doc.uri)));
+
+    // 初始化诊断
+    for (const d of vscode.workspace.textDocuments) scheduleDiagnostics(d);
 }
 
 function deactivate() {}

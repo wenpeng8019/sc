@@ -489,6 +489,7 @@ var a:i1
 - 详细诊断输出：出错行源代码展示、编译上下文、文件位置追踪
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
+- VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 
 ## 14. 语言演进路线图
 
