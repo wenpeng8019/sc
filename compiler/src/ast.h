@@ -102,6 +102,7 @@ struct TypeRef {
     FncKind fnKind = FncKind::None;
     std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = 默认 i4）
     std::vector<Field> fnParams;     // 显式参数列表（不含隐式 this）
+    bool fnVariadic = false;         // 可变参数（'...'）
 };
 
 // ---------- 字段 / 声明项 ----------
@@ -213,6 +214,7 @@ struct Decl {
                                  // 函数签名从该类型展开，无需重复声明参数和返回类型
     std::string methodOwner;     // 方法定义所属结构名（fnc obj::add 时为 obj）
     std::string methodName;      // 方法名（fnc obj::add 时为 add）
+    bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
 
     std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
                                  // （FuncTypeD 的 body 为空，只有签名无实现）

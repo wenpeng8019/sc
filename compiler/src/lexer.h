@@ -48,6 +48,9 @@ enum class Tok {
     KwBreak,    // break
     KwContinue, // continue
 
+    // ---- 特殊 ----
+    Ellipsis,   // ...  可变参数占位
+
     // ---- 分隔符 ----
     LParen,     // (
     RParen,     // )

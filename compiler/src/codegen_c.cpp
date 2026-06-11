@@ -23,6 +23,7 @@ std::string mapBase(const std::string& n) {
         {"u1", "uint8_t"}, {"u2", "uint16_t"}, {"u4", "uint32_t"}, {"u8", "uint64_t"},
         {"f4", "float"},   {"f8", "double"},  {"v", "void"},
         {"b", "uint8_t"},  // bool：u1 的引用别名（true/false 即 1/0）
+        {"va_list", "va_list"},  // 透传：可变参数列表类型
     };
     auto it = m.find(n);
     return it == m.end() ? n : it->second;
@@ -89,12 +90,13 @@ struct CGen {
             out << "(*" << f.name << ")(";
             if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
                 out << curAggrKind << " " << curAggr << " *_this";
-                if (!f.type.fnParams.empty()) out << ", ";
+                if (!f.type.fnParams.empty() || f.type.fnVariadic) out << ", ";
             }
             for (size_t i = 0; i < f.type.fnParams.size(); i++) {
                 if (i) out << ", ";
                 emitDeclarator(f.type.fnParams[i]);
             }
+            if (f.type.fnVariadic) out << (f.type.fnParams.empty() ? "..." : ", ...");
             out << ")";
             return;
         }
@@ -505,7 +507,7 @@ struct CGen {
                 out << "typedef ";
                 emitRetType(d);
                 out << " " << d.name << "(";
-                emitParams(d.fields);
+                emitParams(d.fields, d.variadic);
                 out << ");\n\n";
                 break;
             }
@@ -526,12 +528,13 @@ struct CGen {
         for (int i = 0; i < ptr; i++) out << " *";
     }
 
-    void emitParams(const std::vector<Field>& params) {
-        if (params.empty()) { out << "void"; return; }
+    void emitParams(const std::vector<Field>& params, bool variadic = false) {
+        if (params.empty() && !variadic) { out << "void"; return; }
         for (size_t i = 0; i < params.size(); i++) {
             if (i) out << ", ";
             emitDeclarator(params[i]);
         }
+        if (variadic) out << (params.empty() ? "..." : ", ...");
     }
 
     // 函数签名（实现预定义类型的函数，从函数类型表展开签名）
@@ -547,9 +550,9 @@ struct CGen {
         out << " " << d.name << "(";
         if (!d.methodOwner.empty()) {
             out << d.methodOwner << " *_this";
-            if (!sig->fields.empty()) out << ", ";
+            if (!sig->fields.empty() || sig->variadic) out << ", ";
         }
-        emitParams(sig->fields);
+        emitParams(sig->fields, sig->variadic);
         out << ")";
     }
 
@@ -597,6 +600,7 @@ struct CGen {
             << "#include <stdint.h>\n"
             << "#include <stddef.h>\n"
             << "#include <stdbool.h>\n"
+            << "#include <stdarg.h>\n"
             << "#include <stdio.h>\n"
             << "#include <stdlib.h>\n"
             << "#include <string.h>\n";

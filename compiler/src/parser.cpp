@@ -330,6 +330,10 @@ struct Parser {
                                       : TypeRef::FncKind::PlainPtr;
                 bool haveRet = false;
                 for (;;) {
+                    if (at(Tok::Ellipsis)) {
+                        if (ty.fnParams.empty()) err("'...' 前必须有参数");
+                        ty.fnVariadic = true; advance(); break;
+                    }
                     if (looksLikeParam()) {
                         ty.fnParams.push_back(parseFieldItem());  // 参数
                     } else {
@@ -370,6 +374,10 @@ struct Parser {
                 ty.fnKind = TypeRef::FncKind::PlainPtr;
                 bool haveRet = false;
                 for (;;) {
+                    if (at(Tok::Ellipsis)) {
+                        if (ty.fnParams.empty()) err("'...' 前必须有参数");
+                        ty.fnVariadic = true; advance(); break;
+                    }
                     if (looksLikeParam()) {
                         ty.fnParams.push_back(parseFieldItem());
                     } else {
@@ -505,6 +513,12 @@ struct Parser {
 
     // 解析 fnc 冒号后的单行项：可能是返回类型，也可能是参数
     void parseFncItem(Decl& d, bool& haveRet) {
+        if (at(Tok::Ellipsis)) {
+            if (d.fields.empty()) err("'...' 前必须有至少一个命名参数");
+            d.variadic = true;
+            advance();
+            return;
+        }
         if (looksLikeParam()) {
             d.fields.push_back(parseFieldItem());  // 是参数
             return;
@@ -546,7 +560,7 @@ struct Parser {
         // 单行签名项（返回类型和/或参数，逗号分隔）
         if (!at(Tok::Newline)) {
             parseFncItem(*d, haveRet);
-            while (accept(Tok::Comma)) parseFncItem(*d, haveRet);
+            while (!d->variadic && accept(Tok::Comma)) parseFncItem(*d, haveRet);
         }
         expect(Tok::Newline, "换行");
 
@@ -570,7 +584,13 @@ struct Parser {
             // 看起来像参数声明 → 多行参数
             if (looksLikeParam()) {
                 d->fields.push_back(parseFieldItem());
-                while (accept(Tok::Comma)) d->fields.push_back(parseFieldItem());
+                while (accept(Tok::Comma)) {
+                    if (at(Tok::Ellipsis)) {
+                        if (d->fields.empty()) err("'...' 前必须有参数");
+                        d->variadic = true; advance(); break;
+                    }
+                    d->fields.push_back(parseFieldItem());
+                }
                 expect(Tok::Newline, "换行");
                 continue;
             }

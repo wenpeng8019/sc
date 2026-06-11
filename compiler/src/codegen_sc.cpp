@@ -175,6 +175,7 @@ struct SGen {
         std::string s;
         for (size_t i = 0; i < parts.size(); i++)
             s += (i ? ", " : " ") + parts[i];
+        if (d.variadic) s += parts.empty() ? " ..." : ", ...";
         return s;
     }
 

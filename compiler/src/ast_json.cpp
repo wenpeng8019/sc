@@ -168,6 +168,7 @@ std::string declNode(const Decl& d) {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
+            if (d.variadic) c.push_back(node("param", "...", "", d.line));
             std::string ret = typeToStr(d.retType);
             return nodeExt("fnctype", d.name, ret.empty() ? X : X + ": " + ret,
                            d.line, d.external, d.origin, c);
@@ -176,6 +177,7 @@ std::string declNode(const Decl& d) {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
+            if (d.variadic) c.push_back(node("param", "...", "", d.line));
             for (auto& s : d.body) c.push_back(stmtNode(*s));
             std::string detail;
             if (!d.funcTypeName.empty()) detail = "-> " + d.funcTypeName;

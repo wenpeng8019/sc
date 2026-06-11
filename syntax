@@ -325,20 +325,85 @@ ok = p == nil ? false : true
 示例：
 
 ```sc
+# if / else if / else
+if p.x > 1
+    printf("single cond\n")
+
 if p.x > 1
     && p.y < 10
     -
-    printf("cond ok\n")
+    printf("multi-line cond\n")
 else
     printf("cond fail\n")
 
-for i = 0; i < 3; i++
-    counter += i
+if x == 1
+    printf("one\n")
+else if x == 2
+    printf("two\n")
+else
+    printf("other\n")
 
+# while
 while counter > 0
     counter--
     if counter == 1
         break
+
+# do ... while
+var i: i4 = 0
+do
+    i++
+while i < 5
+
+# for（三段表达式）
+for i = 0; i < 3; i++
+    counter += i
+
+# for（省略某段）
+for ; running; 
+    step()
+
+# case（替代 switch，默认自动 break）
+case code:
+    1, 2:
+        printf("A\n")
+    3:
+        printf("B\n")
+        through
+    4:
+        printf("C\n")
+    :
+        printf("default\n")
+
+# goto 与标签
+start:
+    do
+        i++
+    while i < 2
+    if i < 4
+        goto start
+
+# return
+fnc add: i4, a:i4, b:i4
+    return a + b
+
+fnc noop: v
+    return
+
+# 变量/常量声明
+var a: i4 = 1, b: i4 = 2
+let max: i4 = 100
+
+# 多行声明
+var x: i4 = 0
+    y: i4 = 0
+    z: i4 = 0
+
+# continue
+for i = 0; i < 10; i++
+    if i == 5
+        continue
+    printf("%d\n", i)
 ```
 
 ## 12. 布局规则
@@ -423,18 +488,35 @@ var a:i1
 - `do ... while`、`goto`、标签语句已实现。
 - `typedef` 等价能力已由 `def Alias -> Type` 提供。
 - `sizeof`、`offsetof` 需要作为显式语言内置能力收敛（当前可写成 C 形式调用）。
-- 可变参数尚未实现，需要明确语法与类型检查方案。
+- 可变参数已实现，见下方方案。
 
-### 14.3.1 可变参数方案（待实现）
+### 14.3.1 可变参数（已实现）
 
-建议方案（保持可转 C）：
+函数声明语法：在参数列表末尾加 `...`。
 
-- 函数声明语法：`fnc log: v, tag&: u1, ...`
-- 约束：`...` 只能出现在形参列表末尾，且前面至少有一个具名参数。
-- 函数类型同样支持：`fnc printer_t: v, fmt&: u1, ...`
-- 代码生成：直接映射到 C 的可变参数函数签名（`...`）。
-- 语言内置桥接：提供 `va_start`/`va_arg`/`va_end` 的最小可用封装或直接透传 C 宏。
-- 语义检查：禁止在非可变参数函数中使用可变参数读取；禁止 `...` 出现在中间位置。
+```sc
+# 可变参数函数
+fnc my_printf: v, fmt&: u1, ...
+    var ap: va_list
+    va_start(ap, fmt)
+    vprintf(fmt, ap)
+    va_end(ap)
+
+# 可变参数函数类型
+fnc printer_t: v, fmt&: u1, ...
+
+# 可变参数函数指针字段
+def handler: {
+    log: fnc: v, fmt&: u1, ...
+}
+```
+
+约束：
+
+- `...` 只能出现在参数列表末尾。
+- `...` 前必须有至少一个具名参数。
+- `va_list`、`va_start`、`va_arg`、`va_end` 直接透传 C，使用时按 C 惯用法书写。
+- `stdarg.h` 已纳入默认包含头，无需手动 `inc stdarg.h`。
 
 本阶段不实现：函数重载、命名参数、枚举范围、位标志专用语法。
 

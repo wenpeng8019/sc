@@ -161,6 +161,8 @@ struct Lexer {
         // 尝试三字符匹配
         for (auto* op : ops3)
             if (s.compare(i, 3, op) == 0) { push(Tok::Op, op); i += 3; return true; }
+        // '...' 可变参数
+        if (s.compare(i, 3, "...") == 0) { push(Tok::Ellipsis, "..."); i += 3; return true; }
         // 尝试二字符匹配
         for (auto* op : ops2)
             if (s.compare(i, 2, op) == 0) {
