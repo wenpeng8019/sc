@@ -1,7 +1,9 @@
 #include "semantic.h"
 #include "error.h"
 
+#include <functional>
 #include <unordered_map>
+#include <vector>
 
 namespace {
 
@@ -52,6 +54,98 @@ struct Checker {
             name = al->second;
         }
         return nullptr;
+    }
+
+    std::string resolveAliasToName(std::string name) const {
+        for (int i = 0; i < 16 && !name.empty(); i++) {
+            auto al = aliases.find(name);
+            if (al == aliases.end()) return name;
+            name = al->second;
+        }
+        return name;
+    }
+
+    void collectByValueDepsFromType(const TypeRef& t,
+                                    std::vector<std::pair<std::string, int>>& out,
+                                    int line) const {
+        // 函数字段不参与按值包含图
+        if (t.fnKind != TypeRef::FncKind::None) return;
+
+        // 指针或数组字段不会形成“按值递归包含”
+        if (t.ptr == 0 && t.arrayDims.empty() && !t.name.empty()) {
+            const std::string base = resolveAliasToName(t.name);
+            if (structs.find(base) != structs.end()) out.push_back({base, line});
+        }
+
+        // 内联结构/联合：递归检查其字段
+        if (t.hasInline) {
+            for (auto& f : t.inlineFields)
+                collectByValueDepsFromType(f.type, out, f.line ? f.line : line);
+        }
+    }
+
+    void checkAggregateByValueCycles() const {
+        std::unordered_map<std::string, std::vector<std::pair<std::string, int>>> g;
+        for (auto& kv : structs) g[kv.first] = {};
+
+        // 建图：A 的字段按值包含 B，则 A -> B
+        for (auto& kv : structs) {
+            const Decl* d = kv.second;
+            auto& edges = g[d->name];
+            for (auto& f : d->fields) {
+                collectByValueDepsFromType(f.type, edges, f.line ? f.line : d->line);
+            }
+        }
+
+        std::unordered_map<std::string, int> state;  // 0=未访问,1=栈上,2=完成
+        std::vector<std::string> stack;
+
+        auto findEdgeLine = [&](const std::string& from, const std::string& to) -> int {
+            auto it = g.find(from);
+            if (it == g.end()) return 0;
+            for (auto& e : it->second) if (e.first == to) return e.second;
+            return 0;
+        };
+
+        std::function<void(const std::string&)> dfs = [&](const std::string& u) {
+            state[u] = 1;
+            stack.push_back(u);
+
+            auto it = g.find(u);
+            if (it != g.end()) {
+                for (auto& e : it->second) {
+                    const std::string& v = e.first;
+                    if (state[v] == 0) {
+                        dfs(v);
+                    } else if (state[v] == 1) {
+                        // 回边：发现按值包含环
+                        std::string cycle;
+                        bool inCycle = false;
+                        for (auto& n : stack) {
+                            if (n == v) inCycle = true;
+                            if (!inCycle) continue;
+                            if (!cycle.empty()) cycle += " -> ";
+                            cycle += n;
+                        }
+                        cycle += " -> " + v;
+
+                        int line = e.second;
+                        if (!line && stack.size() >= 2) {
+                            line = findEdgeLine(stack[stack.size() - 2], stack.back());
+                        }
+                        if (!line) line = 1;
+
+                        err(line, "结构/联合按值循环包含: " + cycle + "。请改为指针字段（&）打破递归包含");
+                    }
+                }
+            }
+
+            stack.pop_back();
+            state[u] = 2;
+        };
+
+        for (auto& kv : g)
+            if (state[kv.first] == 0) dfs(kv.first);
     }
 
     Ty inferExpr(const Expr& e,
@@ -348,6 +442,7 @@ struct Checker {
 
     void run() {
         collectTop();
+        checkAggregateByValueCycles();
         checkFunctions();
     }
 };
