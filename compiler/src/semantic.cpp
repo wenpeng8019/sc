@@ -262,6 +262,12 @@ struct Checker {
                 for (auto& x : s.body) checkStmt(*x, a, retTy);
                 break;
             }
+            case Stmt::DoWhileS: {
+                auto a = locals;
+                for (auto& x : s.body) checkStmt(*x, a, retTy);
+                (void)inferExpr(*s.expr, a, s.line);
+                break;
+            }
             case Stmt::ForS: {
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);
                 if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line);
@@ -277,6 +283,13 @@ struct Checker {
                     for (auto& lab : arm.labels) (void)inferExpr(*lab, a, s.line);
                     for (auto& x : arm.body) checkStmt(*x, a, retTy);
                 }
+                break;
+            }
+            case Stmt::GotoS:
+                break;
+            case Stmt::LabelS: {
+                auto a = locals;
+                for (auto& x : s.body) checkStmt(*x, a, retTy);
                 break;
             }
             case Stmt::BreakS:

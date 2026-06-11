@@ -55,6 +55,11 @@ struct SGen {
                 ind(); out << "while " << exprToStr(*s.expr) << "\n";
                 depth++; emitStmts(s.body); depth--;
                 break;
+            case Stmt::DoWhileS:
+                ind(); out << "do\n";
+                depth++; emitStmts(s.body); depth--;
+                ind(); out << "while " << exprToStr(*s.expr) << "\n";
+                break;
             case Stmt::ForS:
                 ind();
                 out << "for "
@@ -82,6 +87,13 @@ struct SGen {
                     depth--;
                 }
                 depth--;
+                break;
+            case Stmt::GotoS:
+                ind(); out << "goto " << s.text << "\n";
+                break;
+            case Stmt::LabelS:
+                ind(); out << s.text << ":\n";
+                depth++; emitStmts(s.body); depth--;
                 break;
             case Stmt::DeclS:
                 emitDecl(*s.decl);

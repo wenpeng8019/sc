@@ -30,8 +30,10 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"inc", Tok::KwInc},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},
     {"else", Tok::KwElse}, {"while", Tok::KwWhile},
+    {"do", Tok::KwDo},
     {"for", Tok::KwFor},   {"case", Tok::KwCase},
     {"through", Tok::KwThrough}, {"break", Tok::KwBreak},
+    {"goto", Tok::KwGoto},
     {"continue", Tok::KwContinue},
 };
 

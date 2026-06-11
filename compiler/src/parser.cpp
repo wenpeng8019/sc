@@ -697,8 +697,41 @@ struct Parser {
         return s;
     }
 
+    StmtPtr parseDoWhileStmt() {
+        auto s = mkStmt(Stmt::DoWhileS);
+        advance();  // do
+        parseBlock(s->body);
+        if (!accept(Tok::KwWhile)) err("do 语句后必须跟 while 条件");
+        s->expr = parseExpr();
+        expect(Tok::Newline, "换行");
+        return s;
+    }
+
+    StmtPtr parseGotoStmt() {
+        auto s = mkStmt(Stmt::GotoS);
+        advance();  // goto
+        if (!at(Tok::Ident)) err("goto 后期望标签名");
+        s->text = advance().text;
+        expect(Tok::Newline, "换行");
+        return s;
+    }
+
+    StmtPtr parseLabelStmt() {
+        auto s = mkStmt(Stmt::LabelS);
+        s->text = advance().text;
+        expect(Tok::Colon, "':'");
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "标签缩进块");
+        parseStmts(s->body);
+        accept(Tok::Dedent);
+        return s;
+    }
+
     // 单条语句解析 —— 按首 token 分派
     StmtPtr parseStmt() {
+        if (at(Tok::Ident) && peek().kind == Tok::Colon && peek(2).kind == Tok::Newline)
+            return parseLabelStmt();
+
         switch (cur().kind) {
             // var / let 声明语句
             case Tok::KwVar:
@@ -757,6 +790,8 @@ struct Parser {
                 parseCondBlock(s->expr, s->body);
                 return s;
             }
+            case Tok::KwDo:
+                return parseDoWhileStmt();
             // for 循环：for init; cond; step \n body
             case Tok::KwFor: {
                 auto s = mkStmt(Stmt::ForS);
@@ -773,6 +808,8 @@ struct Parser {
                 return parseCaseStmt();
             case Tok::KwThrough:
                 err("through 只能出现在 case 分支末尾");
+            case Tok::KwGoto:
+                return parseGotoStmt();
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);

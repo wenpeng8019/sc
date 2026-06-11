@@ -59,7 +59,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|for|case|through|return|break|continue)\\b"
+                    "match": "\\b(if|else|while|do|for|case|through|goto|return|break|continue)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",

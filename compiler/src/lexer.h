@@ -40,9 +40,11 @@ enum class Tok {
     KwIf,       // if
     KwElse,     // else
     KwWhile,    // while
+    KwDo,       // do
     KwFor,      // for
     KwCase,     // case
     KwThrough,  // through
+    KwGoto,     // goto
     KwBreak,    // break
     KwContinue, // continue
 

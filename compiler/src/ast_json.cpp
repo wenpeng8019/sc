@@ -93,6 +93,11 @@ std::string stmtNode(const Stmt& s) {
             for (auto& b : s.body) c.push_back(stmtNode(*b));
             return node("while", "", exprToStr(*s.expr), s.line, c);
         }
+        case Stmt::DoWhileS: {
+            std::vector<std::string> c;
+            for (auto& b : s.body) c.push_back(stmtNode(*b));
+            return node("do-while", "", exprToStr(*s.expr), s.line, c);
+        }
         case Stmt::ForS: {
             std::vector<std::string> c;
             for (auto& b : s.body) c.push_back(stmtNode(*b));
@@ -120,6 +125,13 @@ std::string stmtNode(const Stmt& s) {
                 c.push_back(node("arm", "", d, arm.line, bc));
             }
             return node("case", "", exprToStr(*s.expr), s.line, c);
+        }
+        case Stmt::GotoS:
+            return node("goto", s.text, "", s.line);
+        case Stmt::LabelS: {
+            std::vector<std::string> c;
+            for (auto& b : s.body) c.push_back(stmtNode(*b));
+            return node("label", s.text, "", s.line, c);
         }
         case Stmt::DeclS:
             return declNode(*s.decl);

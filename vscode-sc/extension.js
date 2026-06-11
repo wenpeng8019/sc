@@ -26,9 +26,11 @@ const KEYWORDS = [
     ['if', '条件分支'],
     ['else', '否则分支'],
     ['while', 'while 循环'],
+    ['do', 'do-while 循环起始'],
     ['for', 'for 循环'],
     ['case', '分支匹配（替代 switch）'],
     ['through', 'case 分支贯穿到下一分支'],
+    ['goto', '跳转到标签'],
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
 ];

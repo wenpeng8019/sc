@@ -141,8 +141,11 @@ struct Stmt {
         ReturnS,    // return 语句     eg. return expr;   (expr 可为空 = return;)
         IfS,        // if/else 条件分支
         WhileS,     // while 循环
+        DoWhileS,   // do-while 循环
         ForS,       // for 循环        for init; cond; step \n body
         CaseS,      // case 分支       case expr: labels/default + 自动 break
+        GotoS,      // goto 标签跳转
+        LabelS,     // 标签定义
         BreakS,     // break 语句      (无附加数据)
         ContinueS,  // continue 语句   (无附加数据)
         DeclS,      // 内嵌类型声明    函数体内用 def 定义局部类型（不常见但允许）
@@ -157,6 +160,7 @@ struct Stmt {
     std::vector<StmtPtr> elseBody;     // IfS: else 分支（可能为空、单条 else if、或多条语句块）
     ExprPtr forInit, forCond, forStep; // ForS: for (init; cond; step) 三段表达式
     std::vector<CaseArm> caseArms;     // CaseS: 分支列表（labels 为空表示 default）
+    std::string text;                  // GotoS/LabelS: 标签名
     DeclPtr decl;                      // DeclS: 内嵌的类型定义（def）
     int line = 0;                      // 语句起始行号
 };

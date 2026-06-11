@@ -354,6 +354,13 @@ struct CGen {
                 depth++; emitStmts(s.body); depth--;
                 indent(); out << "}\n";
                 break;
+            case Stmt::DoWhileS:
+                indent(); out << "do {\n";
+                depth++; emitStmts(s.body); depth--;
+                indent(); out << "} while (";
+                emitExpr(*s.expr, true);
+                out << ");\n";
+                break;
             case Stmt::ForS:
                 indent();
                 out << "for (";
@@ -394,6 +401,13 @@ struct CGen {
                 }
                 depth--;
                 indent(); out << "}\n";
+                break;
+            case Stmt::GotoS:
+                indent(); out << "goto " << s.text << ";\n";
+                break;
+            case Stmt::LabelS:
+                indent(); out << s.text << ":\n";
+                depth++; emitStmts(s.body); depth--;
                 break;
             case Stmt::DeclS:
                 emitTypeDecl(*s.decl);
