@@ -69,6 +69,12 @@ struct Expr {
 struct Field;  // 前向声明，TypeRef 内嵌的字段列表需用到 Field
 
 struct TypeRef {
+    enum class FncKind {
+        None,
+        PlainPtr,   // 普通函数指针：fnc: ret, params...
+        MethodPtr,  // 成员函数指针：fnc:: ret, params...
+    };
+
     // 类型名："i4" "f8" "u1" 等内置类型，或用户 def 的自定义类型名
     // 空字符串表示未指定类型，由 codegen 按默认规则推断：
     //   ptr > 0 → void*    （无类型指针默认指向 void）
@@ -86,6 +92,16 @@ struct TypeRef {
     bool hasInline = false;
     bool inlineUnion = false; // true=(联合), false={结构}
     std::vector<Field> inlineFields;  // 内联类型的字段定义
+
+    // 方法字段（伪 class）—— 结构体字段类型为内联函数签名：
+    //   def obj: { func: fnc: i4, x:i4, y:i4 }
+    // 本质是函数指针字段。C 中展开为：
+    //   Ret (*func)(struct obj *_this, params...)
+    // 通过 obj.func(...) 调用时自动传入接收者作为首参 _this，
+    // 实现函数的 sc 源码中以 this 访问（codegen 映射 this → _this）。
+    FncKind fnKind = FncKind::None;
+    std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = 默认 i4）
+    std::vector<Field> fnParams;     // 显式参数列表（不含隐式 this）
 };
 
 // ---------- 字段 / 声明项 ----------
@@ -111,6 +127,13 @@ struct Stmt;
 using StmtPtr = std::unique_ptr<Stmt>;
 
 struct Stmt {
+    struct CaseArm {
+        std::vector<ExprPtr> labels;  // 空=default 分支
+        std::vector<StmtPtr> body;    // 分支体
+        bool through = false;         // 末尾 through：贯穿到下一分支
+        int line = 0;
+    };
+
     enum Kind {
         ExprS,      // 表达式语句      eg. foo(); a = 1;  (以 expr 字段存储)
         VarS,       // 变量声明语句    eg. var x: i4      (以 decls 字段存储多项)
@@ -119,6 +142,7 @@ struct Stmt {
         IfS,        // if/else 条件分支
         WhileS,     // while 循环
         ForS,       // for 循环        for init; cond; step \n body
+        CaseS,      // case 分支       case expr: labels/default + 自动 break
         BreakS,     // break 语句      (无附加数据)
         ContinueS,  // continue 语句   (无附加数据)
         DeclS,      // 内嵌类型声明    函数体内用 def 定义局部类型（不常见但允许）
@@ -132,6 +156,7 @@ struct Stmt {
     std::vector<StmtPtr> body;         // IfS/WhileS/ForS: 条件成立时执行的主体语句
     std::vector<StmtPtr> elseBody;     // IfS: else 分支（可能为空、单条 else if、或多条语句块）
     ExprPtr forInit, forCond, forStep; // ForS: for (init; cond; step) 三段表达式
+    std::vector<CaseArm> caseArms;     // CaseS: 分支列表（labels 为空表示 default）
     DeclPtr decl;                      // DeclS: 内嵌的类型定义（def）
     int line = 0;                      // 语句起始行号
 };
@@ -166,6 +191,8 @@ struct Decl {
     std::string name;            // 类型名 / 函数名；IncD 时为头文件文本
 
     bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
+    bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
+    std::string origin;          // 外部符号来源（导入文件路径或 builtin 名称）
 
     TypeRef type;                // AliasD: 别名指向的目标类型
                                  // EnumD:  枚举的底层整数基类型
@@ -180,6 +207,8 @@ struct Decl {
     std::string funcTypeName;    // fnc name -> func_type 中的预定义函数类型名
                                  // 非空时表示此函数"实现"某个已定义的函数类型，
                                  // 函数签名从该类型展开，无需重复声明参数和返回类型
+    std::string methodOwner;     // 方法定义所属结构名（fnc obj::add 时为 obj）
+    std::string methodName;      // 方法名（fnc obj::add 时为 add）
 
     std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
                                  // （FuncTypeD 的 body 为空，只有签名无实现）
@@ -192,4 +221,5 @@ struct Decl {
 // 所有后端（codegen_c / codegen_sc / ast_json）都从 Program 结构开始遍历。
 struct Program {
     std::vector<DeclPtr> decls;  // 顶层声明列表，按源码中的书写顺序排列
+    std::vector<std::string> externSymbols; // 当前单元引用到的外部符号（模块/头文件导入后汇总）
 };

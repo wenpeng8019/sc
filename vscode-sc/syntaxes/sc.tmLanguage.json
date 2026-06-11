@@ -59,7 +59,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|for|return|break|continue)\\b"
+                    "match": "\\b(if|else|while|for|case|through|return|break|continue)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",
@@ -71,17 +71,25 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|f4|f8|v)\\b"
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b"
+                },
+                {
+                    "name": "storage.type.primitive.sc",
+                    "match": "(?<=:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b(?!\\s*[:(\\n])"
                 },
                 {
                     "name": "entity.name.type.annotated.sc",
-                    "match": "(?<=:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(])"
+                    "match": "(?<=:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(\\n])"
                 }
             ]
         },
         "strings": {
             "name": "string.quoted.double.sc",
             "begin": "\"",
+                {
+                    "name": "keyword.operator.sc",
+                    "match": "::"
+                },
             "end": "\"",
             "patterns": [
                 { "name": "constant.character.escape.sc", "match": "\\\\." }
@@ -89,6 +97,10 @@
         },
         "chars": {
             "name": "string.quoted.single.sc",
+                },
+                {
+                    "name": "constant.language.sc",
+                    "match": "\\b(true|false|nil)\\b"
             "begin": "'",
             "end": "'",
             "patterns": [

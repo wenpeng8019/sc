@@ -26,6 +26,10 @@
 
 namespace {
 
+static bool isScModuleName(const std::string& s) {
+    return s.size() >= 3 && s.substr(s.size() - 3) == ".sc";
+}
+
 // 二元运算符优先级表 —— 数字越大优先级越高
 // 返回 -1 表示不是已知的二元运算符
 int binPrec(const std::string& op) {
@@ -57,6 +61,9 @@ struct Parser {
     int exprBracket = 0;
 
     explicit Parser(const std::vector<Token>& toks) : t(toks) {}
+    static std::string mangleMethodName(const std::string& owner, const std::string& name) {
+        return owner + "_" + name;
+    }
 
     // ---- Token 流访问原语 ----
     const Token& cur() const { return t[p]; }
@@ -70,26 +77,17 @@ struct Parser {
     bool accept(Tok k) { if (at(k)) { advance(); return true; } return false; }
     bool acceptOp(const char* s) { if (atOp(s)) { advance(); return true; } return false; }
 
-    [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
-
-    // expect: 必须是目标 token，否则抛出编译错误
     void expect(Tok k, const char* what) {
         if (!accept(k)) err(std::string("期望 ") + what + "，得到 '" + cur().text + "'");
     }
 
     void skipNewlines() { while (accept(Tok::Newline)) {} }
-    // 括号/字段列表内：忽略所有布局 token
+
     void skipLayout() {
         while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance();
     }
 
-    // ---------------- 表达式解析 ----------------
-    // 表达式解析采用 Pratt 解析风格：
-    //   每个运算符有优先级（precedence），高优先级先结合。
-    //   二元运算左结合，赋值右结合，三元条件右结合。
-    //
-    // 调用链：parseExpr → parseTernary → parseBinary → parseUnary → parsePostfix → parsePrimary
-    //   即：先从最低优先级的赋值开始，逐层下降到最高优先级的原子表达式。
+    [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
 
     // 快捷创建表达式节点
     ExprPtr mk(Expr::Kind k) {
@@ -318,7 +316,30 @@ struct Parser {
         f.name = advance().text;
         parseMeta(f.type);  // 先解析名字后的 & 和 [] 元类型
         // 冒号后的显式类型（可选：省略时由代码生成推断默认类型）
-        if (accept(Tok::Colon)) {
+        if (accept(Tok::DColon) || accept(Tok::Colon)) {
+            const bool methodPtr = t[p - 1].kind == Tok::DColon;
+            // 函数指针字段：name: fnc: ret, ...
+            // 成员函数指针：name:: fnc: ret, ...
+            if (at(Tok::KwFnc)) {
+                advance();  // 跳过 fnc
+                expect(Tok::Colon, "':'");
+                TypeRef ty;
+                ty.fnKind = methodPtr ? TypeRef::FncKind::MethodPtr
+                                      : TypeRef::FncKind::PlainPtr;
+                bool haveRet = false;
+                for (;;) {
+                    if (looksLikeParam()) {
+                        ty.fnParams.push_back(parseFieldItem());  // 参数
+                    } else {
+                        if (haveRet) err("重复的返回类型");
+                        ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
+                        haveRet = true;
+                    }
+                    if (!accept(Tok::Comma)) break;
+                }
+                f.type = std::move(ty);
+                return f;
+            }
             if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
                 TypeRef ty = parseTypeRef();
                 // 合并元类型信息：名字后的 & 和 [] 与冒号后的类型信息合并
@@ -340,7 +361,24 @@ struct Parser {
         parseMeta(f.type);
         if (accept(Tok::Colon)) {
             // 显式类型声明
-            if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
+            if (at(Tok::KwFnc)) {
+                advance();
+                expect(Tok::Colon, "':'");
+                TypeRef ty;
+                ty.fnKind = TypeRef::FncKind::PlainPtr;
+                bool haveRet = false;
+                for (;;) {
+                    if (looksLikeParam()) {
+                        ty.fnParams.push_back(parseFieldItem());
+                    } else {
+                        if (haveRet) err("重复的返回类型");
+                        ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
+                        haveRet = true;
+                    }
+                    if (!accept(Tok::Comma)) break;
+                }
+                f.type = std::move(ty);
+            } else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
                 TypeRef ty = parseTypeRef();
                 ty.ptr += f.type.ptr;
                 ty.arrayDims.insert(ty.arrayDims.end(),
@@ -449,6 +487,7 @@ struct Parser {
         size_t q = p + 1;
         while (q < t.size()) {
             const Token& tk = t[q];
+            if (tk.kind == Tok::DColon) return false;
             if (tk.kind == Tok::Op && (tk.text == "&" || tk.text == "&&")) { q++; continue; }
             if (tk.kind == Tok::LBracket) {  // 跳过 [size]
                 q++;
@@ -479,6 +518,14 @@ struct Parser {
         advance(); // 跳过 fnc 关键字
         if (!at(Tok::Ident)) err("期望函数名");
         d->name = advance().text;
+
+        // 方法定义糖：fnc obj::add: ret, params...
+        if (accept(Tok::DColon)) {
+            d->methodOwner = d->name;
+            if (!at(Tok::Ident)) err("期望方法名");
+            d->methodName = advance().text;
+            d->name = mangleMethodName(d->methodOwner, d->methodName);
+        }
 
         // 形态3：fnc name -> func_type —— 实现预定义函数类型
         if (accept(Tok::Arrow)) {
@@ -591,6 +638,63 @@ struct Parser {
         accept(Tok::Dedent);
     }
 
+    // case 分支：
+    // case expr:
+    //     1, 2:
+    //         ...
+    //     :
+    //         ...
+    StmtPtr parseCaseStmt() {
+        auto s = mkStmt(Stmt::CaseS);
+        advance();  // 跳过 case
+        s->expr = parseExpr();
+        expect(Tok::Colon, "':'");
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "缩进块");
+
+        bool haveDefault = false;
+        for (;;) {
+            skipNewlines();
+            if (at(Tok::Dedent) || at(Tok::End)) break;
+
+            Stmt::CaseArm arm;
+            arm.line = cur().line;
+
+            // 分支标签：v1, v2: 或 :（default）
+            if (accept(Tok::Colon)) {
+                if (haveDefault) err("case 中 default 分支重复");
+                haveDefault = true;
+            } else {
+                arm.labels.push_back(parseExpr());
+                while (accept(Tok::Comma)) arm.labels.push_back(parseExpr());
+                expect(Tok::Colon, "':'");
+            }
+
+            expect(Tok::Newline, "换行");
+            expect(Tok::Indent, "case 分支体");
+
+            for (;;) {
+                skipNewlines();
+                if (at(Tok::Dedent) || at(Tok::End)) break;
+                if (at(Tok::KwThrough)) {
+                    advance();
+                    expect(Tok::Newline, "换行");
+                    arm.through = true;
+                    skipNewlines();
+                    if (!at(Tok::Dedent)) err("through 必须位于 case 分支末尾");
+                    break;
+                }
+                arm.body.push_back(parseStmt());
+            }
+            accept(Tok::Dedent);
+            s->caseArms.push_back(std::move(arm));
+        }
+
+        if (s->caseArms.empty()) err("case 语句至少需要一个分支");
+        accept(Tok::Dedent);
+        return s;
+    }
+
     // 单条语句解析 —— 按首 token 分派
     StmtPtr parseStmt() {
         switch (cur().kind) {
@@ -663,6 +767,10 @@ struct Parser {
                 parseBlock(s->body);
                 return s;
             }
+            case Tok::KwCase:
+                return parseCaseStmt();
+            case Tok::KwThrough:
+                err("through 只能出现在 case 分支末尾");
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);
@@ -694,13 +802,18 @@ struct Parser {
             switch (cur().kind) {
                 case Tok::KwInc: {
                     // inc 头文件引入：lexer 已将头文件名捕获为 Str token
-                    if (exported) err("inc 不支持 @ 导出前缀");
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
                     d->kind = Decl::IncD;
                     advance();  // 跳过 inc 关键字
                     if (!at(Tok::Str)) err("inc 后期望头文件名");
                     d->name = advance().text;
+                    d->external = isScModuleName(d->name);
+                    d->origin = d->name;
+                    if (d->external) {
+                        // 这里先把 sc 模块导入当作外部符号记录，后端会进一步展开
+                        prog.externSymbols.push_back(d->name);
+                    }
                     expect(Tok::Newline, "换行");
                     prog.decls.push_back(std::move(d));
                     break;

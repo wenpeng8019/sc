@@ -1,5 +1,6 @@
 # sc 示例：覆盖主要语法特性
 
+
 # 枚举
 def color: i1
 	Red = 0
@@ -25,7 +26,7 @@ def value: (
 def byte -> u1
 
 # 函数类型定义 + 实现
-fnc binop_t: i4, a: i4, b: i4
+fnc binop_t: i4, a:i4, b: i4
 
 fnc add -> binop_t
 	return a + b
@@ -42,7 +43,7 @@ fnc area:
 	return w * h
 
 # 单行函数定义
-fnc clamp: i4, v: i4, lo: i4, hi: i4
+fnc clamp: i4, v:i4, lo:i4, hi:i4
 	if v < lo
 		return lo
 	if v > hi

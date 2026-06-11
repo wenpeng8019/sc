@@ -63,6 +63,26 @@ struct SGen {
                     << (s.forStep ? exprToStr(*s.forStep) : "") << "\n";
                 depth++; emitStmts(s.body); depth--;
                 break;
+            case Stmt::CaseS:
+                ind(); out << "case " << exprToStr(*s.expr) << ":\n";
+                depth++;
+                for (auto& arm : s.caseArms) {
+                    ind();
+                    if (arm.labels.empty()) out << ":\n";
+                    else {
+                        for (size_t i = 0; i < arm.labels.size(); i++) {
+                            if (i) out << ", ";
+                            out << exprToStr(*arm.labels[i]);
+                        }
+                        out << ":\n";
+                    }
+                    depth++;
+                    emitStmts(arm.body);
+                    if (arm.through) { ind(); out << "through\n"; }
+                    depth--;
+                }
+                depth--;
+                break;
             case Stmt::DeclS:
                 emitDecl(*s.decl);
                 break;
@@ -118,7 +138,10 @@ struct SGen {
                 break;
             case Decl::FuncD:
                 ind();
-                if (!d.funcTypeName.empty())
+                if (!d.methodOwner.empty())
+                    out << X << "fnc " << d.methodOwner << "::" << d.methodName
+                        << ":" << fncItems(d) << "\n";
+                else if (!d.funcTypeName.empty())
                     out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
                     out << X << "fnc " << d.name << ":" << fncItems(d) << "\n";

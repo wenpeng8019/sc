@@ -27,7 +27,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include <sstream>
+#include <unordered_set>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -122,6 +124,109 @@ static int compileAndRun(const std::string& csrc,
     return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
 }
 
+static std::string stripDelims(const std::string& s) {
+    if (s.size() >= 2) {
+        if ((s.front() == '"' && s.back() == '"') || (s.front() == '<' && s.back() == '>'))
+            return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+static bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start) {
+    for (auto p = start; !p.empty(); p = p.parent_path()) {
+        auto cand = p / "builtins";
+        if (std::filesystem::exists(cand) && std::filesystem::is_directory(cand)) return cand;
+    }
+    return {};
+}
+
+static std::filesystem::path resolveModulePath(const std::string& raw,
+                                               const std::filesystem::path& baseDir) {
+    const std::string target = stripDelims(raw);
+    const std::filesystem::path rel(target);
+    const auto builtins = !baseDir.empty() ? findBuiltinsDir(baseDir) : std::filesystem::path{};
+    const auto cwdBuiltins = findBuiltinsDir(std::filesystem::current_path());
+    std::vector<std::filesystem::path> candidates = {
+        rel,
+        baseDir / rel,
+    };
+    if (!endsWith(target, ".sc")) {
+        candidates.push_back(rel.string() + ".sc");
+        candidates.push_back(baseDir / (rel.string() + ".sc"));
+    }
+    if (!builtins.empty()) {
+        candidates.push_back(builtins / rel);
+        if (!endsWith(target, ".sc")) candidates.push_back(builtins / (rel.string() + ".sc"));
+    }
+    if (!cwdBuiltins.empty() && cwdBuiltins != builtins) {
+        candidates.push_back(cwdBuiltins / rel);
+        if (!endsWith(target, ".sc")) candidates.push_back(cwdBuiltins / (rel.string() + ".sc"));
+    }
+    for (auto& c : candidates)
+        if (!c.empty() && std::filesystem::exists(c) && std::filesystem::is_regular_file(c))
+            return std::filesystem::weakly_canonical(c);
+    return {};
+}
+
+static std::string readWholeFile(const std::filesystem::path& p) {
+    std::ifstream fin(p);
+    if (!fin) return {};
+    std::ostringstream ss;
+    ss << fin.rdbuf();
+    return ss.str();
+}
+
+static Program parseSourceText(const std::string& src) {
+    return parse(lex(src));
+}
+
+static void expandImports(Program& prog, const std::filesystem::path& srcPath,
+                          std::unordered_set<std::string>& visited) {
+    std::vector<DeclPtr> merged;
+    const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path() : std::filesystem::current_path();
+    for (auto& d : prog.decls) {
+        if (d->kind != Decl::IncD) {
+            merged.push_back(std::move(d));
+            continue;
+        }
+
+        auto modPath = resolveModulePath(d->name, baseDir);
+        if (modPath.empty() || !endsWith(modPath.string(), ".sc")) {
+            d->external = false;
+            merged.push_back(std::move(d));
+            continue;
+        }
+
+        d->external = true;
+        d->origin = modPath.string();
+        merged.push_back(std::move(d));
+
+        const std::string key = modPath.string();
+        if (!visited.insert(key).second) continue;
+
+        auto imported = parseSourceText(readWholeFile(modPath));
+        expandImports(imported, modPath, visited);
+        prog.externSymbols.push_back(key);
+        for (auto& sym : imported.externSymbols) prog.externSymbols.push_back(sym);
+        for (auto& child : imported.decls) {
+            if (child->kind == Decl::IncD && !endsWith(child->name, ".sc")) {
+                child->external = false;
+                if (child->origin.empty()) child->origin = key;
+            } else {
+                child->external = true;
+                if (child->origin.empty()) child->origin = key;
+                if (!child->name.empty()) prog.externSymbols.push_back(child->name);
+            }
+            merged.push_back(std::move(child));
+        }
+    }
+    prog.decls = std::move(merged);
+}
+
 int main(int argc, char** argv) {
     // ---- 1. 解析命令行参数 ----
     std::string input, output, mode = "run";  // 默认：编译+执行
@@ -161,6 +266,12 @@ int main(int argc, char** argv) {
         auto toks = lex(ss.str());
         // 3b. 语法分析：token 流 → AST 程序树
         auto prog = parse(toks);
+        // 3b.1 解析 sc 模块导入：把外部模块展开到当前单元 AST 中，并记录外部符号
+        if (input != "-") {
+            std::unordered_set<std::string> visited;
+            visited.insert(std::filesystem::weakly_canonical(std::filesystem::path(input)).string());
+            expandImports(prog, std::filesystem::path(input), visited);
+        }
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         auto c = mode == "ast" ? emitAstJson(prog)   // AST→JSON
                : mode == "sc"  ? emitSc(prog)         // AST→规范化sc

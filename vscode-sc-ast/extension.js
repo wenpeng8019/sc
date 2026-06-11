@@ -88,7 +88,9 @@ class AstProvider {
         item.description = n.d || (n.n ? n.k : '');
         item.tooltip = `${n.k}${n.n ? ' ' + n.n : ''}${n.d ? ' ' + n.d : ''}` +
                        (n.l ? `  (第 ${n.l} 行)` : '');
-        item.iconPath = new vscode.ThemeIcon(ICONS[n.k] || 'circle-outline');
+        const color = n.x ? new vscode.ThemeColor('charts.orange') : undefined;
+        item.iconPath = new vscode.ThemeIcon(ICONS[n.k] || 'circle-outline', color);
+        if (n.x && n.o) item.description = `${item.description}  [${path.basename(n.o)}]`;
         if (n.l) {
             item.command = {
                 command: 'scAst.reveal', title: '跳转到源码', arguments: [n.l],

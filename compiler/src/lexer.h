@@ -41,6 +41,8 @@ enum class Tok {
     KwElse,     // else
     KwWhile,    // while
     KwFor,      // for
+    KwCase,     // case
+    KwThrough,  // through
     KwBreak,    // break
     KwContinue, // continue
 
@@ -54,6 +56,7 @@ enum class Tok {
     Comma,      // ,
     Semi,       // ;
     Colon,      // :
+    DColon,     // ::
     Arrow,      // ->    (特殊处理，区别于普通 Op)
 
     // ---- 运算符（由 lexOp() 最长匹配产生）----

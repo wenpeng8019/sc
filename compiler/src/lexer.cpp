@@ -30,7 +30,8 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"inc", Tok::KwInc},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},
     {"else", Tok::KwElse}, {"while", Tok::KwWhile},
-    {"for", Tok::KwFor},   {"break", Tok::KwBreak},
+    {"for", Tok::KwFor},   {"case", Tok::KwCase},
+    {"through", Tok::KwThrough}, {"break", Tok::KwBreak},
     {"continue", Tok::KwContinue},
 };
 
@@ -207,7 +208,10 @@ struct Lexer {
                 case ']': get(); push(Tok::RBracket, "]"); continue;
                 case ',': get(); push(Tok::Comma, ","); continue;
                 case ';': get(); push(Tok::Semi, ";"); continue;
-                case ':': get(); push(Tok::Colon, ":"); continue;
+                case ':':
+                    if (peek(1) == ':') { get(); get(); push(Tok::DColon, "::"); }
+                    else { get(); push(Tok::Colon, ":"); }
+                    continue;
             }
             // ---- 运算符（最长匹配）----
             if (lexOp()) continue;

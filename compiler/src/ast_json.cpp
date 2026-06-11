@@ -49,6 +49,18 @@ std::string node(const std::string& k, const std::string& n, const std::string& 
     return s + "}";
 }
 
+std::string nodeExt(const std::string& k, const std::string& n, const std::string& d,
+                    int line, bool external, const std::string& origin,
+                    const std::vector<std::string>& children = {}) {
+    std::string s = node(k, n, d, line, children);
+    if (!external && origin.empty()) return s;
+    if (!s.empty() && s.back() == '}') s.pop_back();
+    if (external) s += ",\"x\":1";
+    if (!origin.empty()) s += ",\"o\":\"" + jesc(origin) + "\"";
+    s += "}";
+    return s;
+}
+
 std::string declNode(const Decl& d);
 
 std::string stmtNode(const Stmt& s) {
@@ -89,6 +101,26 @@ std::string stmtNode(const Stmt& s) {
                             (s.forStep ? exprToStr(*s.forStep) : "");
             return node("for", "", d, s.line, c);
         }
+        case Stmt::CaseS: {
+            std::vector<std::string> c;
+            for (auto& arm : s.caseArms) {
+                std::vector<std::string> bc;
+                for (auto& b : arm.body) bc.push_back(stmtNode(*b));
+                if (arm.through) bc.push_back(node("through", "", "", arm.line));
+
+                std::string d;
+                if (arm.labels.empty()) d = ":";
+                else {
+                    for (size_t i = 0; i < arm.labels.size(); i++) {
+                        if (i) d += ", ";
+                        d += exprToStr(*arm.labels[i]);
+                    }
+                    d += ":";
+                }
+                c.push_back(node("arm", "", d, arm.line, bc));
+            }
+            return node("case", "", exprToStr(*s.expr), s.line, c);
+        }
         case Stmt::DeclS:
             return declNode(*s.decl);
     }
@@ -100,30 +132,33 @@ std::string declNode(const Decl& d) {
     const std::string X = d.exported ? "@ " : "";
     switch (d.kind) {
         case Decl::IncD:
-            return node("inc", d.name, "", d.line);
+            return nodeExt("inc", d.name, "", d.line, d.external, d.origin);
         case Decl::EnumD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("item", f.name,
                                  f.init ? "= " + exprToStr(*f.init) : "", f.line));
-            return node("enum", d.name, X + ": " + typeToStr(d.type), d.line, c);
+            return nodeExt("enum", d.name, X + ": " + typeToStr(d.type), d.line,
+                           d.external, d.origin, c);
         }
         case Decl::StructD:
         case Decl::UnionD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, false), f.line));
-            return node(d.kind == Decl::StructD ? "struct" : "union",
-                        d.name, X, d.line, c);
+            return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
+                           d.name, X, d.line, d.external, d.origin, c);
         }
         case Decl::AliasD:
-            return node("alias", d.name, X + "-> " + typeToStr(d.type), d.line);
+            return nodeExt("alias", d.name, X + "-> " + typeToStr(d.type), d.line,
+                           d.external, d.origin);
         case Decl::FuncTypeD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
             std::string ret = typeToStr(d.retType);
-            return node("fnctype", d.name, ret.empty() ? X : X + ": " + ret, d.line, c);
+            return nodeExt("fnctype", d.name, ret.empty() ? X : X + ": " + ret,
+                           d.line, d.external, d.origin, c);
         }
         case Decl::FuncD: {
             std::vector<std::string> c;
@@ -136,14 +171,18 @@ std::string declNode(const Decl& d) {
                 std::string ret = typeToStr(d.retType);
                 if (!ret.empty()) detail = ": " + ret;
             }
-            return node("fnc", d.name, X + detail, d.line, c);
+            const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
+            const std::string dtail = d.methodOwner.empty() ? (X + detail)
+                                                           : (X + d.methodOwner + "::" + detail);
+            return nodeExt("fnc", n, dtail, d.line, d.external, d.origin, c);
         }
         case Decl::VarD:
         case Decl::LetD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
-            return node(d.kind == Decl::VarD ? "var" : "let", "", X, d.line, c);
+            return nodeExt(d.kind == Decl::VarD ? "var" : "let", "", X, d.line,
+                           d.external, d.origin, c);
         }
     }
     return "{}";
@@ -154,5 +193,15 @@ std::string declNode(const Decl& d) {
 std::string emitAstJson(const Program& prog) {
     std::vector<std::string> c;
     for (auto& d : prog.decls) c.push_back(declNode(*d));
-    return node("program", "", "", 0, c) + "\n";
+    std::string s = node("program", "", "", 0, c);
+    if (!prog.externSymbols.empty()) {
+        if (!s.empty() && s.back() == '}') s.pop_back();
+        s += ",\"e\":[";
+        for (size_t i = 0; i < prog.externSymbols.size(); i++) {
+            if (i) s += ",";
+            s += "\"" + jesc(prog.externSymbols[i]) + "\"";
+        }
+        s += "]}";
+    }
+    return s + "\n";
 }

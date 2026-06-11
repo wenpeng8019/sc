@@ -21,9 +21,15 @@ std::string mapBase(const std::string& n) {
         {"i1", "int8_t"},  {"i2", "int16_t"}, {"i4", "int32_t"}, {"i8", "int64_t"},
         {"u1", "uint8_t"}, {"u2", "uint16_t"}, {"u4", "uint32_t"}, {"u8", "uint64_t"},
         {"f4", "float"},   {"f8", "double"},  {"v", "void"},
+        {"b", "uint8_t"},  // bool：u1 的引用别名（true/false 即 1/0）
     };
     auto it = m.find(n);
     return it == m.end() ? n : it->second;
+}
+
+bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 // CGen 内部类 —— 封装 C 代码生成的状态
@@ -32,6 +38,16 @@ struct CGen {
     std::ostringstream out;     // 输出流
     int depth = 0;              // 当前缩进深度（每级4空格）
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
+
+    // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
+    std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
+    std::unordered_map<std::string, std::string> aliases;  // 别名 → 目标类型名
+    // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
+    struct VType { std::string name; int ptr = 0; int arr = 0; };
+    std::unordered_map<std::string, VType> globalsT, localsT;
+    bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
+    std::string curAggr;        // 当前正在输出的 struct/union 名（方法字段展开用）
+    std::string curAggrKind;    // "struct" / "union"
 
     explicit CGen(const Program& p) : prog(p) {}
 
@@ -52,6 +68,25 @@ struct CGen {
 
     // 声明一个字段/变量：T [*...]name[size]
     void emitDeclarator(const Field& f, bool asConst = false) {
+        if (f.type.fnKind != TypeRef::FncKind::None) {
+            if (f.type.fnRet) {
+                std::string base; int ptr;
+                resolveType(*f.type.fnRet, base, ptr);
+                out << base << " ";
+                for (int i = 0; i < ptr; i++) out << "*";
+            } else out << "int32_t ";  // 默认返回类型
+            out << "(*" << f.name << ")(";
+            if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
+                out << curAggrKind << " " << curAggr << " *_this";
+                if (!f.type.fnParams.empty()) out << ", ";
+            }
+            for (size_t i = 0; i < f.type.fnParams.size(); i++) {
+                if (i) out << ", ";
+                emitDeclarator(f.type.fnParams[i]);
+            }
+            out << ")";
+            return;
+        }
         if (f.type.hasInline) { // 内联/匿名结构联合
             out << (f.type.inlineUnion ? "union" : "struct") << " {\n";
             depth++;
@@ -72,8 +107,84 @@ struct CGen {
         if (asConst) out << "const ";
         out << base << " ";
         for (int i = 0; i < ptr; i++) out << "*";
-        out << f.name;
+        out << (f.name == "this" ? "_this" : f.name);  // 参数名 this → _this
         for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
+    }
+
+    bool shouldStaticize(const Decl& d) const {
+        return !d.exported && !d.external;
+    }
+
+    // ---------------- 伪 class：类型查询与方法识别 ----------------
+    // 类型名 → struct/union 节点（穿透别名，最多 8 层防环）
+    const Decl* aggrOf(std::string name) const {
+        for (int i = 0; i < 8 && !name.empty(); i++) {
+            auto it = aggrs.find(name);
+            if (it != aggrs.end()) return it->second;
+            auto al = aliases.find(name);
+            if (al == aliases.end()) return nullptr;
+            name = al->second;
+        }
+        return nullptr;
+    }
+
+    static bool hasMethods(const Decl* d) {
+        for (auto& f : d->fields) if (f.type.fnKind == TypeRef::FncKind::MethodPtr) return true;
+        return false;
+    }
+
+    // 表达式的轻量类型推断（仅覆盖方法调用需要的场景）
+    bool exprVType(const Expr& e, VType& vt) const {
+        switch (e.kind) {
+            case Expr::Ident: {
+                auto it = localsT.find(e.text);
+                if (it != localsT.end()) { vt = it->second; return true; }
+                it = globalsT.find(e.text);
+                if (it != globalsT.end()) { vt = it->second; return true; }
+                return false;
+            }
+            case Expr::Member: {
+                VType base;
+                if (!exprVType(*e.a, base)) return false;
+                const Decl* sd = aggrOf(base.name);
+                if (!sd) return false;
+                for (auto& f : sd->fields)
+                    if (f.name == e.text) {
+                        vt = {f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
+                        return true;
+                    }
+                return false;
+            }
+            case Expr::Index:
+                if (!exprVType(*e.a, vt)) return false;
+                if (vt.arr) vt.arr--; else if (vt.ptr) vt.ptr--;
+                return true;
+            case Expr::Unary:
+                if (e.op == "*") {
+                    if (!exprVType(*e.a, vt)) return false;
+                    if (vt.ptr) vt.ptr--;
+                    return true;
+                }
+                if (e.op == "&") {
+                    if (!exprVType(*e.a, vt)) return false;
+                    vt.ptr++;
+                    return true;
+                }
+                return false;
+            default: return false;
+        }
+    }
+
+    // 若 m 是成员访问且该成员是方法字段，返回字段指针（否则 nullptr）
+    const Field* callableField(const Expr& m) const {
+        if (m.kind != Expr::Member) return nullptr;
+        VType base;
+        if (!exprVType(*m.a, base)) return nullptr;
+        const Decl* sd = aggrOf(base.name);
+        if (!sd) return nullptr;
+        for (auto& f : sd->fields)
+            if (f.name == m.text && f.type.fnKind != TypeRef::FncKind::None) return &f;
+        return nullptr;
     }
 
     // ---------------- 表达式 ----------------
@@ -81,8 +192,12 @@ struct CGen {
         switch (e.kind) {
             case Expr::IntLit: case Expr::FloatLit:
             case Expr::StrLit: case Expr::CharLit:
-            case Expr::Ident:
                 out << e.text;
+                break;
+            case Expr::Ident:
+                if (e.text == "this") out << "_this";      // 方法内接收者
+                else if (e.text == "nil") out << "NULL";   // 空指针常量
+                else out << e.text;                        // true/false 由 stdbool.h 提供
                 break;
             case Expr::Unary:
                 out << e.op;
@@ -110,15 +225,25 @@ struct CGen {
                 emitExpr(*e.c);
                 if (!top) out << ")";
                 break;
-            case Expr::Call:
+            case Expr::Call: {
+                // 方法调用：仅成员函数指针才自动注入接收者
+                const Field* mf = callableField(*e.a);
                 emitExpr(*e.a);
                 out << "(";
+                bool first = true;
+                if (mf && mf->type.fnKind == TypeRef::FncKind::MethodPtr) {
+                    if (e.a->op == ".") out << "&";
+                    emitExpr(*e.a->a);
+                    first = false;
+                }
                 for (size_t i = 0; i < e.args.size(); i++) {
-                    if (i) out << ", ";
+                    if (!first) out << ", ";
+                    first = false;
                     emitExpr(*e.args[i], true);
                 }
                 out << ")";
                 break;
+            }
             case Expr::Index:
                 emitExpr(*e.a);
                 out << "[";
@@ -133,16 +258,28 @@ struct CGen {
     }
 
     // ---------------- 语句 ----------------
-    void emitVarDecls(const std::vector<Field>& decls, bool asConst) {
+    void emitVarDecls(const std::vector<Field>& decls, bool asConst, bool isStatic = false) {
         for (auto& f : decls) {
+            regVar(f);
             indent();
+            if (isStatic) out << "static ";
             emitDeclarator(f, asConst);
             if (f.init) {
                 out << " = ";
                 emitExpr(*f.init, true);
+            } else if (f.type.ptr == 0 && f.type.arrayDims.empty() && !f.type.hasInline) {
+                // 含方法字段的结构变量默认零初始化（方法指针默认 nil）
+                const Decl* sd = aggrOf(f.type.name);
+                if (sd && hasMethods(sd)) out << " = {0}";
             }
             out << ";\n";
         }
+    }
+
+    // 记录变量的轻量类型（函数内→局部表，否则→全局表）
+    void regVar(const Field& f) {
+        VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
+        (inFunc ? localsT : globalsT)[f.name] = vt;
     }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
@@ -205,6 +342,35 @@ struct CGen {
                 depth++; emitStmts(s.body); depth--;
                 indent(); out << "}\n";
                 break;
+            case Stmt::CaseS:
+                indent();
+                out << "switch (";
+                emitExpr(*s.expr, true);
+                out << ") {\n";
+                depth++;
+                for (auto& arm : s.caseArms) {
+                    if (arm.labels.empty()) {
+                        indent(); out << "default:\n";
+                    } else {
+                        for (auto& lab : arm.labels) {
+                            indent();
+                            out << "case ";
+                            emitExpr(*lab, true);
+                            out << ":\n";
+                        }
+                    }
+                    indent(); out << "{\n";
+                    depth++;
+                    emitStmts(arm.body);
+                    if (!arm.through) {
+                        indent(); out << "break;\n";
+                    }
+                    depth--;
+                    indent(); out << "}\n";
+                }
+                depth--;
+                indent(); out << "}\n";
+                break;
             case Stmt::DeclS:
                 emitTypeDecl(*s.decl);
                 break;
@@ -262,6 +428,8 @@ struct CGen {
                 break;
             case Decl::StructD:
             case Decl::UnionD:
+                curAggr = d.name;  // 方法字段展开需要所属类型名
+                curAggrKind = d.kind == Decl::UnionD ? "union" : "struct";
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
                     << " " << d.name << " {\n";
@@ -323,16 +491,31 @@ struct CGen {
         }
         emitRetType(*sig);
         out << " " << d.name << "(";
+        if (!d.methodOwner.empty()) {
+            out << d.methodOwner << " *_this";
+            if (!sig->fields.empty()) out << ", ";
+        }
         emitParams(sig->fields);
         out << ")";
     }
 
     void emitFunc(const Decl& d) {
+        if (d.name != "main" && shouldStaticize(d)) out << "static ";
         emitFuncSig(d);
         out << " {\n";
+        // 函数作用域：注册参数类型（含预定义函数类型展开的签名）
+        localsT.clear();
+        inFunc = true;
+        const Decl* sig = &d;
+        if (!d.funcTypeName.empty()) {
+            auto it = funcTypes.find(d.funcTypeName);
+            if (it != funcTypes.end()) sig = it->second;
+        }
+        for (auto& p : sig->fields) regVar(p);
         depth++;
         emitStmts(d.body);
         depth--;
+        inFunc = false;
         out << "}\n\n";
     }
 
@@ -342,6 +525,7 @@ struct CGen {
     //   inc <stdio.h>  → #include <stdio.h>（原样）
     void emitInclude(const Decl& d) {
         const std::string& h = d.name;
+        if (endsWith(h, ".sc")) return;
         if (!h.empty() && (h[0] == '"' || h[0] == '<')) out << "#include " << h << "\n";
         else out << "#include <" << h << ">\n";
     }
@@ -364,9 +548,13 @@ struct CGen {
             if (d->kind == Decl::IncD) emitInclude(*d);
         out << "\n";
 
-        // 收集函数类型
-        for (auto& d : prog.decls)
+        // 收集函数类型与聚合类型（struct/union/别名）注册表
+        for (auto& d : prog.decls) {
             if (d->kind == Decl::FuncTypeD) funcTypes[d->name] = d.get();
+            else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
+                aggrs[d->name] = d.get();
+            else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
+        }
 
         // 第一遍：类型、全局变量、函数原型
         for (auto& d : prog.decls) {
@@ -376,10 +564,15 @@ struct CGen {
                 case Decl::FuncTypeD:
                     emitTypeDecl(*d);
                     break;
-                case Decl::VarD: emitVarDecls(d->fields, false); break;
-                case Decl::LetD: emitVarDecls(d->fields, true); break;
+                case Decl::VarD:
+                    emitVarDecls(d->fields, false, shouldStaticize(*d));
+                    break;
+                case Decl::LetD:
+                    emitVarDecls(d->fields, true, shouldStaticize(*d));
+                    break;
                 case Decl::FuncD:
                     if (d->name != "main") {
+                        if (shouldStaticize(*d)) out << "static ";
                         emitFuncSig(*d);
                         out << ";\n";
                     }
