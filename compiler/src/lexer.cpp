@@ -10,7 +10,7 @@
 //   6. 括号内缩进抑制（parenDepth > 0 时不产生 Indent/Dedent）
 //
 // 缩进算法：
-//   用 indents 栈记录每级缩进级别（Tab数 或 4空格组数）。
+//   用 indents 栈记录每级缩进级别（每 4 空格 = 1 级，禁止 Tab）。
 //   每遇到非空非注释行：
 //     - 缩进 > 栈顶 → 推入新级别，产生 Indent
 //     - 缩进 < 栈顶 → 连续弹出并产生 Dedent
@@ -56,17 +56,15 @@ struct Lexer {
     void handleIndent() {
         for (;;) {
             size_t start = i;
-            int level = 0;
-            // 统计行首空白：Tab 计1级，连续4空格折算1级
+            int spaces = 0;
+            // 严格缩进规则：仅允许空格，且必须为4的倍数
             while (peek() == '\t' || peek() == ' ') {
-                if (get() == '\t') level++;
-                else {
-                    int sp = 1;
-                    while (peek() == ' ') { get(); sp++; }
-                    level += sp / 4;  // 整数除法：3空格=0级，4空格=1级，7空格=1级
-                    break;
-                }
+                char c = get();
+                if (c == '\t') err("缩进不允许使用 Tab，请使用 4 个空格");
+                spaces++;
             }
+            if (spaces % 4 != 0) err("缩进必须为 4 的倍数空格");
+            int level = spaces / 4;
             // 跳过注释行和空行（它们不改变缩进级别）
             if (peek() == '#') { while (peek() && peek() != '\n') get(); }
             if (peek() == '\n') { get(); line++; continue; }

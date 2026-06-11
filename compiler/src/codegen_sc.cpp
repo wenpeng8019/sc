@@ -15,7 +15,7 @@ struct SGen {
     std::ostringstream out;
     int depth = 0;
 
-    void ind() { for (int i = 0; i < depth; i++) out << "\t"; }
+    void ind() { for (int i = 0; i < depth; i++) out << "    "; }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
         for (auto& s : stmts) emitStmt(*s);
