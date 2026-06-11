@@ -13,6 +13,7 @@
 #include <cctype>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 
@@ -613,6 +614,22 @@ struct CGen {
         else out << "#include <" << h << ">\n";
     }
 
+    // 为所有结构/联合生成前置 typedef 声明：
+    //   typedef struct X X;
+    //   typedef union U U;
+    // 目的：让结构/函数定义顺序与源码解耦，先使用再定义也可通过 C 编译。
+    void emitForwardAggrDecls(bool exportedOnly = false) {
+        std::unordered_set<std::string> emitted;
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::StructD && d->kind != Decl::UnionD) continue;
+            if (exportedOnly && !d->exported) continue;
+            if (!emitted.insert(d->name).second) continue;
+            out << "typedef " << (d->kind == Decl::UnionD ? "union" : "struct")
+                << " " << d->name << " " << d->name << ";\n";
+        }
+        if (!emitted.empty()) out << "\n";
+    }
+
     // ---------------- 主流程：两遍扫描输出 ----------------
     // 第一遍：类型定义 + 全局变量 + 函数原型声明（forward declaration）
     // 第二遍：函数体实现
@@ -631,6 +648,9 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::IncD) emitInclude(*d);
         out << "\n";
+
+        // 最简策略：默认为所有结构/联合输出前置声明，消除定义顺序依赖
+        emitForwardAggrDecls();
 
         // 收集函数类型与聚合类型（struct/union/别名）注册表
         for (auto& d : prog.decls) {
@@ -684,6 +704,9 @@ struct CGen {
             << "#include <stdint.h>\n"
             << "#include <stddef.h>\n"
             << "#include <stdbool.h>\n\n";
+
+        // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
+        emitForwardAggrDecls(true);
 
         // 函数类型表（导出函数可能引用未导出的函数类型签名）
         for (auto& d : prog.decls)
