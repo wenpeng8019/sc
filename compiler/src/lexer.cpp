@@ -35,6 +35,8 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"through", Tok::KwThrough}, {"break", Tok::KwBreak},
     {"goto", Tok::KwGoto},
     {"continue", Tok::KwContinue},
+    {"sizeof", Tok::KwSizeof},
+    {"offsetof", Tok::KwOffsetof},
 };
 
 // Lexer 内部类 —— 封装所有词法分析状态

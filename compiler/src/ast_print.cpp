@@ -41,6 +41,10 @@ std::string rec(const Expr& e, bool top) {
             return rec(*e.a, false) + "[" + rec(*e.b, true) + "]";
         case Expr::Member:
             return rec(*e.a, false) + e.op + e.text;
+        case Expr::Sizeof:
+            return "sizeof(" + rec(*e.a, true) + ")";
+        case Expr::Offsetof:
+            return "offsetof(" + e.text + ", " + e.op + ")";
     }
     return "";
 }

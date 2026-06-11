@@ -126,6 +126,30 @@ struct Parser {
             exprBracket--;
             return e;
         }
+        // sizeof(expr | type)
+        if (at(Tok::KwSizeof)) {
+            auto e = mk(Expr::Sizeof);
+            advance();
+            expect(Tok::LParen, "'('");
+            exprBracket++;
+            e->a = parseExpr();
+            exprBracket--;
+            expect(Tok::RParen, "')'");
+            return e;
+        }
+        // offsetof(Type, field)
+        if (at(Tok::KwOffsetof)) {
+            auto e = mk(Expr::Offsetof);
+            advance();
+            expect(Tok::LParen, "'('");
+            if (!at(Tok::Ident)) err("offsetof 第一参数期望类型名");
+            e->text = advance().text;
+            expect(Tok::Comma, "','");
+            if (!at(Tok::Ident)) err("offsetof 第二参数期望字段名");
+            e->op = advance().text;
+            expect(Tok::RParen, "')'");
+            return e;
+        }
         err("期望表达式，得到 '" + cur().text + "'");
     }
 

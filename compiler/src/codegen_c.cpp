@@ -272,6 +272,22 @@ struct CGen {
                 emitExpr(*e.a);
                 out << e.op << e.text;
                 break;
+            case Expr::Sizeof: {
+                out << "sizeof(";
+                // 若内层是单纯标识符且是 sc 内置类型名，做类型映射再输出
+                if (e.a && e.a->kind == Expr::Ident) {
+                    const std::string mapped = mapBase(e.a->text);
+                    if (mapped != e.a->text) { out << mapped; }
+                    else emitExpr(*e.a, true);
+                } else {
+                    emitExpr(*e.a, true);
+                }
+                out << ")";
+                break;
+            }
+            case Expr::Offsetof:
+                out << "offsetof(" << e.text << ", " << e.op << ")";
+                break;
         }
     }
 

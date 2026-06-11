@@ -261,6 +261,32 @@ o.m(1, 2)    # 方法字段调用，自动注入 this
 o->m(1, 2)   # 指针接收者调用，自动注入指针
 ```
 
+### 8.6 可变参数函数
+
+在参数列表末尾加 `...` 声明可变参数函数：
+
+```sc
+fnc my_printf: v, fmt&: u1, ...
+    var ap: va_list
+    va_start(ap, fmt)
+    vprintf(fmt, ap)
+    va_end(ap)
+
+# 可变参数函数类型
+fnc printer_t: v, fmt&: u1, ...
+
+# 可变参数函数指针字段
+def handler: {
+    log: fnc: v, fmt&: u1, ...
+}
+```
+
+约束：
+
+- `...` 只能出现在参数列表末尾，且前面至少有一个具名参数。
+- `va_list`、`va_start`、`va_arg`、`va_end` 直接透传 C，按 C 惯用法使用。
+- `stdarg.h` 已纳入默认包含头，无需 `inc stdarg.h`。
+
 ## 9. 变量与常量
 
 ```sc
@@ -295,6 +321,8 @@ var count: i4            # 显式类型，无初始化
 - 二元运算：算术、比较、逻辑、位运算、赋值和复合赋值
 - 三元条件：`cond ? a : b`
 - 括号分组：`(expr)`
+- `sizeof(expr)` 或 `sizeof(type)`：返回字节大小（映射到 C `sizeof`）
+- `offsetof(Type, field)`：返回字段偏移字节数（映射到 C `offsetof`）
 
 示例：
 
@@ -302,6 +330,8 @@ var count: i4            # 显式类型，无初始化
 a = b + c * d
 ptr->field = arr[i]
 ok = p == nil ? false : true
+var n: u8 = sizeof(point)
+var off: u8 = offsetof(point, y)
 ```
 
 ## 11. 语句与控制流
@@ -452,6 +482,7 @@ var a:i1
 - 可变参数函数（`...`）+ `va_list` 透传
 - `def Alias -> Type` 提供类型别名（等价 typedef）
 - `do ... while`、`goto`、标签语句
+- `sizeof(expr)`、`sizeof(type)`、`offsetof(Type, field)` 内置表达式
 - 基础语义检查：`nil` 赋值边界、解引用/下标越界、返回/赋值类型兼容、局部地址逃逸
 
 ## 14. 工程化计划
@@ -470,18 +501,13 @@ var a:i1
 - 动态分配、数组切片、字符串生命周期的语言级约定。
 - 更强的 `nil`、悬空指针、越界访问静态/运行时防护。
 
-### 14.3 语法补全
-
-- `sizeof`、`offsetof` 作为语言内置（当前可直接写 C 形式调用）。
-- 可变参数（`...`）已支持，约束：`...` 只能在参数末尾，且前面必须有至少一个具名参数；`va_list`/`va_start`/`va_arg`/`va_end` 直接透传 C；`stdarg.h` 已纳入默认头。
-
-### 14.4 类型系统
+### 14.3 类型系统
 
 - `const` / `volatile` / `restrict` 限定符。
 - 泛型或模板机制，支撑通用容器与算法库。
 - 类型检查深度：数据流、别名分析、生命周期边界。
 
-### 14.5 工程化与工具链
+### 14.4 工程化与工具链
 
 - 诊断信息完善：错误链、修复建议、跨文件定位。
 - 调试信息输出和语言服务器（LSP）。

@@ -107,6 +107,11 @@ struct Checker {
                 }
                 return Ty{};
             }
+            case Expr::Sizeof:
+                (void)inferExpr(*e.a, locals, line);
+                return Ty{"u8", 0, 0, true, false};
+            case Expr::Offsetof:
+                return Ty{"u8", 0, 0, true, false};
             case Expr::Call: {
                 Ty callee = inferExpr(*e.a, locals, line);
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);

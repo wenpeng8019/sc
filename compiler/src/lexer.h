@@ -47,6 +47,8 @@ enum class Tok {
     KwGoto,     // goto
     KwBreak,    // break
     KwContinue, // continue
+    KwSizeof,   // sizeof
+    KwOffsetof, // offsetof
 
     // ---- 特殊 ----
     Ellipsis,   // ...  可变参数占位

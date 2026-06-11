@@ -48,6 +48,8 @@ struct Expr {
         Index,      // 下标访问     eg. arr[0]     (a=数组, b=下标)
         Member,     // 成员访问     eg. obj.f  或 ptr->f
                     //              op="." 或 "->", text=成员名
+        Sizeof,     // sizeof(表达式或类型名)  a=内层表达式
+        Offsetof,   // offsetof(Type, field)  text=类型名, op=字段名
     } kind;
 
     std::string text;       // 字面量值 / 标识符名（Ident时）/ 成员名（Member时）
