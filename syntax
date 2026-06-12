@@ -684,7 +684,7 @@ var tab[2][3]: i4 = {
 }
 ```
 
-### 10.3 print 与 string_of（io 内置关键字）
+### 10.3 print 与 string(...) 格式化（io 内置关键字）
 
 `print` 是 C 风格日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）：
 
@@ -700,13 +700,18 @@ print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
 - 输出格式 `HH:MM:SS.mmm L| 文本`，自动换行，单次 fprintf 保证多线程不串行。
 - 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
 
-`string_of(expr)` 按实参的静态类型生成格式化代码，返回内置 `string`
-（需 `inc adt.sc`，调用方负责 `drop`）：
+`string(值)` 括号非空时为格式化关键字（区别于类型 `string` 与堆构造
+`string()`）：按实参的静态类型生成格式化代码，返回内置 `string`
+（需 `inc adt.sc`，调用方负责 `drop`）；三参形态 `string(值, 缓存, 大小)`
+在给定缓存内构建（截断保证 NUL 结尾），返回 `char&` 即缓存首址，无需 drop：
 
 ```sc
-var s: string = string_of(t)        # {id: 1, name: "AB", pos: {x: 3, y: 4}}
+var s: string = string(t)           # {id: 1, name: "AB", pos: {x: 3, y: 4}}
 print("t=%s", s.cstr())
 s.drop()
+
+var b[256]: char
+print("t=%s", string(t, b, 256))    # 缓存形态：返回 char&，无堆分配交接
 ```
 
 格式化规则：整数/浮点→数字（枚举按整数）；`bool`→true/false；`char`→'a'；
@@ -715,7 +720,7 @@ s.drop()
 一维数组→`[v, v, ...]`（char 一维数组按文本加引号）；`string`→"内容"。
 暂不支持多维数组。
 
-`print` / `string_of` 是上下文关键字：若作用域内存在同名函数/变量，
+`print` / `string(...)` 是上下文关键字：若作用域内存在同名函数/变量，
 按普通标识符解析。
 
 ## 11. 语句与控制流
@@ -951,7 +956,7 @@ var a:i1
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `chain` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
 - 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）；成员访问位提供 `prev`/`next` 上下文关键字
-- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`string_of` 按静态类型格式化为 `string`（标量/结构体/一维数组/枚举，需 `inc adt.sc`）
+- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`string(值[, 缓存, 大小])` 按静态类型格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`）
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
 

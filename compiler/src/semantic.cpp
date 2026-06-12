@@ -216,11 +216,12 @@ struct Checker {
                     && globals.find(e.a->text) == globals.end()
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
-                // string_of 关键字：结果类型为 string
-                if (e.a->kind == Expr::Ident && e.a->text == "string_of"
+                // string 格式化关键字：string(值)→string，string(值,缓存,大小)→char&
+                if (e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()) {
                     for (auto& a : e.args) (void)inferExpr(*a, locals, line);
+                    if (e.args.size() == 3) return Ty{"char", 1, 0, true, false};
                     return Ty{"string", 0, 0, true, false};
                 }
                 Ty callee = inferExpr(*e.a, locals, line);

@@ -325,15 +325,20 @@ print("E: 错误 code=%d", -1)        # 前缀 "X:" 设级别
 - 相比 stdc 完整日志系统，省略了 tag/UDP 上报/缓冲模式等机制，保留接口
   风格以便后续扩展。
 
-### string_of —— 类型格式化（关键字）
+### string(...) —— 类型格式化（关键字）
 
-`string_of(expr)` 不依赖 io 实现：编译器按实参的静态类型在生成的 C 中
-合成格式化函数，返回内置 `string`（需 `inc adt.sc`，调用方负责 `drop`）：
+`string` 括号非空时为格式化关键字（区别于类型 `string` 与堆构造
+`string()`），不依赖 io 实现：编译器按实参的静态类型在生成的 C 中
+合成格式化函数（需 `inc adt.sc`）。两种形态按实参个数静态派发：
 
 ```sc
-var s: string = string_of(t)       # {id: 1, name: "AB", pos: {x: 3, y: 4}}
+var s: string = string(t)          # 返回 string，调用方负责 drop
 print("t=%s", s.cstr())
 s.drop()
+
+var b[256]: char
+print("t=%s", string(t, b, 256))   # 在给定缓存内构建（截断保证 NUL 结尾），
+                                   # 返回 char&（即缓存首址），无需 drop
 ```
 
 格式化规则：

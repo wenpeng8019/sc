@@ -59,7 +59,7 @@ struct CGen {
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
     int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + sc_print 原型）
-    int  usesStrof = 0;         // string_of 关键字首次出现行号（需 adt string 可见）
+    int  usesStrof = 0;         // string(值) 格式化关键字首次出现行号（需 adt string 可见）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -73,9 +73,9 @@ struct CGen {
     std::unordered_map<std::string, VType> globalsT, localsT;
     // 函数指针变量的内联签名（var cb: fnc: ...）：缺参补全查询用
     std::unordered_map<std::string, const TypeRef*> fnVarsG, fnVarsL;
-    // 数组变量的维度表（string_of 顶层数组需要维度信息）
+    // 数组变量的维度表（string 格式化顶层数组需要维度信息）
     std::unordered_map<std::string, std::vector<std::string>> varDimsG, varDimsL;
-    // 枚举类型名集合（string_of 按整数格式化）
+    // 枚举类型名集合（string 格式化按整数）
     std::unordered_set<std::string> enums;
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
 
@@ -170,10 +170,10 @@ struct CGen {
     void scanExprForNew(const Expr& e) {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
-        // print / string_of 关键字使用标记（原型/辅助函数需先于函数体输出）
+        // print / string 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "print" && !usesPrint) usesPrint = e.line;
-            if (e.a->text == "string_of" && !usesStrof) usesStrof = e.line;
+            if (e.a->text == "string" && !e.args.empty() && !usesStrof) usesStrof = e.line;
         }
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
@@ -217,14 +217,17 @@ struct CGen {
         }
     }
 
-    // ---------------- string_of 关键字：按静态类型生成格式化器 ----------------
-    // string_of(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
+    // ---------------- string 格式化关键字：按静态类型生成格式化器 ----------------
+    // string(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
+    // string(expr, 缓存, 大小) → sc_strofb__KEY(expr, 缓存, 大小)，在给定缓存内
+    // 构建（截断保证 NUL 结尾），返回 char*（即缓存首址，无需 drop）。
     // 包装函数/聚合格式化器在函数体输出后按需生成（emitSofHelpers 回填）。
     struct SofReq {
         std::string key;                // 包装函数名后缀（类型唯一键）
         std::string cParam;             // 包装函数形参 C 声明
         std::string name;               // sc 类型名
         int ptr = 0;                    // 指针层数
+        bool needBuf = false;           // 需生成缓存变体 sc_strofb__KEY
         std::vector<std::string> dims;  // 数组维度（仅一维）
     };
     std::map<std::string, SofReq> sofReqs;  // key → 顶层格式化请求
@@ -286,27 +289,27 @@ struct CGen {
         return false;
     }
 
-    // string_of 调用点：校验类型并登记格式化请求，输出包装函数调用
+    // string 格式化调用点：校验类型并登记格式化请求，输出包装函数调用
     void emitStrofCall(const Expr& e) {
-        if (e.args.size() != 1)
-            throw CompileError{"string_of 需要且仅需要一个实参", e.line};
+        if (e.args.size() != 1 && e.args.size() != 3)
+            throw CompileError{"string(值[, 缓存, 大小]) 需要 1 或 3 个实参", e.line};
         if (!aggrOf("string"))
-            throw CompileError{"string_of 依赖内置 string，请先 inc adt.sc", e.line};
+            throw CompileError{"string(...) 格式化依赖内置 string，请先 inc adt.sc", e.line};
         VType vt;
         if (!exprVType(*e.args[0], vt))
-            throw CompileError{"string_of 无法推断实参类型", e.line};
+            throw CompileError{"string(...) 无法推断实参类型", e.line};
         SofReq r;
         r.name = vt.name;
         r.ptr = vt.ptr;
         if (vt.arr > 0) {
             if (!exprDims(*e.args[0], r.dims) || (int)r.dims.size() != vt.arr)
-                throw CompileError{"string_of 无法确定数组维度", e.line};
+                throw CompileError{"string(...) 无法确定数组维度", e.line};
             if (r.dims.size() > 1)
-                throw CompileError{"string_of 暂不支持多维数组", e.line};
+                throw CompileError{"string(...) 暂不支持多维数组", e.line};
         }
         const Decl* sd = aggrOf(vt.name);
         if (r.dims.empty() && vt.ptr == 0 && !sd && !scalarClass(vt.name))
-            throw CompileError{"string_of 不支持该类型：" +
+            throw CompileError{"string(...) 不支持该类型：" +
                 (vt.name.empty() ? std::string("(无类型)") : vt.name), e.line};
         // 类型唯一键：规范名 + _p（每层指针）+ _a维度
         std::string key = sd ? sd->name
@@ -320,9 +323,20 @@ struct CGen {
         std::string ct = cTypeOf(vt.name, vt.ptr);
         bool starEnd = !ct.empty() && ct.back() == '*';
         r.cParam = ct + (starEnd ? "" : " ") + (r.dims.empty() ? "_v" : "*_v");
-        sofReqs[r.key] = r;
-        out << "sc_strof__" << r.key << "(";
+        bool buf = e.args.size() == 3;
+        r.needBuf = buf;
+        auto it = sofReqs.find(r.key);
+        if (it == sofReqs.end()) sofReqs[r.key] = r;
+        else if (buf) it->second.needBuf = true;  // 已登记请求按需追加缓存变体
+        out << (buf ? "sc_strofb__" : "sc_strof__") << r.key << "(";
         emitExpr(*e.args[0], true);
+        if (buf) {
+            out << ", ";
+            emitExpr(*e.args[1], true);
+            out << ", (uint64_t)(";
+            emitExpr(*e.args[2], true);
+            out << ")";
+        }
         out << ")";
     }
 
@@ -415,12 +429,23 @@ struct CGen {
             emitSofValue("_v", r.name, r.ptr, r.dims, 0, 1);
         }
         out << "    return _s;\n}\n\n";
+        if (!r.needBuf) return;
+        // 缓存变体：char *sc_strofb__KEY(T, 缓存, 大小) —— 截断拷贝进缓存，返回缓存首址
+        out << "static char *sc_strofb__" << r.key << "(" << r.cParam
+            << ", char *_buf, uint64_t _n) {\n"
+            << "    if (!_buf || !_n) return _buf;\n"
+            << "    string _s = sc_strof__" << r.key << "(_v);\n"
+            << "    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;\n"
+            << "    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);\n"
+            << "    _buf[_l] = 0;\n"
+            << "    string_drop(&_s);\n"
+            << "    return _buf;\n}\n\n";
     }
 
-    // string_of 支撑代码回填：原语 + 聚合格式化器 + 顶层包装
+    // string 格式化支撑代码回填：原语 + 聚合格式化器 + 顶层包装
     void emitSofHelpers() {
         if (sofReqs.empty()) return;
-        out << "/* ---- string_of 关键字支撑：格式化原语与按类型生成的格式化器 ---- */\n"
+        out << "/* ---- string 格式化关键字支撑：格式化原语与按类型生成的格式化器 ---- */\n"
             << "static inline void sc__sof_i64(string *_o, long long _v) {\n"
             << "    char _b[24]; snprintf(_b, sizeof(_b), \"%lld\", _v); string_append(_o, _b); }\n"
             << "static inline void sc__sof_u64(string *_o, unsigned long long _v) {\n"
@@ -538,10 +563,11 @@ struct CGen {
                     vt = {td->name, 1, 0};
                     return true;
                 }
-                // string_of(expr) 结果类型：string（使声明初值/方法调用可推断）
-                if (e.a && e.a->kind == Expr::Ident && e.a->text == "string_of"
-                    && !localsT.count("string_of") && !globalsT.count("string_of")) {
-                    vt = {"string", 0, 0};
+                // string(值[, 缓存, 大小]) 结果类型：string / char*（使声明初值/方法调用可推断）
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
+                    && !localsT.count("string") && !globalsT.count("string")) {
+                    if (e.args.size() == 3) vt = {"char", 1, 0};
+                    else vt = {"string", 0, 0};
                     return true;
                 }
                 return false;
@@ -671,9 +697,10 @@ struct CGen {
                     out << ")";
                     break;
                 }
-                // string_of 关键字：按实参静态类型生成格式化器，返回 adt string
-                if (e.a->kind == Expr::Ident && e.a->text == "string_of"
-                    && !localsT.count("string_of") && !globalsT.count("string_of") && !funcs.count("string_of")) {
+                // string 格式化关键字：string(值) → adt string；string(值, 缓存, 大小) → char*
+                // （无参 string() 走上面的 T() 堆构造糖；被同名定义遮蔽时按普通调用）
+                if (e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
+                    && !localsT.count("string") && !globalsT.count("string") && !funcs.count("string")) {
                     emitStrofCall(e);
                     break;
                 }
@@ -1388,7 +1415,7 @@ struct CGen {
             if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
 
-        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run/print/string_of
+        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run/print/string
         heapNews.clear();
         for (auto& d : prog.decls) {
             if (d->external) continue;
@@ -1396,7 +1423,7 @@ struct CGen {
             for (auto& s : d->body) scanStmtForNew(*s);
         }
 
-        // 枚举类型名集合（string_of 按整数格式化）
+        // 枚举类型名集合（string 格式化按整数）
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
 
@@ -1409,9 +1436,9 @@ struct CGen {
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
             out << "extern void sc_print(const char *, ...);\n\n";
         }
-        // string_of 关键字：依赖 adt string
-        if (usesStrof && !funcs.count("string_of") && !aggrOf("string"))
-            throw CompileError{"string_of 依赖内置 string，请先 inc adt.sc", usesStrof};
+        // string 格式化关键字：依赖 adt string
+        if (usesStrof && !funcs.count("string") && !aggrOf("string"))
+            throw CompileError{"string(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
         if (usesRun) {
@@ -1468,7 +1495,7 @@ struct CGen {
         out << "\n";
         // 堆构造辅助函数（T() 伪调用糖使用）
         emitNewHelpers();
-        // 第二遍：函数定义先写入暂存流（string_of 调用点按需登记格式化请求），
+        // 第二遍：函数定义先写入暂存流（string 格式化调用点按需登记格式化请求），
         // 随后回填支撑代码（原语/格式化器/包装）再拼接函数体
         std::ostringstream mainOut = std::move(out);
         out = std::ostringstream();

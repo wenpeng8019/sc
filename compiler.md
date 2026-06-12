@@ -302,19 +302,23 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
   （codegen_c `memberFieldName`）；普通结构体的同名字段不受影响。
   解析期链表结构体禁止显式定义 `prev`/`next`（与 `_prev`/`_next` 同列）。
 
-### 5.9 print 与 string_of 关键字
+### 5.9 print 与 string(...) 格式化关键字
 
 - `print(fmt, ...)`：成员表/全局表/函数表均无 `print` 时按关键字处理，
   生成 `sc_print(fmt, ...)` 调用并在单元头部输出 extern 原型；要求单元
   `inc io.sc`（拉入 `builtins/io/io_impl.c` 链接），否则编译报错。
   级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `sc_print` 内完成。
-- `string_of(expr)`：要求 `inc adt.sc`（依赖内置 `string`）。代码生成
+- `string(值[, 缓存, 大小])`：括号非空时为格式化关键字（空括号 `string()`
+  仍走 T() 堆构造糖），要求 `inc adt.sc`（依赖内置 `string`）。代码生成
   按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记格式化请求
-  `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），调用点改写为
-  `sc_strof__KEY(实参)`。函数体先写入暂存流，结束后回填支撑代码再拼接：
+  `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），按实参个数静态派发：
+  1 参→`sc_strof__KEY(值)` 返回 `string`；3 参→`sc_strofb__KEY(值, 缓存, 大小)`
+  在缓存内构建（截断保证 NUL 结尾）返回 `char *`；其他个数报错。
+  函数体先写入暂存流，结束后回填支撑代码再拼接：
   8 个标量原语（`sc__sof_i64/u64/f64/bool/char/cstr/ptr/str`）、按值字段
-  闭包递归生成的聚合格式化器 `sc__sof_T(string*, T*)`、以及每请求包装
-  `static string sc_strof__KEY(...)`（聚合一级指针含 nil 检查后解引用）。
+  闭包递归生成的聚合格式化器 `sc__sof_T(string*, T*)`、每请求包装
+  `static string sc_strof__KEY(...)`（聚合一级指针含 nil 检查后解引用）
+  及按需的缓存变体 `static char *sc_strofb__KEY(...)`。
   多维数组、未知类型编译报错；枚举按 i64 处理。
 
 ## 6. 语义检查（semanticCheck）

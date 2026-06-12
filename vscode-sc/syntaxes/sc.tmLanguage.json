@@ -71,6 +71,10 @@
                     "match": "\\b(if|else|while|do|for|case|through|goto|return|break|continue|run|wait)\\b"
                 },
                 {
+                    "name": "keyword.control.io.sc",
+                    "match": "\\b(print)\\b|\\bstring\\b(?=\\s*\\((?!\\s*\\)))"
+                },
+                {
                     "name": "keyword.declaration.sc",
                     "match": "\\b(def|fnc|rpc|var|let|tls|inc)\\b"
                 },
@@ -84,7 +88,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.sc",
-                    "match": "\\b(sizeof|offsetof|print|string_of)\\b"
+                    "match": "\\b(sizeof|offsetof)\\b"
                 },
                 {
                     "name": "variable.language.linked.sc",

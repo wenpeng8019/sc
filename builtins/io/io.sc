@@ -1,4 +1,4 @@
-# io —— sc 输入输出内置模块（print / string_of 语言关键字的支持库）
+# io —— sc 输入输出内置模块（print / string(...) 语言关键字的支持库）
 # 唯一事实源：C ABI 契约见同目录 io.h，默认实现见 io_impl.c
 #
 # 用法：inc io.sc
@@ -10,8 +10,12 @@
 #   - 输出格式：HH:MM:SS.mmm L| 文本（自动补换行）
 #   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；高于该级别的输出被丢弃）
 #
-# string_of —— 字符串格式化（语言关键字，编译器按静态类型生成格式化器）：
-#   var s: string = string_of(x)   # 返回 adt string，用完需 s.drop()
+# string(...) —— 字符串格式化（语言关键字，编译器按静态类型生成格式化器；
+#                括号非空时为格式化，区别于类型 string 与堆构造 string()）：
+#   var s: string = string(x)        # 返回 adt string，用完需 s.drop()
+#   var b[256]: char
+#   var p&: char = string(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
+#                                    # 返回 char&（即缓存首址，无需 drop）
 #   - 标量 → 数字；bool → true/false；char → 'a'
 #   - char& / char 数组 → "文本"；其它指针 → 0x 地址（nil → nil）
 #   - 结构体/联合体 → {字段: 值, ...} 递归展开（链表 _prev/_next 不展开）
