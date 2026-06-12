@@ -73,8 +73,8 @@ fnc main: i4
 
     var r_ptr&: rect = &r
 
-    # 变量定义不指定类型时，默认
-    var msg: = "hello sc"
+    # 变量定义不指定类型时，默认 ??
+    var msg: = "hello" " " "sc"        # 相邻字符串字面量拼接（C 风格）
     printf("%s\n", msg)
     printf("add1(3,4) = %d\n", add1(p.x, p.y))
     printf("add2(3,4) = %d\n", add2(p.x, p.y))

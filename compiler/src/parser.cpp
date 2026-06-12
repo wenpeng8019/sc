@@ -109,10 +109,23 @@ struct Parser {
     ExprPtr parsePrimary() {
         skipNlInBracket();
         // 字面量：整数、浮点、字符串、字符
-        if (at(Tok::Int) || at(Tok::Float) || at(Tok::Str) || at(Tok::Char)) {
+        // 相邻字符串字面量拼接（C 风格 "aa" "bb"；括号内可跨行）
+        if (at(Tok::Str)) {
+            auto e = mk(Expr::StrLit);
+            std::string v = advance().text;
+            skipNlInBracket();
+            while (at(Tok::Str)) {
+                const std::string nx = advance().text;
+                v.pop_back();              // 去掉前段收尾引号
+                v += nx.substr(1);         // 续接后段（去掉开头引号）
+                skipNlInBracket();
+            }
+            e->text = std::move(v);
+            return e;
+        }
+        if (at(Tok::Int) || at(Tok::Float) || at(Tok::Char)) {
             auto e = mk(at(Tok::Int) ? Expr::IntLit
-                        : at(Tok::Float) ? Expr::FloatLit
-                        : at(Tok::Str) ? Expr::StrLit : Expr::CharLit);
+                        : at(Tok::Float) ? Expr::FloatLit : Expr::CharLit);
             e->text = advance().text;
             return e;
         }
