@@ -35,8 +35,6 @@
 
 @fnc thread::join          # 等待结束并回收（含 thread 对象本身，之后指针失效）
 
-@rpc msleep: ms: u4        # 当前线程休眠 ms 毫秒
-
 # ---------------- mutex：互斥锁 ----------------
 
 @def mutex: {

@@ -37,9 +37,20 @@ uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread 
 
 void    thread_join(thread *_this);   /* 等待结束并回收（含 thread 对象本身） */
 
-/* rpc msleep: v, ms: u4 —— 当前线程休眠毫秒 */
-struct msleep { uint32_t ms; };
-void msleep_rpc(struct msleep *_p);
+/* ---------------- pool：线程池（run 语句的另一种执行目标） ---------------- */
+
+typedef struct pool {
+    void *h;       /* 实现私有区指针（队列 + 同步原语 + 工作线程） */
+} pool;
+
+/* run 语句原语（pool 形态，对称 thread_run）：fn 为 rpc 实际函数，
+ * params/psize 为装填好的参数结构体（拷贝入任务节点，调用点无需保活）。
+ * 返回 1 成功 / 0 失败（池未初始化/已停/内存不足） */
+uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psize);
+
+void    pool_init(pool *_this, uint32_t n);  /* n 个工作线程；0 → CPU 逻辑核数 */
+void    pool_join(pool *_this);              /* 屏障：等待全部已提交任务完成（后续仍可提交） */
+void    pool_drop(pool *_this);              /* 析构：等任务完成 → 停工作线程 → 回收 */
 
 /* ---------------- mutex：互斥锁 ---------------- */
 
@@ -68,21 +79,6 @@ void    cond_all(cond *_this);            /* 唤醒全部等待者 */
  * 否则为相对超时时长（sec 秒 + nsec 纳秒）。
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
 int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec);
-
-/* ---------------- pool：线程池（run 语句的另一种执行目标） ---------------- */
-
-typedef struct pool {
-    void *h;       /* 实现私有区指针（队列 + 同步原语 + 工作线程） */
-} pool;
-
-void    pool_init(pool *_this, uint32_t n);  /* n 个工作线程；0 → CPU 逻辑核数 */
-void    pool_join(pool *_this);              /* 屏障：等待全部已提交任务完成（后续仍可提交） */
-void    pool_drop(pool *_this);              /* 析构：等任务完成 → 停工作线程 → 回收 */
-
-/* run 语句原语（pool 形态，对称 thread_run）：fn 为 rpc 实际函数，
- * params/psize 为装填好的参数结构体（拷贝入任务节点，调用点无需保活）。
- * 返回 1 成功 / 0 失败（池未初始化/已停/内存不足） */
-uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psize);
 
 #ifdef __cplusplus
 }

@@ -100,8 +100,6 @@ void thread_join(thread *_this) {
     free(_this);                        /* 回收联合实体（thread + 参数 + 私有区） */
 }
 
-void msleep_rpc(struct msleep *_p) { P_usleep((uint64_t)_p->ms * 1000ULL); }
-
 /* ---------------- mutex ---------------- */
 
 #if P_WIN

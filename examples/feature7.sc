@@ -4,12 +4,13 @@
 #       run note(7)                # detach：线程结束后自释放
 #   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
 #     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
-#   - msleep(ms)：当前线程休眠（m 的 rpc 仅声明，C 侧实现）
+#   - 线程休眠用 platform.h 的 P_usleep(us)（默认 -I，直接 inc）
 #   - wait 语句：条件变量等待 wait cond, mutex[, nsec[, sec]]
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
 #   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
 #     run work(...), p —— 与独立线程同一个动词，按类型静态分派
 inc stdio.h
+inc "platform.h"
 inc m.sc
 
 # 共享上下文：互斥锁保护计数器
@@ -60,7 +61,7 @@ fnc main: i4
 
     # detach：无出参，线程结束后自释放
     run note(7)
-    msleep(50)         # 等 detach 线程打印完
+    P_usleep(50000)    # 等 detach 线程打印完（platform.h）
 
     # try_lock：未占用时成功
     if c.mu.try_lock()
