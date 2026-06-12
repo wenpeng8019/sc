@@ -59,9 +59,8 @@ u4  -> uint32_t
 u8  -> uint64_t
 f4  -> float
 f8  -> double
-v   -> void
-b   -> bool / uint8_t
-c1  -> char
+bool -> uint8_t
+char -> char
 ```
 
 此外还有字面量常量：
@@ -70,8 +69,11 @@ c1  -> char
 - `false`
 - `nil`
 
-其中 `b` 是布尔类型别名，`c1` 用于与 C 字符串字面量/接口互操作
-（`s&: c1` 即 `char *s`），`nil` 用于空指针/空值判断。
+其中 `bool` 是布尔类型（u1 的语义别名），`char` 用于与 C 字符串
+字面量/接口互操作（`s&: char` 即 `char *s`，区别于 i1/u1：C 中
+char/signed char/unsigned char 是三个不同类型），`nil` 用于空指针/空值判断。
+没有 void 类型：函数省略返回类型即无返回值（见 §8），void 指针用
+省略类型名的裸指针表示（字段 `p&:`，返回类型裸 `&`）。
 
 ## 4. 名字后的元类型
 
@@ -311,7 +313,7 @@ fnc add -> binop_t
 或者直接定义签名和函数体：
 
 ```sc
-fnc area:
+fnc area: i4
     r&: rect
     -
     var w: i4 = r->rb.x - r->lt.x
@@ -324,6 +326,11 @@ fnc area:
 - `->` 表示实现一个已命名的函数类型或别名。
 - 函数体如果和参数列表分成两段，使用单独一行 `-` 分隔。
 - 单行参数定义和多行参数定义都支持。
+- **省略返回类型即无返回值**（void）：首项是否参数由“是否带内嵌
+  冒号”区分，如 `fnc add: i4, a:i4, b:i4` 返回 i4，而
+  `fnc show: a:i4, b:i4` 无返回值。无返回值且无参数时 `:` 可一并
+  省略（如 `fnc tick`）。无返回值函数不能 `return 表达式`。
+- void 指针返回类型写裸 `&`（如 `@fnc list::pop: &`）。
 
 ### 8.3 方法定义糖
 
@@ -348,7 +355,7 @@ p->add(1, 2)    # → obj_add(p, 1, 2)
 原型，实现由 C 侧提供，调用糖不变——这是内置 adt 的实现通道：
 
 ```sc
-@def string: { data&: c1, size: u8, cap: u8 }
+@def string: { data&: char, size: u8, cap: u8 }
 @fnc string::len: u8          # 仅声明，C 侧实现 uint64_t string_len(string*)
 ```
 
@@ -419,18 +426,18 @@ o->m(1, 2)   # 自动注入 _this 指针（传入 o）
 在参数列表末尾加 `...` 声明可变参数函数：
 
 ```sc
-fnc my_printf: v, fmt&: u1, ...
+fnc my_printf: fmt&: u1, ...
     var ap: va_list
     va_start(ap, fmt)
     vprintf(fmt, ap)
     va_end(ap)
 
 # 可变参数函数类型
-fnc printer_t: v, fmt&: u1, ...
+fnc printer_t: fmt&: u1, ...
 
 # 可变参数函数指针字段
 def handler: {
-    log: fnc: v, fmt&: u1, ...
+    log: fnc: fmt&: u1, ...
 }
 ```
 
@@ -493,7 +500,7 @@ void mul_rpc(struct mul *p) { p->_ = p->a * p->b; }
 
 约束：
 
-- 返回类型默认 `i4`（与 fnc 一致）；`v` 表示无返回值，结构体不含 `_` 成员。
+- 返回类型规则与 fnc 一致：省略即无返回值，此时结构体不含 `_` 成员。
 - 支持 `@` 导出：头文件中生成结构体、实际函数原型与调用包装，跨模块/纯 C
   均可直接调用。
 - 不支持方法形态（`::`）、实现预定义函数类型（`->`）、可变参数 `...`。
@@ -671,7 +678,7 @@ start:
 fnc add: i4, a:i4, b:i4
     return a + b
 
-fnc noop: v
+fnc noop
     return
 
 # 变量/常量声明
@@ -699,7 +706,7 @@ for i = 0; i < 10; i++
 ```sc
 inc m.sc
 
-rpc work: v, c&: ctx, rounds: i4    # rpc 即线程体
+rpc work: c&: ctx, rounds: i4    # rpc 即线程体（省略返回类型）
     ...
 
 fnc main: i4

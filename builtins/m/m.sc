@@ -23,21 +23,21 @@
 
 @def thread: {
     id: u8        # 跨平台统一线程 id（线程启动后由其自身填写）
-    h&: v         # 实现私有区指针（同块分配，调用方不直接访问）
+    h&:           # 实现私有区指针（同块分配，调用方不直接访问）
 }
 
-@fnc thread::join: v          # 等待结束并回收（含 thread 对象本身，之后指针失效）
+@fnc thread::join          # 等待结束并回收（含 thread 对象本身，之后指针失效）
 
-@rpc msleep: v, ms: u4        # 当前线程休眠 ms 毫秒
+@rpc msleep: ms: u4        # 当前线程休眠 ms 毫秒
 
 # ---------------- mutex：互斥锁 ----------------
 
 @def mutex: {
-    h&: v         # 平台锁句柄（实现私有）
+    h&:           # 平台锁句柄（实现私有）
 }
 
-@fnc mutex::init: v                           # 构造（声明即构造适用）
-@fnc mutex::drop: v                           # 析构
-@fnc mutex::lock: v
-@fnc mutex::unlock: v
-@fnc mutex::try_lock: b                       # 取锁成功返回 1，已被占用返回 0
+@fnc mutex::init           # 构造（声明即构造适用）
+@fnc mutex::drop           # 析构
+@fnc mutex::lock           # 加锁（阻塞）
+@fnc mutex::unlock         # 解锁
+@fnc mutex::try_lock: bool # 取锁成功返回 1，已被占用返回 0

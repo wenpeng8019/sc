@@ -13,7 +13,7 @@ def counter: {
     n: i4
 }
 
-fnc counter::init: v
+fnc counter::init
     this->n = 100
 
 fnc counter::add: i4, k: i4
@@ -21,7 +21,7 @@ fnc counter::add: i4, k: i4
     return this->n
 
 fnc str_cmp -> list_cmp
-    return strcmp((a: c1&), (b: c1&))
+    return strcmp((a: char&), (b: char&))
 
 fnc main: i4
     # 声明即构造：自动调用 counter_init/string_init/list_init
@@ -49,7 +49,7 @@ fnc main: i4
     l.sort(str_cmp)
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, (l.get(i): c1&))
+        printf("list[%llu]=%s\n", i, (l.get(i): char&))
 
     # 析构：手动 drop（指针接收者用 ->）
     var lp&: list = &l

@@ -107,7 +107,7 @@ struct TypeRef {
     // 通过 obj.func(...) 调用时自动传入接收者作为首参 _this，
     // 实现函数的 sc 源码中以 this 访问（codegen 映射 this → _this）。
     FncKind fnKind = FncKind::None;
-    std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = 默认 i4）
+    std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = void）
     std::vector<Field> fnParams;     // 显式参数列表（不含隐式 this）
     bool fnVariadic = false;         // 可变参数（'...'）
 };

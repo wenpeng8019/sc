@@ -23,9 +23,9 @@ std::string mapBase(const std::string& n) {
     static const std::unordered_map<std::string, std::string> m = {
         {"i1", "int8_t"},  {"i2", "int16_t"}, {"i4", "int32_t"}, {"i8", "int64_t"},
         {"u1", "uint8_t"}, {"u2", "uint16_t"}, {"u4", "uint32_t"}, {"u8", "uint64_t"},
-        {"f4", "float"},   {"f8", "double"},  {"v", "void"},
-        {"b", "uint8_t"},  // bool：u1 的引用别名（true/false 即 1/0）
-        {"c1", "char"},    // 字符：与 C 字符串字面量/接口互操作用
+        {"f4", "float"},   {"f8", "double"},
+        {"bool", "uint8_t"},  // 布尔：u1 的语义别名（true/false 即 1/0）
+        {"char", "char"},     // 字符：与 C 字符串字面量/接口互操作用（区别于 i1/u1）
         {"va_list", "va_list"},  // 透传：可变参数列表类型
     };
     auto it = m.find(n);
@@ -97,7 +97,7 @@ struct CGen {
                 resolveType(*f.type.fnRet, base, ptr);
                 out << base << " ";
                 for (int i = 0; i < ptr; i++) out << "*";
-            } else out << "int32_t ";  // 默认返回类型
+            } else out << "void ";  // 省略返回类型 = void
             out << "(*" << f.name << ")(";
             if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
                 out << curAggrKind << " " << curAggr << " *_this";
@@ -745,7 +745,7 @@ struct CGen {
     // ---------------- 函数 ----------------
     void emitRetType(const Decl& d) {
         if (d.retType.name.empty() && d.retType.ptr == 0) {
-            out << "int32_t"; // 默认返回类型
+            out << "void"; // 省略返回类型 = void
             return;
         }
         std::string base; int ptr;
@@ -818,9 +818,9 @@ struct CGen {
     // 结构体仅用 tag（不 typedef）：C 中 struct tag 与函数名分属不同
     // 命名空间，故二者可同名，调用形式与 fnc 完全一致。
 
-    // 是否有返回值（默认 i4，与 fnc 一致；v 为无）
+    // 是否有返回值（与 fnc 一致：省略返回类型 = void 无返回值）
     static bool rpcHasRet(const Decl& d) {
-        return !(d.retType.name == "v" && d.retType.ptr == 0);
+        return !d.retType.name.empty() || d.retType.ptr > 0;
     }
 
     // 同名参数结构体：返回槽 _ 为首个默认成员（C 侧可用 _ 访问）

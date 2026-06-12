@@ -11,12 +11,12 @@ inc stdio.h
 }
 
 # 互递归函数（先声明/后定义顺序不重要）
-@fnc is_even: b, n:i4
+@fnc is_even: bool, n:i4
     if n == 0
         return true
     return is_odd(n - 1)
 
-@fnc is_odd: b, n:i4
+@fnc is_odd: bool, n:i4
     if n == 0
         return false
     return is_even(n - 1)

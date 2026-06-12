@@ -36,7 +36,7 @@ fnc sub -> binop_t
     return a - b
 
 # 直接定义并实现（多行参数，'-' 分隔函数体）
-fnc area:
+fnc area: i4
     r&: rect
     -
     var w: i4 = r->rb.x - r->lt.x

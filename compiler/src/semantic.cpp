@@ -158,7 +158,7 @@ struct Checker {
             case Expr::CharLit: return Ty{"i1", 0, 0, true, false};
             case Expr::Ident: {
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
-                if (e.text == "true" || e.text == "false") return Ty{"b", 0, 0, true, false};
+                if (e.text == "true" || e.text == "false") return Ty{"bool", 0, 0, true, false};
                 auto it = locals.find(e.text);
                 if (it != locals.end()) return it->second;
                 it = globals.find(e.text);
@@ -322,16 +322,21 @@ struct Checker {
         }
     }
 
+    // 函数返回类型：省略 = void（内部以 "v" 标记，供 void 边界检查）
     Ty funcRetType(const Decl& d) const {
         if (!d.funcTypeName.empty()) {
             auto it = funcTypes.find(d.funcTypeName);
             if (it != funcTypes.end()) {
-                return fromTypeRef(it->second->retType);
+                Ty t = fromTypeRef(it->second->retType);
+                if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
+                    return Ty{"v", 0, 0, true, false};
+                return t;
             }
-            return Ty{"i4", 0, 0, true, false};
+            return Ty{"v", 0, 0, true, false};
         }
         Ty t = fromTypeRef(d.retType);
-        if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0)) return Ty{"i4", 0, 0, true, false};
+        if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
+            return Ty{"v", 0, 0, true, false};
         return t;
     }
 
@@ -354,6 +359,8 @@ struct Checker {
                 break;
             case Stmt::ReturnS:
                 if (s.expr) {
+                    if (retTy.name == "v" && retTy.ptr == 0)
+                        err(s.line, "无返回值函数不能 return 表达式（返回类型省略即 void）");
                     if (containsAddrOfLocal(*s.expr, locals))
                         err(s.line, "禁止返回局部变量地址");
                     Ty rt = inferExpr(*s.expr, locals, s.line);

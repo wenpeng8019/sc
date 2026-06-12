@@ -211,10 +211,11 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 | `i1/i2/i4/i8` | `int8_t/int16_t/int32_t/int64_t` |
 | `u1/u2/u4/u8` | `uint8_t/uint16_t/uint32_t/uint64_t` |
 | `f4/f8` | `float/double` |
-| `v` | `void` |
-| `b` | `bool`（`stdbool.h`） |
+| `bool` | `uint8_t` |
+| `char` | `char` |
 | 无类型对象 | `char*` |
 | 无类型指针 | `void*` |
+| 省略返回类型 | `void` |
 | `name&` / `name&&` | `T*` / `T**` |
 | `name[x][y]` | `T name[x][y]` |
 | `(expr: type&)` | `((type*)(expr))` |
@@ -247,7 +248,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 `rpc name: ret, a: T, b: T` 展开为“三件套”：
 
 - `struct name { ret _; T a; T b; };` —— 同名参数结构体，返回槽 `_` 为首成员
-  （返回 `v` 时无 `_`；无参且无返回时生成 `char _;` 占位）；
+  （省略返回类型时无 `_`；无参且无返回时生成 `char _;` 占位）；
 - `void name_rpc(struct name *_p);` —— 实际函数（本模块未导出时 `static`；
   仅声明形态为 extern，由外部 C 侧实现）；
 - `static inline ret name(...)` —— 调用包装：装填结构体 → 执行 → 取返回槽。

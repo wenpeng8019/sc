@@ -48,8 +48,9 @@ const LITERALS = [
 const TYPES = [
     ['i1', 'int8_t'], ['i2', 'int16_t'], ['i4', 'int32_t'], ['i8', 'int64_t'],
     ['u1', 'uint8_t'], ['u2', 'uint16_t'], ['u4', 'uint32_t'], ['u8', 'uint64_t'],
-    ['b', 'bool / u1'],
-    ['f4', 'float'], ['f8', 'double'], ['v', 'void'],
+    ['bool', '布尔（u1 语义别名，true/false）'],
+    ['char', '字符（与 C 字符串互操作，区别于 i1/u1）'],
+    ['f4', 'float'], ['f8', 'double'],
     ['va_list', '可变参数列表类型（透传 stdarg.h）'],
     ['adt_obj', '内置 ADT 公共对象头'],
     ['string', '内置 ADT 字符串对象'],

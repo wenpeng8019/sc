@@ -13,8 +13,8 @@ fnc obj_add: i4, this&: obj, x:i4, y:i4
 
 fnc main: i4
     # b 布尔类型与 true/false 常量
-    var ok: b = true
-    var no: b = false
+    var ok: bool = true
+    var no: bool = false
     printf("ok=%d no=%d\n", ok, no)
 
     # nil 常量

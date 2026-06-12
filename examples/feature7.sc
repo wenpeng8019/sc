@@ -15,7 +15,7 @@ def ctx: {
 }
 
 # 线程体：rpc 即线程入口，参数即线程上下文
-rpc work: v, c&: ctx, rounds: i4
+rpc work: c&: ctx, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         c->mu.lock()
@@ -23,7 +23,7 @@ rpc work: v, c&: ctx, rounds: i4
         c->mu.unlock()
 
 # detach 线程体：自释放，无需 join
-rpc note: v, tag: i4
+rpc note: tag: i4
     printf("detached note: tag=%d\n", tag)
 
 fnc main: i4

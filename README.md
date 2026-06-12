@@ -69,7 +69,7 @@ ln -s "$(pwd)/vscode-sc" ~/.vscode/extensions/sc-lang-0.1.0
 - `inc stdio.h` 引入头文件（对齐 C 的 `#include`）；`inc x.sc` 导入 sc 模块（单元编译+链接）
 - 无预处理器设计：sc 不提供宏/条件编译，平台适配写在 C 头文件里，`inc` 导入后直接用适配结果（C 宏常量/函数式宏可直接使用）
 - `@def`/`@fnc`/`@var`/`@let` 导出对象：`--emit-c -o x.c` 时额外生成 `x.h` 声明；未导出顶层符号默认 C `static`
-- 基本类型：`i1/i2/i4/i8`、`u1/u2/u4/u8`、`f4/f8`、`v`(void)、`b`(bool)、`c1`(char)
+- 基本类型：`i1/i2/i4/i8`、`u1/u2/u4/u8`、`f4/f8`、`bool`、`char`；省略返回类型即 void
 - 强转 `(expr: type&)` 等价 C 的 `(type*)(expr)`；初始化列表 `{1, 2, 3}`；十六进制 `0xFF` 与字面量后缀 `1u/100UL/3.14f`
 - 函数默认返回类型 `i4`；`fnc name -> func_type` 实现预定义函数类型
 - `rpc` 伪形参函数：形式同 `fnc`，参数/返回值展开为同名结构体，实际函数为 `void name_rpc(struct name*)`，返回槽是首成员 `_`

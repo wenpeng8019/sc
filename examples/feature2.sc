@@ -27,7 +27,7 @@ fnc main: i4
         for j = 0; j < 3; j++
             s += m[i][j]
     printf("sum = %d\n", s)
-    var name[8][16]: c1
+    var name[8][16]: char
     strcpy(name[0], "hi")
     printf("name0 = %s\n", name[0])
     printf("add = %d\n", add(2, 3))

@@ -327,8 +327,10 @@ struct Parser {
             parseFieldBlock(ty.inlineFields);   // 递归解析字段列表
             return ty;
         }
-        if (!at(Tok::Ident)) err("期望类型名");
-        ty.name = advance().text;
+        // 裸 & / &&：无名指针 = void 指针（与字段省略类型时 name&: 规则一致）
+        if (at(Tok::Ident)) ty.name = advance().text;
+        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&")))
+            err("期望类型名");
         // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
         for (;;) {
             if (acceptOp("&")) ty.ptr++;
@@ -615,12 +617,16 @@ struct Parser {
             return d;
         }
 
-        expect(Tok::Colon, "':'");
+        // 签名：':' 后接签名项；省略返回类型 = void（首项是否参数由
+        // looksLikeParam 前瞻区分）；无返回值且无参数时 ':' 可整体省略
         bool haveRet = false;
-        // 单行签名项（返回类型和/或参数，逗号分隔）
-        if (!at(Tok::Newline)) {
-            parseFncItem(*d, haveRet);
-            while (!d->variadic && accept(Tok::Comma)) parseFncItem(*d, haveRet);
+        if (accept(Tok::Colon)) {
+            if (!at(Tok::Newline)) {
+                parseFncItem(*d, haveRet);
+                while (!d->variadic && accept(Tok::Comma)) parseFncItem(*d, haveRet);
+            }
+        } else if (!at(Tok::Newline)) {
+            err("期望 ':' 或换行");
         }
         expect(Tok::Newline, "换行");
 

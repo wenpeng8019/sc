@@ -63,54 +63,55 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 ### string —— 动态字符串
 
 内部 NUL 结尾，`cstr()` 永不返回 nil，可直接交给 C 接口。
-返回 `b` 的方法：1 成功 / 0 失败（内存不足或参数越界）。
+返回 `bool` 的方法：1 成功 / 0 失败（内存不足或参数越界）。
+签名为空表示无返回值无参数。
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| init | `v` | 构造为空串 |
-| drop | `v` | 释放缓冲区 |
+| init | | 构造为空串 |
+| drop | | 释放缓冲区 |
 | len | `u8` | 字符数（不含 NUL） |
-| cstr | `c1&` | C 字符串视图（始终非 nil） |
-| clear | `v` | 置空（保留容量） |
-| reserve | `b, n: u8` | 预留容量 |
-| assign | `b, s&: c1` | 赋值为 C 字符串 |
-| append | `b, s&: c1` | 追加 C 字符串 |
-| append_n | `b, s&: c1, n: u8` | 追加前 n 字节 |
-| append_char | `b, c: c1` | 追加单字符 |
-| insert | `b, index: u8, s&: c1` | 指定位置插入 |
-| erase | `b, index: u8, n: u8` | 删除 n 字节 |
-| at | `c1, index: u8` | 取字符（越界返回 0） |
-| find | `i8, sub&: c1, start: u8` | 查找子串（未找到 -1） |
-| rfind | `i8, sub&: c1` | 反向查找（未找到 -1） |
-| equals | `b, s&: c1` | 与 C 字符串比较相等 |
-| starts_with | `b, s&: c1` | 前缀判断 |
-| ends_with | `b, s&: c1` | 后缀判断 |
-| slice | `b, start: i8, stop: i8, out&: string` | 切片 `[start, stop)`，负索引从尾部计 |
-| strip | `v` | 去除首尾空白 |
-| lower / upper | `v` | 大小写转换（ASCII） |
-| clone | `b, out&: string` | 深拷贝到 out |
+| cstr | `char&` | C 字符串视图（始终非 nil） |
+| clear | | 置空（保留容量） |
+| reserve | `bool, n: u8` | 预留容量 |
+| assign | `bool, s&: char` | 赋值为 C 字符串 |
+| append | `bool, s&: char` | 追加 C 字符串 |
+| append_n | `bool, s&: char, n: u8` | 追加前 n 字节 |
+| append_char | `bool, c: char` | 追加单字符 |
+| insert | `bool, index: u8, s&: char` | 指定位置插入 |
+| erase | `bool, index: u8, n: u8` | 删除 n 字节 |
+| at | `char, index: u8` | 取字符（越界返回 0） |
+| find | `i8, sub&: char, start: u8` | 查找子串（未找到 -1） |
+| rfind | `i8, sub&: char` | 反向查找（未找到 -1） |
+| equals | `bool, s&: char` | 与 C 字符串比较相等 |
+| starts_with | `bool, s&: char` | 前缀判断 |
+| ends_with | `bool, s&: char` | 后缀判断 |
+| slice | `bool, start: i8, stop: i8, out&: string` | 切片 `[start, stop)`，负索引从尾部计 |
+| strip | | 去除首尾空白 |
+| lower / upper | | 大小写转换（ASCII） |
+| clone | `bool, out&: string` | 深拷贝到 out |
 
 ### list —— 动态指针数组
 
-元素为 `v&`（裸指针），**不拥有元素**：drop/clear/remove_at 不释放元素本身。
+元素为裸指针（`&`，即 void 指针），**不拥有元素**：drop/clear/remove_at 不释放元素本身。
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| init | `v` | 构造为空列表 |
-| drop | `v` | 释放槽位数组 |
+| init | | 构造为空列表 |
+| drop | | 释放槽位数组 |
 | len | `u8` | 元素个数 |
-| clear | `v` | 清空（保留容量） |
-| reserve | `b, n: u8` | 预留槽位 |
-| push | `b, value&: v` | 尾部追加 |
-| pop | `v&` | 弹出尾元素（空返回 nil） |
-| get | `v&, index: u8` | 取元素（越界返回 nil） |
-| set | `b, index: u8, value&: v` | 改写元素 |
-| insert | `b, index: u8, value&: v` | 指定位置插入 |
-| remove_at | `v&, index: u8` | 删除并返回该元素 |
-| index_of | `i8, value&: v` | 按指针值查找（未找到 -1） |
-| reverse | `v` | 原地反转 |
-| clone | `b, out&: list` | 浅拷贝到 out |
-| sort | `v, cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&: v, b&: v` |
+| clear | | 清空（保留容量） |
+| reserve | `bool, n: u8` | 预留槽位 |
+| push | `bool, value&:` | 尾部追加 |
+| pop | `&` | 弹出尾元素（空返回 nil） |
+| get | `&, index: u8` | 取元素（越界返回 nil） |
+| set | `bool, index: u8, value&:` | 改写元素 |
+| insert | `bool, index: u8, value&:` | 指定位置插入 |
+| remove_at | `&, index: u8` | 删除并返回该元素 |
+| index_of | `i8, value&:` | 按指针值查找（未找到 -1） |
+| reverse | | 原地反转 |
+| clone | `bool, out&: list` | 浅拷贝到 out |
+| sort | `cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&:, b&:` |
 
 ### 使用示例
 
@@ -137,7 +138,7 @@ fnc main: i4
 m_impl.c（默认实现，跨平台经由 `platform.h`：POSIX pthread / Windows 线程）。
 Linux 等平台链接时自动追加 `-lpthread`。
 
-句柄约定：`h&: v` 为实现私有指针，调用方不直接访问；结构布局因此
+句柄约定：`h&:` 为实现私有指针（void 指针），调用方不直接访问；结构布局因此
 跨平台稳定。
 
 ### run 语句与 thread —— 线程
@@ -158,9 +159,9 @@ run work(a, b), &t    # joinable：t&: thread，须 t->join() 等待并回收
 | 成员/方法 | 类型/签名 | 说明 |
 |------|------|------|
 | id | `u8` | 跨平台统一线程 id（线程启动后由其自身填写） |
-| join | `v` | 等待结束并回收（含 thread 对象本身，之后指针失效） |
+| join | | 等待结束并回收（含 thread 对象本身，之后指针失效） |
 
-另提供 rpc 仅声明 `msleep: v, ms: u4`：当前线程休眠毫秒（C 侧实现）。
+另提供 rpc 仅声明 `msleep: ms: u4`：当前线程休眠毫秒（C 侧实现）。
 
 thread 不可手工构造（无 init）；`run` 是唯一创建途径。
 
@@ -168,10 +169,10 @@ thread 不可手工构造（无 init）；`run` 是唯一创建途径。
 
 | 方法 | 签名 | 说明 |
 |------|------|------|
-| init | `v` | 构造（声明即构造适用） |
-| drop | `v` | 析构 |
-| lock / unlock | `v` | 加锁 / 解锁 |
-| try_lock | `b` | 取锁成功返回 1，已被占用返回 0 |
+| init | | 构造（声明即构造适用） |
+| drop | | 析构 |
+| lock / unlock | | 加锁 / 解锁 |
+| try_lock | `bool` | 取锁成功返回 1，已被占用返回 0 |
 
 ### 使用示例
 
@@ -186,7 +187,7 @@ def ctx: {
     n: i4
 }
 
-rpc work: v, c&: ctx, rounds: i4   # rpc 即线程体，参数即线程上下文
+rpc work: c&: ctx, rounds: i4      # rpc 即线程体，参数即线程上下文
     var i: i4 = 0
     for i = 0; i < rounds; i++
         c->mu.lock()

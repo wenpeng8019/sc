@@ -155,19 +155,19 @@ struct SGen {
                 ind();
                 if (!d.methodOwner.empty())
                     out << X << "fnc " << d.methodOwner << "::" << d.methodName
-                        << ":" << fncItems(d) << "\n";
+                        << fncItems(d) << "\n";
                 else
-                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
                 break;
             case Decl::FuncD:
                 ind();
                 if (!d.methodOwner.empty())
                     out << X << "fnc " << d.methodOwner << "::" << d.methodName
-                        << ":" << fncItems(d) << "\n";
+                        << fncItems(d) << "\n";
                 else if (!d.funcTypeName.empty())
                     out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
-                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
                 depth++;
                 emitStmts(d.body);
                 depth--;
@@ -177,7 +177,7 @@ struct SGen {
         }
     }
 
-    // fnc 单行项：返回类型 + 参数
+    // fnc 单行项：返回类型 + 参数（皆无时连同 ':' 一并省略）
     std::string fncItems(const Decl& d) {
         std::vector<std::string> parts;
         std::string ret = typeToStr(d.retType);
@@ -187,7 +187,7 @@ struct SGen {
         for (size_t i = 0; i < parts.size(); i++)
             s += (i ? ", " : " ") + parts[i];
         if (d.variadic) s += parts.empty() ? " ..." : ", ...";
-        return s;
+        return s.empty() ? s : ":" + s;
     }
 
     std::string run(const Program& prog) {

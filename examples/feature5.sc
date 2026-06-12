@@ -11,11 +11,11 @@ rpc add: i4, a: i4, b: i4
     return a + b
 
 # 无返回值（v）：结构体不含返回槽 _
-rpc greet: v, n: i4
+rpc greet: n: i4
     printf("hello rpc x%d\n", n)
 
 # 指针参数（rpc 参数不支持数组，用 & 指针代替）
-rpc strlen2: i4, s&: c1
+rpc strlen2: i4, s&: char
     var n: i4 = 0
     while s[n] != 0
         n++
