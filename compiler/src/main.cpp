@@ -50,7 +50,10 @@ static void usage() {
               << "          inc    = /opt/inc:vendor/inc  # 头文件搜索路径，':' 分隔 → -I（SCC_INC 优先）\n"
               << "          lib    = /opt/lib:vendor/lib  # 库搜索路径，':' 分隔 → -L（SCC_LIB 优先）\n"
               << "          libs   = m pthread       # 链接库名，空格/逗号分隔 → -l（SCC_LIBS 优先）\n"
+              << "          adt    = my_adt.c        # adt 自定义实现（SCC_ADT/--adt 优先）\n"
               << "  -l <名>    追加链接库（可重复；-lm 写法也支持，与配置的 libs 合并）\n"
+              << "  --adt <x>  adt 自定义实现（.c/.o/.a，照 builtins/adt/adt.h 契约实现）；\n"
+              << "             未指定时 inc adt.sc 自动链接内置默认实现 builtins/adt/adt_impl.c\n"
               << "  --build    构建产物模式：编译链接为持久产物，应用与 run 相同的工具链配置\n"
               << "             产物类型按 -o 后缀决定：.a → 静态库（ar rcs）；\n"
               << "             .so/.dylib → 动态库（-shared，单元编译附加 -fPIC）；其余 → 可执行文件\n"
@@ -160,10 +163,12 @@ static std::vector<std::string> splitBy(const std::string& s, const char* seps) 
 struct ToolConfig {
     std::string cflags;   // 编译阶段附加选项（含 -I 展开）
     std::string ldflags;  // 链接阶段附加选项（含 -L/-l 展开）
+    std::string adtImpl;  // adt 自定义实现（--adt/SCC_ADT/.sc 配置 adt；空=内置默认实现）
 };
 
 // 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l
-static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs) {
+static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
+                                 const std::string& adtOpt = "") {
     ToolConfig tc;
     const std::string cflags = configValue("SCC_CFLAGS", "cflags");
     if (!cflags.empty()) tc.cflags += " " + cflags;
@@ -177,6 +182,7 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs) {
         tc.ldflags += " -l" + l;
     for (auto& l : extraLibs)
         tc.ldflags += " -l" + l;
+    tc.adtImpl = !adtOpt.empty() ? adtOpt : configValue("SCC_ADT", "adt");
     return tc;
 }
 
@@ -263,14 +269,18 @@ static std::filesystem::path resolveModulePath(const std::string& raw,
         candidates.push_back(rel.string() + ".sc");
         candidates.push_back(baseDir / (rel.string() + ".sc"));
     }
-    if (!builtins.empty()) {
-        candidates.push_back(builtins / rel);
-        if (!endsWith(target, ".sc")) candidates.push_back(builtins / (rel.string() + ".sc"));
-    }
-    if (!cwdBuiltins.empty() && cwdBuiltins != builtins) {
-        candidates.push_back(cwdBuiltins / rel);
-        if (!endsWith(target, ".sc")) candidates.push_back(cwdBuiltins / (rel.string() + ".sc"));
-    }
+    // builtins 搜索：直接路径 + 子项目形态 builtins/<名>/<名>.sc（如 adt/adt.sc）
+    auto pushBuiltins = [&](const std::filesystem::path& b) {
+        if (b.empty()) return;
+        candidates.push_back(b / rel);
+        const std::string stem = rel.stem().string();
+        candidates.push_back(b / stem / (stem + ".sc"));
+        if (!endsWith(target, ".sc")) candidates.push_back(b / (rel.string() + ".sc"));
+    };
+    pushBuiltins(builtins);
+    if (cwdBuiltins != builtins) pushBuiltins(cwdBuiltins);
+    if (const char* envB = std::getenv("SCC_BUILTINS"))
+        pushBuiltins(std::filesystem::path(envB));
     for (auto& c : candidates)
         if (!c.empty() && std::filesystem::exists(c) && std::filesystem::is_regular_file(c))
             return std::filesystem::weakly_canonical(c);
@@ -333,6 +343,23 @@ static std::vector<std::filesystem::path> resolveUnitDeps(Program& prog,
             deps.push_back(modPath);
         } else {
             d->external = false;
+        }
+    }
+    // 合并直接依赖的 @导出声明（external 标记）：供跨模块语法糖
+    //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成
+    for (auto& dep : deps) {
+        const std::string text = readWholeFile(dep);
+        if (text.empty()) continue;
+        try {
+            Program mp = parseSourceText(text);
+            for (auto& md : mp.decls) {
+                if (!md->exported) continue;
+                md->external = true;
+                md->origin = dep.string();
+                prog.decls.push_back(std::move(md));
+            }
+        } catch (...) {
+            // 依赖解析失败：留待该单元自身编译时报错
         }
     }
     return deps;
@@ -426,6 +453,39 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             return 1;
         }
         objects.push_back(a.opath);
+    }
+
+    // 第三阶段：adt 实现自动参与链接（单元图含 builtins 的 adt.sc 时）
+    //   未指定 --adt → 内置默认实现 builtins/adt/adt_impl.c
+    //   --adt <x.c|x.o|x.a> → 替换为自定义实现
+    std::filesystem::path adtDir;
+    for (auto& kv : units) {
+        const std::filesystem::path p(kv.first);
+        if (p.filename() == "adt.sc" && p.parent_path().filename() == "adt") {
+            adtDir = p.parent_path();
+            break;
+        }
+    }
+    if (!adtDir.empty()) {
+        std::filesystem::path impl = tc.adtImpl.empty()
+            ? adtDir / "adt_impl.c" : std::filesystem::path(tc.adtImpl);
+        if (!std::filesystem::exists(impl)) {
+            std::cerr << "错误: adt 实现文件不存在: " << impl.string() << "\n";
+            return 1;
+        }
+        if (impl.extension() == ".c") {
+            const std::filesystem::path obj = tmpDir / "adt_impl.o";
+            std::string ccCmd = pickCC() + " -g" + tc.cflags + extraCFlags
+                + " -I " + adtDir.string()
+                + " -c " + impl.string() + " -o " + obj.string();
+            if (std::system(ccCmd.c_str()) != 0) {
+                std::cerr << "错误: adt 实现编译失败（" << ccCmd << "）\n";
+                return 1;
+            }
+            objects.push_back(obj);
+        } else {
+            objects.push_back(impl);  // .o/.a 直接参与链接
+        }
     }
     return 0;
 }
@@ -597,6 +657,7 @@ int main(int argc, char** argv) {
     std::string input, output, mode = "run";  // 默认：编译+执行
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
     std::vector<std::string> cmdLibs;         // -l 指定的链接库名
+    std::string adtOpt;                       // --adt 指定的 adt 自定义实现
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--") {                                     // 其后全部为程序参数
@@ -605,6 +666,7 @@ int main(int argc, char** argv) {
         }
         else if (a == "-o" && i + 1 < argc) output = argv[++i];  // 输出文件（可选）
         else if (a == "-l" && i + 1 < argc) cmdLibs.push_back(argv[++i]);  // -l m
+        else if (a == "--adt" && i + 1 < argc) adtOpt = argv[++i];  // adt 自定义实现
         else if (a.size() > 2 && a.compare(0, 2, "-l") == 0)
             cmdLibs.push_back(a.substr(2));                  // -lm 写法
         else if (a == "--build") mode = "build";             // 构建产物模式
@@ -650,14 +712,14 @@ int main(int argc, char** argv) {
 
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
         if (mode == "run") {
-            const ToolConfig tc = loadToolConfig(cmdLibs);
+            const ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
             if (input == "-") return compileAndRun(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);
         }
 
         // 3d'. build 模式：编译链接为持久产物（类型按 -o 后缀决定）
         if (mode == "build") {
-            const ToolConfig tc = loadToolConfig(cmdLibs);
+            const ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
             std::string out = output;
             if (out.empty()) {
                 if (input == "-") {

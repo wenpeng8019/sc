@@ -15,7 +15,7 @@ rpc greet: v, n: i4
     printf("hello rpc x%d\n", n)
 
 # 指针参数（rpc 参数不支持数组，用 & 指针代替）
-rpc strlen2: i4, s&: u1
+rpc strlen2: i4, s&: c1
     var n: i4 = 0
     while s[n] != 0
         n++

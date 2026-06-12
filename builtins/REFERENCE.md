@@ -1,167 +1,110 @@
-# SC Builtins Reference
+# builtins 内置模块参考
 
-## ADT 概览
+`builtins/` 是 scc 的内置模块搜索路径：`inc x.sc` 会依次尝试
+`builtins/x.sc` 与子项目形态 `builtins/x/x.sc`。
+也可用环境变量 `SCC_BUILTINS` 指定额外搜索目录。
 
-导入方式：
+当前内置模块：
 
-```sc
-inc adt.sc
+| 模块 | 引入方式 | 说明 |
+|------|----------|------|
+| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
+
+## adt —— 抽象数据类型子项目
+
+目录结构（`builtins/adt/`）：
+
+| 文件 | 角色 |
+|------|------|
+| adt.sc | 唯一事实源：`@def` 数据布局 + `@fnc T::m` 方法声明（无函数体） |
+| adt.h | C ABI 契约（与 adt.sc 同步维护），自定义实现据此编写 |
+| adt_impl.c | 默认实现，编译器自动编译并链接 |
+
+### 工作机制
+
+1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list` 类型及其方法。
+2. 方法声明（`fnc T::m` 无函数体）转 C 时生成 extern 原型 `T_m(T *_this, ...)`，
+   实现由链接期注入。
+3. 单元图包含 `builtins/adt/adt.sc` 时，scc 自动编译并链接默认实现
+   `adt_impl.c`；可替换为自定义实现：
+
+```sh
+scc app.sc --adt my_adt.c      # .c 自动编译；.o/.a 直接参与链接
+SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 ```
 
-`adt.sc` 提供以下预定义抽象数据类型（ADT）：
+自定义实现须完整实现 `adt.h` 中的全部函数（可基于第三方库如 sds、uthash 等封装）。
 
-- `adt_obj`：所有 ADT 的公共对象头
-- `string`：字符串对象（对齐 Python `str` 常用能力）
-- `list`：动态数组对象（对齐 Python `list` 常用能力）
-- `dict`：键值映射对象（对齐 Python `dict` 常用能力）
-- `dim`：多维数组对象（对齐 NumPy ndarray 常用能力）
-- `json`：JSON DOM 对象
+### 构造与析构
 
-说明：
+- `init`：声明即构造。函数内 `var s: string`（无初值、非指针、非数组）自动调用
+  `string_init(&s)`；全局变量需手动 init。
+- `drop`：手动析构 `s.drop()`（命名保留，未来支持作用域自动插入）。
 
-- 本模块只定义接口契约，不绑定具体算法和内存模型。
-- 运行期由插件通过 `adt_bind_*` / `adt_new_*` 注入实现。
-- “Python 完全对齐”在不同插件下可通过扩展实现；内置层先提供高覆盖核心接口。
+### string —— 动态字符串
 
-## 通用对象协议 adt_obj
+内部 NUL 结尾，`cstr()` 永不返回 nil，可直接交给 C 接口。
+返回 `b` 的方法：1 成功 / 0 失败（内存不足或参数越界）。
 
-字段：
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `v` | 构造为空串 |
+| drop | `v` | 释放缓冲区 |
+| len | `u8` | 字符数（不含 NUL） |
+| cstr | `c1&` | C 字符串视图（始终非 nil） |
+| clear | `v` | 置空（保留容量） |
+| reserve | `b, n: u8` | 预留容量 |
+| assign | `b, s&: c1` | 赋值为 C 字符串 |
+| append | `b, s&: c1` | 追加 C 字符串 |
+| append_n | `b, s&: c1, n: u8` | 追加前 n 字节 |
+| append_char | `b, c: c1` | 追加单字符 |
+| insert | `b, index: u8, s&: c1` | 指定位置插入 |
+| erase | `b, index: u8, n: u8` | 删除 n 字节 |
+| at | `c1, index: u8` | 取字符（越界返回 0） |
+| find | `i8, sub&: c1, start: u8` | 查找子串（未找到 -1） |
+| rfind | `i8, sub&: c1` | 反向查找（未找到 -1） |
+| equals | `b, s&: c1` | 与 C 字符串比较相等 |
+| starts_with | `b, s&: c1` | 前缀判断 |
+| ends_with | `b, s&: c1` | 后缀判断 |
+| slice | `b, start: i8, stop: i8, out&: string` | 切片 `[start, stop)`，负索引从尾部计 |
+| strip | `v` | 去除首尾空白 |
+| lower / upper | `v` | 大小写转换（ASCII） |
+| clone | `b, out&: string` | 深拷贝到 out |
 
-- `plugin&: v` 插件上下文
-- `flags: u8` 状态标志
-- `err_code: i4` 错误码
+### list —— 动态指针数组
 
-方法：
+元素为 `v&`（裸指针），**不拥有元素**：drop/clear/remove_at 不释放元素本身。
 
-- `drop()` 释放资源
-- `clone(out)` 深浅拷贝（语义由插件定义）
-- `reset()` 重置到初始状态
-- `type_name()` 返回类型名 bytes
-- `last_error()` 返回最近错误码
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `v` | 构造为空列表 |
+| drop | `v` | 释放槽位数组 |
+| len | `u8` | 元素个数 |
+| clear | `v` | 清空（保留容量） |
+| reserve | `b, n: u8` | 预留槽位 |
+| push | `b, value&: v` | 尾部追加 |
+| pop | `v&` | 弹出尾元素（空返回 nil） |
+| get | `v&, index: u8` | 取元素（越界返回 nil） |
+| set | `b, index: u8, value&: v` | 改写元素 |
+| insert | `b, index: u8, value&: v` | 指定位置插入 |
+| remove_at | `v&, index: u8` | 删除并返回该元素 |
+| index_of | `i8, value&: v` | 按指针值查找（未找到 -1） |
+| reverse | `v` | 原地反转 |
+| clone | `b, out&: list` | 浅拷贝到 out |
+| sort | `v, cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&: v, b&: v` |
 
-## string 参考
+### 使用示例
 
-核心字段：
-
-- `data&: u1`
-- `size: u8`
-- `capacity: u8`
-
-能力分组：
-
-- 容量与生命周期：`len/is_empty/clear/reserve/shrink_to_fit`
-- 构造与拼接：`assign_bytes/assign_string/append_bytes/append_string/append_char`
-- 编辑：`insert_bytes/erase/replace_bytes`
-- 访问：`at/slice/view`
-- 比较与搜索：`equals_* / compare_string / starts_with / ends_with / find_bytes / rfind_bytes / count_bytes`
-- 规范化：`strip/lstrip/rstrip/lower/upper`
-- 组合：`split_bytes`（输出 list）、`join_list`（输出 string）
-
-## list 参考
-
-核心字段：
-
-- `size: u8`
-- `capacity: u8`
-
-能力分组：
-
-- 容量：`len/is_empty/clear/reserve/shrink_to_fit`
-- 变更：`push/extend/insert/pop/pop_at/remove_at/remove_value`
-- 访问：`get/set/slice`
-- 查询排序：`index_of/count/reverse/sort`
-
-说明：
-
-- 元素通过 `v&` 透传，插件可定义 boxed value、引用计数、GC 等策略。
-
-## dict 参考
-
-能力分组：
-
-- 基础：`len/is_empty/clear/has/get/get_or/set/del`
-- Python 常见操作：`pop/setdefault/update/copy_to`
-- 视图导出：`keys/values/items`（输出 list）
-
-键值约定：
-
-- `key`: `(u1&, key_n)`，可覆盖 UTF-8 字符串 key
-- `value`: `v&`，由插件决定实际值语义
-
-## dim 参考
-
-核心字段：
-
-- `data&: v`
-- `shape&: u8`
-- `strides&: i8`
-- `ndim: u8`
-- `dtype: i4`
-
-能力分组：
-
-- 结构信息：`rank/numel/is_contiguous/shape_at/stride_at`
-- 形状与类型：`reshape/transpose/astype`
-- 元素访问：`get_f8/set_f8/fill_f8`
-- 广播/逐元素：`add/sub/mul/div`
-- 线代与归约：`matmul/sum/mean/min/max`
-
-说明：
-
-- 广播规则、dtype 号表、并行执行策略由插件定义。
-
-## json 参考
-
-核心字段：
-
-- `root&: v`
-- `kind: i4`（插件定义枚举：null/bool/number/string/array/object）
-
-能力分组：
-
-- 解析序列化：`parse_bytes/parse_string/parse_file/stringify/dump_pretty/reset`
-- 类型判断：`is_null/is_bool/is_number/is_string/is_array/is_object`
-- 标量转换：`to_bool/to_i8/to_f8/to_string` 和 `from_*`
-- 对象操作：`has_key/get_key/set_key/del_key/keys`
-- 数组操作：`len/get_index/set_index/insert_index/push/pop`
-- 路径访问：`get_path/set_path`
-
-## 插件接入函数
-
-绑定已有对象：
-
-- `adt_bind_string`
-- `adt_bind_list`
-- `adt_bind_dict`
-- `adt_bind_dim`
-- `adt_bind_json`
-
-构造新对象：
-
-- `adt_new_string`
-- `adt_new_list`
-- `adt_new_dict`
-- `adt_new_dim`
-- `adt_new_json`
-
-## 最小使用示例
+完整示例见 `examples/feature6.sc`：
 
 ```sc
+inc stdio.h
 inc adt.sc
 
-fnc demo: b, plugin&: v
-    var s: string
-    if !adt_new_string(&s, plugin)
-        return false
-    s.append_bytes((u1&)"hello", 5)
-
-    var d: dict
-    if !adt_new_dict(&d, plugin)
-        return false
-
-    var j: json
-    if !adt_new_json(&j, plugin)
-        return false
-    j.parse_string(&s)
-    return true
+fnc main: i4
+    var s: string              # 声明即构造
+    s.append("hello")
+    printf("%s len=%llu\n", s.cstr(), s.len())
+    s.drop()                   # 手动析构
+    return 0
 ```

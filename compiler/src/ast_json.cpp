@@ -170,7 +170,9 @@ std::string declNode(const Decl& d) {
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
             if (d.variadic) c.push_back(node("param", "...", "", d.line));
             std::string ret = typeToStr(d.retType);
-            return nodeExt(d.isRpc ? "rpc" : "fnctype", d.name,
+            std::string ftName = !d.methodOwner.empty()
+                ? d.methodOwner + "::" + d.methodName : d.name;
+            return nodeExt(d.isRpc ? "rpc" : "fnctype", ftName,
                            ret.empty() ? X : X + ": " + ret,
                            d.line, d.external, d.origin, c);
         }

@@ -61,6 +61,7 @@ f4  -> float
 f8  -> double
 v   -> void
 b   -> bool / uint8_t
+c1  -> char
 ```
 
 此外还有字面量常量：
@@ -69,7 +70,8 @@ b   -> bool / uint8_t
 - `false`
 - `nil`
 
-其中 `b` 是布尔类型别名，`nil` 用于空指针/空值判断。
+其中 `b` 是布尔类型别名，`c1` 用于与 C 字符串字面量/接口互操作
+（`s&: c1` 即 `char *s`），`nil` 用于空指针/空值判断。
 
 ## 4. 名字后的元类型
 
@@ -113,8 +115,12 @@ inc io.sc
 
 - 每个 `.sc` 文件独立转成 C 单元并编译为对象文件。
 - `inc x.sc` 表示模块依赖，C 侧通过模块头文件连接接口，不做源码文本展开。
+  同时依赖模块的 `@` 导出声明会被合并进导入方的符号表，
+  使跨模块的方法调用糖、声明即构造等语法糖生效。
 - scc 在运行模式下会按依赖图编译并链接多个单元。
-- 仓库根下 `builtins/` 作为内置模块搜索路径。
+- 仓库根下 `builtins/` 作为内置模块搜索路径；`inc x.sc` 会依次尝试
+  `builtins/x.sc` 与子项目形态 `builtins/x/x.sc`（如 adt），
+  也可用环境变量 `SCC_BUILTINS` 指定额外搜索目录。
 - 内置模块参考手册见 `builtins/REFERENCE.md`。
 
 ### 无预处理器设计与 C 头文件互操作
@@ -179,9 +185,10 @@ fnc main: i4
 | `SCC_INC` | `inc` | 头文件搜索路径，`:` 分隔多路径（类似 PATH） | 逐项 `-I` |
 | `SCC_LIB` | `lib` | 库搜索路径，`:` 分隔多路径 | 逐项 `-L` |
 | `SCC_LIBS` | `libs` | 链接库名，空格或逗号分隔 | 逐项 `-l` |
+| `SCC_ADT` | `adt` | adt 自定义实现（`.c`/`.o`/`.a`） | 参与链接 |
 
 此外 scc 命令行支持 `-l <名>`（可重复，`-lm` 紧凑写法也支持），
-与配置中的 `libs` 合并。
+与配置中的 `libs` 合并；`--adt <path>` 优先于 `SCC_ADT` 与配置键 `adt`。
 
 `.sc` 配置文件示例（每行 `key = value`，`#` 行注释）：
 
@@ -327,7 +334,41 @@ fnc obj::add: i4, x:i4, y:i4
     return this->v + x + y
 ```
 
-这会被规范化成一个带接收者的 C 函数，并在调用时自动注入接收者参数。
+这会被规范化成一个带接收者的 C 函数（修饰名 `obj_add`，首参
+`obj *_this`），调用时自动注入接收者：
+
+```sc
+var o: obj
+o.add(1, 2)     # → obj_add(&o, 1, 2)
+var p&: obj = &o
+p->add(1, 2)    # → obj_add(p, 1, 2)
+```
+
+不带函数体时为**方法声明**（对称于 rpc 的仅声明形态）：生成 extern
+原型，实现由 C 侧提供，调用糖不变——这是内置 adt 的实现通道：
+
+```sc
+@def string: { data&: c1, size: u8, cap: u8 }
+@fnc string::len: u8          # 仅声明，C 侧实现 uint64_t string_len(string*)
+```
+
+#### 构造与析构：init / drop
+
+两个保留方法名承担构造/析构语义：
+
+- `init`（无参）：**声明即构造**。函数内 `var x: T` 且无显式初值、
+  非指针非数组时，转 C 会自动插入 `T_init(&x)`。
+  全局变量不自动构造（C 静态初始化限制），需手动调用。
+- `drop`：析构，当前需**手动调用** `x.drop()`（命名保留，
+  未来支持作用域结束自动插入）。
+
+```sc
+fnc main: i4
+    var s: string      # 自动 string_init(&s)
+    s.append("hi")
+    s.drop()           # 手动释放
+    return 0
+```
 
 ### 8.4 方法字段
 

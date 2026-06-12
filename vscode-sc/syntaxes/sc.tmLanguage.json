@@ -96,7 +96,7 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b"
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|c1|f4|f8|v)\\b"
                 },
                 {
                     "name": "storage.type.library.sc",
@@ -104,7 +104,7 @@
                 },
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "(?<=:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|f4|f8|v)\\b(?!\\s*[:(\\n])"
+                    "match": "(?<=:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|b|c1|f4|f8|v)\\b(?!\\s*[:(\\n])"
                 },
                 {
                     "name": "storage.type.library.sc",

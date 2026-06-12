@@ -146,7 +146,12 @@ struct SGen {
                 ind(); out << X << "def " << d.name << " -> " << typeToStr(d.type) << "\n";
                 break;
             case Decl::FuncTypeD:
-                ind(); out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
+                ind();
+                if (!d.methodOwner.empty())
+                    out << X << "fnc " << d.methodOwner << "::" << d.methodName
+                        << ":" << fncItems(d) << "\n";
+                else
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
                 break;
             case Decl::FuncD:
                 ind();

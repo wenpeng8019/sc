@@ -24,6 +24,7 @@ std::string mapBase(const std::string& n) {
         {"u1", "uint8_t"}, {"u2", "uint16_t"}, {"u4", "uint32_t"}, {"u8", "uint64_t"},
         {"f4", "float"},   {"f8", "double"},  {"v", "void"},
         {"b", "uint8_t"},  // bool：u1 的引用别名（true/false 即 1/0）
+        {"c1", "char"},    // 字符：与 C 字符串字面量/接口互操作用
         {"va_list", "va_list"},  // 透传：可变参数列表类型
     };
     auto it = m.find(n);
@@ -56,6 +57,8 @@ struct CGen {
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
     std::unordered_map<std::string, std::string> aliases;  // 别名 → 目标类型名
+    // 顶层方法表：所属类型 → 方法名 → Decl（fnc T::m 定义或声明）
+    std::unordered_map<std::string, std::unordered_map<std::string, const Decl*>> methods;
     // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
     struct VType { std::string name; int ptr = 0; int arr = 0; };
     std::unordered_map<std::string, VType> globalsT, localsT;
@@ -149,6 +152,21 @@ struct CGen {
     static bool hasMethods(const Decl* d) {
         for (auto& f : d->fields) if (f.type.fnKind == TypeRef::FncKind::MethodPtr) return true;
         return false;
+    }
+
+    // 查找顶层方法：类型名（穿透别名）→ 方法 Decl（未找到 nullptr）
+    const Decl* findMethod(std::string typeName, const std::string& m) const {
+        for (int i = 0; i < 8 && !typeName.empty(); i++) {
+            auto it = methods.find(typeName);
+            if (it != methods.end()) {
+                auto mit = it->second.find(m);
+                if (mit != it->second.end()) return mit->second;
+            }
+            auto al = aliases.find(typeName);
+            if (al == aliases.end()) return nullptr;
+            typeName = al->second;
+        }
+        return nullptr;
     }
 
     static bool hasFieldDefaults(const Decl* d) {
@@ -254,7 +272,24 @@ struct CGen {
                 if (!top) out << ")";
                 break;
             case Expr::Call: {
-                // 方法调用：仅成员函数指针才自动注入接收者
+                // 顶层方法调用糖：o.m(...) / p->m(...) → T_m(&o/p, ...)
+                if (e.a->kind == Expr::Member && !callableField(*e.a)) {
+                    VType base;
+                    if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
+                        if (const Decl* md = findMethod(base.name, e.a->text)) {
+                            out << md->name << "(";   // 修饰名 T_m
+                            if (e.a->op == ".") out << "&";
+                            emitExpr(*e.a->a);
+                            for (auto& a : e.args) {
+                                out << ", ";
+                                emitExpr(*a, true);
+                            }
+                            out << ")";
+                            break;
+                        }
+                    }
+                }
+                // 方法字段调用：成员函数指针自动注入接收者
                 const Field* mf = callableField(*e.a);
                 emitExpr(*e.a);
                 out << "(";
@@ -343,6 +378,15 @@ struct CGen {
                 }
             }
             out << ";\n";
+            // 声明即构造：函数内无初值的结构变量，若类型有无参 init 方法则自动调用
+            if (inFunc && !f.init && f.type.ptr == 0 && f.type.arrayDims.empty()
+                && !f.type.hasInline) {
+                const Decl* im = findMethod(f.type.name, "init");
+                if (im && im->fields.empty()) {
+                    indent();
+                    out << im->name << "(&" << f.name << ");\n";
+                }
+            }
         }
     }
 
@@ -614,9 +658,13 @@ struct CGen {
         out << " " << d.name << "(";
         if (!d.methodOwner.empty()) {
             out << d.methodOwner << " *_this";
-            if (!sig->fields.empty() || sig->variadic) out << ", ";
+            if (!sig->fields.empty() || sig->variadic) {
+                out << ", ";
+                emitParams(sig->fields, sig->variadic);
+            }
+        } else {
+            emitParams(sig->fields, sig->variadic);
         }
-        emitParams(sig->fields, sig->variadic);
         out << ")";
     }
 
@@ -757,6 +805,7 @@ struct CGen {
         for (auto& d : prog.decls) {
             if (d->kind != Decl::StructD && d->kind != Decl::UnionD) continue;
             if (exportedOnly && !d->exported) continue;
+            if (d->external) continue;  // 外部模块类型由其模块头提供
             if (!emitted.insert(d->name).second) continue;
             out << "typedef " << (d->kind == Decl::UnionD ? "union" : "struct")
                 << " " << d->name << " " << d->name << ";\n";
@@ -786,16 +835,20 @@ struct CGen {
         // 最简策略：默认为所有结构/联合输出前置声明，消除定义顺序依赖
         emitForwardAggrDecls();
 
-        // 收集函数类型与聚合类型（struct/union/别名）注册表
+        // 收集函数类型、聚合类型与顶层方法注册表（含外部模块合并声明，供语法糖识别）
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD && !d->isRpc) funcTypes[d->name] = d.get();
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+                funcTypes[d->name] = d.get();
             else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
                 aggrs[d->name] = d.get();
             else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
+            if (!d->methodOwner.empty() && !d->isRpc)
+                methods[d->methodOwner][d->methodName] = d.get();
         }
 
-        // 第一遍：类型、全局变量、函数原型
+        // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
+            if (d->external && d->kind != Decl::IncD) continue;
             switch (d->kind) {
                 case Decl::EnumD: case Decl::StructD:
                 case Decl::UnionD: case Decl::AliasD:
@@ -804,6 +857,8 @@ struct CGen {
                 case Decl::FuncTypeD:
                     // rpc 仅声明：接口三件套，实际函数在外部（C 侧）实现
                     if (d->isRpc) emitRpcInterface(*d, false);
+                    // 方法声明（fnc T::m 无函数体）：extern 原型，实现在外部（C 侧）
+                    else if (!d->methodOwner.empty()) { emitFuncSig(*d); out << ";\n"; }
                     else emitTypeDecl(*d);
                     break;
                 case Decl::VarD:
@@ -824,9 +879,9 @@ struct CGen {
             }
         }
         out << "\n";
-        // 第二遍：函数定义
+        // 第二遍：函数定义（外部模块函数在其自身单元实现）
         for (auto& d : prog.decls)
-            if (d->kind == Decl::FuncD) emitFunc(*d);
+            if (d->kind == Decl::FuncD && !d->external) emitFunc(*d);
         return out.str();
     }
 
@@ -834,7 +889,7 @@ struct CGen {
     // 导出类型 → 完整 typedef；导出变量/常量 → extern；导出函数 → 原型
     std::string runHeader(const std::string& guard) {
         bool any = false;
-        for (auto& d : prog.decls) if (d->exported) { any = true; break; }
+        for (auto& d : prog.decls) if (d->exported && !d->external) { any = true; break; }
         if (!any) return "";
 
         out << "/* 由 scc 生成，请勿手工修改 —— @导出对象声明 */\n"
@@ -847,12 +902,16 @@ struct CGen {
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
         emitForwardAggrDecls(true);
 
-        // 函数类型表（导出函数可能引用未导出的函数类型签名）
-        for (auto& d : prog.decls)
-            if (d->kind == Decl::FuncTypeD && !d->isRpc) funcTypes[d->name] = d.get();
+        // 函数类型表与方法表（导出函数可能引用未导出的函数类型签名）
+        for (auto& d : prog.decls) {
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+                funcTypes[d->name] = d.get();
+            if (!d->methodOwner.empty() && !d->isRpc)
+                methods[d->methodOwner][d->methodName] = d.get();
+        }
 
         for (auto& d : prog.decls) {
-            if (!d->exported) continue;
+            if (!d->exported || d->external) continue;
             switch (d->kind) {
                 case Decl::EnumD: case Decl::StructD:
                 case Decl::UnionD: case Decl::AliasD:
@@ -860,6 +919,7 @@ struct CGen {
                     break;
                 case Decl::FuncTypeD:
                     if (d->isRpc) emitRpcInterface(*d, false);
+                    else if (!d->methodOwner.empty()) { emitFuncSig(*d); out << ";\n"; }
                     else emitTypeDecl(*d);
                     break;
                 case Decl::VarD: emitExternVars(d->fields, false); break;

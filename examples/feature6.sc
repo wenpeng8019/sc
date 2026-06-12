@@ -1,0 +1,58 @@
+# 特性 6：内置 ADT（builtins/adt）与方法语法
+#   - fnc T::m 方法定义（同文件）与方法声明（实现在 C 侧，见 adt.sc）
+#   - init 构造：var x: T 声明即自动调用 T::init（局部、无初值、非指针）
+#   - drop 析构：手动调用（命名保留，未来支持自动插入）
+#   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
+inc stdio.h
+inc stdlib.h
+inc adt.sc
+
+# 同文件方法定义：fnc 所属类型::方法名
+def counter: {
+    n: i4
+}
+
+fnc counter::init: v
+    this->n = 100
+
+fnc counter::add: i4, k: i4
+    this->n = this->n + k
+    return this->n
+
+fnc str_cmp -> list_cmp
+    return strcmp((a: c1&), (b: c1&))
+
+fnc main: i4
+    # 声明即构造：自动调用 counter_init/string_init/list_init
+    var c: counter
+    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
+
+    # string：动态字符串
+    var s: string
+    s.append("Hello")
+    s.append(", sc!")
+    printf("s=%s len=%llu\n", s.cstr(), s.len())
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
+           s.find("sc", 0), s.starts_with("Hello"))
+    var part: string
+    s.slice(-3, -1, &part)              # 负索引切片
+    printf("slice(-3,-1)=%s\n", part.cstr())
+    s.upper()
+    printf("upper=%s\n", s.cstr())
+
+    # list：动态指针数组（元素 v&，不拥有元素）
+    var l: list
+    l.push("banana")
+    l.push("apple")
+    l.push("cherry")
+    l.sort(str_cmp)
+    var i: u8 = 0
+    for i = 0; i < l.len(); i++
+        printf("list[%llu]=%s\n", i, (l.get(i): c1&))
+
+    # 析构：手动 drop（指针接收者用 ->）
+    var lp&: list = &l
+    lp->drop()
+    part.drop()
+    s.drop()
+    return 0

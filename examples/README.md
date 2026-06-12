@@ -12,8 +12,9 @@
 | feature1.sc | 核心语法：def（枚举/结构/联合/别名）、fnc（函数类型/实现/多行参数）、var/let、指针 `&`、控制流、多行条件表达式 |
 | feature2.sc | 多维数组 `name[x][y]`、`@` 导出、`inc` 头文件 |
 | feature3.sc | `b` 布尔类型、`true/false/nil` 常量、伪 class 方法字段 |
-| feature4.sc | sc 模块导入（`inc x.sc`，单元编译+链接）：builtins/adt.sc |
+| feature4.sc | sc 模块导入（`inc x.sc`，单元编译+链接）：builtins/adt/adt.sc |
 | feature5.sc | `rpc` 伪形参函数（参数/返回值展开为同名结构体，`@rpc` 导出） |
+| feature6.sc | 内置 ADT（string/list）与方法语法：`fnc T::m` 定义/声明、init 声明即构造、drop 手动析构、调用糖 |
 
 ## 专项验证（feature_*.sc）：编译器机制
 

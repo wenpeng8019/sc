@@ -407,7 +407,8 @@ struct Checker {
 
     void collectTop() {
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD && !d->isRpc) funcTypes[d->name] = d.get();
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+                funcTypes[d->name] = d.get();
             if (d->kind == Decl::StructD || d->kind == Decl::UnionD) structs[d->name] = d.get();
             if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
         }
