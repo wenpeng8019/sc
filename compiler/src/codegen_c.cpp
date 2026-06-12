@@ -271,6 +271,12 @@ struct CGen {
             case Expr::Cast:
                 vt = {e.text, e.castPtr, 0};
                 return true;
+            case Expr::Binary:
+                // 赋值表达式的结果类型 = 左操作数类型（支持 (p = T())->m() 等）
+                if (!e.op.empty() && e.op.back() == '='
+                    && e.op != "==" && e.op != "!=" && e.op != "<=" && e.op != ">=")
+                    return exprVType(*e.a, vt);
+                return false;
             case Expr::Call:
                 // T() 伪调用结果类型：T&（使链式方法调用可推断）
                 if (const Decl* td = typeCallee(e)) {
