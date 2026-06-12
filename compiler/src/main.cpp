@@ -244,6 +244,43 @@ static bool endsWith(const std::string& s, const std::string& suffix) {
     return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+#ifdef SCC_EMBED_BUILTINS
+// ---------------- 内嵌 builtins（发行版变体）----------------
+// CMake -DSCC_EMBED_BUILTINS=ON 时，builtins 的 .sc/.h 与预编译 adt.a
+// 经 cmake/embed_builtins.cmake 生成的表内嵌进二进制；首次使用释放到
+// ~/.cache/scc/builtins-<内容哈希>（已存在且大小一致则复用，内容变化
+// 自动换目录），使 scc 单二进制发行无需携带 builtins 目录。
+struct EmbeddedFile { const char* path; const unsigned char* data; size_t size; };
+extern const EmbeddedFile g_embeddedBuiltins[];
+extern const size_t g_embeddedBuiltinsCount;
+extern const char* const g_embeddedBuiltinsHash;
+
+static std::filesystem::path embeddedBuiltinsDir() {
+    static const std::filesystem::path cached = [] {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path base;
+        if (const char* home = std::getenv("HOME"))
+            base = fs::path(home) / ".cache" / "scc";
+        else
+            base = fs::temp_directory_path(ec) / "scc-cache";
+        const fs::path dir = base / ("builtins-" + std::string(g_embeddedBuiltinsHash));
+        for (size_t i = 0; i < g_embeddedBuiltinsCount; i++) {
+            const auto& f = g_embeddedBuiltins[i];
+            const fs::path p = dir / f.path;
+            if (fs::is_regular_file(p, ec) && fs::file_size(p, ec) == f.size) continue;
+            fs::create_directories(p.parent_path(), ec);
+            std::ofstream out(p, std::ios::binary);
+            if (!out.write(reinterpret_cast<const char*>(f.data),
+                           static_cast<std::streamsize>(f.size)))
+                return fs::path{};  // 释放失败：禁用内嵌目录（不影响其余搜索路径）
+        }
+        return dir;
+    }();
+    return cached;
+}
+#endif
+
 static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start) {
     for (auto p = start; !p.empty(); ) {
         auto cand = p / "builtins";
@@ -281,6 +318,9 @@ static std::filesystem::path resolveModulePath(const std::string& raw,
     if (cwdBuiltins != builtins) pushBuiltins(cwdBuiltins);
     if (const char* envB = std::getenv("SCC_BUILTINS"))
         pushBuiltins(std::filesystem::path(envB));
+#ifdef SCC_EMBED_BUILTINS
+    pushBuiltins(embeddedBuiltinsDir());  // 内嵌资源释放目录（优先级最低）
+#endif
     for (auto& c : candidates)
         if (!c.empty() && std::filesystem::exists(c) && std::filesystem::is_regular_file(c))
             return std::filesystem::weakly_canonical(c);
@@ -467,8 +507,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         }
     }
     if (!adtDir.empty()) {
-        std::filesystem::path impl = tc.adtImpl.empty()
-            ? adtDir / "adt_impl.c" : std::filesystem::path(tc.adtImpl);
+        std::filesystem::path impl(tc.adtImpl);
+        if (impl.empty()) {
+            impl = adtDir / "adt_impl.c";
+            if (!std::filesystem::exists(impl))
+                impl = adtDir / "adt.a";  // 内嵌发行版：释放的是预编译静态库
+        }
         if (!std::filesystem::exists(impl)) {
             std::cerr << "错误: adt 实现文件不存在: " << impl.string() << "\n";
             return 1;

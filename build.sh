@@ -15,6 +15,7 @@ usage() {
 
 命令:
   build      构建 scc 编译器 (默认)
+  dist       构建发行版 scc（builtins 资源 + 预编译 adt.a 内嵌，单二进制免携带 builtins）
   test       构建并用 examples/feature*.sc 做端到端验证
   install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图）
   uninstall  卸载 scc 与 VSCode 插件
@@ -27,6 +28,29 @@ do_build() {
     cmake -B "$BUILD_DIR" -S "$ROOT/compiler" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$BUILD_DIR"
     echo "==> 完成: $BUILD_DIR/scc"
+}
+
+do_dist() {
+    echo "==> 构建发行版 scc（内嵌 builtins）"
+    cmake -B "$BUILD_DIR-dist" -S "$ROOT/compiler" -DCMAKE_BUILD_TYPE=Release -DSCC_EMBED_BUILTINS=ON
+    cmake --build "$BUILD_DIR-dist"
+    # 冒烟验证：在无 builtins 目录的环境下编译运行 adt 程序（依赖内嵌资源释放）
+    echo "==> 验证内嵌 builtins（脱离仓库目录运行）"
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "$tmp/t.sc" <<'EOF'
+inc stdio.h
+inc adt.sc
+fnc main: i4
+    var s: string
+    s.append("dist-ok")
+    printf("%s\n", s.cstr())
+    s.drop()
+    return 0
+EOF
+    (cd "$tmp" && "$BUILD_DIR-dist/scc" t.sc)
+    rm -rf "$tmp"
+    echo "==> 完成: $BUILD_DIR-dist/scc"
 }
 
 do_test() {
@@ -91,12 +115,13 @@ do_uninstall() {
 }
 
 do_clean() {
-    rm -rf "$BUILD_DIR"
-    echo "==> 已清理 $BUILD_DIR"
+    rm -rf "$BUILD_DIR" "$BUILD_DIR-dist"
+    echo "==> 已清理 $BUILD_DIR ($BUILD_DIR-dist)"
 }
 
 case "${1:-build}" in
     build)     do_build ;;
+    dist)      do_dist ;;
     test)      do_test ;;
     install)   do_install ;;
     uninstall) do_uninstall ;;

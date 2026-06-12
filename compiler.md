@@ -91,7 +91,8 @@ scc app.sc --emit-sc             # 规范化格式输出
 4. 统一链接为可执行文件并运行，结束后删除整个临时目录。
 
 模块搜索路径：相对入口文件目录 → 仓库根 `builtins/` 目录（含子项目形态
-`builtins/x/x.sc`）→ 环境变量 `SCC_BUILTINS` 指定目录。
+`builtins/x/x.sc`）→ 环境变量 `SCC_BUILTINS` 指定目录 → 内嵌资源释放目录
+（仅发行版变体，见 §10）。
 
 ### 3.3 退出码与信号
 
@@ -310,11 +311,22 @@ feature1.sc:31: 错误: 期望 ':'，得到 ''
 
 ```sh
 ./build.sh build      # 构建 scc（CMake Release，产物 compiler/build/scc）
+./build.sh dist       # 构建发行版 scc（内嵌 builtins，产物 compiler/build-dist/scc）
 ./build.sh test       # 构建 + examples/feature*.sc 端到端验证（运行模式 + emit-c 模式 + 负向用例）
 ./build.sh install    # 安装 scc 到 $PREFIX/bin（默认 /usr/local/bin）+ VSCode 插件软链
 ./build.sh uninstall  # 卸载
 ./build.sh clean      # 清理构建产物
 ```
+
+发行版变体（`-DSCC_EMBED_BUILTINS=ON`）：构建时把 `builtins/` 下全部
+`.sc`/`.h` 资源与预编译的 `adt.a`（`adt_impl.c` 提前编为静态库）内嵌进
+scc 二进制；运行时首次使用释放到 `~/.cache/scc/builtins-<内容哈希>`
+（已存在则复用，内容变化自动换目录），作为优先级最低的模块搜索路径；
+adt 链接阶段发现释放目录无 `adt_impl.c` 时回退到 `adt.a` 直接参与链接。
+效果：scc 单二进制即可发行，无需携带 `builtins/` 目录；源码仓库内
+开发时仓库 `builtins/` 优先生效，行为不变。`--adt` 自定义实现仍可用
+（释放目录含 `adt.h` 供自定义 `.c` 编译）。注：builtins 增删文件后需
+重新 cmake configure（资源清单在 configure 时收集）。
 
 手动构建：
 

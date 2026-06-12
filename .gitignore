@@ -1,5 +1,6 @@
 # 构建产物
 compiler/build/
+compiler/build-dist/
 *.o
 *.out
 *.exe
