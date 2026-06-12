@@ -1,6 +1,7 @@
 # 特性 6：内置 ADT（builtins/adt）与方法语法
-#   - fnc T::m 方法定义（同文件）与方法声明（实现在 C 侧，见 adt.sc）
-#   - 栈构造：var x: T 声明即自动调用 T::init（局部、无初值、非指针）
+#   - 成员函数：结构体内直接实现（签名字段 + 缩进函数体）
+#   - 方法声明：fnc T::m 仅声明形态（实现在 C 侧，见 adt.sc）
+#   - 栈构造：var x: T 声明即自动调用 T 的 init（局部、无初值、非指针）
 #   - 堆构造：T() 类型伪调用 → malloc + 字段默认值/清零 + init
 #   - drop 析构：手动调用（命名保留，未来支持自动插入）；堆对象再 free
 #   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
@@ -8,20 +9,18 @@ inc stdio.h
 inc stdlib.h
 inc adt.sc
 
-# 同文件方法定义：fnc 所属类型::方法名
+# 成员函数：结构体内直接实现，函数体内用 this 访问接收者
 def counter: {
     n: i4
+    init: fnc
+        this->n = 100
+    add: fnc: i4, k: i4
+        this->n = this->n + k
+        return this->n
 }
 
-fnc counter::init
-    this->n = 100
-
-fnc counter::add: i4, k: i4
-    this->n = this->n + k
-    return this->n
-
 fnc str_cmp -> list_cmp
-    return strcmp((a: char&), (b: char&))
+    return strcmp(a: char&, b: char&)    # 裸强转：实参位置免括号
 
 fnc main: i4
     # 声明即构造：自动调用 counter_init/string_init/list_init
@@ -49,7 +48,7 @@ fnc main: i4
     l.sort(str_cmp)
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, (l.get(i): char&))
+        printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
 
     # 析构：手动 drop（指针接收者用 ->）
     var lp&: list = &l

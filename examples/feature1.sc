@@ -26,24 +26,21 @@ def value: (
 # 自定义类型别名
 def byte -> u1
 
-# 函数类型定义 + 实现
-fnc binop_t: i4, a:i4, b: i4
+# 函数类型定义
+fnc add_f: i4, a:i4, b: i4
 
-fnc add -> binop_t
+# 用预定义函数类型定义函数实现
+fnc add1 -> add_f
     return a + b
+fnc add2 -> add_f
+    return a + 2*b
 
-fnc sub -> binop_t
-    return a - b
+# 无值返回函数类型定义
+fnc dec_f: v:i4
+fnc dec -> dec_f
+    --v
 
-# 直接定义并实现（多行参数，'-' 分隔函数体）
-fnc area: i4
-    r&: rect
-    -
-    var w: i4 = r->rb.x - r->lt.x
-    var h: i4 = r->rb.y - r->lt.y
-    return w * h
-
-# 单行函数定义
+# 直接定义并实现函数
 fnc clamp: i4, v:i4, lo:i4, hi:i4
     if v < lo
         return lo
@@ -51,11 +48,21 @@ fnc clamp: i4, v:i4, lo:i4, hi:i4
         return hi
     return v
 
+# 直接定义并实现函数 + 换行形式定义多行参数
+# + 这里要用 '-' 分隔函数体
+fnc area: i4
+    r&: rect
+    -
+    var w: i4 = r->rb.x - r->lt.x
+    var h: i4 = r->rb.y - r->lt.y
+    return w * h
+
 # 全局变量/常量
 let MAX: i4 = 100
 var counter: i4 = 0
 
 fnc main: i4
+
     var p: point
     p.x = 3
     p.y = 4
@@ -66,14 +73,15 @@ fnc main: i4
 
     var r_ptr&: rect = &r
 
+    # 变量定义不指定类型时，默认
     var msg: = "hello sc"
     printf("%s\n", msg)
-    printf("add(3,4) = %d\n", add(p.x, p.y))
-    printf("sub(3,4) = %d\n", sub(p.x, p.y))
+    printf("add1(3,4) = %d\n", add1(p.x, p.y))
+    printf("add2(3,4) = %d\n", add2(p.x, p.y))
     printf("area = %d\n", area(&r))
     printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
 
-    # 多行条件表达式
+    # 多行条件表达式（同样支持单行条件表达式
     if p.x > 1
         && p.y < 10
         -

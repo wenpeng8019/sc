@@ -50,8 +50,10 @@ struct Expr {
                     //              op="." 或 "->", text=成员名
         Sizeof,     // sizeof(表达式或类型名)  a=内层表达式
         Offsetof,   // offsetof(Type, field)  text=类型名, op=字段名
-        Cast,       // 强制类型转换 (expr: type&)  a=被转换表达式,
-                    //              text=目标类型名, castPtr=指针层数（& 个数）
+        Cast,       // 强制类型转换  右值位置可裸写 expr: type&，
+                    //              需继续 ->/. 等操作时加括号 (expr: type&)->f
+                    //              a=被转换表达式, text=目标类型名,
+                    //              castPtr=指针层数（& 个数）
         InitList,   // 初始化列表 {1, 2, 3}  args=元素列表（可嵌套）
     } kind;
 
@@ -79,7 +81,6 @@ struct TypeRef {
     enum class FncKind {
         None,
         PlainPtr,   // 普通函数指针：fnc: ret, params...
-        MethodPtr,  // 成员函数指针：fnc:: ret, params...
     };
 
     // 类型名："i4" "f8" "u1" 等内置类型，或用户 def 的自定义类型名
@@ -100,12 +101,11 @@ struct TypeRef {
     bool inlineUnion = false; // true=(联合), false={结构}
     std::vector<Field> inlineFields;  // 内联类型的字段定义
 
-    // 方法字段（伪 class）—— 结构体字段类型为内联函数签名：
+    // 函数指针字段 —— 结构体字段类型为内联函数签名（无函数体）：
     //   def obj: { func: fnc: i4, x:i4, y:i4 }
-    // 本质是函数指针字段。C 中展开为：
-    //   Ret (*func)(struct obj *_this, params...)
-    // 通过 obj.func(...) 调用时自动传入接收者作为首参 _this，
-    // 实现函数的 sc 源码中以 this 访问（codegen 映射 this → _this）。
+    // C 中展开为：Ret (*func)(params...)
+    // 若字段签名后跟缩进函数体，则不是字段而是成员函数（parser 提升为
+    // 带 methodOwner 的顶层 FuncD，C 中生成 T_m(T *_this, ...)）。
     FncKind fnKind = FncKind::None;
     std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = void）
     std::vector<Field> fnParams;     // 显式参数列表（不含隐式 this）
@@ -227,8 +227,9 @@ struct Decl {
     std::string funcTypeName;    // fnc name -> func_type 中的预定义函数类型名
                                  // 非空时表示此函数"实现"某个已定义的函数类型，
                                  // 函数签名从该类型展开，无需重复声明参数和返回类型
-    std::string methodOwner;     // 方法定义所属结构名（fnc obj::add 时为 obj）
-    std::string methodName;      // 方法名（fnc obj::add 时为 add）
+    std::string methodOwner;     // 方法所属结构名：结构体内实现的成员函数（FuncD）
+                                 // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
+    std::string methodName;      // 方法名（name 为修饰名 owner_method）
     bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
     bool isRpc = false;          // rpc 声明：参数/返回值展开为同名结构体，
                                  // 实际函数为 void name_rpc(struct name*)，

@@ -8,12 +8,16 @@
 #include "codegen_sc.h"
 #include "ast_print.h"
 #include <sstream>
+#include <unordered_map>
+#include <vector>
 
 namespace {
 
 struct SGen {
     std::ostringstream out;
     int depth = 0;
+    // 成员函数表：所属类型 → 方法 Decl 列表（再生时印回结构体内部）
+    std::unordered_map<std::string, std::vector<const Decl*>> methodImpls;
 
     void ind() { for (int i = 0; i < depth; i++) out << "    "; }
 
@@ -152,6 +156,16 @@ struct SGen {
                 ind(); out << X << "def " << d.name << ": " << open << "\n";
                 depth++;
                 for (auto& f : d.fields) { ind(); out << fieldToStr(f, true) << "\n"; }
+                // 成员函数：签名字段 + 缩进函数体（结构体内实现）
+                auto mi = methodImpls.find(d.name);
+                if (mi != methodImpls.end()) {
+                    for (const Decl* m : mi->second) {
+                        ind(); out << m->methodName << ": fnc" << fncItems(*m) << "\n";
+                        depth++;
+                        emitStmts(m->body);
+                        depth--;
+                    }
+                }
                 depth--;
                 ind(); out << close << "\n";
                 break;
@@ -168,11 +182,9 @@ struct SGen {
                     out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
                 break;
             case Decl::FuncD:
+                if (!d.methodOwner.empty()) break;  // 成员函数已在结构体内输出
                 ind();
-                if (!d.methodOwner.empty())
-                    out << X << "fnc " << d.methodOwner << "::" << d.methodName
-                        << fncItems(d) << "\n";
-                else if (!d.funcTypeName.empty())
+                if (!d.funcTypeName.empty())
                     out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
                     out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
@@ -200,11 +212,17 @@ struct SGen {
     }
 
     std::string run(const Program& prog) {
+        // 预扫：结构内实现的成员函数（FuncD + methodOwner）归入所属类型
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncD && !d->methodOwner.empty() && !d->external)
+                methodImpls[d->methodOwner].push_back(d.get());
         out << "# 由 scc --emit-sc 从 AST 再生成\n\n";
         for (auto& d : prog.decls) {
             // 外部模块合并进来的声明不输出（由 inc 引入，输出会导致重定义），
             // 但 inc 行本身保留（与 codegen_c 第一遍的跳过规则一致）
             if (d->external && d->kind != Decl::IncD) continue;
+            // 结构内成员函数随所属类型输出，顶层不单独成段
+            if (d->kind == Decl::FuncD && !d->methodOwner.empty()) continue;
             emitDecl(*d);
             out << "\n";
         }

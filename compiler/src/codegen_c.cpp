@@ -61,14 +61,16 @@ struct CGen {
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
     std::unordered_map<std::string, std::string> aliases;  // 别名 → 目标类型名
-    // 顶层方法表：所属类型 → 方法名 → Decl（fnc T::m 定义或声明）
+    // 顶层函数表：函数名 → Decl（缺参调用 0 补全查签名用）
+    std::unordered_map<std::string, const Decl*> funcs;
+    // 顶层方法表：所属类型 → 方法名 → Decl（结构内实现或 fnc T::m 声明）
     std::unordered_map<std::string, std::unordered_map<std::string, const Decl*>> methods;
     // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
     struct VType { std::string name; int ptr = 0; int arr = 0; };
     std::unordered_map<std::string, VType> globalsT, localsT;
+    // 函数指针变量的内联签名（var cb: fnc: ...）：缺参补全查询用
+    std::unordered_map<std::string, const TypeRef*> fnVarsG, fnVarsL;
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
-    std::string curAggr;        // 当前正在输出的 struct/union 名（方法字段展开用）
-    std::string curAggrKind;    // "struct" / "union"
 
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
@@ -100,10 +102,6 @@ struct CGen {
                 for (int i = 0; i < ptr; i++) out << "*";
             } else out << "void ";  // 省略返回类型 = void
             out << "(*" << f.name << ")(";
-            if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
-                out << curAggrKind << " " << curAggr << " *_this";
-                if (!f.type.fnParams.empty() || f.type.fnVariadic) out << ", ";
-            }
             for (size_t i = 0; i < f.type.fnParams.size(); i++) {
                 if (i) out << ", ";
                 emitDeclarator(f.type.fnParams[i]);
@@ -151,11 +149,6 @@ struct CGen {
             name = al->second;
         }
         return nullptr;
-    }
-
-    static bool hasMethods(const Decl* d) {
-        for (auto& f : d->fields) if (f.type.fnKind == TypeRef::FncKind::MethodPtr) return true;
-        return false;
     }
 
     // ---- T() 伪调用预扫描：收集需要生成 T__new 辅助函数的类型 ----
@@ -293,7 +286,7 @@ struct CGen {
         }
     }
 
-    // 若 m 是成员访问且该成员是方法字段，返回字段指针（否则 nullptr）
+    // 若 m 是成员访问且该成员是函数指针字段，返回字段指针（否则 nullptr）
     const Field* callableField(const Expr& m) const {
         if (m.kind != Expr::Member) return nullptr;
         VType base;
@@ -304,6 +297,57 @@ struct CGen {
             if (f.name == m.text && f.type.fnKind != TypeRef::FncKind::None) return &f;
         return nullptr;
     }
+
+    // ---------------- 缺参调用 0 补全 ----------------
+    // 允许实参少于形参：缺少的参数按类型补默认值
+    //   指针/数组/函数指针 → NULL；聚合按值 → (T){0}；其余标量 → 0
+    void emitDefaultArg(const Field& p) {
+        if (p.type.fnKind != TypeRef::FncKind::None) { out << "NULL"; return; }
+        std::string base; int ptr;
+        resolveType(p.type, base, ptr);
+        if (ptr > 0 || !p.type.arrayDims.empty()) { out << "NULL"; return; }
+        if (const Decl* sd = aggrOf(p.type.name)) {
+            out << "(" << sd->name << "){0}";
+            return;
+        }
+        out << "0";
+    }
+
+    // 查询被调目标的形参表（用于缺参补全）：
+    //   函数指针变量/参数（内联签名或命名函数类型）→ 顶层 fnc → rpc 包装
+    const std::vector<Field>* calleeParams(const std::string& n) const {
+        // 变量（含参数）优先：遮蔽同名函数
+        const bool isLocal = inFunc && localsT.count(n);
+        if (isLocal || globalsT.count(n)) {
+            auto& fnVars = isLocal ? fnVarsL : fnVarsG;
+            auto fv = fnVars.find(n);
+            if (fv != fnVars.end()) return &fv->second->fnParams;
+            // 命名函数类型的变量：var cb&: my_fnc_type
+            std::string tn = (isLocal ? localsT : globalsT).at(n).name;
+            for (int i = 0; i < 8 && !tn.empty(); i++) {
+                auto it = funcTypes.find(tn);
+                if (it != funcTypes.end()) return &it->second->fields;
+                auto al = aliases.find(tn);
+                if (al == aliases.end()) break;
+                tn = al->second;
+            }
+            return nullptr;
+        }
+        auto f = funcs.find(n);
+        if (f != funcs.end()) {
+            const Decl* sig = f->second;
+            if (!sig->funcTypeName.empty()) {  // fnc name -> func_type：签名从类型展开
+                auto it = funcTypes.find(sig->funcTypeName);
+                if (it == funcTypes.end()) return nullptr;
+                sig = it->second;
+            }
+            return &sig->fields;
+        }
+        auto r = rpcs.find(n);
+        if (r != rpcs.end()) return &r->second->fields;
+        return nullptr;
+    }
+
 
     // ---------------- 表达式 ----------------
     void emitExpr(const Expr& e, bool top = false) {
@@ -363,26 +407,33 @@ struct CGen {
                                 out << ", ";
                                 emitExpr(*a, true);
                             }
+                            // 缺参 0 补全（接收者已占首参，后续皆需逗号）
+                            for (size_t i = e.args.size(); i < md->fields.size(); i++) {
+                                out << ", ";
+                                emitDefaultArg(md->fields[i]);
+                            }
                             out << ")";
                             break;
                         }
                     }
                 }
-                // 方法字段调用：成员函数指针自动注入接收者
+                // 函数指针字段/变量/顶层函数调用（含缺参 0 补全）
                 const Field* mf = callableField(*e.a);
+                const std::vector<Field>* params = nullptr;
+                if (mf) params = &mf->type.fnParams;
+                else if (e.a->kind == Expr::Ident && e.a->text != "this")
+                    params = calleeParams(e.a->text);
                 emitExpr(*e.a);
                 out << "(";
-                bool first = true;
-                if (mf && mf->type.fnKind == TypeRef::FncKind::MethodPtr) {
-                    if (e.a->op == ".") out << "&";
-                    emitExpr(*e.a->a);
-                    first = false;
-                }
                 for (size_t i = 0; i < e.args.size(); i++) {
-                    if (!first) out << ", ";
-                    first = false;
+                    if (i) out << ", ";
                     emitExpr(*e.args[i], true);
                 }
+                if (params)
+                    for (size_t i = e.args.size(); i < params->size(); i++) {
+                        if (i) out << ", ";
+                        emitDefaultArg((*params)[i]);
+                    }
                 out << ")";
                 break;
             }
@@ -454,9 +505,6 @@ struct CGen {
                     } else {
                         out << " = {0}";
                     }
-                } else if (f.type.ptr == 0 && f.type.arrayDims.empty() && !f.type.hasInline) {
-                    // 含方法字段的结构变量默认零初始化（方法指针默认 nil）
-                    if (sd && hasMethods(sd)) out << " = {0}";
                 }
             }
             out << ";\n";
@@ -477,6 +525,9 @@ struct CGen {
     void regVar(const Field& f) {
         VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
         (inFunc ? localsT : globalsT)[f.name] = vt;
+        // 函数指针变量：额外记录内联签名（缺参补全查询用）
+        if (f.type.fnKind != TypeRef::FncKind::None)
+            (inFunc ? fnVarsL : fnVarsG)[f.name] = &f.type;
     }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
@@ -636,8 +687,8 @@ struct CGen {
         if (it == rpcs.end())
             throw CompileError{"run 的目标必须是 rpc: " + call.a->text, s.line};
         const Decl* r = it->second;
-        if (call.args.size() != r->fields.size())
-            throw CompileError{"rpc 实参数量不匹配: " + r->name + " 期望 " +
+        if (call.args.size() > r->fields.size())
+            throw CompileError{"rpc 实参数量超出: " + r->name + " 期望至多 " +
                                std::to_string(r->fields.size()) + " 个", s.line};
         if (!aggrOf("thread"))
             throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
@@ -756,8 +807,6 @@ struct CGen {
                 break;
             case Decl::StructD:
             case Decl::UnionD:
-                curAggr = d.name;  // 方法字段展开需要所属类型名
-                curAggrKind = d.kind == Decl::UnionD ? "union" : "struct";
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
                     << " " << d.name << " {\n";
@@ -858,6 +907,7 @@ struct CGen {
         out << " {\n";
         // 函数作用域：注册参数类型（含预定义函数类型展开的签名）
         localsT.clear();
+        fnVarsL.clear();
         inFunc = true;
         const Decl* sig = &d;
         if (!d.funcTypeName.empty()) {
@@ -947,6 +997,7 @@ struct CGen {
         emitRpcWorkerSig(d);
         out << " {\n";
         localsT.clear();
+        fnVarsL.clear();
         inFunc = true;
         for (auto& p : d.fields) regVar(p);
         curRpc = &d;
@@ -1011,7 +1062,7 @@ struct CGen {
         // 最简策略：默认为所有结构/联合输出前置声明，消除定义顺序依赖
         emitForwardAggrDecls();
 
-        // 收集函数类型、聚合类型与顶层方法注册表（含外部模块合并声明，供语法糖识别）
+        // 收集函数类型、聚合类型、顶层函数与方法注册表（含外部模块合并声明，供语法糖识别）
         for (auto& d : prog.decls) {
             if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
@@ -1020,6 +1071,8 @@ struct CGen {
             else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
+            else if (d->kind == Decl::FuncD && !d->isRpc)
+                funcs[d->name] = d.get();  // 顶层函数（缺参补全查签名）
             if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
 

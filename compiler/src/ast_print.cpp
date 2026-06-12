@@ -66,16 +66,17 @@ std::string rec(const Expr& e, bool top) {
 
 std::string exprToStr(const Expr& e) { return rec(e, true); }
 
-// 方法字段（伪 class）签名："fnc: ret, p1: t1, ..."
+// 函数签名字段："fnc: ret, p1: t1, ..."（无返回值且无参数时仅 "fnc"）
 static std::string fncSigStr(const TypeRef& t) {
-    std::string s = t.fnKind == TypeRef::FncKind::MethodPtr ? "fnc::" : "fnc:";
+    std::string s = "fnc";
     std::vector<std::string> parts;
     if (t.fnRet) {
         std::string r = typeToStr(*t.fnRet);
         if (!r.empty()) parts.push_back(r);
     }
     for (auto& p : t.fnParams) parts.push_back(fieldToStr(p, false));
-    for (size_t i = 0; i < parts.size(); i++) s += (i ? ", " : " ") + parts[i];
+    for (size_t i = 0; i < parts.size(); i++) s += (i ? ", " : ": ") + parts[i];
+    if (t.fnVariadic) s += parts.empty() ? ": ..." : ", ...";
     return s;
 }
 
@@ -98,7 +99,6 @@ std::string inlineStr(const TypeRef& t) {
 }
 
 std::string fieldDetail(const Field& f, bool withInit) {
-    if (f.type.fnKind == TypeRef::FncKind::MethodPtr) return ":: " + fncSigStr(f.type);
     if (f.type.fnKind == TypeRef::FncKind::PlainPtr) return ": " + fncSigStr(f.type);
     std::string s;
     if (!f.type.hasInline)
