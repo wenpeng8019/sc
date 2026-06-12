@@ -1,7 +1,8 @@
 # 特性 6：内置 ADT（builtins/adt）与方法语法
 #   - fnc T::m 方法定义（同文件）与方法声明（实现在 C 侧，见 adt.sc）
-#   - init 构造：var x: T 声明即自动调用 T::init（局部、无初值、非指针）
-#   - drop 析构：手动调用（命名保留，未来支持自动插入）
+#   - 栈构造：var x: T 声明即自动调用 T::init（局部、无初值、非指针）
+#   - 堆构造：T() 类型伪调用 → malloc + 字段默认值/清零 + init
+#   - drop 析构：手动调用（命名保留，未来支持自动插入）；堆对象再 free
 #   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
 inc stdio.h
 inc stdlib.h
@@ -55,4 +56,11 @@ fnc main: i4
     lp->drop()
     part.drop()
     s.drop()
+
+    # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
+    var hs&: string = string()
+    hs->append("on the heap")
+    printf("heap: %s\n", hs->cstr())
+    hs->drop()
+    free(hs)
     return 0

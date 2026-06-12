@@ -387,8 +387,8 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     UnitInfo u;
     u.path = canon;
     u.prog = parseSourceText(src);
-    semanticCheck(u.prog);
-    u.deps = resolveUnitDeps(u.prog, canon);
+    u.deps = resolveUnitDeps(u.prog, canon);   // 先合并依赖导出声明（external）
+    semanticCheck(u.prog);                     // 再检查：导入类型/方法可见
 
     for (auto& dep : u.deps) {
         if (!loadUnitGraph(dep, units, visiting, errMsg)) {
@@ -701,10 +701,10 @@ int main(int argc, char** argv) {
         auto toks = lex(src);
         // 3b. 语法分析：token 流 → AST 程序树
         auto prog = parse(toks);
-        // 3b.0 语义检查：类型兼容/指针安全边界
-        semanticCheck(prog);
-        // 3b.1 记录当前单元的模块依赖信息（不展开源码）
+        // 3b.0 记录当前单元的模块依赖信息（不展开源码，合并依赖导出声明）
         if (input != "-") resolveUnitDeps(prog, std::filesystem::path(input));
+        // 3b.1 语义检查：类型兼容/指针安全边界（含导入符号）
+        semanticCheck(prog);;
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         auto c = mode == "ast" ? emitAstJson(prog)   // AST→JSON
                : mode == "sc"  ? emitSc(prog)         // AST→规范化sc

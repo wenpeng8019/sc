@@ -207,6 +207,12 @@ struct Checker {
             case Expr::Offsetof:
                 return Ty{"u8", 0, 0, true, false};
             case Expr::Call: {
+                // T() 类型伪调用（堆构造糖）：结果类型为 T&
+                if (e.a->kind == Expr::Ident && e.args.empty()
+                    && locals.find(e.a->text) == locals.end()
+                    && globals.find(e.a->text) == globals.end()
+                    && resolveStruct(e.a->text))
+                    return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
                 Ty callee = inferExpr(*e.a, locals, line);
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 if (callee.valid && callee.name == "v" && callee.ptr == 0 && callee.arr == 0)

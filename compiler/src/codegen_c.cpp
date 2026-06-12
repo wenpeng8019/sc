@@ -11,6 +11,7 @@
 #include "codegen_c.h"
 #include "error.h"
 #include <cctype>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,6 +155,52 @@ struct CGen {
         return false;
     }
 
+    // ---- T() 伪调用预扫描：收集需要生成 T__new 辅助函数的类型 ----
+    std::set<std::string> heapNews;
+
+    void scanExprForNew(const Expr& e) {
+        if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
+            if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
+        if (e.a) scanExprForNew(*e.a);
+        if (e.b) scanExprForNew(*e.b);
+        if (e.c) scanExprForNew(*e.c);
+        for (auto& a : e.args) scanExprForNew(*a);
+    }
+
+    void scanStmtForNew(const Stmt& s) {
+        if (s.expr) scanExprForNew(*s.expr);
+        for (auto& f : s.decls) if (f.init) scanExprForNew(*f.init);
+        if (s.forInit) scanExprForNew(*s.forInit);
+        if (s.forCond) scanExprForNew(*s.forCond);
+        if (s.forStep) scanExprForNew(*s.forStep);
+        for (auto& b : s.body) scanStmtForNew(*b);
+        for (auto& b : s.elseBody) scanStmtForNew(*b);
+        for (auto& arm : s.caseArms) {
+            for (auto& l : arm.labels) scanExprForNew(*l);
+            for (auto& b : arm.body) scanStmtForNew(*b);
+        }
+    }
+
+    // 生成堆构造辅助函数：T *T__new(void) = malloc + 默认值/清零 + init
+    void emitNewHelpers() {
+        for (auto& tn : heapNews) {
+            auto it = aggrs.find(tn);
+            if (it == aggrs.end()) continue;
+            const Decl* sd = it->second;
+            out << "static inline " << tn << " *" << tn << "__new(void) {\n"
+                << "    " << tn << " *_p = (" << tn << " *)malloc(sizeof(" << tn << "));\n"
+                << "    if (_p) {\n";
+            if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
+                out << "        *_p = " << tn << "__default();\n";
+            else
+                out << "        memset(_p, 0, sizeof(" << tn << "));\n";
+            const Decl* im = findMethod(tn, "init");
+            if (im && im->fields.empty())
+                out << "        " << im->name << "(_p);\n";
+            out << "    }\n    return _p;\n}\n\n";
+        }
+    }
+
     // 查找顶层方法：类型名（穿透别名）→ 方法 Decl（未找到 nullptr）
     const Decl* findMethod(std::string typeName, const std::string& m) const {
         for (int i = 0; i < 8 && !typeName.empty(); i++) {
@@ -167,6 +214,15 @@ struct CGen {
             typeName = al->second;
         }
         return nullptr;
+    }
+
+    // T() 类型伪调用：被调对象是聚合类型名（无参、未被变量遮蔽）
+    // → 堆构造糖，返回解析后的聚合类型 Decl（否则 nullptr）
+    const Decl* typeCallee(const Expr& call) const {
+        if (!call.a || call.a->kind != Expr::Ident || !call.args.empty()) return nullptr;
+        const std::string& n = call.a->text;
+        if (localsT.count(n) || globalsT.count(n)) return nullptr;
+        return aggrOf(n);
     }
 
     static bool hasFieldDefaults(const Decl* d) {
@@ -215,6 +271,13 @@ struct CGen {
             case Expr::Cast:
                 vt = {e.text, e.castPtr, 0};
                 return true;
+            case Expr::Call:
+                // T() 伪调用结果类型：T&（使链式方法调用可推断）
+                if (const Decl* td = typeCallee(e)) {
+                    vt = {td->name, 1, 0};
+                    return true;
+                }
+                return false;
             default: return false;
         }
     }
@@ -272,6 +335,11 @@ struct CGen {
                 if (!top) out << ")";
                 break;
             case Expr::Call: {
+                // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
+                if (const Decl* td = typeCallee(e)) {
+                    out << td->name << "__new()";
+                    break;
+                }
                 // 顶层方法调用糖：o.m(...) / p->m(...) → T_m(&o/p, ...)
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
@@ -846,6 +914,14 @@ struct CGen {
                 methods[d->methodOwner][d->methodName] = d.get();
         }
 
+        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫）
+        heapNews.clear();
+        for (auto& d : prog.decls) {
+            if (d->external) continue;
+            for (auto& f : d->fields) if (f.init) scanExprForNew(*f.init);
+            for (auto& s : d->body) scanStmtForNew(*s);
+        }
+
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
             if (d->external && d->kind != Decl::IncD) continue;
@@ -879,6 +955,8 @@ struct CGen {
             }
         }
         out << "\n";
+        // 堆构造辅助函数（T() 伪调用糖使用）
+        emitNewHelpers();
         // 第二遍：函数定义（外部模块函数在其自身单元实现）
         for (auto& d : prog.decls)
             if (d->kind == Decl::FuncD && !d->external) emitFunc(*d);

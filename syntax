@@ -370,6 +370,22 @@ fnc main: i4
     return 0
 ```
 
+#### 堆构造：T() 类型伪调用
+
+堆对象的创建无法从数据流追踪（malloc 只是普通调用），所以用显式语法
+让“创建”成为语法事件：结构体类型名作无参调用 `T()`，返回 `T&`：
+
+```sc
+var p&: string = string()   # malloc + 字段默认值/清零 + string_init(p)
+p->append("heap")
+p->drop()                   # 手动析构
+free(p)                     # 再释放内存（drop 不含 free）
+```
+
+转 C 时生成 `static inline T *T__new(void)` 辅助函数：malloc 失败返回
+nil；有字段默认值用默认值初始化，否则清零；类型有无参 `init` 则调用。
+同名局部/全局变量会遮蔽该糖（按普通调用处理）。
+
 ### 8.4 方法字段
 
 结构体字段可以声明为普通函数指针或成员函数指针：

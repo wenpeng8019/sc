@@ -37,9 +37,12 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 
 ### 构造与析构
 
-- `init`：声明即构造。函数内 `var s: string`（无初值、非指针、非数组）自动调用
+- `init`：栈对象声明即构造——函数内 `var s: string`（无初值、非指针、非数组）自动调用
   `string_init(&s)`；全局变量需手动 init。
-- `drop`：手动析构 `s.drop()`（命名保留，未来支持作用域自动插入）。
+- `T()` 堆构造糖：`var p&: string = string()` → malloc + 清零/默认值 + init，
+  返回 `T&`（malloc 失败返回 nil）。
+- `drop`：手动析构 `s.drop()`（命名保留，未来支持作用域自动插入）；
+  堆对象 drop 后需再 `free(p)`（drop 只释放内部资源，不释放对象本身）。
 
 ### string —— 动态字符串
 
