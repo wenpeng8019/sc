@@ -146,6 +146,7 @@ struct Stmt {
         ExprS,      // 表达式语句      eg. foo(); a = 1;  (以 expr 字段存储)
         VarS,       // 变量声明语句    eg. var x: i4      (以 decls 字段存储多项)
         LetS,       // 常量声明语句    eg. let MAX = 100
+        TlsS,       // 线程局部变量声明 eg. tls cnt: i4   (static 存储期，每线程独立)
         ReturnS,    // return 语句     eg. return expr;   (expr 可为空 = return;)
         IfS,        // if/else 条件分支
         WhileS,     // while 循环
@@ -197,9 +198,10 @@ struct Decl {
         FuncD,      // 函数实现   fnc name: ret, p1:t1, p2:t2 \n\tbody
                     //            或 fnc name -> func_type \n\tbody（实现预定义函数类型）
 
-        // -- var/let 全局变量/常量 --
+        // -- var/let/tls 全局变量/常量/线程局部变量 --
         VarD,       // 全局变量   var name:type [= init]
         LetD,       // 全局常量   let name:type = init
+        TlsD,       // 线程局部变量 tls name:type [= init]（static，不可导出）
 
         // -- inc 头文件引入 --
         IncD,       // 引入头文件  inc stdio.h → #include <stdio.h>

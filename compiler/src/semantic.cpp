@@ -358,6 +358,7 @@ struct Checker {
                 break;
             case Stmt::VarS:
             case Stmt::LetS:
+            case Stmt::TlsS:
                 checkVarDecls(s.decls, locals);
                 break;
             case Stmt::ReturnS:
@@ -440,7 +441,8 @@ struct Checker {
         }
 
         for (auto& d : prog.decls) {
-            if (d->kind != Decl::VarD && d->kind != Decl::LetD) continue;
+            if (d->kind != Decl::VarD && d->kind != Decl::LetD && d->kind != Decl::TlsD)
+                continue;
             for (auto& f : d->fields) {
                 Ty lhs = fromTypeRef(f.type);
                 if (!lhs.valid || (lhs.name.empty() && lhs.ptr == 0 && lhs.arr == 0)) {

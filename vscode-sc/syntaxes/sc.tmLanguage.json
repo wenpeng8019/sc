@@ -52,7 +52,7 @@
             }
         },
         "var-decl": {
-            "match": "\\b(var|let)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "match": "\\b(var|let|tls)\\s+([A-Za-z_][A-Za-z0-9_]*)",
             "captures": {
                 "1": { "name": "keyword.declaration.var.sc" },
                 "2": { "name": "variable.other.declaration.sc" }
@@ -72,7 +72,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|inc)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|tls|inc)\\b"
                 },
                 {
                     "name": "variable.language.this.sc",

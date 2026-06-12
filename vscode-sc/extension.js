@@ -22,6 +22,7 @@ const KEYWORDS = [
     ['rpc', '定义伪形参函数（参数/返回值展开为同名结构体）'],
     ['var', '定义变量'],
     ['let', '定义常量'],
+    ['tls', '定义线程局部变量（static 存储期，每线程独立实例）'],
     ['inc', '引入头文件（对齐 C 的 #include）'],
     ['return', '返回'],
     ['if', '条件分支'],
@@ -139,7 +140,7 @@ function buildIndex(ast) {
             case 'rpc':
                 idx.funcs.set(n.n, n);
                 break;
-            case 'var': case 'let':
+            case 'var': case 'let': case 'tls':
                 for (const it of n.c || [])
                     idx.globals.set(it.n, { kind: n.k, detail: it.d, line: it.l });
                 break;
@@ -164,7 +165,7 @@ function scopeVars(idx, line) {
         for (const ch of node.c || []) {
             if (ch.k === 'param') {
                 vars.set(ch.n, { kind: 'param', detail: ch.d, line: ch.l });
-            } else if (ch.k === 'var' || ch.k === 'let') {
+            } else if (ch.k === 'var' || ch.k === 'let' || ch.k === 'tls') {
                 for (const it of ch.c || [])
                     if (!it.l || it.l <= line)
                         vars.set(it.n, { kind: ch.k, detail: it.d, line: it.l });
@@ -214,7 +215,7 @@ function fallbackItems(doc) {
     const items = [];
     const seen = new Set();
     for (let i = 0; i < doc.lineCount; i++) {
-        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|rpc|var|let)\s+([A-Za-z_]\w*)/);
+        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|rpc|var|let|tls)\s+([A-Za-z_]\w*)/);
         if (m && !seen.has(m[2])) {
             seen.add(m[2]);
             const kind = m[1] === 'def' ? K.Class : (m[1] === 'fnc' || m[1] === 'rpc') ? K.Function

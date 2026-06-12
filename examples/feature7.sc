@@ -9,6 +9,7 @@
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
 #   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
 #     run work(...), p —— 与独立线程同一个动词，按类型静态分派
+#   - tls：线程局部变量（static 存储期，每线程独立实例，可顶层/函数内）
 inc stdio.h
 inc "platform.h"
 inc m.sc
@@ -30,6 +31,24 @@ rpc work: c&: ctx, rounds: i4
 # detach 线程体：自释放，无需 join
 rpc note: tag: i4
     printf("detached note: tag=%d\n", tag)
+
+# tls：顶层线程局部变量，每线程独立计数
+tls hits: i4 = 0
+
+rpc bump: c&: ctx, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        hits = hits + 1
+    if hits == rounds          # tls 正确 ⇒ 每线程恰好等于自己的 rounds
+        c->mu.lock()
+        c->n = c->n + 1
+        c->mu.unlock()
+
+# tls：函数内线程局部变量（static 存储期，跨调用保持）
+fnc next_id: i4
+    tls id: i4 = 100
+    id++
+    return id
 
 # 条件变量信号：加锁置位后唤醒等待者
 def sig: {
@@ -67,6 +86,21 @@ fnc main: i4
     if c.mu.try_lock()
         printf("try_lock ok\n")
         c.mu.unlock()
+
+    # tls：函数内 static 存储期，跨调用保持
+    next_id()
+    next_id()
+    printf("tls id=%d\n", next_id())       # 期望 103
+
+    # tls：两线程各自独立计数，互不可见
+    c.n = 0
+    var b1&: thread = nil
+    var b2&: thread = nil
+    run bump(&c, 10000), &b1
+    run bump(&c, 20000), &b2
+    b1->join()
+    b2->join()
+    printf("tls threads ok: %d\n", c.n)    # 期望 2
 
     c.mu.drop()
 

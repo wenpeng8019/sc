@@ -434,11 +434,13 @@ struct CGen {
     }
 
     // ---------------- 语句 ----------------
-    void emitVarDecls(const std::vector<Field>& decls, bool asConst, bool isStatic = false) {
+    void emitVarDecls(const std::vector<Field>& decls, bool asConst,
+                      bool isStatic = false, bool isTls = false) {
         for (auto& f : decls) {
             regVar(f);
             indent();
-            if (isStatic) out << "static ";
+            if (isTls) out << "static TLS ";   // tls：必为 static（C 规范），TLS 宏见 platform.h
+            else if (isStatic) out << "static ";
             emitDeclarator(f, asConst);
             if (f.init) {
                 out << " = ";
@@ -446,7 +448,8 @@ struct CGen {
             } else {
                 const Decl* sd = aggrOf(f.type.name);
                 if (sd && (sd->kind == Decl::StructD || sd->kind == Decl::UnionD)) {
-                    if (sd->kind == Decl::StructD && hasFieldDefaults(sd)) {
+                    // tls 为 static 存储期：初始化须常量表达式，不能调 __default()
+                    if (!isTls && sd->kind == Decl::StructD && hasFieldDefaults(sd)) {
                         out << " = " << sd->name << "__default()";
                     } else {
                         out << " = {0}";
@@ -458,7 +461,8 @@ struct CGen {
             }
             out << ";\n";
             // 声明即构造：函数内无初值的结构变量，若类型有无参 init 方法则自动调用
-            if (inFunc && !f.init && f.type.ptr == 0 && f.type.arrayDims.empty()
+            // （tls 除外：static 存储期只初始化一次，此处会每次进函数重执行）
+            if (inFunc && !isTls && !f.init && f.type.ptr == 0 && f.type.arrayDims.empty()
                 && !f.type.hasInline) {
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->fields.empty()) {
@@ -499,6 +503,7 @@ struct CGen {
                 break;
             case Stmt::VarS: emitVarDecls(s.decls, false); break;
             case Stmt::LetS: emitVarDecls(s.decls, true); break;
+            case Stmt::TlsS: emitVarDecls(s.decls, false, false, true); break;
             case Stmt::ReturnS:
                 indent();
                 if (curRpc) {
@@ -993,14 +998,10 @@ struct CGen {
     // 第二遍：函数体实现
     // 这样做的目的是支持函数间的任意引用顺序（包括递归/互递归）
     std::string run() {
+        // 标准 C 头统一由 builtins/platform.h 提供（该目录默认在 -I 路径），
+        // 同时带入 TLS 宏等跨平台适配
         out << "/* 由 scc 生成，请勿手工修改 */\n"
-            << "#include <stdint.h>\n"
-            << "#include <stddef.h>\n"
-            << "#include <stdbool.h>\n"
-            << "#include <stdarg.h>\n"
-            << "#include <stdio.h>\n"
-            << "#include <stdlib.h>\n"
-            << "#include <string.h>\n";
+            << "#include \"platform.h\"\n";
 
         // 用户 inc 引入的头文件
         for (auto& d : prog.decls)
@@ -1068,6 +1069,9 @@ struct CGen {
                 case Decl::LetD:
                     emitVarDecls(d->fields, true, shouldStaticize(*d));
                     break;
+                case Decl::TlsD:
+                    emitVarDecls(d->fields, false, false, true);  // 始终 static TLS
+                    break;
                 case Decl::FuncD:
                     if (d->isRpc) { emitRpcInterface(*d, shouldStaticize(*d)); break; }
                     if (d->name != "main") {
@@ -1098,9 +1102,7 @@ struct CGen {
         out << "/* 由 scc 生成，请勿手工修改 —— @导出对象声明 */\n"
             << "#ifndef " << guard << "\n"
             << "#define " << guard << "\n\n"
-            << "#include <stdint.h>\n"
-            << "#include <stddef.h>\n"
-            << "#include <stdbool.h>\n\n";
+            << "#include \"platform.h\"\n\n";
 
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
         emitForwardAggrDecls(true);
@@ -1127,6 +1129,7 @@ struct CGen {
                     break;
                 case Decl::VarD: emitExternVars(d->fields, false); break;
                 case Decl::LetD: emitExternVars(d->fields, true); break;
+                case Decl::TlsD: break;  // tls 不可导出（parser 已拦截）
                 case Decl::FuncD:
                     if (d->isRpc) { emitRpcInterface(*d, false); break; }
                     emitFuncSig(*d);

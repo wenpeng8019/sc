@@ -36,6 +36,7 @@ enum class Tok {
     KwRpc,      // rpc  — 定义伪形参函数（参数/返回值展开为同名结构体）
     KwVar,      // var  — 定义变量
     KwLet,      // let  — 定义常量
+    KwTls,      // tls  — 定义线程局部变量（static 存储期，每线程独立实例）
     KwInc,      // inc  — 引入头文件（对齐 C 的 #include，后跟行尾文本）
     KwReturn,   // return
     KwIf,       // if

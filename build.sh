@@ -72,7 +72,8 @@ do_test() {
     local tmp
     tmp="$(mktemp -d)"
     "$BUILD_DIR/scc" "$ROOT/examples/feature1.sc" --emit-c -o "$tmp/feature1.c"
-    cc "$tmp/feature1.c" -o "$tmp/feature1"
+    # 生成的 C 统一 #include "platform.h"：手动编译需 -I builtins（scc 默认自带）
+    cc "$tmp/feature1.c" -I "$ROOT/builtins" -o "$tmp/feature1"
     "$tmp/feature1"
     # @导出头文件生成（feature_export_inc 无 main，仅验证 .h）
     echo "--- feature_export_inc.sc（--emit-c 头文件）---"

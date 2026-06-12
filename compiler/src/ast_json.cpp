@@ -68,11 +68,13 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::ExprS:
             return node("expr", "", exprToStr(*s.expr), s.line);
         case Stmt::VarS:
-        case Stmt::LetS: {
+        case Stmt::LetS:
+        case Stmt::TlsS: {
             std::vector<std::string> c;
             for (auto& f : s.decls)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
-            return node(s.kind == Stmt::VarS ? "var" : "let", "", "", s.line, c);
+            return node(s.kind == Stmt::VarS ? "var"
+                      : s.kind == Stmt::LetS ? "let" : "tls", "", "", s.line, c);
         }
         case Stmt::ReturnS:
             return node("return", "", s.expr ? exprToStr(*s.expr) : "", s.line);
@@ -201,11 +203,13 @@ std::string declNode(const Decl& d) {
             return nodeExt(d.isRpc ? "rpc" : "fnc", n, dtail, d.line, d.external, d.origin, c);
         }
         case Decl::VarD:
-        case Decl::LetD: {
+        case Decl::LetD:
+        case Decl::TlsD: {
             std::vector<std::string> c;
             for (auto& f : d.fields)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
-            return nodeExt(d.kind == Decl::VarD ? "var" : "let", "", X, d.line,
+            return nodeExt(d.kind == Decl::VarD ? "var"
+                         : d.kind == Decl::LetD ? "let" : "tls", "", X, d.line,
                            d.external, d.origin, c);
         }
     }

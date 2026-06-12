@@ -2,7 +2,8 @@
  *
  * 角色：builtins 内其他内置模块的 C 实现（adt_impl.c / m_impl.c ...）
  *       统一经由本头文件实现跨平台，不直接散落 #ifdef。
- * 内容：平台判定宏、平台基础头、路径分隔符、TLS、字节序、
+ * 内容：常用标准 C 头（scc 生成的 C 统一由本头带入）、平台判定宏、
+ *       平台基础头、路径分隔符、TLS、字节序、
  *       时钟（墙钟/单调/CPU 耗时）、微秒休眠、CPU 核数、原子操作。
  * 发行：与其他 builtins 资源一样内嵌进 scc 二进制并随用释放。
  */
@@ -10,7 +11,11 @@
 #define SC_PLATFORM_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -49,6 +54,24 @@
 #define P_LINUX 0
 #endif
 
+/* ---------------- 路径分隔符 ---------------- */
+
+#if P_POSIX_LIKE
+#define P_SEP '/'
+#else
+#define P_SEP '\\'
+#endif
+
+#if P_WIN
+#define P_IS_SEP(c) ((c) == '/' || (c) == '\\')
+#else
+#define P_IS_SEP(c) ((c) == '/')
+#endif
+
+#ifndef __FILE_NAME__
+#define __FILE_NAME__ (strrchr(__FILE__, P_SEP) ? strrchr(__FILE__, P_SEP) + 1 : __FILE__)
+#endif
+
 /* ---------------- 平台基础头 ---------------- */
 
 #if P_WIN
@@ -73,38 +96,6 @@
 #define P_POSIX_LIKE 0
 #endif
 
-/* ---------------- 路径分隔符 ---------------- */
-
-#if P_POSIX_LIKE
-#define P_SEP '/'
-#else
-#define P_SEP '\\'
-#endif
-
-#if P_WIN
-#define P_IS_SEP(c) ((c) == '/' || (c) == '\\')
-#else
-#define P_IS_SEP(c) ((c) == '/')
-#endif
-
-#ifndef __FILE_NAME__
-#define __FILE_NAME__ (strrchr(__FILE__, P_SEP) ? strrchr(__FILE__, P_SEP) + 1 : __FILE__)
-#endif
-
-/* ---------------- 线程局部存储 ---------------- */
-
-#if defined(__cplusplus)
-#define TLS thread_local
-#elif defined(_MSC_VER)
-#define TLS __declspec(thread)
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define TLS _Thread_local
-#elif defined(__GNUC__) || defined(__clang__)
-#define TLS __thread
-#else
-#error "TLS not supported on this compiler"
-#endif
-
 /* ---------------- 字节序 ---------------- */
 
 #if P_WIN
@@ -122,6 +113,34 @@
 #else
 #   include <endian.h>
 #endif
+
+/* ---------------- 线程局部存储 ---------------- */
+
+#if defined(__cplusplus)
+#define TLS thread_local
+#elif defined(_MSC_VER)
+#define TLS __declspec(thread)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define TLS _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+#define TLS __thread
+#else
+#error "TLS not supported on this compiler"
+#endif
+
+/* ---------------- CPU 核数 ---------------- */
+
+/* 逻辑核数（至少返回 1） */
+static inline uint32_t P_ncpu(void) {
+#if P_WIN
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwNumberOfProcessors > 0 ? (uint32_t)si.dwNumberOfProcessors : 1;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (uint32_t)n : 1;
+#endif
+}
 
 /* ---------------- 时间与时钟 ---------------- */
 
@@ -241,20 +260,6 @@ static inline void P_usleep(uint64_t us) {
 #else
     struct timespec ts = { (time_t)(us / 1000000ULL), (long)(us % 1000000ULL) * 1000L };
     nanosleep(&ts, NULL);
-#endif
-}
-
-/* ---------------- CPU 核数 ---------------- */
-
-/* 逻辑核数（至少返回 1） */
-static inline uint32_t P_ncpu(void) {
-#if P_WIN
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    return si.dwNumberOfProcessors > 0 ? (uint32_t)si.dwNumberOfProcessors : 1;
-#else
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return n > 0 ? (uint32_t)n : 1;
 #endif
 }
 

@@ -825,10 +825,12 @@ struct Parser {
             return parseLabelStmt();
 
         switch (cur().kind) {
-            // var / let 声明语句
+            // var / let / tls 声明语句
             case Tok::KwVar:
-            case Tok::KwLet: {
-                auto s = mkStmt(cur().kind == Tok::KwVar ? Stmt::VarS : Stmt::LetS);
+            case Tok::KwLet:
+            case Tok::KwTls: {
+                auto s = mkStmt(cur().kind == Tok::KwVar ? Stmt::VarS
+                              : cur().kind == Tok::KwLet ? Stmt::LetS : Stmt::TlsS);
                 advance();
                 parseVarList(s->decls);
                 return s;
@@ -991,11 +993,15 @@ struct Parser {
                     prog.decls.back()->exported = exported;
                     break;
                 case Tok::KwVar:
-                case Tok::KwLet: {
-                    // 全局变量/常量：包装成 VarD/LetD 类型的 Decl
+                case Tok::KwLet:
+                case Tok::KwTls: {
+                    // 全局变量/常量/线程局部变量：包装成 VarD/LetD/TlsD 类型的 Decl
+                    if (cur().kind == Tok::KwTls && exported)
+                        err("tls 变量为线程局部 static 存储，不可 @ 导出");
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
-                    d->kind = cur().kind == Tok::KwVar ? Decl::VarD : Decl::LetD;
+                    d->kind = cur().kind == Tok::KwVar ? Decl::VarD
+                            : cur().kind == Tok::KwLet ? Decl::LetD : Decl::TlsD;
                     d->exported = exported;
                     advance();
                     parseVarList(d->fields);  // 解析一项或多项（逗号或多行）
@@ -1004,7 +1010,7 @@ struct Parser {
                 }
                 default:
                     // 顶层只允许程序结构对象的几种关键字
-                    err("顶层只允许 inc/def/fnc/rpc/var/let，得到 '" + cur().text + "'");
+                    err("顶层只允许 inc/def/fnc/rpc/var/let/tls，得到 '" + cur().text + "'");
             }
         }
         return prog;

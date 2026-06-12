@@ -38,6 +38,7 @@ struct SGen {
                 break;
             case Stmt::VarS: emitVarLine("var", s.decls); break;
             case Stmt::LetS: emitVarLine("let", s.decls); break;
+            case Stmt::TlsS: emitVarLine("tls", s.decls); break;
             case Stmt::ReturnS:
                 ind();
                 out << "return";
@@ -181,6 +182,7 @@ struct SGen {
                 break;
             case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.fields); break;
             case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.fields); break;
+            case Decl::TlsD: emitVarLine("tls", d.fields); break;
         }
     }
 
