@@ -1,4 +1,4 @@
-# 新特性综合测试：多维数组 / @导出 / inc
+# 特性 2：多维数组 / @导出 / inc 头文件
 inc string.h
 
 @def Color: i1

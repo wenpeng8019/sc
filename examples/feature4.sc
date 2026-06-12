@@ -1,4 +1,4 @@
-# 外部模块导入测试：builtins/io.sc
+# 特性 4：sc 模块导入（inc x.sc，单元编译+链接）：builtins/io.sc
 inc io.sc
 
 fnc main: i4

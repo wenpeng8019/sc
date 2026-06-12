@@ -35,8 +35,8 @@ cmake --build build
 #   SCC_INC/inc 头文件路径(:分隔→-I) | SCC_LIB/lib 库路径(:分隔→-L) | SCC_LIBS/libs 库名(→-l)
 # .sc 配置文件格式（每行 key = value，# 注释）：cc = clang
 # '--' 后的参数透传给程序；-l <名>/-lm 追加链接库
-./build/scc ../examples/demo.sc
-SCC_CC=clang ./build/scc ../examples/demo.sc -- arg1 arg2
+./build/scc ../examples/feature1.sc
+SCC_CC=clang ./build/scc ../examples/feature1.sc -- arg1 arg2
 SCC_LIB=/opt/homebrew/lib ./build/scc app.sc -l curl -lm
 
 # 构建产物模式：可执行 / 静态库 / 动态库（按 -o 后缀决定；缺省为输入名去 .sc）
@@ -44,9 +44,9 @@ SCC_LIB=/opt/homebrew/lib ./build/scc app.sc -l curl -lm
 ./build/scc util.sc --build -o libutil.a      # 同时生成 libutil.h（@导出接口）
 ./build/scc util.sc --build -o libutil.dylib  # Linux 用 .so
 
-# 转译为 C 源码；有 @导出对象时额外生成同名 .h（demo.h）
-./build/scc ../examples/demo.sc --emit-c -o demo.c
-cc demo.c -o demo && ./demo
+# 转译为 C 源码；有 @导出对象时额外生成同名 .h（feature1.h）
+./build/scc ../examples/feature1.sc --emit-c -o feature1.c
+cc feature1.c -o feature1 && ./feature1
 ```
 
 ## 路线

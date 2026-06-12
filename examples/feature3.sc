@@ -1,4 +1,4 @@
-# 新特性测试：b 布尔类型 / true,false,nil 常量 / 伪 class 方法字段
+# 特性 3：b 布尔类型 / true,false,nil 常量 / 伪 class 方法字段
 inc stdio.h
 
 # 伪 class：带方法字段的结构体

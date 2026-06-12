@@ -15,7 +15,7 @@ usage() {
 
 命令:
   build      构建 scc 编译器 (默认)
-  test       构建并用 examples/demo.sc 做端到端验证
+  test       构建并用 examples/feature*.sc 做端到端验证
   install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图）
   uninstall  卸载 scc 与 VSCode 插件
   clean      清理构建产物
@@ -31,16 +31,32 @@ do_build() {
 
 do_test() {
     do_build
-    echo "==> 端到端验证 examples/demo.sc"
-    echo "--- 默认模式（编译+执行）---"
-    "$BUILD_DIR/scc" "$ROOT/examples/demo.sc"
-    echo "--- --emit-c 模式（转译 C 后手动编译）---"
+    echo "==> 端到端验证 examples/feature*.sc"
+    # 可运行特性系列：默认模式（编译+执行）
+    local f
+    for f in feature1 feature2 feature3 feature4 feature5 feature_forward; do
+        echo "--- $f.sc（默认模式）---"
+        "$BUILD_DIR/scc" "$ROOT/examples/$f.sc"
+    done
+    # emit-c 模式：转译 C 后手动编译运行
+    echo "--- feature1.sc（--emit-c 模式）---"
     local tmp
     tmp="$(mktemp -d)"
-    "$BUILD_DIR/scc" "$ROOT/examples/demo.sc" --emit-c -o "$tmp/demo.c"
-    cc "$tmp/demo.c" -o "$tmp/demo"
-    "$tmp/demo"
+    "$BUILD_DIR/scc" "$ROOT/examples/feature1.sc" --emit-c -o "$tmp/feature1.c"
+    cc "$tmp/feature1.c" -o "$tmp/feature1"
+    "$tmp/feature1"
+    # @导出头文件生成（feature_export_inc 无 main，仅验证 .h）
+    echo "--- feature_export_inc.sc（--emit-c 头文件）---"
+    "$BUILD_DIR/scc" "$ROOT/examples/feature_export_inc.sc" --emit-c -o "$tmp/exp.c"
+    [ -f "$tmp/exp.h" ] && echo "exp.h 已生成"
     rm -rf "$tmp"
+    # 负向用例：应在语义阶段报错
+    echo "--- feature_bad_value_cycle.sc（预期报错）---"
+    if "$BUILD_DIR/scc" "$ROOT/examples/feature_bad_value_cycle.sc" 2>/dev/null; then
+        echo "错误：负向用例未报错" >&2
+        exit 1
+    fi
+    echo "已按预期报错"
     echo "==> 验证通过"
 }
 

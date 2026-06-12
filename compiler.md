@@ -270,7 +270,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 输出格式：`文件:行号: 错误: 消息`，附出错行源码展示与修复提示（如有）：
 
 ```
-demo.sc:31: 错误: 期望 ':'，得到 ''
+feature1.sc:31: 错误: 期望 ':'，得到 ''
   |          1
   提示: case 分支标签需以 ':' 结尾
 ```
@@ -301,7 +301,7 @@ demo.sc:31: 错误: 期望 ':'，得到 ''
 
 ```sh
 ./build.sh build      # 构建 scc（CMake Release，产物 compiler/build/scc）
-./build.sh test       # 构建 + examples/demo.sc 端到端验证（运行模式 + emit-c 模式）
+./build.sh test       # 构建 + examples/feature*.sc 端到端验证（运行模式 + emit-c 模式 + 负向用例）
 ./build.sh install    # 安装 scc 到 $PREFIX/bin（默认 /usr/local/bin）+ VSCode 插件软链
 ./build.sh uninstall  # 卸载
 ./build.sh clean      # 清理构建产物
