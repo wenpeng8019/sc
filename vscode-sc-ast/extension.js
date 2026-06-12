@@ -44,6 +44,7 @@ const ICONS = {
     if: 'git-branch', else: 'git-branch', while: 'sync', for: 'sync',
     'do-while': 'sync-ignored', goto: 'arrow-swap', label: 'tag',
     return: 'arrow-left', break: 'debug-step-out', continue: 'debug-continue',
+    run: 'play',
     expr: 'symbol-operator', error: 'error',
 };
 
