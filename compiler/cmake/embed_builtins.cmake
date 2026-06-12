@@ -1,9 +1,10 @@
 # ============================================================
 # 内嵌 builtins 资源生成脚本（cmake -P 调用，配合 SCC_EMBED_BUILTINS）
-#   输入: BASE  = builtins 目录绝对路径
-#         RELS  = 冒号分隔的相对路径列表（.sc/.h 资源）
-#         ADT_A = 预编译 adt 静态库路径（内嵌为 adt/adt.a）
-#         OUT   = 生成的 .cpp 路径
+#   输入: BASE      = builtins 目录绝对路径
+#         RELS      = 冒号分隔的相对路径列表（.sc/.h 资源）
+#         LIBS      = 冒号分隔的预编译子项目静态库绝对路径列表
+#         LIB_NAMES = 与 LIBS 对位的内嵌相对名（如 adt/adt.a:m/m.a）
+#         OUT       = 生成的 .cpp 路径
 #   输出: EmbeddedFile 表 + 全部内容的 MD5（运行时作缓存目录名，
 #         内容变化自动换目录，无陈旧缓存问题）
 # ============================================================
@@ -14,8 +15,12 @@ foreach(_r IN LISTS _rels)
     list(APPEND _files "${BASE}/${_r}")
     list(APPEND _names "${_r}")
 endforeach()
-list(APPEND _files "${ADT_A}")
-list(APPEND _names "adt/adt.a")
+if(NOT "${LIBS}" STREQUAL "")
+    string(REPLACE ":" ";" _libs "${LIBS}")
+    string(REPLACE ":" ";" _libnames "${LIB_NAMES}")
+    list(APPEND _files ${_libs})
+    list(APPEND _names ${_libnames})
+endif()
 
 set(_decls "")
 set(_table "")

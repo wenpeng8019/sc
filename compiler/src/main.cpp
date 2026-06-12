@@ -443,11 +443,13 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
 
 // 把模块图中所有单元生成 .c/.h 并编译为 .o（run 与 build 模式共用）
 // extraCFlags 用于追加单元级编译选项（如动态库的 -fPIC）；成功返回 0
+// extraLd 返回子项目需要的额外链接选项（如 Linux 上 m 的 -lpthread）
 static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& units,
                                  const ToolConfig& tc,
                                  const std::string& extraCFlags,
                                  const std::filesystem::path& tmpDir,
-                                 std::vector<std::filesystem::path>& objects) {
+                                 std::vector<std::filesystem::path>& objects,
+                                 std::string* extraLd = nullptr) {
     struct UnitArtifact {
         std::filesystem::path cpath;
         std::filesystem::path hpath;
@@ -495,35 +497,42 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         objects.push_back(a.opath);
     }
 
-    // 第三阶段：adt 实现自动参与链接（单元图含 builtins 的 adt.sc 时）
-    //   未指定 --adt → 内置默认实现 builtins/adt/adt_impl.c
-    //   --adt <x.c|x.o|x.a> → 替换为自定义实现
-    std::filesystem::path adtDir;
+    // 第三阶段：builtins 子项目实现自动参与链接
+    //   子项目形态 <目录>/x/x.sc，同目录存在 x_impl.c（自动编译，
+    //   -I 自身目录 + -I 上级目录使 "x.h"/"platform.h" 可见）或
+    //   x.a（内嵌发行版释放的预编译库，直接链接）；两者皆无则跳过。
+    //   adt 特例：--adt <x.c|x.o|x.a> 可替换默认实现。
     for (auto& kv : units) {
         const std::filesystem::path p(kv.first);
-        if (p.filename() == "adt.sc" && p.parent_path().filename() == "adt") {
-            adtDir = p.parent_path();
-            break;
+        const std::string stem = p.stem().string();
+        if (p.extension() != ".sc" || p.parent_path().filename() != stem) continue;
+        const std::filesystem::path dir = p.parent_path();
+
+        std::filesystem::path impl;
+        if (stem == "adt" && !tc.adtImpl.empty()) {
+            impl = tc.adtImpl;
+            if (!std::filesystem::exists(impl)) {
+                std::cerr << "错误: adt 实现文件不存在: " << impl.string() << "\n";
+                return 1;
+            }
+        } else {
+            impl = dir / (stem + "_impl.c");
+            if (!std::filesystem::exists(impl)) impl = dir / (stem + ".a");
+            if (!std::filesystem::exists(impl)) continue;  // 非子项目实现形态
         }
-    }
-    if (!adtDir.empty()) {
-        std::filesystem::path impl(tc.adtImpl);
-        if (impl.empty()) {
-            impl = adtDir / "adt_impl.c";
-            if (!std::filesystem::exists(impl))
-                impl = adtDir / "adt.a";  // 内嵌发行版：释放的是预编译静态库
-        }
-        if (!std::filesystem::exists(impl)) {
-            std::cerr << "错误: adt 实现文件不存在: " << impl.string() << "\n";
-            return 1;
-        }
+#if !defined(__APPLE__) && !defined(_WIN32)
+        // Linux 等平台 pthread 需显式链接（macOS 已内置）
+        if (stem == "m" && extraLd && extraLd->find("-lpthread") == std::string::npos)
+            *extraLd += " -lpthread";
+#endif
         if (impl.extension() == ".c") {
-            const std::filesystem::path obj = tmpDir / "adt_impl.o";
+            const std::filesystem::path obj = tmpDir / (stem + "_impl.o");
             std::string ccCmd = pickCC() + " -g" + tc.cflags + extraCFlags
-                + " -I " + adtDir.string()
+                + " -I " + dir.string()
+                + " -I " + dir.parent_path().string()
                 + " -c " + impl.string() + " -o " + obj.string();
             if (std::system(ccCmd.c_str()) != 0) {
-                std::cerr << "错误: adt 实现编译失败（" << ccCmd << "）\n";
+                std::cerr << "错误: " << stem << " 实现编译失败（" << ccCmd << "）\n";
                 return 1;
             }
             objects.push_back(obj);
@@ -593,10 +602,15 @@ static int buildProject(const std::filesystem::path& rootPath,
     const std::filesystem::path tmpDir(dirC);
     const OutKind kind = outputKind(output);
     std::vector<std::filesystem::path> objects;
+    std::string extraLd;
     int rc = compileUnitsToObjects(units, tc,
                                    kind == OutKind::SharedLib ? " -fPIC" : "",
-                                   tmpDir, objects);
-    if (rc == 0) rc = linkOutput(kind, objects, output, tc);
+                                   tmpDir, objects, &extraLd);
+    if (rc == 0) {
+        ToolConfig tcLink = tc;
+        tcLink.ldflags += extraLd;
+        rc = linkOutput(kind, objects, output, tcLink);
+    }
     std::filesystem::remove_all(tmpDir);
     return rc;
 }
@@ -657,7 +671,8 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     }
     const std::filesystem::path tmpDir(dirC);
     std::vector<std::filesystem::path> objects;
-    if (compileUnitsToObjects(units, tc, "", tmpDir, objects) != 0) {
+    std::string extraLd;
+    if (compileUnitsToObjects(units, tc, "", tmpDir, objects, &extraLd) != 0) {
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
@@ -666,7 +681,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     const std::filesystem::path bin = tmpDir / "run.out";
     std::string linkCmd = pickCC() + " -g";  // 添加 -g 保留调试符号
     for (auto& o : objects) linkCmd += " " + o.string();
-    linkCmd += " -o " + bin.string() + tc.ldflags;
+    linkCmd += " -o " + bin.string() + tc.ldflags + extraLd;
     if (std::system(linkCmd.c_str()) != 0) {
         std::cerr << "错误: 链接失败（" << linkCmd << "）\n";
         std::filesystem::remove_all(tmpDir);

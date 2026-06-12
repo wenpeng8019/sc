@@ -4,6 +4,7 @@
  * 可通过 scc --adt <x.c|x.o|x.a> 替换为自定义实现（契约见 adt.h）。
  */
 #include "adt.h"
+#include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 
 #include <stdlib.h>
 #include <string.h>

@@ -9,6 +9,22 @@
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
+| m | `inc m.sc` | 多线程语言支持标准：thread（线程）、mutex（互斥锁） |
+
+另有 `platform.h`（非模块）：builtins 内各实现的跨平台基础头，见末节。
+
+## 子项目通用机制
+
+子项目形态 `builtins/x/` 由三件套构成：
+
+| 文件 | 角色 |
+|------|------|
+| x.sc | 唯一事实源：`@def` 数据布局 + `@fnc T::m` 方法声明（无函数体） |
+| x.h | C ABI 契约（与 x.sc 同步维护），自定义/默认实现据此编写 |
+| x_impl.c | 默认实现，编译器自动编译并链接（`-I` 自身目录与 builtins 根） |
+
+单元图包含 `<目录>/x/x.sc` 且同目录存在 `x_impl.c`（或内嵌发行版释放的
+预编译 `x.a`）时，实现自动参与链接；两者皆无则跳过（不影响纯 sc 子项目）。
 
 ## adt —— 抽象数据类型子项目
 
@@ -111,3 +127,84 @@ fnc main: i4
     s.drop()                   # 手动析构
     return 0
 ```
+
+## m —— 多线程语言支持标准
+
+多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；后续按
+语言特性需要扩展（条件变量/原子操作/线程局部存储等）。
+
+目录结构（`builtins/m/`）：m.sc（事实源）、m.h（C ABI 契约）、
+m_impl.c（默认实现，跨平台经由 `platform.h`：POSIX pthread / Windows 线程）。
+Linux 等平台链接时自动追加 `-lpthread`。
+
+句柄约定：`h&: v` 为实现私有的平台句柄（实现内部分配/释放），调用方
+不直接访问；结构布局因此跨平台稳定。
+
+### thread —— 线程
+
+线程入口为命名函数类型 `thread_fn: v, arg&: v`，用
+`fnc worker -> thread_fn` 实现。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `v` | 构造为空（声明即构造适用） |
+| start | `b, f&: thread_fn, arg&: v` | 启动线程（已启动未回收返回 0） |
+| join | `v` | 等待结束并回收 |
+| drop | `v` | 未 join 的线程 detach 后释放 |
+| sleep | `v, ms: u4` | 当前线程休眠（与接收者实例无关） |
+
+start 后必须 join（回收）或 drop（detach 释放）二选一。
+
+### mutex —— 互斥锁
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `v` | 构造（声明即构造适用） |
+| drop | `v` | 析构 |
+| lock / unlock | `v` | 加锁 / 解锁 |
+| try_lock | `b` | 取锁成功返回 1，已被占用返回 0 |
+
+### 使用示例
+
+完整示例见 `examples/feature7.sc`：
+
+```sc
+inc stdio.h
+inc m.sc
+
+def ctx: {
+    mu: mutex
+    n: i4
+}
+
+fnc worker -> thread_fn
+    var c&: ctx = (arg: ctx&)
+    c->mu.lock()
+    c->n = c->n + 1
+    c->mu.unlock()
+
+fnc main: i4
+    var c: ctx
+    c.n = 0
+    c.mu.init()        # 嵌套字段不自动构造，手动 init
+    var t: thread      # 声明即构造
+    t.start(worker, &c)
+    t.join()
+    c.mu.drop()
+    printf("n=%d\n", c.n)
+    return 0
+```
+
+## platform.h —— 跨平台基础头
+
+`builtins/platform.h` 不是 sc 模块，而是 builtins 内各 C 实现
+（adt_impl.c / m_impl.c ...）共用的单头文件跨平台层（参考摘取自 stdc），
+随其他 builtins 资源一并内嵌/释放。实现编译时自动 `-I` builtins 根目录。
+
+提供：平台判定宏（`P_WIN`/`P_DARWIN`/`P_BSD`/`P_LINUX`/`P_POSIX`/
+`P_POSIX_LIKE`）、平台基础头引入、路径分隔符（`P_SEP`/`P_IS_SEP`）、
+`TLS` 线程局部存储、字节序（`BYTE_ORDER`）、单调时钟
+（`P_clock`/`P_clock_now`/`P_clock_ms`）、毫秒休眠（`P_msleep`）。
+
+新增 builtins 实现时应统一经由本头文件做平台适配，不在实现内散落
+`#ifdef` 平台分支。
