@@ -50,6 +50,7 @@ struct CGen {
     const Program& prog;
     std::ostringstream out;     // 输出流
     int depth = 0;              // 当前缩进深度（每级4空格）
+    std::string srcFile;        // 非空时输出 #line 指令，调试器映射回 .sc 源码
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
@@ -190,6 +191,9 @@ struct CGen {
                     return true;
                 }
                 return false;
+            case Expr::Cast:
+                vt = {e.text, e.castPtr, 0};
+                return true;
             default: return false;
         }
     }
@@ -289,6 +293,24 @@ struct CGen {
             case Expr::Offsetof:
                 out << "offsetof(" << e.text << ", " << e.op << ")";
                 break;
+            case Expr::Cast: {
+                // (expr: type&) → ((T*)(expr))
+                out << "((" << mapBase(e.text);
+                for (int i = 0; i < e.castPtr; i++) out << "*";
+                out << ")(";
+                emitExpr(*e.a, true);
+                out << "))";
+                break;
+            }
+            case Expr::InitList: {
+                out << "{";
+                for (size_t i = 0; i < e.args.size(); i++) {
+                    if (i) out << ", ";
+                    emitExpr(*e.args[i], true);
+                }
+                out << "}";
+                break;
+            }
         }
     }
 
@@ -330,10 +352,15 @@ struct CGen {
     }
 
     void emitStmt(const Stmt& s) {
-        // 行号映射：为每个语句添加行号注释，便于调试时关联回原始 SC 源代码
+        // 行号映射：指定了源文件时输出 #line 指令（调试器断点/单步/堆栈
+        // 直接落在 .sc 源码）；否则输出注释供人工对照
         if (s.line > 0) {
-            indent();
-            out << "/* line " << s.line << " */\n";
+            if (!srcFile.empty()) {
+                out << "#line " << s.line << " \"" << srcFile << "\"\n";
+            } else {
+                indent();
+                out << "/* line " << s.line << " */\n";
+            }
         }
         
         switch (s.kind) {
@@ -580,6 +607,9 @@ struct CGen {
     }
 
     void emitFunc(const Decl& d) {
+        // 函数定义行映射回 .sc 源码（函数序言断点落在 fnc 行）
+        if (!srcFile.empty() && d.line > 0)
+            out << "#line " << d.line << " \"" << srcFile << "\"\n";
         if (d.name != "main" && shouldStaticize(d)) out << "static ";
         emitFuncSig(d);
         out << " {\n";
@@ -748,8 +778,9 @@ struct CGen {
 
 } // namespace
 
-std::string emitC(const Program& prog) {
+std::string emitC(const Program& prog, const std::string& srcFile) {
     CGen g(prog);
+    g.srcFile = srcFile;
     return g.run();
 }
 

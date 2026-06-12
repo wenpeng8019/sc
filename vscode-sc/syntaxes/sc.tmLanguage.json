@@ -134,9 +134,9 @@
         },
         "numbers": {
             "patterns": [
-                { "name": "constant.numeric.hex.sc", "match": "\\b0[xX][0-9a-fA-F]+\\b" },
-                { "name": "constant.numeric.float.sc", "match": "\\b[0-9]+\\.[0-9]+\\b" },
-                { "name": "constant.numeric.integer.sc", "match": "\\b[0-9]+\\b" }
+                { "name": "constant.numeric.hex.sc", "match": "\\b0[xX][0-9a-fA-F]+[uUlL]*\\b" },
+                { "name": "constant.numeric.float.sc", "match": "\\b[0-9]+\\.[0-9]+[fFlL]?\\b" },
+                { "name": "constant.numeric.integer.sc", "match": "\\b[0-9]+[uUlL]*\\b" }
             ]
         },
         "function-call": {

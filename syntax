@@ -114,6 +114,92 @@ inc io.sc
 - 仓库根下 `builtins/` 作为内置模块搜索路径。
 - 内置模块参考手册见 `builtins/REFERENCE.md`。
 
+### 无预处理器设计与 C 头文件互操作
+
+sc **有意不提供**预定义宏、`#define` 宏定义、`#if/#ifdef` 条件编译这类预处理能力。
+设计目标是：sc 源码表面应该像脚本语言一样**平台无关**，不出现平台分支。
+
+平台适配不是不要，而是下沉到 C 层完成：把 `#ifdef` 判断写在 C 头文件里，
+sc 通过 `inc` 导入后直接使用适配后的结果：
+
+```c
+/* platform.h —— 平台适配留在 C 头文件中 */
+#if defined(__APPLE__)
+#define OS_NAME "macos"
+#define OS_ID   1
+#elif defined(_WIN32)
+#define OS_NAME "windows"
+#define OS_ID   2
+#else
+#define OS_NAME "linux"
+#define OS_ID   3
+#endif
+#define SQUARE(x) ((x) * (x))
+```
+
+```sc
+inc stdio.h
+inc limits.h
+inc "platform.h"
+
+fnc main: i4
+    printf("os: %s id=%d\n", OS_NAME, OS_ID)   # 宏常量直接当标识符用
+    printf("int max: %d\n", INT_MAX)            # 标准头中的宏常量
+    printf("square: %d\n", SQUARE(9))           # 函数式宏直接当函数调用
+    return 0
+```
+
+互操作规则：
+
+- C 宏常量（`INT_MAX`、自定义 `OS_NAME` 等）直接作为标识符使用，原样透传到生成的 C 代码。
+- C 函数式宏（`SQUARE(x)`、`va_start` 等）直接按函数调用语法使用。
+- `#if/#ifdef` 等条件编译只存在于 C 头文件中，sc 源码只看到适配后的最终结果。
+- 运行模式下，每个模块单元编译时会自动附加源 `.sc` 文件所在目录为头文件搜索路径，
+  因此 `inc "platform.h"` 能找到与源码同目录的本地头。
+
+### 工具链配置（编译选项与链接库）
+
+两种输出路径对配置的需求不同：
+
+- `--emit-c` 转译模式：只产出 C 源码，编译选项由后续手工编译时自行指定，
+  **不受下列配置影响**。
+- 运行模式（默认，类似 python 直接执行）：scc 需要调用 C 工具链，
+  通过下列配置控制编译与链接。
+
+配置来源与优先级：**环境变量 > 当前目录 `.sc` 配置文件**（逐键独立生效）：
+
+| 环境变量 | `.sc` 配置键 | 含义 | 展开为 |
+|---|---|---|---|
+| `SCC_CC` / `CC` | `cc` | C 编译器 | — |
+| `SCC_CFLAGS` | `cflags` | 额外编译选项（空格分隔） | 原样附加 |
+| `SCC_LDFLAGS` | `ldflags` | 额外链接选项（空格分隔） | 原样附加 |
+| `SCC_INC` | `inc` | 头文件搜索路径，`:` 分隔多路径（类似 PATH） | 逐项 `-I` |
+| `SCC_LIB` | `lib` | 库搜索路径，`:` 分隔多路径 | 逐项 `-L` |
+| `SCC_LIBS` | `libs` | 链接库名，空格或逗号分隔 | 逐项 `-l` |
+
+此外 scc 命令行支持 `-l <名>`（可重复，`-lm` 紧凑写法也支持），
+与配置中的 `libs` 合并。
+
+`.sc` 配置文件示例（每行 `key = value`，`#` 行注释）：
+
+```
+cc     = clang
+cflags = -O2 -Wall
+inc    = vendor/inc:/opt/homebrew/include
+lib    = vendor/lib:/opt/homebrew/lib
+libs   = mylib, m
+```
+
+等价的环境变量与命令行写法：
+
+```sh
+SCC_INC=vendor/inc SCC_LIB=vendor/lib SCC_LIBS="mylib m" scc t.sc
+scc t.sc -l mylib -lm        # -l 追加链接库
+```
+
+生效位置：`cflags`/`-I` 作用于每个模块单元的编译；`ldflags`/`-L`/`-l`
+作用于最终链接。单文件 stdin 模式（`scc -`）编译链接一步完成，两类选项都附加。
+
 ## 6. 导出
 
 `@` 前缀表示导出对象，`--emit-c` 时会额外生成头文件声明；
@@ -262,9 +348,11 @@ def obj: {
 
 ```sc
 o.cb(1, 2)   # 普通函数指针调用
-o.m(1, 2)    # 方法字段调用，自动注入 this
-o->m(1, 2)   # 指针接收者调用，自动注入指针
+o.m(1, 2)    # 自动注入 _this 指针（传入 &o）
+o->m(1, 2)   # 自动注入 _this 指针（传入 o）
 ```
+
+两者本质一致：都会把接收者作为 `_this` 指针传入方法。
 
 ### 8.6 可变参数函数
 
@@ -317,15 +405,19 @@ var count: i4            # 显式类型，无初始化
 当前表达式支持：
 
 - 字面量：整数、浮点、字符串、字符、`true`、`false`、`nil`
+- 十六进制整数：`0xFF`、`0x1A2B`
+- 字面量后缀（与 C 对齐）：整数 `u/U/l/L` 可组合（`1u`、`100UL`、`7LL`），浮点 `f/F/l/L`（`3.14f`）
 - 标识符
 - 函数调用：`f(a, b)`
 - 成员访问：`a.b`、`a->b`
 - 下标：`a[i]`
-- 前缀一元：`! ~ - + * & ++ --`
+- 前缀一元：`! ~ - + * & ++ --`（`&` 为取址，`*` 为解引用）
 - 后缀一元：`++ --`
 - 二元运算：算术、比较、逻辑、位运算、赋值和复合赋值
 - 三元条件：`cond ? a : b`
 - 括号分组：`(expr)`
+- 强制类型转换：`(expr: type)`、`(expr: type&)`（见 10.1）
+- 初始化列表：`{1, 2, 3}`，可嵌套（见 10.2）
 - `sizeof(expr)` 或 `sizeof(type)`：返回字节大小（映射到 C `sizeof`）
 - `offsetof(Type, field)`：返回字段偏移字节数（映射到 C `offsetof`）
 
@@ -337,6 +429,43 @@ ptr->field = arr[i]
 ok = p == nil ? false : true
 var n: u8 = sizeof(point)
 var off: u8 = offsetof(point, y)
+var mask: u4 = 0xFF00
+var big: u8 = 100UL
+let pi: f4 = 3.14f
+```
+
+### 10.1 强制类型转换
+
+sc 的强转写在括号内、表达式之后，用 `:` 引出目标类型：
+
+```sc
+(expr: type)      # 值转换，等价 C 的 (type)(expr)
+(expr: type&)     # 指针转换，等价 C 的 (type*)(expr)
+(expr: type&&)    # 二级指针转换
+```
+
+指针层数沿用 “名字后缀 &” 约定，加在类型名后。对比 C：
+
+```sc
+# C:  ((node*)(p + 1))->next     两层括号，不好写
+# sc: (p + 1: node&)->next       一层括号，顺序阅读
+var x: f8 = 9.9
+var t: i4 = (x: i4)              # 浮点截断
+printf("%d\n", (p: node&)->val)  # void* 转结构体指针后取成员
+```
+
+### 10.2 初始化列表
+
+与 C 对齐，用于数组/结构体初始化，可嵌套、允许尾逗号，括号内可换行：
+
+```sc
+var arr[3]: i4 = {10, 20, 30}
+var m[2][2]: i4 = {{1, 2}, {3, 4}}
+var pt: point = {1, 2}
+var tab[2][3]: i4 = {
+    {1, 2, 3},
+    {4, 5, 6},
+}
 ```
 
 ## 11. 语句与控制流
@@ -488,6 +617,7 @@ var a:i1
 - `def Alias -> Type` 提供类型别名（等价 typedef）
 - `do ... while`、`goto`、标签语句
 - `sizeof(expr)`、`sizeof(type)`、`offsetof(Type, field)` 内置表达式
+- 强制类型转换 `(expr: type&)`，初始化列表 `{1, 2, 3}`，十六进制/字面量后缀
 - 基础语义检查：`nil` 赋值边界、解引用/下标越界、返回/赋值类型兼容、局部地址逃逸
 - 聚合类型循环检测：结构/联合按值递归包含会在 AST 语义阶段报错（需改为指针字段 `&`）
 - 详细诊断输出：出错行源代码展示、编译上下文、文件位置追踪
@@ -674,6 +804,11 @@ ptr->field = value
 arr[i] = 1
 f(a, b, c)
 ok = p == nil ? false : true
+var arr[3]: i4 = {10, 20, 30}     # 初始化列表
+var mask: u4 = 0xFF00              # 十六进制
+var big: u8 = 100UL                # 字面量后缀
+(p + 1: node&)->next               # 强转：等价 C 的 ((node*)(p + 1))->next
+var t: i4 = (x: i4)                # 值转换
 ```
 
 ## 16. 当前限制
@@ -686,7 +821,8 @@ ok = p == nil ? false : true
 - 还没有完整的泛型/模板能力。
 - 还没有显式的 `const`/`volatile`/`restrict` 限定符。
 - 还没有成熟的资源管理机制，例如 `defer` 或析构钩子。
-- 结构体字段默认值已支持；指定初始化与更丰富初始化表达式仍待完善。
+- 初始化列表 `{1, 2, 3}` 已支持；指定成员初始化（C 的 `.field = x`）仍未支持。
+- 预处理能力（宏定义、条件编译）是**有意不提供**的设计决策而非缺失，见第 5 节“无预处理器设计”。
 - 目前的工程化能力主要集中在转译与 AST，标准库和工具链仍偏薄。
 
 这些限制不是“缺文档”，而是“语言还在演进中”的真实状态，应该在后续实现时逐条收敛。

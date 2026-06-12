@@ -19,6 +19,7 @@
 #include "lexer.h"
 #include "error.h"
 #include <cctype>
+#include <cstring>
 #include <unordered_map>
 
 namespace {
@@ -107,12 +108,14 @@ struct Lexer {
     }
 
     // 扫描数字字面量：支持十进制整数、浮点数、十六进制整数
+    // 以及 C 风格字面量后缀：整数 u/U/l/L（可组合），浮点 f/F/l/L
     void lexNumber() {
         std::string v;
         bool isFloat = false;
         // 十六进制前缀 0x / 0X
         if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
             v += get(); v += get();
+            if (!isxdigit((unsigned char)peek())) err("0x 后期望十六进制数字");
             while (isxdigit((unsigned char)peek())) v += get();
         } else {
             // 十进制整数部分
@@ -124,6 +127,9 @@ struct Lexer {
                 while (isdigit((unsigned char)peek())) v += get();
             }
         }
+        // 字面量后缀：整数 u/U/l/L（如 1u, 100UL, 7LL），浮点 f/F/l/L（如 3.14f）
+        const char* sfx = isFloat ? "fFlL" : "uUlL";
+        while (peek() && std::strchr(sfx, peek())) v += get();
         push(isFloat ? Tok::Float : Tok::Int, v);
     }
 

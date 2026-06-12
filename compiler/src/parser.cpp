@@ -117,12 +117,43 @@ struct Parser {
             e->text = advance().text;
             return e;
         }
-        // 括号分组：(expr)
+        // 括号分组：(expr)；若括号内出现 "expr : type"，则为强制类型转换
+        //   (p + 1: Node&)->next  等价于 C 的 ((Node*)(p + 1))->next
         if (accept(Tok::LParen)) {
             exprBracket++;
             auto e = parseExpr();
             skipNlInBracket();
+            if (accept(Tok::Colon)) {  // 强转：目标类型名 + 可选 & 后缀
+                skipNlInBracket();
+                if (!at(Tok::Ident)) err("强转期望类型名");
+                auto c = mk(Expr::Cast);
+                c->text = advance().text;
+                while (atOp("&") || atOp("&&"))
+                    c->castPtr += advance().text == "&&" ? 2 : 1;
+                c->a = std::move(e);
+                e = std::move(c);
+                skipNlInBracket();
+            }
             expect(Tok::RParen, "')'");
+            exprBracket--;
+            return e;
+        }
+        // 初始化列表：{e1, e2, ...}，可嵌套，允许尾逗号
+        if (accept(Tok::LBrace)) {
+            exprBracket++;
+            auto e = mk(Expr::InitList);
+            skipNlInBracket();
+            if (!at(Tok::RBrace)) {
+                for (;;) {
+                    e->args.push_back(parseExpr());
+                    skipNlInBracket();
+                    if (!accept(Tok::Comma)) break;
+                    skipNlInBracket();
+                    if (at(Tok::RBrace)) break;  // 尾逗号
+                }
+            }
+            skipNlInBracket();
+            expect(Tok::RBrace, "'}'");
             exprBracket--;
             return e;
         }

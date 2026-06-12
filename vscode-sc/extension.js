@@ -282,6 +282,15 @@ function activate(context) {
             const idx = ast ? buildIndex(ast) : null;
 
             // ---- 1. 成员访问上下文：obj. / ptr-> → 仅列子域（字段）----
+            // 1a. 强转后成员访问：(expr: Type&)-> / (expr: Type).
+            const cast = before.match(/\(\s*[^()]*:\s*([A-Za-z_]\w*)\s*&*\s*\)\s*(\.|->)\w*$/);
+            if (cast) {
+                if (!idx) return [];
+                const t = resolveStruct(idx, cast[1]);
+                if (!t) return [];
+                return (t.c || []).map(f =>
+                        mkItem(f.n, K.Field, (f.d || '').trim(), '0'));
+            }
             const mem = before.match(/([A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*)*)(\.|->)\w*$/);
             if (mem) {
                 if (!idx) return [];

@@ -50,6 +50,9 @@ struct Expr {
                     //              op="." 或 "->", text=成员名
         Sizeof,     // sizeof(表达式或类型名)  a=内层表达式
         Offsetof,   // offsetof(Type, field)  text=类型名, op=字段名
+        Cast,       // 强制类型转换 (expr: type&)  a=被转换表达式,
+                    //              text=目标类型名, castPtr=指针层数（& 个数）
+        InitList,   // 初始化列表 {1, 2, 3}  args=元素列表（可嵌套）
     } kind;
 
     std::string text;       // 字面量值 / 标识符名（Ident时）/ 成员名（Member时）
@@ -61,6 +64,8 @@ struct Expr {
                             // Ternary: a=条件, b=真值分支, c=假值分支
                             // Call/Index/Member: a=被操作对象
     std::vector<ExprPtr> args;  // 函数调用的实参列表（Call 时有效）
+                                // InitList 时为初始化元素列表
+    int castPtr = 0;            // Cast: 目标类型的指针层数
     int line = 0;               // 表达式起始行号（用于错误报告）
 };
 

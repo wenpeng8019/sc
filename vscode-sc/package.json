@@ -28,6 +28,9 @@
                 "path": "./syntaxes/sc.tmLanguage.json"
             }
         ],
+        "breakpoints": [
+            { "language": "sc" }
+        ],
         "configuration": {
             "title": "SC Language",
             "properties": {

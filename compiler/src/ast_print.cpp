@@ -45,6 +45,19 @@ std::string rec(const Expr& e, bool top) {
             return "sizeof(" + rec(*e.a, true) + ")";
         case Expr::Offsetof:
             return "offsetof(" + e.text + ", " + e.op + ")";
+        case Expr::Cast: {
+            std::string s = "(" + rec(*e.a, true) + ": " + e.text;
+            for (int i = 0; i < e.castPtr; i++) s += "&";
+            return s + ")";
+        }
+        case Expr::InitList: {
+            std::string s = "{";
+            for (size_t i = 0; i < e.args.size(); i++) {
+                if (i) s += ", ";
+                s += rec(*e.args[i], true);
+            }
+            return s + "}";
+        }
     }
     return "";
 }

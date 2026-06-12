@@ -231,6 +231,12 @@ struct Checker {
                 }
                 return l.valid ? l : r;
             }
+            case Expr::Cast:
+                (void)inferExpr(*e.a, locals, line);
+                return Ty{e.text, e.castPtr, 0, true, false};
+            case Expr::InitList:
+                for (auto& a : e.args) (void)inferExpr(*a, locals, line);
+                return Ty{};
         }
         return Ty{};
     }
