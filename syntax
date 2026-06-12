@@ -292,6 +292,37 @@ var tmp: {
 }
 ```
 
+### 7.6 链表结构体
+
+结构体名后写 `~` 标记，使该类型对象具备双向链表链接能力：
+
+```sc
+def task: ~ {
+    id: i4
+}
+```
+
+转 C 时编译器在成员**末尾**注入两个隐藏指针成员 `_prev` / `_next`（类型为
+`task*`）。它们是真实字段，可直接读写遍历，但不可在结构体内显式定义，
+`--emit-sc` 也不会输出。`~` 仅支持结构体 `{}`，不支持联合体/枚举/别名。
+
+链表结构体配合内置 ADT `chain`（`inc adt.sc`）使用，详见
+builtins/REFERENCE.md：
+
+```sc
+var l: chain
+var t: task
+l.append(&t)                    # 编译器自动注入 _prev 偏移
+var it&: task = l->first(): task&
+while it != nil
+    printf("%d\n", it->id)
+    it = it->_next              # 尾元素 _next 为 nil
+```
+
+约定：`head` 指向首元素；首元素的 `_prev` 指向尾元素（即 rear 指针）；
+尾元素的 `_next` 为 `nil`。同一 `chain` 只能存放同一种结构体；chain 不拥有
+元素，移除操作不释放元素内存。
+
 ## 8. 函数、函数类型和方法
 
 ### 8.1 函数类型
@@ -879,7 +910,8 @@ var a:i1
 - 聚合类型循环检测：结构/联合按值递归包含会在 AST 语义阶段报错（需改为指针字段 `&`）
 - 详细诊断输出：出错行源代码展示、编译上下文、文件位置追踪
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
-- 预定义 ADT 接口（`inc adt.sc`）：`string` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
+- 预定义 ADT 接口（`inc adt.sc`）：`string` / `chain` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
+- 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
 

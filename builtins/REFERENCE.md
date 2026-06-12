@@ -113,6 +113,48 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 | clone | `bool, out&: list` | 浅拷贝到 out |
 | sort | `cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&:, b&:` |
 
+### chain —— 侵入式双向链表
+
+配合链表结构体 `def T: ~ {}` 使用（编译器在 T 成员末尾注入 `T *_prev` /
+`T *_next`）。机制约定：
+
+- `head` 指向首元素；首元素的 `_prev` 指向尾元素（即 rear），尾元素的
+  `_next` 为 `nil`——取队尾 O(1)，正向遍历以 `nil` 结尾。
+- 同一 `chain` 只能存放**同一种**结构体：`_off` 记录 `_prev` 在元素内的
+  字节偏移，由编译器在 `append`/`push` 调用处自动注入
+  `offsetof(T, _prev)`，对用户透明。
+- **不拥有元素**：pop/remove/cut 只摘除链接，不释放元素内存。
+- 元素入链前无需初始化 `_prev`/`_next`；同一元素不可同时挂在两条链上。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| append | `it&:` | 添加到队尾 |
+| push | `it&:` | 添加到队首 |
+| pop | `&` | 移除并返回首元素（空返回 nil） |
+| before | `pos&:, it&:` | 插入到 pos 前面 |
+| after | `pos&:, it&:` | 插入到 pos 后面 |
+| remove | `it&:` | 摘除指定元素 |
+| first | `&` | 首元素（空返回 nil） |
+| last | `&` | 尾元素（即 first 的 `_prev`） |
+| revert | | 首尾翻转 |
+| append_to | `dst&: chain` | 整链接到 dst 尾部，自身清空 |
+| push_to | `dst&: chain` | 整链接到 dst 头部，自身清空 |
+| cut | `from&:, to&:, out&: chain` | 截取 `[from..to]` 段为新链 out（out 被覆盖） |
+
+```sc
+def task: ~ { id: i4 }
+
+var l: chain
+var t[3]: task
+l.append(&t[0])
+l.append(&t[1])
+l.push(&t[2])              # 2 0 1
+var it&: task = l.first(): task&
+while it != nil
+    printf("%d ", it->id)
+    it = it->_next
+```
+
 ### 使用示例
 
 完整示例见 `examples/feature6.sc`：

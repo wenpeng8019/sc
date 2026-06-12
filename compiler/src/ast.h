@@ -124,6 +124,7 @@ struct Field {
     std::string name;        // 字段/参数/变量/枚举项名称；空 = 匿名嵌入
     TypeRef type;            // 类型信息（含指针层数、数组标记、内联结构等）
     ExprPtr init;            // 初值表达式（var/let 声明和枚举项使用）
+    bool synthetic = false;  // 编译器注入的隐藏成员（如链表 _prev/_next，emit-sc 不输出）
     int line = 0;            // 声明所在行号
 };
 
@@ -212,6 +213,7 @@ struct Decl {
 
     bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
     bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
+    bool linked = false;         // 链表结构体 def T: ~ {}：末尾注入 _prev/_next 自链指针
     std::string origin;          // 外部符号来源（导入文件路径或 builtin 名称）
 
     TypeRef type;                // AliasD: 别名指向的目标类型

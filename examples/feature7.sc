@@ -1,4 +1,4 @@
-# 特性 7：内置多线程支持（语言特性 run + builtins/m）
+# 特性 7：内置多线程支持（语言特性 run/wait/tls + builtins/m）
 #   - run 语句以 rpc 调用创建线程（rpc 参数天然可打包，正好作线程上下文）：
 #       run work(&c, 10000), &t1   # joinable：t1&: thread，join 等待并回收
 #       run note(7)                # detach：线程结束后自释放

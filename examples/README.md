@@ -16,6 +16,8 @@
 | feature5.sc | `rpc` 伪形参函数（参数/返回值展开为同名结构体，`@rpc` 导出） |
 | feature6.sc | 内置 ADT（string/list）与方法语法：`fnc T::m` 定义/声明、init 声明即构造、drop 手动析构、调用糖 |
 | feature7.sc | 内置多线程（run/wait + m）：`run rpc调用[, &t|pool]` 创建线程/入池，joinable/detach、mutex 保护计数、P_usleep（platform.h）、`wait cond, mutex[, nsec[, sec]]` 条件等待、pool 线程池、tls 线程局部变量 |
+| feature8.sc | 语法糖三件套：右值强转免括号 `expr: type&`、调用缺参默认补 0/nil/{0}、结构体内成员函数实现 |
+| feature9.sc | 链表结构体 `def T: ~ {}`（注入 `_prev`/`_next`）与内置 `chain` 双向链表：append/push/pop/before/after/remove/first/last/revert/append_to/push_to/cut |
 
 ## 专项验证（feature_*.sc）：编译器机制
 

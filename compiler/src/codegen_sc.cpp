@@ -153,9 +153,13 @@ struct SGen {
             case Decl::UnionD: {
                 const char* open = d.kind == Decl::StructD ? "{" : "(";
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
-                ind(); out << X << "def " << d.name << ": " << open << "\n";
+                ind(); out << X << "def " << d.name << ": "
+                           << (d.linked ? "~ " : "") << open << "\n";
                 depth++;
-                for (auto& f : d.fields) { ind(); out << fieldToStr(f, true) << "\n"; }
+                for (auto& f : d.fields) {
+                    if (f.synthetic) continue;  // 链表注入成员由 ~ 标记再生
+                    ind(); out << fieldToStr(f, true) << "\n";
+                }
                 // 成员函数：签名字段 + 缩进函数体（结构体内实现）
                 auto mi = methodImpls.find(d.name);
                 if (mi != methodImpls.end()) {

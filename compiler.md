@@ -287,6 +287,17 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 
 运行模式下每个模块单元也按同一机制生成接口头，模块间通过头文件连接。
 
+### 5.8 链表结构体（def T: ~）与 chain 偏移注入
+
+- 解析期：`def T: ~ {}` 置 `Decl::linked`，并在字段表**末尾**追加两个
+  `synthetic` 真实字段 `_prev`/`_next`（`T*`）——后续成员访问、零初始化、
+  头文件导出均按普通字段处理，`--emit-sc` 跳过 synthetic 字段还原原貌。
+  `~` 仅允许 `{}` 结构体；显式定义 `_prev`/`_next` 报错。
+- 代码生成期：`chain::append/push` 方法调用糖处，编译器取实参静态类型 T
+  （须为 `linked` 结构体一级指针，否则报错），自动追加尾参
+  `offsetof(T, _prev)`。chain 以 `_off` 记录该偏移，其余无类型实参的
+  操作（pop/last/revert/cut 等）经 `_off` 间接寻址 `_prev`/`_next`。
+
 ## 6. 语义检查（semanticCheck）
 
 在代码生成前做静态检查，当前覆盖：
