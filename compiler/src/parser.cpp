@@ -915,6 +915,21 @@ struct Parser {
                 expect(Tok::Newline, "换行");
                 return s;
             }
+            // wait 条件等待语句：wait cond, mutex [, nsec [, sec]]
+            //   nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
+            case Tok::KwWait: {
+                auto s = mkStmt(Stmt::WaitS);
+                advance();
+                s->expr = parseExpr();                              // cond
+                expect(Tok::Comma, "','");
+                s->forInit = parseExpr();                           // mutex
+                if (accept(Tok::Comma)) {
+                    s->forCond = parseExpr();                       // 纳秒
+                    if (accept(Tok::Comma)) s->forStep = parseExpr(); // 秒
+                }
+                expect(Tok::Newline, "换行");
+                return s;
+            }
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);

@@ -56,6 +56,7 @@ struct CGen {
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
+    bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -171,6 +172,7 @@ struct CGen {
 
     void scanStmtForNew(const Stmt& s) {
         if (s.kind == Stmt::RunS) usesRun = true;
+        if (s.kind == Stmt::WaitS) usesWait = true;
         if (s.expr) scanExprForNew(*s.expr);
         for (auto& f : s.decls) if (f.init) scanExprForNew(*f.init);
         if (s.forInit) scanExprForNew(*s.forInit);
@@ -602,6 +604,9 @@ struct CGen {
             case Stmt::RunS:
                 emitRunStmt(s);
                 break;
+            case Stmt::WaitS:
+                emitWaitStmt(s);
+                break;
         }
     }
 
@@ -641,6 +646,34 @@ struct CGen {
         out << ");\n";
         depth--;
         indent(); out << "}\n";
+    }
+
+    // wait 语句 → cond_wait 调用（cond_wait 在 m_impl 中实现）
+    //   wait c, m            → cond_wait(&c, &m, 0, 0);        无限等待
+    //   wait c, m, ns, s     → cond_wait(&c, &m, ns, s);       超时等待
+    // cond/mutex 实参可为对象或指针：对象自动取地址（与方法调用糖一致）
+    void emitWaitStmt(const Stmt& s) {
+        if (!aggrOf("cond") || !aggrOf("mutex"))
+            throw CompileError{"wait 语句需要 cond/mutex 类型，请先 inc m.sc", s.line};
+        indent();
+        out << "cond_wait(";
+        emitAutoAddr(*s.expr);     // cond
+        out << ", ";
+        emitAutoAddr(*s.forInit);  // mutex
+        out << ", ";
+        if (s.forCond) emitExpr(*s.forCond, true); else out << "0";
+        out << ", ";
+        if (s.forStep) emitExpr(*s.forStep, true); else out << "0";
+        out << ");\n";
+    }
+
+    // 对象 → &(对象)，指针 → 原样（按轻量类型推断；不可推断时默认按对象取地址）
+    void emitAutoAddr(const Expr& e) {
+        VType vt;
+        bool isPtr = exprVType(e, vt) && vt.ptr > 0 && vt.arr == 0;
+        if (!isPtr) out << "&(";
+        emitExpr(e, true);
+        if (!isPtr) out << ")";
     }
 
     void emitElseIf(const Stmt& s) { // "} else " 之后接 if，不缩进首行
@@ -977,6 +1010,12 @@ struct CGen {
         if (usesRun)
             out << "typedef struct thread thread;\n"
                 << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);\n\n";
+
+        // wait 语句条件等待原语：实现在 m 子项目（m_impl）
+        if (usesWait)
+            out << "typedef struct cond cond;\n"
+                << "typedef struct mutex mutex;\n"
+                << "extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);\n\n";
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {

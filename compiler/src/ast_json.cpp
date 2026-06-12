@@ -138,6 +138,10 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::RunS:
             return node("run", "", exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
+        case Stmt::WaitS:
+            return node("wait", "", exprToStr(*s.expr) + ", " + exprToStr(*s.forInit) +
+                        (s.forCond ? ", " + exprToStr(*s.forCond) : "") +
+                        (s.forStep ? ", " + exprToStr(*s.forStep) : ""), s.line);
     }
     return "{}";
 }

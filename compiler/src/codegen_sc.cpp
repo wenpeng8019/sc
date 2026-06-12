@@ -104,6 +104,13 @@ struct SGen {
                 if (s.forInit) out << ", " << exprToStr(*s.forInit);
                 out << "\n";
                 break;
+            case Stmt::WaitS:
+                ind();
+                out << "wait " << exprToStr(*s.expr) << ", " << exprToStr(*s.forInit);
+                if (s.forCond) out << ", " << exprToStr(*s.forCond);
+                if (s.forStep) out << ", " << exprToStr(*s.forStep);
+                out << "\n";
+                break;
         }
     }
 

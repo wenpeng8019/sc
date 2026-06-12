@@ -1,4 +1,4 @@
-# m —— sc 多线程语言支持标准（run/thread/mutex）
+# m —— sc 多线程语言支持标准（run/wait/thread/mutex/cond）
 #
 # 本文件是 m 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -12,12 +12,17 @@
 #   run work(a, b)        # detach：线程结束后自释放
 #   run work(a, b), &t    # joinable：t&: thread，须 t->join() 等待并回收
 #
+# 条件等待由 wait 语句完成（语言特性，编译器生成 cond_wait 调用）：
+#   wait c, mu            # 无限等待（调用前须已持有 mu）
+#   wait c, mu, nsec, sec # 超时等待（nsec/sec 全 0 等价于无限等待）
+#   c/mu 可为对象或指针，对象自动取地址；被虚假唤醒需循环复查条件
+#
 # 实现机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
 #   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），
 #   线程实体与参数同生命周期；语法层面能拿到的 thread 必为 joinable。
 #
 # 定位：多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；
-#       后续按语言特性需要扩展（条件变量/原子操作/线程局部存储等）。
+#       后续按语言特性需要扩展（原子操作/线程局部存储等）。
 
 # ---------------- thread：线程（run 创建，不可手工构造） ----------------
 
@@ -41,3 +46,14 @@
 @fnc mutex::lock           # 加锁（阻塞）
 @fnc mutex::unlock         # 解锁
 @fnc mutex::try_lock: bool # 取锁成功返回 1，已被占用返回 0
+
+# ---------------- cond：条件变量（配合 wait 语句使用） ----------------
+
+@def cond: {
+    h&:           # 平台条件变量句柄（实现私有）
+}
+
+@fnc cond::init            # 构造（声明即构造适用）
+@fnc cond::drop            # 析构
+@fnc cond::one             # 唤醒一个等待者
+@fnc cond::all             # 唤醒全部等待者

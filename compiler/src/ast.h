@@ -160,6 +160,9 @@ struct Stmt {
         RunS,       // run 线程语句    run rpc调用 [, thread出参地址]
                     //                 expr=rpc 调用（Expr::Call），forInit=可选出参（&t，t 为 thread&）
                     //                 有出参 → joinable（join 等待并回收）；无 → detach 自释放
+        WaitS,      // wait 条件等待   wait cond, mutex [, nsec [, sec]]
+                    //                 expr=cond，forInit=mutex，forCond=可选纳秒，forStep=可选秒
+                    //                 nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
     } kind;
 
     ExprPtr expr;                      // ExprS: 表达式的值

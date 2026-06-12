@@ -37,6 +37,7 @@ const KEYWORDS = [
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
     ['run', '以 rpc 调用创建线程（run 调用[, &t]，需 inc m.sc）'],
+    ['wait', '条件变量等待（wait cond, mutex[, nsec[, sec]]，需 inc m.sc）'],
     ['this', '方法体内的接收者指针（fnc T::m 中访问 this->字段）'],
 ];
 

@@ -9,7 +9,8 @@
  *   - id 由新线程自身填写（跨平台统一 tid），创建后立即读取可能尚未写入
  *   - h 为实现私有区指针（指向同块尾部），调用方不直接访问
  *   - mutex：init/drop 配对；lock/unlock 配对
- *   - 返回 uint8_t（sc 的 b 类型）的函数：1 成功 / 0 失败
+ *   - cond：init/drop 配对；wait 语句由编译器生成 cond_wait 调用
+ *   - 返回 uint8_t（sc 的 bool 类型）的函数：1 成功 / 0 失败
  */
 #ifndef SC_M_H
 #define SC_M_H
@@ -50,6 +51,22 @@ void    mutex_drop(mutex *_this);
 void    mutex_lock(mutex *_this);
 void    mutex_unlock(mutex *_this);
 uint8_t mutex_try_lock(mutex *_this);     /* 1 成功 / 0 已被占用 */
+
+/* ---------------- cond：条件变量 ---------------- */
+
+typedef struct cond {
+    void *h;       /* 平台条件变量句柄（实现私有） */
+} cond;
+
+void    cond_init(cond *_this);
+void    cond_drop(cond *_this);
+void    cond_one(cond *_this);            /* 唤醒一个等待者 */
+void    cond_all(cond *_this);            /* 唤醒全部等待者 */
+
+/* wait 语句原语：调用前须已持有 m；nsec/sec 全 0 → 无限等待，
+ * 否则为相对超时时长（sec 秒 + nsec 纳秒）。
+ * 返回 0 被唤醒 / 1 超时 / -1 错误 */
+int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec);
 
 #ifdef __cplusplus
 }

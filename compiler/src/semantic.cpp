@@ -422,6 +422,12 @@ struct Checker {
                 (void)inferExpr(*s.expr, locals, s.line);             // rpc 调用实参
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);  // thread 出参
                 break;
+            case Stmt::WaitS:
+                (void)inferExpr(*s.expr, locals, s.line);             // cond
+                (void)inferExpr(*s.forInit, locals, s.line);          // mutex
+                if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line);  // 纳秒
+                if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line);  // 秒
+                break;
         }
     }
 

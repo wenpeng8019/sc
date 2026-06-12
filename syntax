@@ -610,6 +610,7 @@ var tab[2][3]: i4 = {
 - `break`
 - `continue`
 - `run`（以 rpc 调用创建线程，见 11.1）
+- `wait`（条件变量等待，见 11.2）
 - 变量/常量声明
 - 表达式语句
 
@@ -728,6 +729,40 @@ fnc main: i4
 - 转 C：装填 rpc 参数结构体后调用线程原语
   `thread_run(入口, &参数, sizeof(参数), 出参|NULL)`（m_impl 提供，
   POSIX pthread / Windows 线程）。
+
+### 11.2 wait 语句（条件变量等待）
+
+`wait` 在条件变量上等待唤醒，需要 `inc m.sc`（cond/mutex 类型与
+原语实现）：
+
+```sc
+wait 条件变量, 互斥锁 [, 纳秒 [, 秒]]
+```
+
+```sc
+inc m.sc
+
+var mu: mutex
+var cv: cond
+
+mu.lock()
+while ready == 0               # 虚假唤醒：必须循环复查条件
+    wait cv, mu                # 无限等待
+mu.unlock()
+
+mu.lock()
+wait cv, mu, 5000000, 0        # 超时等待：5ms（5000000 纳秒）
+mu.unlock()
+```
+
+- 前两参数为 cond 与 mutex，可为对象或指针（对象自动取地址，与
+  方法调用糖一致）；调用前须已持有该 mutex，等待期间自动释锁，
+  返回前重新加锁。
+- 后两参数（可选）为超时：第三参纳秒、第四参秒；全 0 或省略 →
+  无限等待。
+- 唤醒由 cond 方法完成：`one()` 唤醒一个等待者，`all()` 唤醒全部。
+- 转 C：生成条件等待原语 `cond_wait(&cond, &mutex, 纳秒, 秒)`
+  （m_impl 提供；Windows 下超时精度为毫秒，纳秒向上取整）。
 
 ## 12. 布局规则
 
