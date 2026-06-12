@@ -116,15 +116,15 @@
                 },
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "(?<=:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8)\\b(?!\\s*[:(\\n])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8)\\b(?!\\s*[:(])"
                 },
                 {
                     "name": "storage.type.library.sc",
-                    "match": "(?<=:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b(?!\\s*[:(\\n])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b(?!\\s*[:(])"
                 },
                 {
                     "name": "entity.name.type.annotated.sc",
-                    "match": "(?<=:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(\\n])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(])"
                 }
             ]
         },
