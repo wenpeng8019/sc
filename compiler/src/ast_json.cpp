@@ -135,6 +135,9 @@ std::string stmtNode(const Stmt& s) {
         }
         case Stmt::DeclS:
             return declNode(*s.decl);
+        case Stmt::RunS:
+            return node("run", "", exprToStr(*s.expr) +
+                        (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
     }
     return "{}";
 }

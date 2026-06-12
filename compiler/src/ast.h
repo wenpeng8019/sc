@@ -157,6 +157,9 @@ struct Stmt {
         BreakS,     // break 语句      (无附加数据)
         ContinueS,  // continue 语句   (无附加数据)
         DeclS,      // 内嵌类型声明    函数体内用 def 定义局部类型（不常见但允许）
+        RunS,       // run 线程语句    run rpc调用 [, thread出参地址]
+                    //                 expr=rpc 调用（Expr::Call），forInit=可选出参（&t，t 为 thread&）
+                    //                 有出参 → joinable（join 等待并回收）；无 → detach 自释放
     } kind;
 
     ExprPtr expr;                      // ExprS: 表达式的值

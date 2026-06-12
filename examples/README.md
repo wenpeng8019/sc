@@ -15,7 +15,7 @@
 | feature4.sc | sc 模块导入（`inc x.sc`，单元编译+链接）：builtins/adt/adt.sc |
 | feature5.sc | `rpc` 伪形参函数（参数/返回值展开为同名结构体，`@rpc` 导出） |
 | feature6.sc | 内置 ADT（string/list）与方法语法：`fnc T::m` 定义/声明、init 声明即构造、drop 手动析构、调用糖 |
-| feature7.sc | 内置多线程（thread/mutex）：`inc m.sc`、线程入口 `fnc f -> thread_fn`、互斥锁保护计数 |
+| feature7.sc | 内置多线程（run + m）：`run rpc调用[, &t]` 创建线程，joinable/detach、mutex 保护计数、msleep |
 
 ## 专项验证（feature_*.sc）：编译器机制
 

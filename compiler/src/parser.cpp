@@ -896,6 +896,19 @@ struct Parser {
                 err("through 只能出现在 case 分支末尾");
             case Tok::KwGoto:
                 return parseGotoStmt();
+            // run 线程语句：run rpc调用 [, &thread指针]
+            //   有出参 → joinable（join 等待并回收）；无 → detach 自释放
+            case Tok::KwRun: {
+                auto s = mkStmt(Stmt::RunS);
+                advance();
+                s->expr = parseExpr();
+                if (!s->expr || s->expr->kind != Expr::Call ||
+                    !s->expr->a || s->expr->a->kind != Expr::Ident)
+                    err("run 期望 rpc 调用形式 name(args)");
+                if (accept(Tok::Comma)) s->forInit = parseExpr();  // thread 出参地址
+                expect(Tok::Newline, "换行");
+                return s;
+            }
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);

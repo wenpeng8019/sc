@@ -54,6 +54,8 @@ struct CGen {
     int depth = 0;              // 当前缩进深度（每级4空格）
     std::string srcFile;        // 非空时输出 #line 指令，调试器映射回 .sc 源码
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
+    std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
+    bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -168,6 +170,7 @@ struct CGen {
     }
 
     void scanStmtForNew(const Stmt& s) {
+        if (s.kind == Stmt::RunS) usesRun = true;
         if (s.expr) scanExprForNew(*s.expr);
         for (auto& f : s.decls) if (f.init) scanExprForNew(*f.init);
         if (s.forInit) scanExprForNew(*s.forInit);
@@ -596,7 +599,48 @@ struct CGen {
             case Stmt::DeclS:
                 emitTypeDecl(*s.decl);
                 break;
+            case Stmt::RunS:
+                emitRunStmt(s);
+                break;
         }
+    }
+
+    // run 语句 → 装填 rpc 参数结构体 + thread_run 调用
+    //   run worker(a, b), &t →
+    //   { struct worker _rp = {0}; _rp.x = a; ...;
+    //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
+    // thread_run 在 m_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
+    // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
+    void emitRunStmt(const Stmt& s) {
+        const Expr& call = *s.expr;
+        auto it = rpcs.find(call.a->text);
+        if (it == rpcs.end())
+            throw CompileError{"run 的目标必须是 rpc: " + call.a->text, s.line};
+        const Decl* r = it->second;
+        if (call.args.size() != r->fields.size())
+            throw CompileError{"rpc 实参数量不匹配: " + r->name + " 期望 " +
+                               std::to_string(r->fields.size()) + " 个", s.line};
+        if (!aggrOf("thread"))
+            throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
+        indent(); out << "{\n";
+        depth++;
+        indent(); out << "struct " << r->name << " _rp = {0};\n";
+        for (size_t i = 0; i < call.args.size(); i++) {
+            indent();
+            out << "_rp." << r->fields[i].name << " = ";
+            emitExpr(*call.args[i], true);
+            out << ";\n";
+        }
+        indent();
+        out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
+        if (s.forInit) {
+            out << "(thread **)(";
+            emitExpr(*s.forInit, true);
+            out << ")";
+        } else out << "NULL";
+        out << ");\n";
+        depth--;
+        indent(); out << "}\n";
     }
 
     void emitElseIf(const Stmt& s) { // "} else " 之后接 if，不缩进首行
@@ -918,15 +962,21 @@ struct CGen {
             else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
+            if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
 
-        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫）
+        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run 语句
         heapNews.clear();
         for (auto& d : prog.decls) {
             if (d->external) continue;
             for (auto& f : d->fields) if (f.init) scanExprForNew(*f.init);
             for (auto& s : d->body) scanStmtForNew(*s);
         }
+
+        // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
+        if (usesRun)
+            out << "typedef struct thread thread;\n"
+                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);\n\n";
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {

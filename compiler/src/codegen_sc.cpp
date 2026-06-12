@@ -98,6 +98,12 @@ struct SGen {
             case Stmt::DeclS:
                 emitDecl(*s.decl);
                 break;
+            case Stmt::RunS:
+                ind();
+                out << "run " << exprToStr(*s.expr);
+                if (s.forInit) out << ", " << exprToStr(*s.forInit);
+                out << "\n";
+                break;
         }
     }
 

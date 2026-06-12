@@ -1,33 +1,43 @@
 /* m.h —— sc 多线程支持标准的 C ABI 契约（与 builtins/m/m.sc 同步维护）
  *
  * 约定：
- *   - h 为实现私有的平台句柄（实现负责分配/释放），调用方不直接访问
- *   - 返回 uint8_t（sc 的 b 类型）的函数：1 成功 / 0 失败
- *   - thread：start 后必须 join（回收）或 drop（detach 释放）二选一
+ *   - 线程由 run 语句创建：编译器生成 thread_run 调用，
+ *     单次 malloc(sizeof(thread) + psize + 实现私有区)，
+ *     rpc 参数 memcpy 到 thread 对象紧随位置（t + 1）
+ *   - out 非空 → joinable：*out 接收 thread*，须 thread_join 等待并回收（整块释放）
+ *     out 为空 → detach：线程结束后自释放
+ *   - id 由新线程自身填写（跨平台统一 tid），创建后立即读取可能尚未写入
+ *   - h 为实现私有区指针（指向同块尾部），调用方不直接访问
  *   - mutex：init/drop 配对；lock/unlock 配对
+ *   - 返回 uint8_t（sc 的 b 类型）的函数：1 成功 / 0 失败
  */
 #ifndef SC_M_H
 #define SC_M_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ---------------- thread：线程 ---------------- */
-
-typedef void thread_fn(void *arg);    /* 线程入口函数类型 */
+/* ---------------- thread：线程（run 语句原语） ---------------- */
 
 typedef struct thread {
-    void *h;       /* 平台线程句柄（实现私有） */
+    uint64_t id;   /* 跨平台统一线程 id（线程启动后由其自身填写） */
+    void *h;       /* 实现私有区指针（同块分配） */
 } thread;
 
-void    thread_init(thread *_this);                              /* 构造为空 */
-uint8_t thread_start(thread *_this, thread_fn *f, void *arg);    /* 启动线程 */
-void    thread_join(thread *_this);                              /* 等待结束并回收 */
-void    thread_drop(thread *_this);                              /* 未 join 则 detach 后释放 */
-void    thread_sleep(thread *_this, uint32_t ms);                /* 当前线程休眠 */
+/* run 语句原语：fn 为 rpc 实际函数（void name_rpc(struct name*)），
+ * params/psize 为装填好的参数结构体；out 为空即 detach 自释放。
+ * 返回 1 成功 / 0 失败（失败时 *out 置 NULL） */
+uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out);
+
+void    thread_join(thread *_this);   /* 等待结束并回收（含 thread 对象本身） */
+
+/* rpc msleep: v, ms: u4 —— 当前线程休眠毫秒 */
+struct msleep { uint32_t ms; };
+void msleep_rpc(struct msleep *_p);
 
 /* ---------------- mutex：互斥锁 ---------------- */
 

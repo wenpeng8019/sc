@@ -256,7 +256,24 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 空间，故可同名——调用点无需任何改写。函数体内参数引用改写为 `_p->x`，
 `return e` 改写为 `_p->_ = e; return;`。`@rpc` 导出时头文件包含完整三件套。
 
-### 5.6 头文件生成（@ 导出）
+### 5.6 run 语句（多线程）
+
+`run rpc调用[, &t]` 以 rpc 调用创建线程（目标必须是 rpc，需 `inc m.sc`）：
+
+```c
+{   /* run work(a, b), &t */
+    struct work _rp = {0};
+    _rp.x = a; _rp.y = b;
+    thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&t));
+}
+```
+
+出参为空（无 `, &t`）时传 `NULL` → detach 自释放。`thread_run` 为线程原语
+（m_impl 实现）：单次 `malloc(sizeof(thread) + psize + 实现私有区)` 的联合
+实体，参数 memcpy 到 thread 紧随位置；joinable 由 `thread_join` 等待并整块
+回收。程序含 run 语句时自动输出 `thread_run` 的 extern 原型。
+
+### 5.7 头文件生成（@ 导出）
 
 `--emit-c -o x.c` 且存在 `@` 导出对象时生成 `x.h`：
 

@@ -408,6 +408,10 @@ struct Checker {
                 break;
             case Stmt::DeclS:
                 break;
+            case Stmt::RunS:
+                (void)inferExpr(*s.expr, locals, s.line);             // rpc 调用实参
+                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);  // thread 出参
+                break;
         }
     }
 

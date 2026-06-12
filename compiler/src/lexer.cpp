@@ -37,6 +37,7 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"through", Tok::KwThrough}, {"break", Tok::KwBreak},
     {"goto", Tok::KwGoto},
     {"continue", Tok::KwContinue},
+    {"run", Tok::KwRun},
     {"sizeof", Tok::KwSizeof},
     {"offsetof", Tok::KwOffsetof},
 };

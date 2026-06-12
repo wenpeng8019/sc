@@ -9,7 +9,7 @@
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
-| m | `inc m.sc` | 多线程语言支持标准：thread（线程）、mutex（互斥锁） |
+| m | `inc m.sc` | 多线程语言支持标准：run 语句、thread（线程）、mutex（互斥锁） |
 
 另有 `platform.h`（非模块）：builtins 内各实现的跨平台基础头，见末节。
 
@@ -137,23 +137,32 @@ fnc main: i4
 m_impl.c（默认实现，跨平台经由 `platform.h`：POSIX pthread / Windows 线程）。
 Linux 等平台链接时自动追加 `-lpthread`。
 
-句柄约定：`h&: v` 为实现私有的平台句柄（实现内部分配/释放），调用方
-不直接访问；结构布局因此跨平台稳定。
+句柄约定：`h&: v` 为实现私有指针，调用方不直接访问；结构布局因此
+跨平台稳定。
 
-### thread —— 线程
+### run 语句与 thread —— 线程
 
-线程入口为命名函数类型 `thread_fn: v, arg&: v`，用
-`fnc worker -> thread_fn` 实现。
+线程由 `run` 语句创建（语言特性），目标必须是 **rpc 调用**：rpc 参数
+天然可打包，正好作线程上下文，无需额外定义入口函数类型：
 
-| 方法 | 签名 | 说明 |
+```sc
+run work(a, b)        # detach：线程结束后自释放
+run work(a, b), &t    # joinable：t&: thread，须 t->join() 等待并回收
+```
+
+实现机制：run 内部单次分配 `sizeof(thread) + sizeof(rpc参数) + 实现私有区`
+的联合实体，rpc 参数紧随 thread 对象之后（`p + sizeof(thread)` 即参数），
+线程实体与参数同生命周期。语法层面能拿到的 thread 必为 joinable，
+所以 thread 对象非常简洁：
+
+| 成员/方法 | 类型/签名 | 说明 |
 |------|------|------|
-| init | `v` | 构造为空（声明即构造适用） |
-| start | `b, f&: thread_fn, arg&: v` | 启动线程（已启动未回收返回 0） |
-| join | `v` | 等待结束并回收 |
-| drop | `v` | 未 join 的线程 detach 后释放 |
-| sleep | `v, ms: u4` | 当前线程休眠（与接收者实例无关） |
+| id | `u8` | 跨平台统一线程 id（线程启动后由其自身填写） |
+| join | `v` | 等待结束并回收（含 thread 对象本身，之后指针失效） |
 
-start 后必须 join（回收）或 drop（detach 释放）二选一。
+另提供 rpc 仅声明 `msleep: v, ms: u4`：当前线程休眠毫秒（C 侧实现）。
+
+thread 不可手工构造（无 init）；`run` 是唯一创建途径。
 
 ### mutex —— 互斥锁
 
@@ -177,19 +186,22 @@ def ctx: {
     n: i4
 }
 
-fnc worker -> thread_fn
-    var c&: ctx = (arg: ctx&)
-    c->mu.lock()
-    c->n = c->n + 1
-    c->mu.unlock()
+rpc work: v, c&: ctx, rounds: i4   # rpc 即线程体，参数即线程上下文
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        c->mu.lock()
+        c->n = c->n + 1
+        c->mu.unlock()
 
 fnc main: i4
     var c: ctx
     c.n = 0
     c.mu.init()        # 嵌套字段不自动构造，手动 init
-    var t: thread      # 声明即构造
-    t.start(worker, &c)
-    t.join()
+    var t&: thread = nil
+    run work(&c, 10000), &t    # joinable
+    run work(&c, 10000)        # detach（仅示意，结束后自释放）
+    t->join()                  # 等待并回收，之后 t 失效
+    msleep(50)                 # 等 detach 线程结束
     c.mu.drop()
     printf("n=%d\n", c.n)
     return 0

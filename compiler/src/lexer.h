@@ -48,6 +48,7 @@ enum class Tok {
     KwGoto,     // goto
     KwBreak,    // break
     KwContinue, // continue
+    KwRun,      // run  — 以 rpc 调用创建线程（多线程语言特性，依赖 m 模块）
     KwSizeof,   // sizeof
     KwOffsetof, // offsetof
 

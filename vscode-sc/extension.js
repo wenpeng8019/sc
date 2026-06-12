@@ -36,6 +36,7 @@ const KEYWORDS = [
     ['offsetof', '返回字段在类型中的偏移量'],
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
+    ['run', '以 rpc 调用创建线程（run 调用[, &t]，需 inc m.sc）'],
 ];
 
 const LITERALS = [

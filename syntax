@@ -602,6 +602,7 @@ var tab[2][3]: i4 = {
 - 标签语句（`label:`）
 - `break`
 - `continue`
+- `run`（以 rpc 调用创建线程，见 11.1）
 - 变量/常量声明
 - 表达式语句
 
@@ -688,6 +689,38 @@ for i = 0; i < 10; i++
         continue
     printf("%d\n", i)
 ```
+
+### 11.1 run 语句（多线程）
+
+`run` 以 **rpc 调用**创建线程：rpc 的参数天然可打包（见 8.7），正好作
+线程上下文，无需额外定义入口函数类型。需要 `inc m.sc`（thread 类型与
+线程原语实现）。
+
+```sc
+inc m.sc
+
+rpc work: v, c&: ctx, rounds: i4    # rpc 即线程体
+    ...
+
+fnc main: i4
+    var t&: thread = nil
+    run work(&c, 10000), &t    # joinable：t 接收 thread 指针
+    run work(&c, 10000)        # detach：线程结束后自释放
+    t->join()                  # 等待并回收（含 thread 对象），之后 t 失效
+    return 0
+```
+
+- 第二参数（可选）为 thread 指针的地址（`&t`，t 为 `thread&`）：
+  指定即 joinable，必须 `join()` 等待并回收；省略则线程内部 detach，
+  结束后自释放。
+- thread 对象由 run 内部联合分配：单次
+  `alloc(sizeof(thread) + sizeof(rpc参数) + 实现私有区)`，rpc 参数紧随
+  thread 之后（`p + sizeof(thread)` 即参数），线程实体与参数同生命周期。
+- 语法层面能拿到的 thread 必为 joinable，所以 thread 成员很简洁：
+  `id`（跨平台统一线程 id）与 `join` 方法。不可手工构造。
+- 转 C：装填 rpc 参数结构体后调用线程原语
+  `thread_run(入口, &参数, sizeof(参数), 出参|NULL)`（m_impl 提供，
+  POSIX pthread / Windows 线程）。
 
 ## 12. 布局规则
 

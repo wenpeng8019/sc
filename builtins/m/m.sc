@@ -1,32 +1,34 @@
-# m —— sc 多线程语言支持标准（thread/mutex）
+# m —— sc 多线程语言支持标准（run/thread/mutex）
 #
 # 本文件是 m 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
 #   @fnc T::m 方法声明（无函数体）：extern 原型，实现在 C 侧
+#   @rpc 仅声明：调用包装由编译器生成，实际函数（*_rpc）在 C 侧实现
 #
 # 默认实现：同目录 m_impl.c（编译器自动编译并链接，
 #           跨平台经由 builtins/platform.h：POSIX pthread / Windows 线程）
 #
-# 句柄约定：h&: v 为实现私有的平台句柄（实现内部分配/释放），
-#           调用方不直接访问；结构布局因此跨平台稳定。
+# 线程由 run 语句创建（语言特性，目标必须是 rpc 调用）：
+#   run work(a, b)        # detach：线程结束后自释放
+#   run work(a, b), &t    # joinable：t&: thread，须 t->join() 等待并回收
+#
+# 实现机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
+#   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），
+#   线程实体与参数同生命周期；语法层面能拿到的 thread 必为 joinable。
 #
 # 定位：多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；
 #       后续按语言特性需要扩展（条件变量/原子操作/线程局部存储等）。
 
-# ---------------- thread：线程 ----------------
-
-@fnc thread_fn: v, arg&: v        # 线程入口函数类型
+# ---------------- thread：线程（run 创建，不可手工构造） ----------------
 
 @def thread: {
-    h&: v         # 平台线程句柄（实现私有）
+    id: u8        # 跨平台统一线程 id（线程启动后由其自身填写）
+    h&: v         # 实现私有区指针（同块分配，调用方不直接访问）
 }
 
-@fnc thread::init: v                          # 构造为空（未启动）
-@fnc thread::start: b, f&: thread_fn, arg&: v # 启动线程（已启动未回收返回 0）
-@fnc thread::join: v                          # 等待结束并回收
-@fnc thread::drop: v                          # 析构：未 join 的线程 detach 后释放
+@fnc thread::join: v          # 等待结束并回收（含 thread 对象本身，之后指针失效）
 
-@fnc thread::sleep: v, ms: u4                 # 当前线程休眠（与接收者实例无关）
+@rpc msleep: v, ms: u4        # 当前线程休眠 ms 毫秒
 
 # ---------------- mutex：互斥锁 ----------------
 
