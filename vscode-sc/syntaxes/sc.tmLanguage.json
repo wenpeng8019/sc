@@ -73,6 +73,10 @@
                 {
                     "name": "keyword.declaration.sc",
                     "match": "\\b(def|fnc|rpc|var|let|inc)\\b"
+                },
+                {
+                    "name": "variable.language.this.sc",
+                    "match": "\\bthis\\b"
                 }
             ]
         },

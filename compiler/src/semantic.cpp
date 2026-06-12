@@ -217,7 +217,10 @@ struct Checker {
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 if (callee.valid && callee.name == "v" && callee.ptr == 0 && callee.arr == 0)
                     err(e.line, "void 值不能作为表达式使用");
-                return Ty{"i4", 0, 0, true, false};
+                // 调用结果类型未知（语义层不登记函数返回类型；
+                // stdin 单文件解析时 T() 的 T 也可能来自未合并依赖），
+                // 返回 invalid 跳过后续检查，避免误报
+                return Ty{};
             }
             case Expr::PostUnary:
                 return inferExpr(*e.a, locals, line);
@@ -322,17 +325,17 @@ struct Checker {
         }
     }
 
-    // 函数返回类型：省略 = void（内部以 "v" 标记，供 void 边界检查）
+    // 函数返回类型：省略 = void（内部以 "v" 标记，供 void 边界检查）；
+    // 引用的函数类型未知（如 stdin 单文件解析时依赖未合并）时
+    // 返回 invalid，表示“不知道”而非假定 void，跳过返回值检查
     Ty funcRetType(const Decl& d) const {
         if (!d.funcTypeName.empty()) {
             auto it = funcTypes.find(d.funcTypeName);
-            if (it != funcTypes.end()) {
-                Ty t = fromTypeRef(it->second->retType);
-                if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
-                    return Ty{"v", 0, 0, true, false};
-                return t;
-            }
-            return Ty{"v", 0, 0, true, false};
+            if (it == funcTypes.end()) return Ty{};  // 未知函数类型：不检查
+            Ty t = fromTypeRef(it->second->retType);
+            if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
+                return Ty{"v", 0, 0, true, false};
+            return t;
         }
         Ty t = fromTypeRef(d.retType);
         if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
@@ -359,7 +362,7 @@ struct Checker {
                 break;
             case Stmt::ReturnS:
                 if (s.expr) {
-                    if (retTy.name == "v" && retTy.ptr == 0)
+                    if (retTy.valid && retTy.name == "v" && retTy.ptr == 0)
                         err(s.line, "无返回值函数不能 return 表达式（返回类型省略即 void）");
                     if (containsAddrOfLocal(*s.expr, locals))
                         err(s.line, "禁止返回局部变量地址");
