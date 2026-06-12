@@ -11,7 +11,7 @@
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
 | m | `inc m.sc` | 多线程语言支持标准：run/wait 语句、thread、mutex、cond、pool（线程池） |
 
-另有 `platform.h`（非模块）：builtins 内各实现的跨平台基础头，见末节。
+另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
 
 ## 子项目通用机制
 
@@ -258,9 +258,11 @@ fnc main: i4
 
 ## platform.h —— 跨平台基础头
 
-`builtins/platform.h` 不是 sc 模块，而是 builtins 内各 C 实现
-（adt_impl.c / m_impl.c ...）共用的单头文件跨平台层（参考摘取自 stdc），
-随其他 builtins 资源一并内嵌/释放。实现编译时自动 `-I` builtins 根目录。
+`builtins/platform.h` 不是 sc 模块，而是面向用户的单头文件 C 跨平台层
+（参考摘取自 stdc），builtins 内各 C 实现（adt_impl.c / m_impl.c ...）
+也统一经由它做平台适配。builtins 根目录默认加入编译 `-I`，因此
+用户代码中 `inc "platform.h"` 与 `inc stdint.h` 一样开箱即用；
+随其他 builtins 资源一并内嵌/释放。
 
 提供：平台判定宏（`P_WIN`/`P_DARWIN`/`P_BSD`/`P_LINUX`/`P_POSIX`/
 `P_POSIX_LIKE`）、平台基础头引入、路径分隔符（`P_SEP`/`P_IS_SEP`）、

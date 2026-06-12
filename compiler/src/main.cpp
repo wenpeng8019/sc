@@ -292,6 +292,26 @@ static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start)
     return {};
 }
 
+// builtins 根目录默认加入编译 -I：platform.h 等根级头文件是面向用户的
+// 跨平台能力层，inc "platform.h" 应与 inc stdint.h 一样开箱即用。
+// 搜索顺序同模块解析：输入文件目录向上 → cwd 向上 → SCC_BUILTINS → 内嵌释放目录
+static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
+    namespace fs = std::filesystem;
+    fs::path b;
+    if (input != "-") {
+        std::error_code ec;
+        const fs::path abs = fs::absolute(fs::path(input), ec);
+        if (!ec) b = findBuiltinsDir(abs.parent_path());
+    }
+    if (b.empty()) b = findBuiltinsDir(fs::current_path());
+    if (b.empty())
+        if (const char* envB = std::getenv("SCC_BUILTINS")) b = envB;
+#ifdef SCC_EMBED_BUILTINS
+    if (b.empty()) b = embeddedBuiltinsDir();
+#endif
+    if (!b.empty()) tc.cflags += " -I " + b.string();
+}
+
 static std::filesystem::path resolveModulePath(const std::string& raw,
                                                const std::filesystem::path& baseDir) {
     const std::string target = stripDelims(raw);
@@ -771,14 +791,16 @@ int main(int argc, char** argv) {
 
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
         if (mode == "run") {
-            const ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            addBuiltinsInclude(tc, input);   // platform.h 等面向用户的 builtins 根级头默认可见
             if (input == "-") return compileAndRun(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);
         }
 
         // 3d'. build 模式：编译链接为持久产物（类型按 -o 后缀决定）
         if (mode == "build") {
-            const ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            addBuiltinsInclude(tc, input);
             std::string out = output;
             if (out.empty()) {
                 if (input == "-") {
