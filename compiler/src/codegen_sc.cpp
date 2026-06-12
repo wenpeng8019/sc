@@ -200,6 +200,9 @@ struct SGen {
     std::string run(const Program& prog) {
         out << "# 由 scc --emit-sc 从 AST 再生成\n\n";
         for (auto& d : prog.decls) {
+            // 外部模块合并进来的声明不输出（由 inc 引入，输出会导致重定义），
+            // 但 inc 行本身保留（与 codegen_c 第一遍的跳过规则一致）
+            if (d->external && d->kind != Decl::IncD) continue;
             emitDecl(*d);
             out << "\n";
         }
