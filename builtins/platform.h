@@ -3,7 +3,7 @@
  * 角色：builtins 内其他内置模块的 C 实现（adt_impl.c / m_impl.c ...）
  *       统一经由本头文件实现跨平台，不直接散落 #ifdef。
  * 内容：平台判定宏、平台基础头、路径分隔符、TLS、字节序、
- *       时钟（墙钟/单调/CPU 耗时）、微秒休眠。
+ *       时钟（墙钟/单调/CPU 耗时）、微秒休眠、CPU 核数、原子操作。
  * 发行：与其他 builtins 资源一样内嵌进 scc 二进制并随用释放。
  */
 #ifndef SC_PLATFORM_H
@@ -262,7 +262,8 @@ static inline uint32_t P_ncpu(void) {
 // 优先使用 C11 stdatomic.h，否则使用平台特定实现
 // 注意：所有 P_inc/P_and/P_or/P_xor 等操作返回新值（操作后的值）
 // P_get_and_xxx 操作返回旧值（操作前的值）
-// P_test_and_set 返回 bool（true 表示成功）
+// P_test_and_set 返回 bool（true 表示成功）；失败时 *pTestVar 更新为实际旧值
+// 注意：C11/MSVC 分支的返回新值宏中 v 会求值两次，v 不得带副作用
 //-----------------------------------------------------------------------------
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
@@ -285,26 +286,26 @@ static inline uint32_t P_ncpu(void) {
 #define P_get_and_set_rel(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
 #define P_get_and_set_ord(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
 
-#define P_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) + (v)
-#define P_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) + (v)
-#define P_inc_acq(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) + (v)
-#define P_inc_rel(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) + (v)
-#define P_inc_ord(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) + (v)
-#define P_and(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) & (v)
-#define P_and_dbl(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) & (v)
-#define P_and_acq(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) & (v)
-#define P_and_rel(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) & (v)
-#define P_and_ord(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) & (v)
-#define P_or(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) | (v)
-#define P_or_dbl(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) | (v)
-#define P_or_acq(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) | (v)
-#define P_or_rel(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) | (v)
-#define P_or_ord(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) | (v)
-#define P_xor(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) ^ (v)
-#define P_xor_dbl(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) ^ (v)
-#define P_xor_acq(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) ^ (v)
-#define P_xor_rel(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) ^ (v)
-#define P_xor_ord(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) ^ (v)
+#define P_inc(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) + (v))
+#define P_inc_dbl(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) + (v))
+#define P_inc_acq(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) + (v))
+#define P_inc_rel(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) + (v))
+#define P_inc_ord(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) + (v))
+#define P_and(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) & (v))
+#define P_and_dbl(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) & (v))
+#define P_and_acq(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) & (v))
+#define P_and_rel(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) & (v))
+#define P_and_ord(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) & (v))
+#define P_or(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) | (v))
+#define P_or_dbl(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) | (v))
+#define P_or_acq(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) | (v))
+#define P_or_rel(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) | (v))
+#define P_or_ord(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) | (v))
+#define P_xor(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) ^ (v))
+#define P_xor_dbl(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) ^ (v))
+#define P_xor_acq(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) ^ (v))
+#define P_xor_rel(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) ^ (v))
+#define P_xor_ord(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) ^ (v))
 
 #define P_get_and_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
 #define P_get_and_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
@@ -333,6 +334,8 @@ static inline uint32_t P_ncpu(void) {
 #define P_test_and_set_dbl(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_relaxed)
 #define P_test_and_set_ord(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_relaxed)
 
+/* 注：以下 _or_acq 变体的失败序强于成功序，C11 禁止该组合（C17 起放宽）；
+ * gcc/clang 实际均接受，严格 C11 环境下请用成功序 ≥ 失败序的变体 */
 #define P_test_and_set_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_acquire)
 #define P_test_and_set_acq_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_acquire)
 #define P_test_and_set_rel_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_acquire)
@@ -341,12 +344,16 @@ static inline uint32_t P_ncpu(void) {
 
 #elif P_WIN && !defined(__GNUC__)
 // Windows MSVC (Interlocked* 操作默认有 full barrier，无法实现弱内存序)
+// 限制：本分支统一按 32 位 LONG 操作，仅适用于 32 位整型；
+//        64 位变量需 Interlocked*64 系列，未封装（MinGW 走 __GNUC__ 分支不受限）。
+//        P_get/P_get_acq 为普通读（x86 对齐读天然原子且自带 acquire）；
+//        P_get_ord 用 InterlockedOr(p, 0) 获得 full barrier 语义。
 
 #define P_get(pVar) (*(pVar))
 #define P_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
 #define P_get_acq(pVar) (*(pVar))
 #define P_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_ord(pVar) (*(pVar))
+#define P_get_ord(pVar) InterlockedOr((volatile LONG*)(pVar), 0)
 #define P_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
 
 #define P_get_and_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
