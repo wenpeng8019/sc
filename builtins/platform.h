@@ -258,4 +258,239 @@ static inline uint32_t P_ncpu(void) {
 #endif
 }
 
+//------------------  原子操作  ------------------------------------------------
+// 优先使用 C11 stdatomic.h，否则使用平台特定实现
+// 注意：所有 P_inc/P_and/P_or/P_xor 等操作返回新值（操作后的值）
+// P_get_and_xxx 操作返回旧值（操作前的值）
+// P_test_and_set 返回 bool（true 表示成功）
+//-----------------------------------------------------------------------------
+
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
+// C11 atomics
+#   include <stdatomic.h>
+
+/* 用 __typeof__ 而非 typeof：typeof 是 GCC/Clang 扩展，C23 前非标准，
+ * 会触发 Clang -Wlanguage-extension-token 警告；__typeof__ 是双下划线形式，
+ * 同样受 GCC/Clang 支持但不触发该警告。 */
+#define P_get(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_relaxed)
+#define P_set(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_acq(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_acquire)
+#define P_set_rel(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_ord(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_seq_cst)
+#define P_set_ord(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+
+#define P_get_and_set(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_and_set_dbl(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define P_get_and_set_acq(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define P_get_and_set_rel(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_and_set_ord(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+
+#define P_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) + (v)
+#define P_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) + (v)
+#define P_inc_acq(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) + (v)
+#define P_inc_rel(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) + (v)
+#define P_inc_ord(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) + (v)
+#define P_and(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) & (v)
+#define P_and_dbl(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) & (v)
+#define P_and_acq(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) & (v)
+#define P_and_rel(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) & (v)
+#define P_and_ord(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) & (v)
+#define P_or(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) | (v)
+#define P_or_dbl(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) | (v)
+#define P_or_acq(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) | (v)
+#define P_or_rel(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) | (v)
+#define P_or_ord(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) | (v)
+#define P_xor(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) ^ (v)
+#define P_xor_dbl(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) ^ (v)
+#define P_xor_acq(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) ^ (v)
+#define P_xor_rel(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) ^ (v)
+#define P_xor_ord(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) ^ (v)
+
+#define P_get_and_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_and_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define P_get_and_inc_acq(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define P_get_and_inc_rel(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_and_inc_ord(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define P_get_and_and(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_and_and_dbl(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define P_get_and_and_acq(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define P_get_and_and_rel(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_and_and_ord(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define P_get_and_or(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_and_or_dbl(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define P_get_and_or_acq(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define P_get_and_or_rel(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_and_or_ord(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define P_get_and_xor(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define P_get_and_xor_dbl(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define P_get_and_xor_acq(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define P_get_and_xor_rel(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define P_get_and_xor_ord(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+
+#define P_test_and_set(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_relaxed)
+#define P_test_and_set_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_relaxed)
+#define P_test_and_set_rel(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_relaxed)
+#define P_test_and_set_dbl(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_relaxed)
+#define P_test_and_set_ord(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_relaxed)
+
+#define P_test_and_set_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_acquire)
+#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_acquire)
+#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_acquire)
+#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_acquire)
+#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_acquire)
+
+#elif P_WIN && !defined(__GNUC__)
+// Windows MSVC (Interlocked* 操作默认有 full barrier，无法实现弱内存序)
+
+#define P_get(pVar) (*(pVar))
+#define P_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_acq(pVar) (*(pVar))
+#define P_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_ord(pVar) (*(pVar))
+#define P_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+
+#define P_get_and_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_set_dbl(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_set_acq(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+
+// 返回新值：InterlockedExchangeAdd 返回旧值，需要 + v
+#define P_inc(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define P_inc_dbl(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define P_inc_acq(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define P_inc_rel(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define P_inc_ord(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+// 返回新值：InterlockedAnd 返回旧值，需要 & v
+#define P_and(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define P_and_dbl(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define P_and_acq(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define P_and_rel(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define P_and_ord(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define P_or(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define P_or_dbl(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define P_or_acq(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define P_or_rel(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define P_or_ord(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define P_xor(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define P_xor_dbl(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define P_xor_acq(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define P_xor_rel(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define P_xor_ord(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+
+// 返回旧值
+#define P_get_and_inc(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_inc_dbl(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_inc_acq(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_inc_rel(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_inc_ord(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_and(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_and_dbl(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_and_acq(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_and_rel(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_and_ord(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_or(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_or_dbl(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_or_acq(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_or_rel(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_or_ord(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_xor(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_xor_dbl(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_xor_acq(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_xor_rel(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define P_get_and_xor_ord(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+
+// 返回 bool：InterlockedCompareExchange 返回旧值，比较是否等于 expected
+static inline bool P_test_and_set_impl(volatile LONG* pVar, LONG* pTestVar, LONG v) {
+    LONG old = InterlockedCompareExchange(pVar, v, *pTestVar);
+    if (old == *pTestVar) return true;
+    *pTestVar = old;
+    return false;
+}
+#define P_test_and_set(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_rel(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_dbl(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_ord(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+
+#define P_test_and_set_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+
+#elif defined(__GNUC__)
+
+#define P_get(pVar) __atomic_load_n(pVar, __ATOMIC_RELAXED)
+#define P_set(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELAXED)
+#define P_get_acq(pVar) __atomic_load_n(pVar, __ATOMIC_ACQUIRE)
+#define P_set_rel(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELEASE)
+#define P_get_ord(pVar) __atomic_load_n(pVar, __ATOMIC_SEQ_CST)
+#define P_set_ord(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_SEQ_CST)
+
+#define P_get_and_set(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELAXED)
+#define P_get_and_set_dbl(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQ_REL)
+#define P_get_and_set_acq(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQUIRE)
+#define P_get_and_set_rel(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELEASE)
+#define P_get_and_set_ord(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_SEQ_CST)
+
+#define P_inc(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELAXED)
+#define P_inc_dbl(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define P_inc_acq(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define P_inc_rel(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELEASE)
+#define P_inc_ord(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define P_and(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELAXED)
+#define P_and_dbl(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define P_and_acq(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define P_and_rel(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELEASE)
+#define P_and_ord(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define P_or(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELAXED)
+#define P_or_dbl(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define P_or_acq(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define P_or_rel(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELEASE)
+#define P_or_ord(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define P_xor(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELAXED)
+#define P_xor_dbl(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define P_xor_acq(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define P_xor_rel(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELEASE)
+#define P_xor_ord(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_SEQ_CST)
+
+#define P_get_and_inc(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELAXED)
+#define P_get_and_inc_dbl(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQ_REL)
+#define P_get_and_inc_acq(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQUIRE)
+#define P_get_and_inc_rel(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELEASE)
+#define P_get_and_inc_ord(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_SEQ_CST)
+#define P_get_and_and(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELAXED)
+#define P_get_and_and_dbl(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQ_REL)
+#define P_get_and_and_acq(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQUIRE)
+#define P_get_and_and_rel(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELEASE)
+#define P_get_and_and_ord(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_SEQ_CST)
+#define P_get_and_or(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELAXED)
+#define P_get_and_or_dbl(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQ_REL)
+#define P_get_and_or_acq(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQUIRE)
+#define P_get_and_or_rel(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELEASE)
+#define P_get_and_or_ord(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_SEQ_CST)
+#define P_get_and_xor(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELAXED)
+#define P_get_and_xor_dbl(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQ_REL)
+#define P_get_and_xor_acq(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQUIRE)
+#define P_get_and_xor_rel(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELEASE)
+#define P_get_and_xor_ord(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_SEQ_CST)
+
+#define P_test_and_set(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+
+#define P_test_and_set_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)
+#define P_test_and_set_rel(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED)
+#define P_test_and_set_dbl(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)
+#define P_test_and_set_ord(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)
+
+#define P_test_and_set_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_ACQUIRE)
+#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)
+#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
+#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_ACQUIRE)
+
+#else
+#error "Unsupported platform"
+#endif
+
 #endif /* SC_PLATFORM_H */
