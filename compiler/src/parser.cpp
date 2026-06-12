@@ -583,12 +583,17 @@ struct Parser {
         haveRet = true;
     }
 
-    DeclPtr parseFnc() {
+    DeclPtr parseFnc(bool isRpc = false) {
         auto d = std::make_unique<Decl>();
         d->line = cur().line;
-        advance(); // 跳过 fnc 关键字
-        if (!at(Tok::Ident)) err("期望函数名");
+        d->isRpc = isRpc;
+        advance(); // 跳过 fnc/rpc 关键字
+        if (!at(Tok::Ident)) err(isRpc ? "期望 rpc 名" : "期望函数名");
         d->name = advance().text;
+
+        // rpc 是伪形参函数糖：不支持方法形态与函数类型实现形态
+        if (isRpc && at(Tok::DColon)) err("rpc 不支持方法定义（::）");
+        if (isRpc && at(Tok::Arrow)) err("rpc 不支持实现预定义函数类型（->）");
 
         // 方法定义糖：fnc obj::add: ret, params...
         if (accept(Tok::DColon)) {
@@ -657,9 +662,15 @@ struct Parser {
             d->kind = Decl::FuncD;      // 有函数体的函数定义
             parseStmts(d->body);
         } else {
-            d->kind = Decl::FuncTypeD;  // 只有参数，无函数体：函数类型
+            d->kind = Decl::FuncTypeD;  // 只有参数，无函数体：函数类型（rpc 时为声明）
         }
         accept(Tok::Dedent);
+        // rpc 参数将成为结构体字段：不支持变参与数组参数
+        if (d->isRpc) {
+            if (d->variadic) err("rpc 不支持可变参数 '...'");
+            for (auto& f : d->fields)
+                if (!f.type.arrayDims.empty()) err("rpc 参数不支持数组，请改用指针（&）");
+        }
         return d;
     }
 
@@ -941,6 +952,10 @@ struct Parser {
                     prog.decls.push_back(parseFnc());   // 函数定义
                     prog.decls.back()->exported = exported;
                     break;
+                case Tok::KwRpc:
+                    prog.decls.push_back(parseFnc(true)); // rpc 伪形参函数（参数结构体糖）
+                    prog.decls.back()->exported = exported;
+                    break;
                 case Tok::KwVar:
                 case Tok::KwLet: {
                     // 全局变量/常量：包装成 VarD/LetD 类型的 Decl
@@ -955,7 +970,7 @@ struct Parser {
                 }
                 default:
                     // 顶层只允许程序结构对象的几种关键字
-                    err("顶层只允许 inc/def/fnc/var/let，得到 '" + cur().text + "'");
+                    err("顶层只允许 inc/def/fnc/rpc/var/let，得到 '" + cur().text + "'");
             }
         }
         return prog;

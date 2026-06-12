@@ -170,7 +170,8 @@ std::string declNode(const Decl& d) {
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
             if (d.variadic) c.push_back(node("param", "...", "", d.line));
             std::string ret = typeToStr(d.retType);
-            return nodeExt("fnctype", d.name, ret.empty() ? X : X + ": " + ret,
+            return nodeExt(d.isRpc ? "rpc" : "fnctype", d.name,
+                           ret.empty() ? X : X + ": " + ret,
                            d.line, d.external, d.origin, c);
         }
         case Decl::FuncD: {
@@ -188,7 +189,7 @@ std::string declNode(const Decl& d) {
             const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
             const std::string dtail = d.methodOwner.empty() ? (X + detail)
                                                            : (X + d.methodOwner + "::" + detail);
-            return nodeExt("fnc", n, dtail, d.line, d.external, d.origin, c);
+            return nodeExt(d.isRpc ? "rpc" : "fnc", n, dtail, d.line, d.external, d.origin, c);
         }
         case Decl::VarD:
         case Decl::LetD: {

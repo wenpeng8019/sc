@@ -27,6 +27,7 @@ namespace {
 // 关键字映射表 —— 标识符扫描后查此表判断是否为关键字
 const std::unordered_map<std::string, Tok> kKeywords = {
     {"def", Tok::KwDef},   {"fnc", Tok::KwFnc},
+    {"rpc", Tok::KwRpc},
     {"var", Tok::KwVar},   {"let", Tok::KwLet},
     {"inc", Tok::KwInc},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},

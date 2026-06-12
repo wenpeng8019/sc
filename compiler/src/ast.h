@@ -222,6 +222,9 @@ struct Decl {
     std::string methodOwner;     // 方法定义所属结构名（fnc obj::add 时为 obj）
     std::string methodName;      // 方法名（fnc obj::add 时为 add）
     bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
+    bool isRpc = false;          // rpc 声明：参数/返回值展开为同名结构体，
+                                 // 实际函数为 void name_rpc(struct name*)，
+                                 // FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
 
     std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
                                  // （FuncTypeD 的 body 为空，只有签名无实现）

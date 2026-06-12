@@ -33,6 +33,7 @@ enum class Tok {
     // ---- 关键字 ----
     KwDef,      // def  — 定义类型
     KwFnc,      // fnc  — 定义函数
+    KwRpc,      // rpc  — 定义伪形参函数（参数/返回值展开为同名结构体）
     KwVar,      // var  — 定义变量
     KwLet,      // let  — 定义常量
     KwInc,      // inc  — 引入头文件（对齐 C 的 #include，后跟行尾文本）

@@ -19,6 +19,7 @@ const path = require('path');
 const KEYWORDS = [
     ['def', '定义类型（枚举/结构/联合/别名）'],
     ['fnc', '定义函数或函数类型'],
+    ['rpc', '定义伪形参函数（参数/返回值展开为同名结构体）'],
     ['var', '定义变量'],
     ['let', '定义常量'],
     ['inc', '引入头文件（对齐 C 的 #include）'],
@@ -131,6 +132,7 @@ function buildIndex(ast) {
                     idx.globals.set(it.n, { kind: 'enum-item', detail: n.n, line: it.l });
                 break;
             case 'fnc':
+            case 'rpc':
                 idx.funcs.set(n.n, n);
                 break;
             case 'var': case 'let':
@@ -146,7 +148,7 @@ function buildIndex(ast) {
 function enclosingFunc(idx, line) {
     let last = null;
     for (const n of idx.topLevel) if (n.l && n.l <= line) last = n;
-    return last && last.k === 'fnc' ? last : null;
+    return last && (last.k === 'fnc' || last.k === 'rpc') ? last : null;
 }
 
 // 收集函数内可见的参数与局部变量（局部变量须声明于光标行或之前）
@@ -208,10 +210,10 @@ function fallbackItems(doc) {
     const items = [];
     const seen = new Set();
     for (let i = 0; i < doc.lineCount; i++) {
-        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|var|let)\s+([A-Za-z_]\w*)/);
+        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|rpc|var|let)\s+([A-Za-z_]\w*)/);
         if (m && !seen.has(m[2])) {
             seen.add(m[2]);
-            const kind = m[1] === 'def' ? K.Class : m[1] === 'fnc' ? K.Function
+            const kind = m[1] === 'def' ? K.Class : (m[1] === 'fnc' || m[1] === 'rpc') ? K.Function
                        : m[1] === 'let' ? K.Constant : K.Variable;
             const it = new vscode.CompletionItem(m[2], kind);
             it.detail = m[1];

@@ -72,7 +72,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|var|let|inc)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|inc)\\b"
                 }
             ]
         },

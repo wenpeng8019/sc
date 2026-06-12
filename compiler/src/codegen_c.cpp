@@ -63,6 +63,9 @@ struct CGen {
     std::string curAggr;        // 当前正在输出的 struct/union 名（方法字段展开用）
     std::string curAggrKind;    // "struct" / "union"
 
+    // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
+    const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
+    std::unordered_set<std::string> rpcParams;  // 当前 rpc 的参数名集合
     explicit CGen(const Program& p) : prog(p) {}
 
     void indent() { for (int i = 0; i < depth; i++) out << "    "; }
@@ -220,6 +223,8 @@ struct CGen {
             case Expr::Ident:
                 if (e.text == "this") out << "_this";      // 方法内接收者
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
+                else if (curRpc && rpcParams.count(e.text))
+                    out << "_p->" << e.text;               // rpc 实际函数内：参数即结构体成员
                 else out << e.text;                        // true/false 由 stdbool.h 提供
                 break;
             case Expr::Unary:
@@ -373,6 +378,15 @@ struct CGen {
             case Stmt::LetS: emitVarDecls(s.decls, true); break;
             case Stmt::ReturnS:
                 indent();
+                if (curRpc) {
+                    // rpc 实际函数：返回值写入结构体首个默认成员 _
+                    if (s.expr && rpcHasRet(*curRpc)) {
+                        out << "_p->_ = ";
+                        emitExpr(*s.expr, true);
+                        out << "; return;\n";
+                    } else out << "return;\n";
+                    break;
+                }
                 out << "return";
                 if (s.expr) { out << " "; emitExpr(*s.expr, true); }
                 out << ";\n";
@@ -610,6 +624,7 @@ struct CGen {
         // 函数定义行映射回 .sc 源码（函数序言断点落在 fnc 行）
         if (!srcFile.empty() && d.line > 0)
             out << "#line " << d.line << " \"" << srcFile << "\"\n";
+        if (d.isRpc) { emitRpcWorker(d); return; }
         if (d.name != "main" && shouldStaticize(d)) out << "static ";
         emitFuncSig(d);
         out << " {\n";
@@ -625,6 +640,95 @@ struct CGen {
         depth++;
         emitStmts(d.body);
         depth--;
+        inFunc = false;
+        out << "}\n\n";
+    }
+
+    // ---------------- rpc：伪形参函数糖 ----------------
+    // rpc add: i4, a: i4, b: i4 展开为三件套：
+    //   struct add { int32_t _; int32_t a; int32_t b; };  // 同名参数结构体
+    //   void add_rpc(struct add *_p);                      // 实际函数
+    //   static inline int32_t add(int32_t a, int32_t b);   // 调用包装
+    // 结构体仅用 tag（不 typedef）：C 中 struct tag 与函数名分属不同
+    // 命名空间，故二者可同名，调用形式与 fnc 完全一致。
+
+    // 是否有返回值（默认 i4，与 fnc 一致；v 为无）
+    static bool rpcHasRet(const Decl& d) {
+        return !(d.retType.name == "v" && d.retType.ptr == 0);
+    }
+
+    // 同名参数结构体：返回槽 _ 为首个默认成员（C 侧可用 _ 访问）
+    void emitRpcStruct(const Decl& d) {
+        out << "struct " << d.name << " {\n";
+        depth++;
+        if (rpcHasRet(d)) {
+            indent();
+            emitRetType(d);
+            out << " _;\n";
+        } else if (d.fields.empty()) {
+            indent();
+            out << "char _;\n";  // C 不允许空结构体：占位
+        }
+        for (auto& f : d.fields) {
+            indent();
+            emitDeclarator(f);
+            out << ";\n";
+        }
+        depth--;
+        out << "};\n";
+    }
+
+    // 实际函数签名：void name_rpc(struct name *_p)
+    void emitRpcWorkerSig(const Decl& d) {
+        out << "void " << d.name << "_rpc(struct " << d.name << " *_p)";
+    }
+
+    // 调用包装：装填结构体 → 执行实际函数 → 取返回槽
+    void emitRpcWrapper(const Decl& d) {
+        out << "static inline ";
+        emitRetType(d);
+        out << " " << d.name << "(";
+        emitParams(d.fields);
+        out << ") {\n";
+        depth++;
+        indent(); out << "struct " << d.name << " _p = {0};\n";
+        for (auto& f : d.fields) {
+            indent();
+            out << "_p." << f.name << " = "
+                << (f.name == "this" ? "_this" : f.name) << ";\n";
+        }
+        indent(); out << d.name << "_rpc(&_p);\n";
+        if (rpcHasRet(d)) { indent(); out << "return _p._;\n"; }
+        depth--;
+        out << "}\n\n";
+    }
+
+    // rpc 接口三件套：结构体 + 实际函数原型 + 调用包装
+    // workerStatic：本模块定义且未导出时 static；仅声明/导出时 extern
+    void emitRpcInterface(const Decl& d, bool workerStatic) {
+        emitRpcStruct(d);
+        if (workerStatic) out << "static ";
+        emitRpcWorkerSig(d);
+        out << ";\n";
+        emitRpcWrapper(d);
+    }
+
+    // rpc 实际函数体：参数引用由 emitExpr/ReturnS 改写为 _p->xxx
+    void emitRpcWorker(const Decl& d) {
+        if (shouldStaticize(d)) out << "static ";
+        emitRpcWorkerSig(d);
+        out << " {\n";
+        localsT.clear();
+        inFunc = true;
+        for (auto& p : d.fields) regVar(p);
+        curRpc = &d;
+        rpcParams.clear();
+        for (auto& p : d.fields) rpcParams.insert(p.name);
+        depth++;
+        emitStmts(d.body);
+        depth--;
+        curRpc = nullptr;
+        rpcParams.clear();
         inFunc = false;
         out << "}\n\n";
     }
@@ -684,7 +788,7 @@ struct CGen {
 
         // 收集函数类型与聚合类型（struct/union/别名）注册表
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD) funcTypes[d->name] = d.get();
+            if (d->kind == Decl::FuncTypeD && !d->isRpc) funcTypes[d->name] = d.get();
             else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
                 aggrs[d->name] = d.get();
             else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
@@ -695,8 +799,12 @@ struct CGen {
             switch (d->kind) {
                 case Decl::EnumD: case Decl::StructD:
                 case Decl::UnionD: case Decl::AliasD:
-                case Decl::FuncTypeD:
                     emitTypeDecl(*d);
+                    break;
+                case Decl::FuncTypeD:
+                    // rpc 仅声明：接口三件套，实际函数在外部（C 侧）实现
+                    if (d->isRpc) emitRpcInterface(*d, false);
+                    else emitTypeDecl(*d);
                     break;
                 case Decl::VarD:
                     emitVarDecls(d->fields, false, shouldStaticize(*d));
@@ -705,6 +813,7 @@ struct CGen {
                     emitVarDecls(d->fields, true, shouldStaticize(*d));
                     break;
                 case Decl::FuncD:
+                    if (d->isRpc) { emitRpcInterface(*d, shouldStaticize(*d)); break; }
                     if (d->name != "main") {
                         if (shouldStaticize(*d)) out << "static ";
                         emitFuncSig(*d);
@@ -740,19 +849,23 @@ struct CGen {
 
         // 函数类型表（导出函数可能引用未导出的函数类型签名）
         for (auto& d : prog.decls)
-            if (d->kind == Decl::FuncTypeD) funcTypes[d->name] = d.get();
+            if (d->kind == Decl::FuncTypeD && !d->isRpc) funcTypes[d->name] = d.get();
 
         for (auto& d : prog.decls) {
             if (!d->exported) continue;
             switch (d->kind) {
                 case Decl::EnumD: case Decl::StructD:
                 case Decl::UnionD: case Decl::AliasD:
-                case Decl::FuncTypeD:
                     emitTypeDecl(*d);
+                    break;
+                case Decl::FuncTypeD:
+                    if (d->isRpc) emitRpcInterface(*d, false);
+                    else emitTypeDecl(*d);
                     break;
                 case Decl::VarD: emitExternVars(d->fields, false); break;
                 case Decl::LetD: emitExternVars(d->fields, true); break;
                 case Decl::FuncD:
+                    if (d->isRpc) { emitRpcInterface(*d, false); break; }
                     emitFuncSig(*d);
                     out << ";\n";
                     break;

@@ -37,7 +37,7 @@ function runScc(args, input) {
 const ICONS = {
     inc: 'package',
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
-    alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function',
+    alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', rpc: 'symbol-event',
     var: 'symbol-variable', let: 'symbol-constant',
     param: 'symbol-parameter', field: 'symbol-field', item: 'symbol-enum-member',
     case: 'list-selection', arm: 'list-flat', through: 'arrow-right',

@@ -4,6 +4,9 @@ scc 是 sc 语言的编译器（C++17 实现，手写词法分析 + 递归下降
 本手册覆盖编译器的能力、机制、配置与用法。语言本身的语法参考见 [syntax](syntax)，
 内置模块参考见 [builtins/REFERENCE.md](builtins/REFERENCE.md)。
 
+sc 与 C 是共生关系：scc 转译为 C 后复用整个 C 工具链（编译器、调试器、库、ABI），
+同时把 C 的工作流收敛为单命令（直接运行、构建产物、头文件生成、模块依赖编译链接）。
+
 ## 1. 总览
 
 ### 1.1 编译流水线
@@ -227,7 +230,21 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 - 字段默认值：为含默认值的类型生成 `static inline T T__default(void)` 初始化器，
   未指定字段零初始化。
 
-### 5.5 头文件生成（@ 导出）
+### 5.5 伪形参函数（rpc）
+
+`rpc name: ret, a: T, b: T` 展开为“三件套”：
+
+- `struct name { ret _; T a; T b; };` —— 同名参数结构体，返回槽 `_` 为首成员
+  （返回 `v` 时无 `_`；无参且无返回时生成 `char _;` 占位）；
+- `void name_rpc(struct name *_p);` —— 实际函数（本模块未导出时 `static`；
+  仅声明形态为 extern，由外部 C 侧实现）；
+- `static inline ret name(...)` —— 调用包装：装填结构体 → 执行 → 取返回槽。
+
+实现要点：结构体仅用 struct tag（不 typedef），C 中 tag 与函数名分属不同命名
+空间，故可同名——调用点无需任何改写。函数体内参数引用改写为 `_p->x`，
+`return e` 改写为 `_p->_ = e; return;`。`@rpc` 导出时头文件包含完整三件套。
+
+### 5.6 头文件生成（@ 导出）
 
 `--emit-c -o x.c` 且存在 `@` 导出对象时生成 `x.h`：
 

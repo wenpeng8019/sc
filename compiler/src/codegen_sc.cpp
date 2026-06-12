@@ -146,7 +146,7 @@ struct SGen {
                 ind(); out << X << "def " << d.name << " -> " << typeToStr(d.type) << "\n";
                 break;
             case Decl::FuncTypeD:
-                ind(); out << X << "fnc " << d.name << ":" << fncItems(d) << "\n";
+                ind(); out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
                 break;
             case Decl::FuncD:
                 ind();
@@ -156,7 +156,7 @@ struct SGen {
                 else if (!d.funcTypeName.empty())
                     out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
-                    out << X << "fnc " << d.name << ":" << fncItems(d) << "\n";
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << ":" << fncItems(d) << "\n";
                 depth++;
                 emitStmts(d.body);
                 depth--;
