@@ -104,7 +104,7 @@
                 },
                 {
                     "name": "storage.type.library.sc",
-                    "match": "\\b(va_list|adt_obj|string|list|dict|dim|json)\\b"
+                    "match": "\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b"
                 },
                 {
                     "name": "storage.type.primitive.sc",
@@ -112,7 +112,7 @@
                 },
                 {
                     "name": "storage.type.library.sc",
-                    "match": "(?<=:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json)\\b(?!\\s*[:(\\n])"
+                    "match": "(?<=:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b(?!\\s*[:(\\n])"
                 },
                 {
                     "name": "entity.name.type.annotated.sc",

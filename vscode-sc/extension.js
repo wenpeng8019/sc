@@ -61,6 +61,10 @@ const TYPES = [
     ['dict', '内置 ADT 字典对象'],
     ['dim', '内置 ADT 多维数组对象'],
     ['json', '内置 ADT JSON 对象'],
+    ['thread', '内置线程对象（run 语句出参，需 inc m.sc）'],
+    ['mutex', '内置互斥锁对象（需 inc m.sc）'],
+    ['cond', '内置条件变量对象（配合 wait 语句，需 inc m.sc）'],
+    ['pool', '内置线程池对象（run 语句第二参入池，需 inc m.sc）'],
 ];
 
 // ---------------- scc 调用与 AST 缓存 ----------------
@@ -91,6 +95,21 @@ function runScc(args, input) {
 // uri → { version, ast }，保留最近一次解析成功的 AST
 const astCache = new Map();
 
+// 文件模式解析：stdin 单步模式（scc -）不走模块图，inc 的 builtins/模块外部声明
+// 不在 AST 中；改为写同目录隐藏临时文件走文件模式（inc 解析与真实文件一致）
+let astSeq = 0;
+async function runAstOnText(doc, text) {
+    const dir = path.dirname(doc.uri.fsPath);
+    const tmp = path.join(dir, `.sc_ast_${process.pid}_${++astSeq}.tmp.sc`);
+    try {
+        fs.writeFileSync(tmp, text);
+        const out = await runScc([tmp, '--ast'], '');
+        return JSON.parse(out);
+    } finally {
+        try { fs.unlinkSync(tmp); } catch { /* 已删除 */ }
+    }
+}
+
 // 解析顺序：完整源码 → 抹掉光标行（正在输入的 "p." 等残句会让整个文件解析失败，
 // 而声明都在其它行，抹掉后的 AST 足以支撑补全）→ 最近一次成功的 AST
 async function getAst(doc, cursorLine) {
@@ -105,8 +124,7 @@ async function getAst(doc, cursorLine) {
     }
     for (const t of texts) {
         try {
-            const out = await runScc(['-', '--ast'], t);
-            const ast = JSON.parse(out);
+            const ast = await runAstOnText(doc, t);
             astCache.set(key, { version: doc.version, ast });
             return ast;
         } catch { /* 尝试下一个候选 */ }
@@ -121,14 +139,16 @@ function typeFromDetail(d) {
     return m ? m[1] : null;
 }
 
-// 顶层一遍扫描：类型表 / 全局对象表 / 函数表
+// 顶层一遍扫描：类型表 / 全局对象表 / 函数表 / 方法表（"T::m"，含 builtins 外部声明）
 function buildIndex(ast) {
-    const idx = { types: new Map(), globals: new Map(), funcs: new Map(), topLevel: [], externSymbols: new Set(ast.e || []) };
+    const idx = { types: new Map(), globals: new Map(), funcs: new Map(), methods: new Map(), topLevel: [], externSymbols: new Set(ast.e || []) };
     for (const n of ast.c || []) {
         idx.topLevel.push(n);
         switch (n.k) {
             case 'struct': case 'union': case 'alias': case 'fnctype':
-                idx.types.set(n.n, n);
+                // fnctype 含两类：方法/函数声明（C 侧实现，如 builtins）与函数类型定义
+                if (n.k === 'fnctype' && n.n && n.n.includes('::')) idx.methods.set(n.n, n);
+                else idx.types.set(n.n, n);
                 break;
             case 'enum':
                 idx.types.set(n.n, n);
@@ -138,7 +158,8 @@ function buildIndex(ast) {
                 break;
             case 'fnc':
             case 'rpc':
-                idx.funcs.set(n.n, n);
+                if (n.n && n.n.includes('::')) idx.methods.set(n.n, n);
+                else idx.funcs.set(n.n, n);
                 break;
             case 'var': case 'let': case 'tls':
                 for (const it of n.c || [])
@@ -149,10 +170,20 @@ function buildIndex(ast) {
     return idx;
 }
 
+// 某类型名下的全部方法：[ [短名, 节点], ... ]
+function methodsOf(idx, typeName) {
+    const out = [];
+    const prefix = typeName + '::';
+    for (const [key, m] of idx.methods)
+        if (key.startsWith(prefix)) out.push([key.slice(prefix.length), m]);
+    return out;
+}
+
 // 光标所在的函数节点：顶层声明中起始行 <= 光标行的最后一个，且须是 fnc
+// 外部声明（x）行号属于来源文件坐标系，必须跳过，否则错位
 function enclosingFunc(idx, line) {
     let last = null;
-    for (const n of idx.topLevel) if (n.l && n.l <= line) last = n;
+    for (const n of idx.topLevel) if (!n.x && n.l && n.l <= line) last = n;
     return last && (last.k === 'fnc' || last.k === 'rpc') ? last : null;
 }
 
@@ -239,9 +270,39 @@ function getWordAt(doc, pos) {
     return { word: doc.getText(r), range: r };
 }
 
-function toMarkdownType(detail) {
-    const d = (detail || '').trim();
-    return d ? `类型: ${d}` : '类型信息不可用';
+// 函数节点 → sc 风格签名：fnc name[: ret][, a: i4, ...]
+// 详情中的导出标记 "@ " 与 ast-view 的 "T::" 前缀不入签名
+// fnctype 声明形态（C 侧实现）按 fnc 呈现
+function funcSignature(f) {
+    const params = (f.c || []).filter(ch => ch.k === 'param')
+        .map(p => p.n === '...' ? '...' : p.n + (p.d || ''));
+    let d = (f.d || '').replace(/^@\s*/, '');
+    if (f.n && f.n.includes('::')) d = d.replace(/^[A-Za-z_]\w*::/, '');
+    const kw = f.k === 'fnctype' ? 'fnc' : f.k;
+    let sig = `${kw} ${f.n}${d}`;
+    if (params.length) sig += ', ' + params.join(', ');
+    return sig;
+}
+
+// 类型节点 → sc 风格定义块（struct/union/enum 列成员，alias/fnctype 单行）
+function typeDefinition(t, idx) {
+    const head = `def ${t.n}${(t.d || '').replace(/^@\s*/, '')}`;
+    const members = (t.c || []).filter(ch => ch.k === 'field' || ch.k === 'item' || ch.k === 'param');
+    let body = members.map(m =>
+        '    ' + (m.n === '...' ? '...' : m.n + (m.d || ''))).join('\n');
+    // 附该类型的方法签名（builtins/本模块 fnc T::m）
+    if (idx)
+        for (const [, m] of methodsOf(idx, t.n))
+            body += (body ? '\n' : '') + '    ' + funcSignature(m);
+    return body ? head + '\n' + body : head;
+}
+
+// 悬停 Markdown：代码块呈现签名/定义，附来源说明
+function hoverMd(code, note) {
+    const md = new vscode.MarkdownString();
+    md.appendCodeblock(code, 'sc');
+    if (note) md.appendMarkdown(note);
+    return new vscode.Hover(md);
 }
 
 function parseErrorDiagnostic(errText, doc) {
@@ -281,6 +342,15 @@ function activate(context) {
         return it;
     };
 
+    // 成员补全：字段 + 该类型的方法（含 builtins 外部声明）
+    const memberItems = (idx, t) => {
+        const items = (t.c || []).map(f =>
+                mkItem(f.n, K.Field, (f.d || '').trim(), '0'));
+        for (const [short, m] of methodsOf(idx, t.n))
+            items.push(mkItem(short, K.Method, funcSignature(m), '0'));
+        return items;
+    };
+
     const provider = {
         async provideCompletionItems(doc, pos) {
             const before = doc.lineAt(pos.line).text.slice(0, pos.character);
@@ -295,8 +365,7 @@ function activate(context) {
                 if (!idx) return [];
                 const t = resolveStruct(idx, cast[1]);
                 if (!t) return [];
-                return (t.c || []).map(f =>
-                        mkItem(f.n, K.Field, (f.d || '').trim(), '0'));
+                return memberItems(idx, t);
             }
             const mem = before.match(/([A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*)*)(\.|->)\w*$/);
             if (mem) {
@@ -304,8 +373,7 @@ function activate(context) {
                 const chain = mem[1].split(/\.|->/);
                 const t = resolveChain(idx, scopeVars(idx, line), chain);
                 if (!t) return [];  // 类型未知时不输出噪音
-                return (t.c || []).map(f =>
-                        mkItem(f.n, K.Field, (f.d || '').trim(), '0'));
+                return memberItems(idx, t);
             }
 
             // ---- 2. 类型上下文：: 或 -> 之后 → 仅列类型 ----
@@ -386,7 +454,7 @@ function activate(context) {
         }
     }));
 
-    // 悬停：显示符号类型与来源
+    // 悬停：函数显示完整签名（含参数），类型显示成员定义，变量显示类型与来源
     context.subscriptions.push(vscode.languages.registerHoverProvider('sc', {
         async provideHover(doc, pos) {
             const w = getWordAt(doc, pos);
@@ -394,32 +462,57 @@ function activate(context) {
             const ast = await getAst(doc, pos.line);
             if (!ast) return null;
             const idx = buildIndex(ast);
+            // 成员上下文：obj.word / ptr->word → 字段或方法（builtins 外部声明在此命中）
+            const beforeWord = doc.lineAt(pos.line).text.slice(0, w.range.start.character);
+            if (/(\.|->)$/.test(beforeWord)) {
+                const mem = beforeWord.match(/([A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*)*)(\.|->)$/);
+                if (mem) {
+                    const t = resolveChain(idx, scopeVars(idx, pos.line + 1), mem[1].split(/\.|->/));
+                    if (t) {
+                        const f = (t.c || []).find(x => x.n === w.word);
+                        if (f) return hoverMd(`${w.word}${(f.d || '')}`, `${t.n} 的字段`);
+                        const m = idx.methods.get(t.n + '::' + w.word);
+                        if (m) return hoverMd(funcSignature(m), `${t.n} 的方法`);
+                    }
+                }
+                // 链类型不可推断：按方法短名在方法表中匫配（可能多类型同名，全部列出）
+                const cand = [...idx.methods.values()].filter(m => m.n.endsWith('::' + w.word));
+                if (cand.length)
+                    return hoverMd(cand.map(funcSignature).join('\n'), '方法（按名称匹配）');
+            }
             const locals = scopeVars(idx, pos.line + 1);
             const local = locals.get(w.word);
             if (local) {
-                return new vscode.Hover(new vscode.MarkdownString(
-                    `**${w.word}**\n\n局部符号\n\n${toMarkdownType(local.detail)}`));
+                const kw = local.kind === 'param' ? '参数' : local.kind;
+                return hoverMd(`${w.word}${(local.detail || '')}`, `${kw} · 局部符号`);
             }
             const g = idx.globals.get(w.word);
             if (g) {
-                return new vscode.Hover(new vscode.MarkdownString(
-                    `**${w.word}**\n\n全局符号\n\n${toMarkdownType(g.detail)}`));
+                if (g.kind === 'enum-item')
+                    return hoverMd(`${w.word}${(g.detail ? ': ' + g.detail : '')}`, '枚举项');
+                return hoverMd(`${g.kind} ${w.word}${(g.detail || '')}`, '全局符号');
             }
             const t = idx.types.get(w.word);
             if (t) {
-                return new vscode.Hover(new vscode.MarkdownString(
-                    `**${w.word}**\n\n类型定义 (${t.k})`));
+                // fnctype：函数类型定义或外部函数声明 → 按函数签名呈现
+                if (t.k === 'fnctype')
+                    return hoverMd(funcSignature(t), t.x ? '函数声明（外部实现）' : '函数类型/函数声明');
+                // 展示成员与方法定义；alias 穿透后补充展示目标结构成员
+                let code = typeDefinition(t, idx);
+                if (t.k === 'alias') {
+                    const target = resolveStruct(idx, w.word);
+                    if (target && target.n !== w.word) code += '\n\n' + typeDefinition(target, idx);
+                }
+                return hoverMd(code, `类型定义 (${t.k})`);
             }
             const f = idx.funcs.get(w.word);
-            if (f) {
-                return new vscode.Hover(new vscode.MarkdownString(
-                    `**${w.word}**\n\n函数\n\n${(f.d || '').trim()}`));
-            }
+            if (f) return hoverMd(funcSignature(f),
+                                  (f.k === 'rpc' ? 'rpc 函数' : '函数') + (f.x ? '（外部模块）' : ''));
             return null;
         }
     }));
 
-    // 定义跳转：支持类型/函数/全局符号跳转
+    // 定义跳转：类型/函数/方法/全局符号；外部声明（builtins/模块）直达来源文件
     context.subscriptions.push(vscode.languages.registerDefinitionProvider('sc', {
         async provideDefinition(doc, pos) {
             const w = getWordAt(doc, pos);
@@ -427,11 +520,26 @@ function activate(context) {
             const ast = await getAst(doc, pos.line);
             if (!ast) return null;
             const idx = buildIndex(ast);
-            const lookup = [idx.types.get(w.word), idx.funcs.get(w.word), idx.globals.get(w.word)];
-            for (const hit of lookup) {
+            // 成员访问：obj.m / ptr->m → 优先按方法/字段解析
+            const beforeWord = doc.lineAt(pos.line).text.slice(0, w.range.start.character);
+            const hits = [];
+            if (/(\.|->)$/.test(beforeWord)) {
+                const mem = beforeWord.match(/([A-Za-z_]\w*(?:(?:\.|->)[A-Za-z_]\w*)*)(\.|->)$/);
+                if (mem) {
+                    const t = resolveChain(idx, scopeVars(idx, pos.line + 1), mem[1].split(/\.|->/));
+                    if (t) {
+                        hits.push(idx.methods.get(t.n + '::' + w.word));
+                        hits.push((t.c || []).find(x => x.n === w.word));
+                    }
+                }
+            }
+            hits.push(idx.types.get(w.word), idx.funcs.get(w.word), idx.globals.get(w.word));
+            for (const hit of hits) {
                 if (!hit) continue;
-                const p = lineToPos(doc, hit.l || hit.line || 1);
-                return new vscode.Location(doc.uri, p);
+                // 外部声明带来源文件（o）：行号属于来源文件，直达跳转
+                const uri = hit.o && fs.existsSync(hit.o) ? vscode.Uri.file(hit.o) : doc.uri;
+                const line = Math.max(0, (hit.l || hit.line || 1) - 1);
+                return new vscode.Location(uri, new vscode.Position(line, 0));
             }
             return null;
         }
@@ -460,7 +568,8 @@ function activate(context) {
     const refreshDiagnostics = async (doc) => {
         if (!doc || doc.languageId !== 'sc') return;
         try {
-            await runScc(['-', '--ast'], doc.getText());
+            // 文件模式：inc 的模块声明可见，避免对 run/thread 等误报
+            await runAstOnText(doc, doc.getText());
             diagnostics.set(doc.uri, []);
         } catch (e) {
             diagnostics.set(doc.uri, [parseErrorDiagnostic(String(e.message || e), doc)]);
