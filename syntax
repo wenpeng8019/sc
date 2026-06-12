@@ -3,7 +3,7 @@
 
 sc 是一门基于 C 的结构化语言。它不取代 C，而是作为 C 的前台语言与 C 共生：
 sc 专注更高层的语言逻辑特性，低级的平台与设备能力依然交给 C 完成（经 `inc` 互操）。
-sc 语言自身的设计理念是“程序即结构”：顶层程序由 `def` / `fnc` / `var` / `let` / `inc` 这些结构对象组成，语法尽量和 C 对齐，但在类型、方法和模块上提供更高层的表达。
+sc 语言自身的设计理念是“程序即结构”：顶层程序由 `def` / `var` / `let` / `fnc` / `rpc` / `inc` 这些结构对象组成，语法尽量和 C 对齐，但在类型、方法和模块上提供更高层的表达。
 
 ## 1. 语言原则
 
@@ -702,7 +702,7 @@ for i = 0; i < 10; i++
 
 `run` 以 **rpc 调用**创建线程：rpc 的参数天然可打包（见 8.7），正好作
 线程上下文，无需额外定义入口函数类型。需要 `inc m.sc`（thread 类型与
-线程原语实现）。
+线程原语实现）。第二参数决定执行形态（按类型静态分派）：
 
 ```sc
 inc m.sc
@@ -715,20 +715,28 @@ fnc main: i4
     run work(&c, 10000), &t    # joinable：t 接收 thread 指针
     run work(&c, 10000)        # detach：线程结束后自释放
     t->join()                  # 等待并回收（含 thread 对象），之后 t 失效
+
+    var p: pool                # 线程池：同一个 run 动词
+    p.init(4)                  # 4 个工作线程；0 → CPU 逻辑核数
+    run work(&c, 10000), p     # 入池：任务排队，由工作线程执行
+    p.join()                   # 屏障：等全部已提交任务完成
+    p.drop()                   # 析构：等任务完成后停池回收
     return 0
 ```
 
-- 第二参数（可选）为 thread 指针的地址（`&t`，t 为 `thread&`）：
-  指定即 joinable，必须 `join()` 等待并回收；省略则线程内部 detach，
+- 第二参数（可选）按类型分派：`&t`（t 为 `thread&`）→ joinable
+  独立线程，必须 `join()` 等待并回收；pool 对象或指针 → 任务入池
+  （对象自动取地址，与 wait 语句一致）；省略 → 线程内部 detach，
   结束后自释放。
 - thread 对象由 run 内部联合分配：单次
   `alloc(sizeof(thread) + sizeof(rpc参数) + 实现私有区)`，rpc 参数紧随
   thread 之后（`p + sizeof(thread)` 即参数），线程实体与参数同生命周期。
 - 语法层面能拿到的 thread 必为 joinable，所以 thread 成员很简洁：
   `id`（跨平台统一线程 id）与 `join` 方法。不可手工构造。
-- 转 C：装填 rpc 参数结构体后调用线程原语
-  `thread_run(入口, &参数, sizeof(参数), 出参|NULL)`（m_impl 提供，
-  POSIX pthread / Windows 线程）。
+- 转 C：装填 rpc 参数结构体后按第二参类型改发线程原语——独立线程
+  `thread_run(入口, &参数, sizeof(参数), 出参|NULL)`，入池
+  `pool_run(&池, 入口, &参数, sizeof(参数))`（均 m_impl 提供，
+  POSIX pthread / Windows 线程；C 侧是两个普通函数，无运行时多态）。
 
 ### 11.2 wait 语句（条件变量等待）
 

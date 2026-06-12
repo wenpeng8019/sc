@@ -9,7 +9,7 @@
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
-| m | `inc m.sc` | 多线程语言支持标准：run 语句、thread（线程）、mutex（互斥锁） |
+| m | `inc m.sc` | 多线程语言支持标准：run/wait 语句、thread、mutex、cond、pool（线程池） |
 
 另有 `platform.h`（非模块）：builtins 内各实现的跨平台基础头，见末节。
 
@@ -144,11 +144,13 @@ Linux 等平台链接时自动追加 `-lpthread`。
 ### run 语句与 thread —— 线程
 
 线程由 `run` 语句创建（语言特性），目标必须是 **rpc 调用**：rpc 参数
-天然可打包，正好作线程上下文，无需额外定义入口函数类型：
+天然可打包，正好作线程上下文，无需额外定义入口函数类型。
+第二参数决定执行形态：
 
 ```sc
-run work(a, b)        # detach：线程结束后自释放
+run work(a, b)        # detach：独立线程，结束后自释放
 run work(a, b), &t    # joinable：t&: thread，须 t->join() 等待并回收
+run work(a, b), p     # 入池：p 为 pool（对象或指针），任务排队执行
 ```
 
 实现机制：run 内部单次分配 `sizeof(thread) + sizeof(rpc参数) + 实现私有区`
@@ -173,6 +175,52 @@ thread 不可手工构造（无 init）；`run` 是唯一创建途径。
 | drop | | 析构 |
 | lock / unlock | | 加锁 / 解锁 |
 | try_lock | `bool` | 取锁成功返回 1，已被占用返回 0 |
+
+### cond 与 wait 语句 —— 条件变量
+
+条件等待由 `wait` 语句完成（语言特性，编译器生成 `cond_wait` 调用）：
+
+```sc
+wait c, mu            # 无限等待（调用前须已持有 mu）
+wait c, mu, nsec, sec # 超时等待（nsec/sec 全 0 等价于无限等待）
+```
+
+c/mu 可为对象或指针，对象自动取地址；被虚假唤醒需循环复查条件。
+Windows 下超时精度为毫秒（纳秒向上取整）。
+
+| 方法 | 说明 |
+|------|------|
+| init / drop | 构造 / 析构 |
+| one | 唤醒一个等待者 |
+| all | 唤醒全部等待者 |
+
+### pool —— 线程池
+
+pool 是 `run` 语句的另一种执行目标：任务提交复用 run 语句，没有
+新增提交方法——“线程”与“线程池”在语言层面是同一个动词：
+
+```sc
+var p: pool
+p.init(4)                  # 4 个工作线程；0 → CPU 逻辑核数
+run work(&c, 1000), p      # 入池排队（与独立线程同一语句）
+p.join()                   # 屏障：等全部已提交任务完成（之后仍可提交）
+p.drop()                   # 析构：等任务完成 → 停工作线程 → 回收
+```
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `n: u4` | n 个工作线程；0 → CPU 逻辑核数 |
+| join | | 屏障：等待全部已提交任务完成（可反复使用） |
+| drop | | 析构：等已提交任务全部完成后停池回收（不丢任务） |
+
+按类型静态分派机制：编译器在生成 run 语句时推断第二参类型——
+pool 对象或指针 → 生成 `pool_run(&p, fn, &参数, sizeof)` 入池；其余
+（`&t` 形态）→ 生成 `thread_run` 创建独立线程。C 侧是两个普通函数，
+没有运行时多态。任务节点延续联合分配哲学：`[节点][rpc 参数]`单块
+分配，参数拷贝入节点，调用点无需保活。
+
+刻意不提供 future/cancel/动态扩容：任务级同步用 cond + wait 语句，
+需要隔离时建多个 pool。
 
 ### 使用示例
 
@@ -216,8 +264,11 @@ fnc main: i4
 
 提供：平台判定宏（`P_WIN`/`P_DARWIN`/`P_BSD`/`P_LINUX`/`P_POSIX`/
 `P_POSIX_LIKE`）、平台基础头引入、路径分隔符（`P_SEP`/`P_IS_SEP`）、
-`TLS` 线程局部存储、字节序（`BYTE_ORDER`）、单调时钟
-（`P_clock`/`P_clock_now`/`P_clock_ms`）、毫秒休眠（`P_msleep`）。
+`TLS` 线程局部存储、字节序（`BYTE_ORDER`）、时钟（`P_clock` 类型，
+`P_time_now` 墙钟 / `P_clock_now` 单调 / `P_cost_now` CPU 耗时，
+`clock_s/ms/us` 取值与 `*_diff` 差值等宏族，`P_tick_s/ms/us` 快捷计时）、
+微秒休眠（`P_usleep`，Windows 毫秒精度向上取整）、
+CPU 逻辑核数（`P_ncpu`）。
 
 新增 builtins 实现时应统一经由本头文件做平台适配，不在实现内散落
 `#ifdef` 平台分支。

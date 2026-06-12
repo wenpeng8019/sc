@@ -7,6 +7,8 @@
 #   - msleep(ms)：当前线程休眠（m 的 rpc 仅声明，C 侧实现）
 #   - wait 语句：条件变量等待 wait cond, mutex[, nsec[, sec]]
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
+#   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
+#     run work(...), p —— 与独立线程同一个动词，按类型静态分派
 inc stdio.h
 inc m.sc
 
@@ -87,4 +89,20 @@ fnc main: i4
 
     s.cv.drop()
     s.mu.drop()
+
+    # pool：run 第二参为 pool → 任务入池（4 个 worker 跑 8 个任务）
+    var c2: ctx
+    c2.n = 0
+    c2.mu.init()
+    var p: pool
+    p.init(4)                  # 0 → CPU 核数
+    var k: i4 = 0
+    for k = 0; k < 8; k++
+        run work(&c2, 1000), p # 入池：与 run 独立线程同一语句
+    p.join()                   # 屏障：等全部任务完成（pool 仍可用）
+    printf("pool done: n=%d\n", c2.n)      # 期望 8000
+    run work(&c2, 1000), p     # join 后继续提交
+    p.drop()                   # 析构：等任务完成后停池回收
+    printf("pool drop: n=%d\n", c2.n)      # 期望 9000
+    c2.mu.drop()
     return 0

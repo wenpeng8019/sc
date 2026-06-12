@@ -616,6 +616,15 @@ struct CGen {
     //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
     // thread_run 在 m_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
     // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
+    // run 语句 → 装填 rpc 参数结构体 + 线程原语调用（第二参按类型静态分派）
+    //   run worker(a, b), &t →
+    //   { struct worker _rp = {0}; _rp.x = a; ...;
+    //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
+    //   run worker(a, b), p（p 为 pool 对象或指针，对象自动取地址）→
+    //     pool_run(&p, (void (*)(void *))worker_rpc, &_rp, sizeof(_rp));
+    // thread_run 在 m_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
+    // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
+    // pool_run 同哲学：参数拷贝入任务节点，调用点无需保活。
     void emitRunStmt(const Stmt& s) {
         const Expr& call = *s.expr;
         auto it = rpcs.find(call.a->text);
@@ -627,6 +636,15 @@ struct CGen {
                                std::to_string(r->fields.size()) + " 个", s.line};
         if (!aggrOf("thread"))
             throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
+        // 第二参类型分派：pool（对象/指针）→ 入池；其余 → thread 出参
+        bool toPool = false;
+        if (s.forInit) {
+            VType vt;
+            if (exprVType(*s.forInit, vt) && vt.arr == 0 && vt.ptr <= 1) {
+                const Decl* sd = aggrOf(vt.name);
+                if (sd && sd->name == "pool") toPool = true;
+            }
+        }
         indent(); out << "{\n";
         depth++;
         indent(); out << "struct " << r->name << " _rp = {0};\n";
@@ -637,13 +655,19 @@ struct CGen {
             out << ";\n";
         }
         indent();
-        out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
-        if (s.forInit) {
-            out << "(thread **)(";
-            emitExpr(*s.forInit, true);
-            out << ")";
-        } else out << "NULL";
-        out << ");\n";
+        if (toPool) {
+            out << "pool_run(";
+            emitAutoAddr(*s.forInit);
+            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
+        } else {
+            out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
+            if (s.forInit) {
+                out << "(thread **)(";
+                emitExpr(*s.forInit, true);
+                out << ")";
+            } else out << "NULL";
+            out << ");\n";
+        }
         depth--;
         indent(); out << "}\n";
     }
@@ -1007,9 +1031,15 @@ struct CGen {
         }
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
-        if (usesRun)
+        if (usesRun) {
             out << "typedef struct thread thread;\n"
-                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);\n\n";
+                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);\n";
+            // 第二参可能是 pool：pool 类型可见即一并输出 pool_run 原型
+            if (aggrOf("pool"))
+                out << "typedef struct pool pool;\n"
+                    << "extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);\n";
+            out << "\n";
+        }
 
         // wait 语句条件等待原语：实现在 m 子项目（m_impl）
         if (usesWait)

@@ -244,4 +244,18 @@ static inline void P_usleep(uint64_t us) {
 #endif
 }
 
+/* ---------------- CPU 核数 ---------------- */
+
+/* 逻辑核数（至少返回 1） */
+static inline uint32_t P_ncpu(void) {
+#if P_WIN
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwNumberOfProcessors > 0 ? (uint32_t)si.dwNumberOfProcessors : 1;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (uint32_t)n : 1;
+#endif
+}
+
 #endif /* SC_PLATFORM_H */
