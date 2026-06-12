@@ -218,7 +218,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 | 省略返回类型 | `void` |
 | `name&` / `name&&` | `T*` / `T**` |
 | `name[x][y]` | `T name[x][y]` |
-| `(expr: type&)` | `((type*)(expr))` |
+| `expr: type&`（右值裸形态） | `((type*)(expr))` |
 | `nil` | `NULL` |
 
 生成的 C 文件头部自动包含 `stdint.h`、`stddef.h`、`stdbool.h`、`stdarg.h`。
@@ -233,13 +233,16 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 生成 C 时自动输出结构/联合前置声明与函数原型，sc 源码支持先使用后定义
 （含递归 / 互递归函数）。
 
-### 5.4 伪类（方法与方法字段）
+### 5.4 伪类（成员函数与函数指针字段）
 
-- `fnc Obj::method: ...` 生成带接收者的 C 函数（名字修饰 `Obj_method`），
-  函数体内 `this` 映射为参数 `_this`。
-- 结构体方法指针字段 `m:: fnc: ...` 展开为 `Ret (*m)(struct Obj *_this, ...)`；
-  `o.m(...)` / `o->m(...)` 调用时自动注入接收者（`&o` / `o`）。
-- 普通函数指针字段 `cb: fnc: ...` 展开为普通 C 函数指针，调用不注入接收者。
+- 成员函数在结构体定义内实现（签名字段 + 缩进函数体），生成带接收者的
+  C 函数（名字修饰 `Obj_method`，首参 `Obj *_this`），函数体内 `this`
+  映射为参数 `_this`；`o.m(...)` / `p->m(...)` 调用时自动注入接收者
+  （`&o` / `p`）。`@fnc Obj::m` 仅声明形态生成 extern 原型（C 侧实现）。
+- 普通函数指针字段 `cb: fnc: ...`（无函数体）展开为普通 C 函数指针，
+  调用不注入接收者。
+- 调用实参不足时默认补 0：指针/数组/函数指针补 `NULL`，按值聚合补
+  `(T){0}`，标量补 `0`；覆盖普通函数、成员函数、函数指针、rpc/run。
 - 字段默认值：为含默认值的类型生成 `static inline T T__default(void)` 初始化器，
   未指定字段零初始化。
 
