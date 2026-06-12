@@ -84,7 +84,11 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.sc",
-                    "match": "\\b(sizeof|offsetof)\\b"
+                    "match": "\\b(sizeof|offsetof|print|string_of)\\b"
+                },
+                {
+                    "name": "variable.language.linked.sc",
+                    "match": "(?<=->|\\.)(prev|next)\\b"
                 }
             ]
         },

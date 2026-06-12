@@ -316,11 +316,16 @@ l.append(&t)                    # 编译器自动注入 _prev 偏移
 var it&: task = l->first(): task&
 while it != nil
     printf("%d\n", it->id)
-    it = it->_next              # 尾元素 _next 为 nil
+    it = it->next               # 尾元素 next 为 nil
 ```
 
-约定：`head` 指向首元素；首元素的 `_prev` 指向尾元素（即 rear 指针）；
-尾元素的 `_next` 为 `nil`。同一 `chain` 只能存放同一种结构体；chain 不拥有
+成员访问位提供上下文关键字 `prev` / `next`：当基址是链表结构体时，
+`o.prev` / `p->next` 等价 `_prev` / `_next`（转 C 时映射）。它们仅在成员
+访问位生效，不是保留字：普通结构体仍可定义名为 `prev`/`next` 的字段；
+链表结构体内则禁止显式定义 `prev`/`next`/`_prev`/`_next`。
+
+约定：`head` 指向首元素；首元素的 `prev` 指向尾元素（即 rear 指针）；
+尾元素的 `next` 为 `nil`。同一 `chain` 只能存放同一种结构体；chain 不拥有
 元素，移除操作不释放元素内存。
 
 ## 8. 函数、函数类型和方法
@@ -679,6 +684,40 @@ var tab[2][3]: i4 = {
 }
 ```
 
+### 10.3 print 与 string_of（io 内置关键字）
+
+`print` 是 C 风格日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）：
+
+```sc
+inc io.sc
+
+print("n=%d s=%s", 42, "hello")     # 默认 D 级别
+print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
+```
+
+- 格式串与 printf 一致；前缀 `F:`/`E:`/`W:`/`I:`/`D:`/`V:` 设日志级别
+ （致命/错误/警告/信息/调试/详细），无前缀默认 `D`。
+- 输出格式 `HH:MM:SS.mmm L| 文本`，自动换行，单次 fprintf 保证多线程不串行。
+- 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
+
+`string_of(expr)` 按实参的静态类型生成格式化代码，返回内置 `string`
+（需 `inc adt.sc`，调用方负责 `drop`）：
+
+```sc
+var s: string = string_of(t)        # {id: 1, name: "AB", pos: {x: 3, y: 4}}
+print("t=%s", s.cstr())
+s.drop()
+```
+
+格式化规则：整数/浮点→数字（枚举按整数）；`bool`→true/false；`char`→'a'；
+`char&`→"文本"（nil→nil）；其他指针→十六进制地址；结构/联合→`{字段: 值, ...}`
+递归展开（一级指针自动解引用，nil→"nil"；函数指针/合成字段跳过）；
+一维数组→`[v, v, ...]`（char 一维数组按文本加引号）；`string`→"内容"。
+暂不支持多维数组。
+
+`print` / `string_of` 是上下文关键字：若作用域内存在同名函数/变量，
+按普通标识符解析。
+
 ## 11. 语句与控制流
 
 当前已经实现的语句包括：
@@ -911,7 +950,8 @@ var a:i1
 - 详细诊断输出：出错行源代码展示、编译上下文、文件位置追踪
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `chain` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
-- 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）
+- 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）；成员访问位提供 `prev`/`next` 上下文关键字
+- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`string_of` 按静态类型格式化为 `string`（标量/结构体/一维数组/枚举，需 `inc adt.sc`）
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
 

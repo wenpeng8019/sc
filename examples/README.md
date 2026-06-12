@@ -18,6 +18,7 @@
 | feature7.sc | 内置多线程（run/wait + m）：`run rpc调用[, &t|pool]` 创建线程/入池，joinable/detach、mutex 保护计数、P_usleep（platform.h）、`wait cond, mutex[, nsec[, sec]]` 条件等待、pool 线程池、tls 线程局部变量 |
 | feature8.sc | 语法糖三件套：右值强转免括号 `expr: type&`、调用缺参默认补 0/nil/{0}、结构体内成员函数实现 |
 | feature9.sc | 链表结构体 `def T: ~ {}`（注入 `_prev`/`_next`）与内置 `chain` 双向链表：append/push/pop/before/after/remove/first/last/revert/append_to/push_to/cut |
+| feature10.sc | `prev`/`next` 上下文关键字（链表结构体成员访问位）；io 子模块：`print` 日志输出（F/E/W/I/D/V 级别、SC_LOG 过滤）与 `string_of` 格式化（标量/结构体/数组/枚举→string） |
 
 ## 专项验证（feature_*.sc）：编译器机制
 

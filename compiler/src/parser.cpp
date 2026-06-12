@@ -561,8 +561,9 @@ struct Parser {
             }
             if (linked) {
                 for (auto& f : d->fields)
-                    if (f.name == "_prev" || f.name == "_next")
-                        err("_prev/_next 为链表结构体内置成员，不可显式定义");
+                    if (f.name == "_prev" || f.name == "_next" ||
+                        f.name == "prev" || f.name == "next")
+                        err("prev/next/_prev/_next 为链表结构体内置成员，不可显式定义");
                 for (const char* n : {"_prev", "_next"}) {
                     Field f;
                     f.name = n;

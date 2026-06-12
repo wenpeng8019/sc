@@ -297,6 +297,25 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
   （须为 `linked` 结构体一级指针，否则报错），自动追加尾参
   `offsetof(T, _prev)`。chain 以 `_off` 记录该偏移，其余无类型实参的
   操作（pop/last/revert/cut 等）经 `_off` 间接寻址 `_prev`/`_next`。
+- `prev`/`next` 上下文关键字：成员访问位（`.`/`->`）且基址静态类型为
+  `linked` 结构体时，语义推断与 C 生成统一映射为 `_prev`/`_next`
+  （codegen_c `memberFieldName`）；普通结构体的同名字段不受影响。
+  解析期链表结构体禁止显式定义 `prev`/`next`（与 `_prev`/`_next` 同列）。
+
+### 5.9 print 与 string_of 关键字
+
+- `print(fmt, ...)`：成员表/全局表/函数表均无 `print` 时按关键字处理，
+  生成 `sc_print(fmt, ...)` 调用并在单元头部输出 extern 原型；要求单元
+  `inc io.sc`（拉入 `builtins/io/io_impl.c` 链接），否则编译报错。
+  级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `sc_print` 内完成。
+- `string_of(expr)`：要求 `inc adt.sc`（依赖内置 `string`）。代码生成
+  按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记格式化请求
+  `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），调用点改写为
+  `sc_strof__KEY(实参)`。函数体先写入暂存流，结束后回填支撑代码再拼接：
+  8 个标量原语（`sc__sof_i64/u64/f64/bool/char/cstr/ptr/str`）、按值字段
+  闭包递归生成的聚合格式化器 `sc__sof_T(string*, T*)`、以及每请求包装
+  `static string sc_strof__KEY(...)`（聚合一级指针含 nil 检查后解引用）。
+  多维数组、未知类型编译报错；枚举按 i64 处理。
 
 ## 6. 语义检查（semanticCheck）
 

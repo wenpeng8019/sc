@@ -196,8 +196,11 @@ struct Checker {
                 if (!base.valid) return Ty{};
                 const Decl* sd = resolveStruct(base.name);
                 if (!sd) return Ty{};
+                // prev/next 上下文关键字：链表结构体上映射到内置 _prev/_next
+                std::string fn = e.text;
+                if (sd->linked && (fn == "prev" || fn == "next")) fn = "_" + fn;
                 for (auto& f : sd->fields) {
-                    if (f.name == e.text) return fromTypeRef(f.type);
+                    if (f.name == fn) return fromTypeRef(f.type);
                 }
                 return Ty{};
             }
@@ -213,6 +216,13 @@ struct Checker {
                     && globals.find(e.a->text) == globals.end()
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
+                // string_of 关键字：结果类型为 string
+                if (e.a->kind == Expr::Ident && e.a->text == "string_of"
+                    && locals.find(e.a->text) == locals.end()
+                    && globals.find(e.a->text) == globals.end()) {
+                    for (auto& a : e.args) (void)inferExpr(*a, locals, line);
+                    return Ty{"string", 0, 0, true, false};
+                }
                 Ty callee = inferExpr(*e.a, locals, line);
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 if (callee.valid && callee.name == "v" && callee.ptr == 0 && callee.arr == 0)

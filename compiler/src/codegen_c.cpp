@@ -11,6 +11,7 @@
 #include "codegen_c.h"
 #include "error.h"
 #include <cctype>
+#include <map>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -57,6 +58,8 @@ struct CGen {
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
+    int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + sc_print 原型）
+    int  usesStrof = 0;         // string_of 关键字首次出现行号（需 adt string 可见）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -70,6 +73,10 @@ struct CGen {
     std::unordered_map<std::string, VType> globalsT, localsT;
     // 函数指针变量的内联签名（var cb: fnc: ...）：缺参补全查询用
     std::unordered_map<std::string, const TypeRef*> fnVarsG, fnVarsL;
+    // 数组变量的维度表（string_of 顶层数组需要维度信息）
+    std::unordered_map<std::string, std::vector<std::string>> varDimsG, varDimsL;
+    // 枚举类型名集合（string_of 按整数格式化）
+    std::unordered_set<std::string> enums;
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
 
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
@@ -151,12 +158,23 @@ struct CGen {
         return nullptr;
     }
 
+    // prev/next 上下文关键字：链表结构体上映射到内置 _prev/_next
+    static std::string memberFieldName(const Decl& sd, const std::string& name) {
+        if (sd.linked && (name == "prev" || name == "next")) return "_" + name;
+        return name;
+    }
+
     // ---- T() 伪调用预扫描：收集需要生成 T__new 辅助函数的类型 ----
     std::set<std::string> heapNews;
 
     void scanExprForNew(const Expr& e) {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
+        // print / string_of 关键字使用标记（原型/辅助函数需先于函数体输出）
+        if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
+            if (e.a->text == "print" && !usesPrint) usesPrint = e.line;
+            if (e.a->text == "string_of" && !usesStrof) usesStrof = e.line;
+        }
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
         if (e.c) scanExprForNew(*e.c);
@@ -197,6 +215,244 @@ struct CGen {
                 out << "        " << im->name << "(_p);\n";
             out << "    }\n    return _p;\n}\n\n";
         }
+    }
+
+    // ---------------- string_of 关键字：按静态类型生成格式化器 ----------------
+    // string_of(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
+    // 包装函数/聚合格式化器在函数体输出后按需生成（emitSofHelpers 回填）。
+    struct SofReq {
+        std::string key;                // 包装函数名后缀（类型唯一键）
+        std::string cParam;             // 包装函数形参 C 声明
+        std::string name;               // sc 类型名
+        int ptr = 0;                    // 指针层数
+        std::vector<std::string> dims;  // 数组维度（仅一维）
+    };
+    std::map<std::string, SofReq> sofReqs;  // key → 顶层格式化请求
+    std::set<std::string> sofAggrs;         // 需生成 sc__sof_T 的聚合（不含 string）
+
+    // 穿透别名得到最终类型名（最多 8 层防环）
+    std::string resolveAliasName(std::string n) const {
+        for (int i = 0; i < 8; i++) {
+            auto it = aliases.find(n);
+            if (it == aliases.end()) break;
+            n = it->second;
+        }
+        return n;
+    }
+
+    // 标量分类：'i' 有符号 / 'u' 无符号 / 'f' 浮点 / 'b' bool / 'c' 字符 / 0 非标量
+    char scalarClass(const std::string& rawName) const {
+        std::string n = resolveAliasName(rawName);
+        if (enums.count(n)) return 'i';
+        if (n == "i1" || n == "i2" || n == "i4" || n == "i8") return 'i';
+        if (n == "u1" || n == "u2" || n == "u4" || n == "u8") return 'u';
+        if (n == "f4" || n == "f8") return 'f';
+        if (n == "bool") return 'b';
+        if (n == "char" || n == "c1") return 'c';
+        return 0;
+    }
+
+    // sc 类型 → C 类型文本（聚合用规范名，标量经 mapBase）
+    std::string cTypeOf(const std::string& name, int ptr) const {
+        std::string base;
+        if (name.empty()) base = ptr > 0 ? "void" : "char";
+        else if (const Decl* sd = aggrOf(name)) base = sd->name;
+        else base = mapBase(resolveAliasName(name));
+        std::string s = base;
+        if (ptr > 0) {
+            s += " ";
+            for (int i = 0; i < ptr; i++) s += "*";
+        }
+        return s;
+    }
+
+    // 数组表达式的维度（Ident 查变量表，Member 查字段定义）
+    bool exprDims(const Expr& e, std::vector<std::string>& dims) const {
+        if (e.kind == Expr::Ident) {
+            auto it = varDimsL.find(e.text);
+            if (inFunc && it != varDimsL.end()) { dims = it->second; return true; }
+            it = varDimsG.find(e.text);
+            if (it != varDimsG.end()) { dims = it->second; return true; }
+            return false;
+        }
+        if (e.kind == Expr::Member) {
+            VType base;
+            if (!exprVType(*e.a, base)) return false;
+            const Decl* sd = aggrOf(base.name);
+            if (!sd) return false;
+            for (auto& f : sd->fields)
+                if (f.name == e.text) { dims = f.type.arrayDims; return true; }
+        }
+        return false;
+    }
+
+    // string_of 调用点：校验类型并登记格式化请求，输出包装函数调用
+    void emitStrofCall(const Expr& e) {
+        if (e.args.size() != 1)
+            throw CompileError{"string_of 需要且仅需要一个实参", e.line};
+        if (!aggrOf("string"))
+            throw CompileError{"string_of 依赖内置 string，请先 inc adt.sc", e.line};
+        VType vt;
+        if (!exprVType(*e.args[0], vt))
+            throw CompileError{"string_of 无法推断实参类型", e.line};
+        SofReq r;
+        r.name = vt.name;
+        r.ptr = vt.ptr;
+        if (vt.arr > 0) {
+            if (!exprDims(*e.args[0], r.dims) || (int)r.dims.size() != vt.arr)
+                throw CompileError{"string_of 无法确定数组维度", e.line};
+            if (r.dims.size() > 1)
+                throw CompileError{"string_of 暂不支持多维数组", e.line};
+        }
+        const Decl* sd = aggrOf(vt.name);
+        if (r.dims.empty() && vt.ptr == 0 && !sd && !scalarClass(vt.name))
+            throw CompileError{"string_of 不支持该类型：" +
+                (vt.name.empty() ? std::string("(无类型)") : vt.name), e.line};
+        // 类型唯一键：规范名 + _p（每层指针）+ _a维度
+        std::string key = sd ? sd->name
+                             : (vt.name.empty() ? std::string("x") : resolveAliasName(vt.name));
+        for (int i = 0; i < vt.ptr; i++) key += "_p";
+        for (auto& d : r.dims) {
+            key += "_a";
+            for (char c : d) key += (isalnum((unsigned char)c) ? c : '_');
+        }
+        r.key = key;
+        std::string ct = cTypeOf(vt.name, vt.ptr);
+        bool starEnd = !ct.empty() && ct.back() == '*';
+        r.cParam = ct + (starEnd ? "" : " ") + (r.dims.empty() ? "_v" : "*_v");
+        sofReqs[r.key] = r;
+        out << "sc_strof__" << r.key << "(";
+        emitExpr(*e.args[0], true);
+        out << ")";
+    }
+
+    // 收集需要生成格式化器的聚合（递归按值字段；指针打地址不递归）
+    void collectSofAggr(const std::string& name) {
+        const Decl* sd = aggrOf(name);
+        if (!sd || sd->name == "string") return;
+        if (!sofAggrs.insert(sd->name).second) return;
+        for (auto& f : sd->fields) {
+            if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None || f.type.hasInline)
+                continue;
+            if (f.type.ptr > 0) continue;
+            collectSofAggr(f.type.name);
+        }
+    }
+
+    // 生成“把 lv 的值格式化追加到 _o”的语句（递归处理数组维度）
+    void emitSofValue(const std::string& lv, const std::string& name, int ptr,
+                      const std::vector<std::string>& dims, size_t di, int ind) {
+        auto pad = [&] { for (int i = 0; i < ind; i++) out << "    "; };
+        char sc = scalarClass(name);
+        if (di < dims.size()) {
+            // 一维 char 数组：按文本引用输出
+            if (sc == 'c' && ptr == 0 && dims.size() - di == 1) {
+                pad(); out << "string_append_char(_o, '\"');\n";
+                pad(); out << "string_append_n(_o, (char *)(" << lv << "), strnlen("
+                           << lv << ", (size_t)(" << dims[di] << ")));\n";
+                pad(); out << "string_append_char(_o, '\"');\n";
+                return;
+            }
+            std::string iv = "_i" + std::to_string(di);
+            pad(); out << "string_append_char(_o, '[');\n";
+            pad(); out << "for (size_t " << iv << " = 0; " << iv << " < (size_t)("
+                       << dims[di] << "); " << iv << "++) {\n";
+            pad(); out << "    if (" << iv << ") string_append(_o, \", \");\n";
+            emitSofValue(lv + "[" + iv + "]", name, ptr, dims, di + 1, ind + 1);
+            pad(); out << "}\n";
+            pad(); out << "string_append_char(_o, ']');\n";
+            return;
+        }
+        if (ptr > 0) {
+            pad();
+            if (sc == 'c' && ptr == 1) out << "sc__sof_cstr(_o, " << lv << ");\n";
+            else out << "sc__sof_ptr(_o, (const void *)(" << lv << "));\n";
+            return;
+        }
+        if (sc) {
+            pad();
+            switch (sc) {
+                case 'i': out << "sc__sof_i64(_o, (long long)(" << lv << "));\n"; break;
+                case 'u': out << "sc__sof_u64(_o, (unsigned long long)(" << lv << "));\n"; break;
+                case 'f': out << "sc__sof_f64(_o, (double)(" << lv << "));\n"; break;
+                case 'b': out << "sc__sof_bool(_o, (unsigned char)(" << lv << "));\n"; break;
+                case 'c': out << "sc__sof_char(_o, (char)(" << lv << "));\n"; break;
+            }
+            return;
+        }
+        const Decl* sd = aggrOf(name);
+        if (sd && sd->name == "string") { pad(); out << "sc__sof_str(_o, &(" << lv << "));\n"; return; }
+        if (sd) { pad(); out << "sc__sof_" << sd->name << "(_o, &(" << lv << "));\n"; return; }
+        pad(); out << "string_append(_o, \"?\");\n";
+    }
+
+    // 聚合格式化器：{字段: 值, ...}（synthetic/函数指针字段跳过；联合体按全部成员输出）
+    void emitSofAggrBody(const Decl& sd) {
+        out << "static void sc__sof_" << sd.name << "(string *_o, " << sd.name << " *_v) {\n"
+            << "    string_append(_o, \"{\");\n";
+        bool first = true;
+        for (auto& f : sd.fields) {
+            if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None) continue;
+            out << "    string_append(_o, \"" << (first ? "" : ", ") << f.name << ": \");\n";
+            if (f.type.hasInline) out << "    string_append(_o, \"?\");\n";
+            else emitSofValue("_v->" + f.name, f.type.name, f.type.ptr, f.type.arrayDims, 0, 1);
+            first = false;
+        }
+        out << "    string_append(_o, \"}\");\n}\n\n";
+    }
+
+    // 顶层包装：string sc_strof__KEY(T) —— 构造 string、格式化、按值返回
+    void emitSofWrapper(const SofReq& r) {
+        out << "static string sc_strof__" << r.key << "(" << r.cParam << ") {\n"
+            << "    string _s;\n    string_init(&_s);\n    string *_o = &_s;\n";
+        const Decl* sd = aggrOf(r.name);
+        if (r.dims.empty() && r.ptr == 1 && sd) {
+            // 聚合一级指针：解引用展开内容（nil → "nil"）
+            out << "    if (!_v) string_append(_o, \"nil\");\n";
+            if (sd->name == "string") out << "    else sc__sof_str(_o, _v);\n";
+            else out << "    else sc__sof_" << sd->name << "(_o, _v);\n";
+        } else {
+            emitSofValue("_v", r.name, r.ptr, r.dims, 0, 1);
+        }
+        out << "    return _s;\n}\n\n";
+    }
+
+    // string_of 支撑代码回填：原语 + 聚合格式化器 + 顶层包装
+    void emitSofHelpers() {
+        if (sofReqs.empty()) return;
+        out << "/* ---- string_of 关键字支撑：格式化原语与按类型生成的格式化器 ---- */\n"
+            << "static inline void sc__sof_i64(string *_o, long long _v) {\n"
+            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%lld\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_u64(string *_o, unsigned long long _v) {\n"
+            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%llu\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_f64(string *_o, double _v) {\n"
+            << "    char _b[40]; snprintf(_b, sizeof(_b), \"%g\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_bool(string *_o, unsigned char _v) {\n"
+            << "    string_append(_o, _v ? \"true\" : \"false\"); }\n"
+            << "static inline void sc__sof_char(string *_o, char _v) {\n"
+            << "    string_append_char(_o, '\\''); string_append_char(_o, _v); string_append_char(_o, '\\''); }\n"
+            << "static inline void sc__sof_cstr(string *_o, const char *_v) {\n"
+            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
+            << "    string_append_char(_o, '\"'); string_append(_o, (char *)_v); string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_ptr(string *_o, const void *_v) {\n"
+            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
+            << "    char _b[24]; snprintf(_b, sizeof(_b), \"0x%llx\", (unsigned long long)(uintptr_t)_v);\n"
+            << "    string_append(_o, _b); }\n"
+            << "static inline void sc__sof_str(string *_o, string *_v) {\n"
+            << "    string_append_char(_o, '\"');\n"
+            << "    if (_v->data) string_append_n(_o, _v->data, _v->size);\n"
+            << "    string_append_char(_o, '\"'); }\n\n";
+        // 聚合传递闭包（仅按需：按值聚合 / 一维数组元素 / 一级指针解引用）
+        for (auto& kv : sofReqs) {
+            const SofReq& r = kv.second;
+            if (!r.dims.empty()) { if (r.ptr == 0) collectSofAggr(r.name); }
+            else if (r.ptr <= 1) collectSofAggr(r.name);
+        }
+        for (auto& n : sofAggrs)
+            out << "static void sc__sof_" << n << "(string *_o, " << n << " *_v);\n";
+        if (!sofAggrs.empty()) out << "\n";
+        for (auto& n : sofAggrs) emitSofAggrBody(*aggrs.at(n));
+        for (auto& kv : sofReqs) emitSofWrapper(kv.second);
     }
 
     // 查找顶层方法：类型名（穿透别名）→ 方法 Decl（未找到 nullptr）
@@ -243,8 +499,9 @@ struct CGen {
                 if (!exprVType(*e.a, base)) return false;
                 const Decl* sd = aggrOf(base.name);
                 if (!sd) return false;
+                const std::string fn = memberFieldName(*sd, e.text);
                 for (auto& f : sd->fields)
-                    if (f.name == e.text) {
+                    if (f.name == fn) {
                         vt = {f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
                         return true;
                     }
@@ -279,6 +536,12 @@ struct CGen {
                 // T() 伪调用结果类型：T&（使链式方法调用可推断）
                 if (const Decl* td = typeCallee(e)) {
                     vt = {td->name, 1, 0};
+                    return true;
+                }
+                // string_of(expr) 结果类型：string（使声明初值/方法调用可推断）
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "string_of"
+                    && !localsT.count("string_of") && !globalsT.count("string_of")) {
+                    vt = {"string", 0, 0};
                     return true;
                 }
                 return false;
@@ -395,6 +658,25 @@ struct CGen {
                     out << td->name << "__new()";
                     break;
                 }
+                // print 关键字：C 风格日志输出（io 子项目 sc_print，未被同名定义遮蔽时）
+                if (e.a->kind == Expr::Ident && e.a->text == "print"
+                    && !localsT.count("print") && !globalsT.count("print") && !funcs.count("print")) {
+                    if (e.args.empty())
+                        throw CompileError{"print 需要格式串实参", e.line};
+                    out << "sc_print(";
+                    for (size_t i = 0; i < e.args.size(); i++) {
+                        if (i) out << ", ";
+                        emitExpr(*e.args[i], true);
+                    }
+                    out << ")";
+                    break;
+                }
+                // string_of 关键字：按实参静态类型生成格式化器，返回 adt string
+                if (e.a->kind == Expr::Ident && e.a->text == "string_of"
+                    && !localsT.count("string_of") && !globalsT.count("string_of") && !funcs.count("string_of")) {
+                    emitStrofCall(e);
+                    break;
+                }
                 // 顶层方法调用糖：o.m(...) / p->m(...) → T_m(&o/p, ...)
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
@@ -459,10 +741,20 @@ struct CGen {
                 emitExpr(*e.b, true);
                 out << "]";
                 break;
-            case Expr::Member:
+            case Expr::Member: {
                 emitExpr(*e.a);
-                out << e.op << e.text;
+                std::string fn = e.text;
+                if (e.text == "prev" || e.text == "next") {
+                    // 上下文关键字：链表结构体上 prev/next 映射到内置 _prev/_next
+                    VType base;
+                    if (exprVType(*e.a, base)) {
+                        const Decl* sd = aggrOf(base.name);
+                        if (sd && sd->linked) fn = "_" + e.text;
+                    }
+                }
+                out << e.op << fn;
                 break;
+            }
             case Expr::Sizeof: {
                 out << "sizeof(";
                 // 若内层是单纯标识符且是 sc 内置类型名，做类型映射再输出
@@ -541,6 +833,8 @@ struct CGen {
     void regVar(const Field& f) {
         VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
         (inFunc ? localsT : globalsT)[f.name] = vt;
+        if (!f.type.arrayDims.empty())
+            (inFunc ? varDimsL : varDimsG)[f.name] = f.type.arrayDims;
         // 函数指针变量：额外记录内联签名（缺参补全查询用）
         if (f.type.fnKind != TypeRef::FncKind::None)
             (inFunc ? fnVarsL : fnVarsG)[f.name] = &f.type;
@@ -924,6 +1218,7 @@ struct CGen {
         // 函数作用域：注册参数类型（含预定义函数类型展开的签名）
         localsT.clear();
         fnVarsL.clear();
+        varDimsL.clear();
         inFunc = true;
         const Decl* sig = &d;
         if (!d.funcTypeName.empty()) {
@@ -1014,6 +1309,7 @@ struct CGen {
         out << " {\n";
         localsT.clear();
         fnVarsL.clear();
+        varDimsL.clear();
         inFunc = true;
         for (auto& p : d.fields) regVar(p);
         curRpc = &d;
@@ -1092,13 +1388,30 @@ struct CGen {
             if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
 
-        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run 语句
+        // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run/print/string_of
         heapNews.clear();
         for (auto& d : prog.decls) {
             if (d->external) continue;
             for (auto& f : d->fields) if (f.init) scanExprForNew(*f.init);
             for (auto& s : d->body) scanStmtForNew(*s);
         }
+
+        // 枚举类型名集合（string_of 按整数格式化）
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::EnumD) enums.insert(d->name);
+
+        // print 关键字：需 io 模块实现 sc_print（inc io.sc 参与链接）
+        if (usesPrint && !funcs.count("print")) {
+            bool hasIo = false;
+            for (auto& d : prog.decls)
+                if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
+            if (!hasIo)
+                throw CompileError{"print 需要先 inc io.sc", usesPrint};
+            out << "extern void sc_print(const char *, ...);\n\n";
+        }
+        // string_of 关键字：依赖 adt string
+        if (usesStrof && !funcs.count("string_of") && !aggrOf("string"))
+            throw CompileError{"string_of 依赖内置 string，请先 inc adt.sc", usesStrof};
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
         if (usesRun) {
@@ -1155,9 +1468,16 @@ struct CGen {
         out << "\n";
         // 堆构造辅助函数（T() 伪调用糖使用）
         emitNewHelpers();
-        // 第二遍：函数定义（外部模块函数在其自身单元实现）
+        // 第二遍：函数定义先写入暂存流（string_of 调用点按需登记格式化请求），
+        // 随后回填支撑代码（原语/格式化器/包装）再拼接函数体
+        std::ostringstream mainOut = std::move(out);
+        out = std::ostringstream();
         for (auto& d : prog.decls)
             if (d->kind == Decl::FuncD && !d->external) emitFunc(*d);
+        std::string funcsPart = out.str();
+        out = std::move(mainOut);
+        emitSofHelpers();
+        out << funcsPart;
         return out.str();
     }
 
