@@ -164,6 +164,13 @@ struct CGen {
         return name;
     }
 
+    // 链表结构体首个真实成员（跳过前置注入的 synthetic _prev/_next）
+    const Field* firstRealField(const Decl* sd) const {
+        if (!sd) return nullptr;
+        for (auto& f : sd->fields) if (!f.synthetic) return &f;
+        return nullptr;
+    }
+
     // ---- T() 伪调用预扫描：收集需要生成 T__new 辅助函数的类型 ----
     std::set<std::string> heapNews;
 
@@ -679,6 +686,67 @@ struct CGen {
                 if (!top) out << ")";
                 break;
             case Expr::Call: {
+                // base/prev/next 内置函数：链表结构体字段导航
+                if (e.a && e.a->kind == Expr::Ident && !localsT.count(e.a->text) &&
+                    !globalsT.count(e.a->text) && !funcs.count(e.a->text)) {
+                    const std::string kw = e.a->text;
+                    if ((kw == "base" || kw == "prev" || kw == "next") && e.args.size() == 1) {
+                        const Expr* src = &*e.args[0];
+                        bool typed = src->kind == Expr::Cast;
+                        if (typed) src = src->a.get();
+                        VType vt;
+                        bool hasVt = exprVType(*src, vt);
+                        const Decl* sd = hasVt ? aggrOf(vt.name) : nullptr;
+
+                        auto emitRawSrc = [&]() {
+                            if (vt.ptr > 0 || vt.arr > 0) emitExpr(*src, true);
+                            else {
+                                out << "&(";
+                                emitExpr(*src, true);
+                                out << ")";
+                            }
+                        };
+
+                        auto emitTypedCast = [&](const Expr& castExpr) {
+                            out << "((" << mapBase(castExpr.text);
+                            for (int i = 0; i < castExpr.castPtr + 1; i++) out << "*";
+                            out << ")(";
+                            emitRawSrc();
+                            out << "))";
+                        };
+
+                        if (kw == "base") {
+                            if (typed) { emitTypedCast(*e.args[0]); break; }
+                            if (hasVt && sd && sd->linked) {
+                                const Field* rf = firstRealField(sd);
+                                if (rf) {
+                                    if (vt.ptr > 0 || vt.arr > 0) {
+                                        out << "((void *)&((";
+                                        emitExpr(*src, true);
+                                        out << ")->" << rf->name << "))";
+                                    } else {
+                                        out << "((void *)&((";
+                                        emitExpr(*src, true);
+                                        out << ")." << rf->name << "))";
+                                    }
+                                    break;
+                                }
+                            }
+                            out << "((void *)";
+                            emitRawSrc();
+                            out << ")";
+                            break;
+                        }
+
+                        if (kw == "prev" || kw == "next") {
+                            if (typed) { emitTypedCast(*e.args[0]); break; }
+                            out << "((void *)*(void **)(";
+                            emitRawSrc();
+                            out << "))";
+                            break;
+                        }
+                    }
+                }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
                 if (const Decl* td = typeCallee(e)) {
                     out << td->name << "__new()";

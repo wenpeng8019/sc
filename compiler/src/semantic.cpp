@@ -210,6 +210,28 @@ struct Checker {
             case Expr::Offsetof:
                 return Ty{"u8", 0, 0, true, false};
             case Expr::Call: {
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "base"
+                    && !locals.count("base") && !globals.count("base")) {
+                    if (e.args.size() != 1) err(e.line, "base 需要 1 个实参");
+                    if (e.args[0]->kind == Expr::Cast) {
+                        Ty t = inferExpr(*e.args[0]->a, locals, line);
+                        if (!t.valid) return Ty{};
+                        return Ty{e.args[0]->text, e.args[0]->castPtr + 1, 0, true, false};
+                    }
+                    (void)inferExpr(*e.args[0], locals, line);
+                    return Ty{"void", 1, 0, true, false};
+                }
+                if (e.a && e.a->kind == Expr::Ident && (e.a->text == "prev" || e.a->text == "next")
+                    && !locals.count(e.a->text) && !globals.count(e.a->text)) {
+                    if (e.args.size() != 1) err(e.line, "prev/next 需要 1 个实参");
+                    if (e.args[0]->kind == Expr::Cast) {
+                        Ty t = inferExpr(*e.args[0]->a, locals, line);
+                        if (!t.valid) return Ty{};
+                        return Ty{e.args[0]->text, e.args[0]->castPtr + 1, 0, true, false};
+                    }
+                    (void)inferExpr(*e.args[0], locals, line);
+                    return Ty{"void", 1, 0, true, false};
+                }
                 // T() 类型伪调用（堆构造糖）：结果类型为 T&
                 if (e.a->kind == Expr::Ident && e.args.empty()
                     && locals.find(e.a->text) == locals.end()

@@ -560,7 +560,7 @@ struct Parser {
         }
         expect(Tok::Colon, "':'");
 
-        // ~：链表标记（仅结构体）—— 转 C 时在成员末尾注入 _prev/_next 自链指针
+        // ~：链表标记（仅结构体）—— 转 C 时在成员前面注入 _prev/_next 自链指针
         bool linked = acceptOp("~");
 
         // { ... }：结构体（函数签名字段后跟缩进函数体 = 成员函数）
@@ -577,15 +577,18 @@ struct Parser {
                     if (f.name == "_prev" || f.name == "_next" ||
                         f.name == "prev" || f.name == "next")
                         err("prev/next/_prev/_next 为链表结构体内置成员，不可显式定义");
+                std::vector<Field> injected;
                 for (const char* n : {"_prev", "_next"}) {
                     Field f;
                     f.name = n;
-                    f.type.name = d->name;
                     f.type.ptr = 1;
                     f.synthetic = true;
                     f.line = d->line;
-                    d->fields.push_back(std::move(f));
+                    injected.push_back(std::move(f));
                 }
+                d->fields.insert(d->fields.begin(),
+                                 std::make_move_iterator(injected.begin()),
+                                 std::make_move_iterator(injected.end()));
             }
             expect(Tok::Newline, "换行");
             return d;
