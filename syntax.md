@@ -709,19 +709,25 @@ print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
 - 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
 
 `stringify(值)` 是 JSON 字符串格式化关键字（区别于类型 `string` 与堆构造
-`string()`）：按实参的静态类型生成格式化代码，返回内置 `string`（需 `inc adt.sc`，
-调用方负责 `drop`）；三参形态 `stringify(值, 缓存, 大小)` 在给定缓存内构建
-（截断保证 NUL 结尾），返回 `char&` 即缓存首址，无需 drop。转 C 时，按类型生成的
+`string()`）：按实参的静态类型生成格式化代码，返回内置 `string`（需 `inc adt.sc`
+与 `inc io.sc`，调用方负责 `drop`）；三参形态 `stringify(值, 缓存, 大小)` 在给定缓存内
+构建（截断保证 NUL 结尾），返回 `char&` 即缓存首址，无需 drop。转 C 时，按类型生成的
 静态内联格式化器写入独立的 `stringify.h`，由生成的 `.c` 在类型定义之后 `#include`：
 
 ```sc
-var s: string = stringify(t)        # {"id": 1, "name": "AB", "pos": {"x": 3, "y": 4}}
+var s: string = stringify(t)        # 默认多行美化（2 空格逐层缩进）
 print("t=%s", s.cstr())
 s.drop()
 
 var b[256]: char
-print("t=%s", stringify(t, b, 256)) # 缓存形态：返回 char&，无堆分配交接
+print("t=%s", stringify<compact:1>(t, b, 256))   # 缓存 + 紧凑：{"id":1,"name":"AB"}
 ```
+
+选项块 `stringify<key:val, ...>(值)`：以 `(stringify_t){...}` 传入格式化器，键值限整数
+字面量（来源 io 的 `stringify_t`，故需 `inc io.sc`）。当前支持 `compact`：
+
+- `compact:1` → 紧凑单行 `{"x":3,"y":4}`；
+- 默认（无选项 / `compact:0`）→ 多行美化，对象/数组逐层 2 空格缩进、嵌套换行。
 
 格式化规则（输出合法 JSON，对象键加双引号）：整数/浮点→数字（枚举按整数）；
 `bool`→true/false；`char`→'a'；`char&` / char 一维数组→"文本"；`string`→"内容"；

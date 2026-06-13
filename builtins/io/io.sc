@@ -17,6 +17,9 @@
 #   var b[256]: char
 #   var p&: char = stringify(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
 #                                       # 返回 char&（即缓存首址，无需 drop）
+#   选项块 stringify<key:val, ...>(...)：以 (stringify_t){...} 传入格式化器
+#     · stringify<compact:1>(x)         # 紧凑单行 {"x":3,"y":4}
+#     · 默认（无选项 / compact:0）       # 多行美化（2 空格逐层缩进）
 #   - 标量 → 数字；bool → true/false；char → 'a'
 #   - char& / char 数组 → "文本"；adt string → "内容"
 #   - 结构体/联合体 → {"字段": 值, ...} JSON 对象（链表 _prev/_next 不展开）
@@ -26,4 +29,4 @@
 #     · 其它指针（void&/多级）→ "0x地址"（nil → nil）
 #   - 一维数组 → [v, v, ...]
 #   - 结构体一级指针（顶层实参）→ 解引用展开内容（nil → "nil"）
-#   依赖 adt string（inc adt.sc），暂不支持多维数组
+#   依赖 adt string（inc adt.sc）与 io 的 stringify_t（inc io.sc），暂不支持多维数组

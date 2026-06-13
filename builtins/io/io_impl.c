@@ -7,8 +7,6 @@
 #include "platform.h"
 #include "io.h"
 
-#include <time.h>
-
 /* 级别：1=F 致命 2=E 错误 3=W 警告 4=I 状态 5=D 调试 6=V 详尽 */
 static const char SC_LV_CHARS[] = "FEWIDV";
 #define SC_LV_DEF 5 /* D */

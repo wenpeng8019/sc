@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ============================================================
@@ -68,6 +69,9 @@ struct Expr {
     std::vector<ExprPtr> args;  // 函数调用的实参列表（Call 时有效）
                                 // InitList 时为初始化元素列表
     int castPtr = 0;            // Cast: 目标类型的指针层数
+    // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
+    // 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
+    std::vector<std::pair<std::string, long long>> sofOpts;
     int line = 0;               // 表达式起始行号（用于错误报告）
 };
 

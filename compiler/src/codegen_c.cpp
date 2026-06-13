@@ -378,6 +378,13 @@ struct CGen {
         auto it = sofReqs.find(r.key);
         if (it == sofReqs.end()) sofReqs[r.key] = r;
         else if (buf) it->second.needBuf = true;  // 已登记请求按需追加缓存变体
+        // stringify<...> 选项块 → (stringify_t){ ... } 复合字面量（末参传入）
+        long long optCompact = 0;
+        for (auto& o : e.sofOpts) {
+            if (o.first == "compact") optCompact = o.second;
+            else throw CompileError{"stringify 选项未知键：'" + o.first + "'（当前仅支持 compact）", e.line};
+        }
+        std::string optLit = "(stringify_t){ .compact = " + std::to_string(optCompact) + " }";
         out << "stringify_" << r.key << (buf ? "_buf" : "") << "(";
         emitExpr(*e.args[0], true);
         if (buf) {
@@ -387,7 +394,7 @@ struct CGen {
             emitExpr(*e.args[2], true);
             out << ")";
         }
-        out << ")";
+        out << ", " << optLit << ")";
     }
 
     // 收集需要生成格式化器的聚合（递归按值字段；指针打地址不递归）
@@ -404,8 +411,10 @@ struct CGen {
     }
 
     // 生成“把 lv 的值格式化追加到 _o”的语句（递归处理数组维度）
+    // depthC：本值所在容器的缩进层级 C 表达式（美化模式换行缩进用；compact 模式忽略）
     void emitSofValue(const std::string& lv, const std::string& name, int ptr,
-                      const std::vector<std::string>& dims, size_t di, int ind) {
+                      const std::vector<std::string>& dims, size_t di, int ind,
+                      const std::string& depthC) {
         auto pad = [&] { for (int i = 0; i < ind; i++) out << "    "; };
         char sc = scalarClass(name);
         if (di < dims.size()) {
@@ -418,12 +427,15 @@ struct CGen {
                 return;
             }
             std::string iv = "_i" + std::to_string(di);
+            std::string childDepth = "(" + depthC + ") + 1";
             pad(); out << "string_append_char(_o, '[');\n";
             pad(); out << "for (size_t " << iv << " = 0; " << iv << " < (size_t)("
                        << dims[di] << "); " << iv << "++) {\n";
-            pad(); out << "    if (" << iv << ") string_append(_o, \", \");\n";
-            emitSofValue(lv + "[" + iv + "]", name, ptr, dims, di + 1, ind + 1);
+            pad(); out << "    if (" << iv << ") string_append(_o, \",\");\n";
+            pad(); out << "    sc__sof_nl(_o, _opt, " << childDepth << ");\n";
+            emitSofValue(lv + "[" + iv + "]", name, ptr, dims, di + 1, ind + 1, childDepth);
             pad(); out << "}\n";
+            pad(); out << "if ((size_t)(" << dims[di] << ")) sc__sof_nl(_o, _opt, " << depthC << ");\n";
             pad(); out << "string_append_char(_o, ']');\n";
             return;
         }
@@ -464,46 +476,52 @@ struct CGen {
         }
         const Decl* sd = aggrOf(name);
         if (sd && sd->name == "string") { pad(); out << "sc__sof_str(_o, &(" << lv << "));\n"; return; }
-        if (sd) { pad(); out << "sc__sof_" << sd->name << "(_o, &(" << lv << "));\n"; return; }
+        if (sd) { pad(); out << "sc__sof_" << sd->name << "(_o, &(" << lv << "), _opt, " << depthC << ");\n"; return; }
         pad(); out << "string_append(_o, \"null\");\n";
     }
 
     // 聚合格式化器：{"字段": 值, ...}（JSON：键加双引号；synthetic/函数指针字段跳过）
+    // compact=1 紧凑单行；否则多行美化（2 空格逐层缩进）。
     void emitSofAggrBody(const Decl& sd) {
-        out << "static void sc__sof_" << sd.name << "(string *_o, " << sd.name << " *_v) {\n"
+        out << "static void sc__sof_" << sd.name << "(string *_o, " << sd.name
+            << " *_v, stringify_t _opt, int _depth) {\n"
             << "    string_append(_o, \"{\");\n";
-        bool first = true;
+        bool any = false;
         for (auto& f : sd.fields) {
             if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None) continue;
-            out << "    string_append(_o, \"" << (first ? "" : ", ")
-                << "\\\"" << f.name << "\\\": \");\n";
+            if (any) out << "    string_append(_o, \",\");\n";
+            out << "    sc__sof_nl(_o, _opt, _depth + 1);\n";
+            out << "    string_append(_o, _opt.compact ? \"\\\"" << f.name << "\\\":\" : \"\\\""
+                << f.name << "\\\": \");\n";
             if (f.type.hasInline) out << "    string_append(_o, \"null\");\n";
-            else emitSofValue("_v->" + f.name, f.type.name, f.type.ptr, f.type.arrayDims, 0, 1);
-            first = false;
+            else emitSofValue("_v->" + f.name, f.type.name, f.type.ptr,
+                              f.type.arrayDims, 0, 1, "_depth + 1");
+            any = true;
         }
+        if (any) out << "    sc__sof_nl(_o, _opt, _depth);\n";
         out << "    string_append(_o, \"}\");\n}\n\n";
     }
 
-    // 顶层包装：string stringify_KEY(T) —— 构造 string、格式化、按值返回
+    // 顶层包装：string stringify_KEY(T, stringify_t) —— 构造 string、格式化、按值返回
     void emitSofWrapper(const SofReq& r) {
-        out << "static string stringify_" << r.key << "(" << r.cParam << ") {\n"
+        out << "static string stringify_" << r.key << "(" << r.cParam << ", stringify_t _opt) {\n"
             << "    string _s;\n    string_init(&_s);\n    string *_o = &_s;\n";
         const Decl* sd = aggrOf(r.name);
         if (r.dims.empty() && r.ptr == 1 && sd) {
             // 聚合一级指针：解引用展开内容（nil → "nil"）
             out << "    if (!_v) string_append(_o, \"nil\");\n";
             if (sd->name == "string") out << "    else sc__sof_str(_o, _v);\n";
-            else out << "    else sc__sof_" << sd->name << "(_o, _v);\n";
+            else out << "    else sc__sof_" << sd->name << "(_o, _v, _opt, 0);\n";
         } else {
-            emitSofValue("_v", r.name, r.ptr, r.dims, 0, 1);
+            emitSofValue("_v", r.name, r.ptr, r.dims, 0, 1, "0");
         }
         out << "    return _s;\n}\n\n";
         if (!r.needBuf) return;
-        // 缓存变体：char *stringify_KEY_buf(T, 缓存, 大小) —— 截断拷贝进缓存，返回缓存首址
+        // 缓存变体：char *stringify_KEY_buf(T, 缓存, 大小, stringify_t) —— 截断拷贝进缓存，返回缓存首址
         out << "static char *stringify_" << r.key << "_buf(" << r.cParam
-            << ", char *_buf, uint64_t _n) {\n"
+            << ", char *_buf, uint64_t _n, stringify_t _opt) {\n"
             << "    if (!_buf || !_n) return _buf;\n"
-            << "    string _s = stringify_" << r.key << "(_v);\n"
+            << "    string _s = stringify_" << r.key << "(_v, _opt);\n"
             << "    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;\n"
             << "    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);\n"
             << "    _buf[_l] = 0;\n"
@@ -526,7 +544,8 @@ struct CGen {
                 ? (char)std::toupper((unsigned char)c) : '_';
             out << "#ifndef " << guard << "\n#define " << guard << "\n"
                 << "/* 由 scc 生成：stringify 关键字按类型生成的 JSON 格式化器。\n"
-                   "   需在 string 类型与各结构体 typedef 之后 #include（由生成的 .c 自动完成）。 */\n";
+                   "   需在 string 类型、io 的 stringify_t 与各结构体 typedef 之后 #include\n"
+                   "   （由生成的 .c 自动完成）。 */\n";
         }
         out << "/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */\n"
             << "static inline void sc__sof_i64(string *_o, long long _v) {\n"
@@ -562,7 +581,11 @@ struct CGen {
             << "static inline void sc__sof_str(string *_o, string *_v) {\n"
             << "    string_append_char(_o, '\"');\n"
             << "    if (_v->data) string_append_n(_o, _v->data, _v->size);\n"
-            << "    string_append_char(_o, '\"'); }\n\n";
+            << "    string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_nl(string *_o, stringify_t _opt, int _depth) {\n"
+            << "    if (_opt.compact) return;\n"
+            << "    string_append_char(_o, '\\n');\n"
+            << "    for (int _i = 0; _i < _depth; _i++) string_append(_o, \"  \"); }\n\n";
         // 聚合传递闭包（仅按需：按值聚合 / 一维数组元素 / 一级指针解引用）
         for (auto& kv : sofReqs) {
             const SofReq& r = kv.second;
@@ -570,7 +593,7 @@ struct CGen {
             else if (r.ptr <= 1) collectSofAggr(r.name);
         }
         for (auto& n : sofAggrs)
-            out << "static void sc__sof_" << n << "(string *_o, " << n << " *_v);\n";
+            out << "static void sc__sof_" << n << "(string *_o, " << n << " *_v, stringify_t _opt, int _depth);\n";
         if (!sofAggrs.empty()) out << "\n";
         for (auto& n : sofAggrs) emitSofAggrBody(*aggrs.at(n));
         for (auto& kv : sofReqs) emitSofWrapper(kv.second);
@@ -1636,9 +1659,16 @@ struct CGen {
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
             out << "extern void print(const char *, ...);\n\n";
         }
-        // stringify 格式化关键字：依赖 adt string
-        if (usesStrof && !funcs.count("stringify") && !aggrOf("string"))
-            throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
+        // stringify 格式化关键字：依赖 adt string 与 io 的 stringify_t 选项类型
+        if (usesStrof && !funcs.count("stringify")) {
+            if (!aggrOf("string"))
+                throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
+            bool hasIo = false;
+            for (auto& d : prog.decls)
+                if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
+            if (!hasIo)
+                throw CompileError{"stringify(...) 选项依赖 io 的 stringify_t，请先 inc io.sc", usesStrof};
+        }
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
         if (usesRun) {

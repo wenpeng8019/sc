@@ -22,6 +22,7 @@
 // ============================================================
 #include "parser.h"
 #include "error.h"
+#include <cstdlib>
 #include <unordered_map>
 
 namespace {
@@ -209,11 +210,39 @@ struct Parser {
     // 后缀表达式 —— 循环解析调用链、下标、成员访问、后缀++
     ExprPtr parsePostfix() {
         auto e = parsePrimary();
+        // stringify<key:val, ...>(...) 选项块：仅 stringify 关键字后紧跟 '<' 时触发。
+        // 选项值限整数字面量（如 compact:1）；解析后随调用链附到对应 Call 节点。
+        std::vector<std::pair<std::string, long long>> pendingSofOpts;
+        bool hasSofOpts = false;
+        if (e->kind == Expr::Ident && e->text == "stringify" && atOp("<")) {
+            advance();  // 消费 '<'
+            skipNlInBracket();
+            if (!atOp(">")) {
+                for (;;) {
+                    skipNlInBracket();
+                    if (!at(Tok::Ident)) err("stringify 选项期望键名");
+                    std::string key = advance().text;
+                    expect(Tok::Colon, "':'");
+                    skipNlInBracket();
+                    long long sign = 1;
+                    if (acceptOp("-")) sign = -1;
+                    else acceptOp("+");
+                    if (!at(Tok::Int)) err("stringify 选项 '" + key + "' 的值需为整数字面量");
+                    long long v = sign * std::strtoll(advance().text.c_str(), nullptr, 0);
+                    pendingSofOpts.push_back({key, v});
+                    skipNlInBracket();
+                    if (!acceptOp(",")) break;
+                }
+            }
+            if (!acceptOp(">")) err("stringify 选项块期望 '>'");
+            hasSofOpts = true;
+        }
         for (;;) {
             if (accept(Tok::LParen)) { // 函数调用：expr(args)
                 exprBracket++;
                 auto call = mk(Expr::Call);
                 call->a = std::move(e);  // a = 被调函数表达式
+                if (hasSofOpts) { call->sofOpts = std::move(pendingSofOpts); hasSofOpts = false; }
                 skipNlInBracket();
                 if (!at(Tok::RParen)) {
                     for (;;) {
@@ -249,6 +278,7 @@ struct Parser {
                 e = std::move(u);
             } else break;  // 无更多后缀操作，退出循环
         }
+        if (hasSofOpts) err("stringify<...> 选项块后须紧跟调用 '(...)'");
         return e;
     }
 

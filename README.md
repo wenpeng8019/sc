@@ -76,5 +76,5 @@ ln -s "$(pwd)/vscode-sc" ~/.vscode/extensions/sc-lang-0.1.0
 - 方法：成员函数在结构体内直接实现（签名字段+缩进函数体）；`@fnc T::m` 仅声明（C 侧实现）；调用 `o.m()`/`p->m()` 自动注入接收者，实参不足默认补 0；`init` 声明即构造，`T()` 堆构造（malloc+init，返回 `T&`），`drop` 手动析构
 - 内置 ADT：`inc adt.sc` 引入 `string`/`list`/`chain`（默认实现自动链接，`--adt` 可替换），见 `builtins/REFERENCE.md`
 - 链表结构体：`def T: ~ {}` 成员末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表使用；成员访问位 `prev`/`next` 上下文关键字等价 `_prev`/`_next`
-- io 内置关键字：`print("E: %d", n)` C 风格日志输出（F/E/W/I/D/V 级别、`SC_LOG` 过滤，需 `inc io.sc`）；`stringify(值)` JSON 格式化关键字（返回 `string` 用毕 `drop`；`stringify(值, 缓存, 大小)` 返回缓存 `char&`，需 `inc adt.sc`，转 C 时生成独立 `stringify.h`）
+- io 内置关键字：`print("E: %d", n)` C 风格日志输出（F/E/W/I/D/V 级别、`SC_LOG` 过滤，需 `inc io.sc`）；`stringify(值)` JSON 格式化关键字（默认多行美化，返回 `string` 用毕 `drop`；`stringify(值, 缓存, 大小)` 返回缓存 `char&`；选项块 `stringify<compact:1>(值)` 紧凑单行；需 `inc adt.sc` + `inc io.sc`，转 C 时生成独立 `stringify.h`）
 - 多行子项与函数体/语句体之间以单独一行 `-` 分隔

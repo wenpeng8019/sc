@@ -4,6 +4,7 @@ compiler/build-dist/
 *.o
 *.out
 *.exe
+scc
 
 # IDE
 .vscode/

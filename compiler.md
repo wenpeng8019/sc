@@ -319,15 +319,21 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
   级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `print` 内完成。
 - `stringify(值[, 缓存, 大小])`：JSON 格式化关键字（空括号 `string()`
   仍走 T() 堆构造糖；同名定义遮蔽时按普通调用），要求 `inc adt.sc`（依赖内置
-  `string`）。代码生成按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记
-  格式化请求 `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），按实参个数
-  静态派发：1 参→`sc_strof__KEY(值)` 返回 `string`；3 参→`sc_strofb__KEY(值, 缓存, 大小)`
+  `string`）与 `inc io.sc`（依赖选项类型 `stringify_t`）。可选选项块
+  `stringify<key:val, ...>(...)`：parser 在 `parsePostfix` 中遇 `stringify` 后紧跟 `<`
+  时解析键值对（值限整数字面量）挂到 `Expr::sofOpts`；codegen 据此构造
+  `(stringify_t){ .compact = N }` 作为末参传入格式化器（当前仅 `compact` 键）。
+  代码生成按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记格式化请求
+  `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），按实参个数静态派发：
+  1 参→`stringify_KEY(值, opt)` 返回 `string`；3 参→`stringify_KEY_buf(值, 缓存, 大小, opt)`
   在缓存内构建（截断保证 NUL 结尾）返回 `char *`；其他个数报错。
   函数体先写入暂存流，结束后回填支撑代码：格式化原语
-  （`sc__sof_i64/u64/f64/bool/char/cstr/ptr/named_ptr/amp_*/str`）、按值字段
-  闭包递归生成的聚合格式化器 `sc__sof_T(string*, T*)`（输出 JSON 对象，键加双引号）、
-  每请求包装 `static string sc_strof__KEY(...)`（聚合一级指针含 nil 检查后解引用）
-  及按需的缓存变体 `static char *sc_strofb__KEY(...)`。结构体指针成员→`"类型名@0x地址"`，
+  （`sc__sof_i64/u64/f64/bool/char/cstr/ptr/named_ptr/amp_*/str`）、缩进原语
+  `sc__sof_nl(string*, stringify_t, int)`、按值字段闭包递归生成的聚合格式化器
+  `sc__sof_T(string*, T*, stringify_t, int depth)`（输出 JSON 对象，键加双引号；
+  `compact:1` 紧凑单行，否则按 `_depth` 逐层 2 空格缩进多行美化）、
+  每请求包装 `static string stringify_KEY(..., stringify_t)`（聚合一级指针含 nil 检查后解引用）
+  及按需的缓存变体 `static char *stringify_KEY_buf(...)`。结构体指针成员→`"类型名@0x地址"`，
   标量指针成员→`"&值"`。转 C 时支撑代码写入独立 `stringify.h`（含 include guard），
   生成的 `.c` 在类型定义之后 `#include`（编译单元 `<token>_stringify.h`；
   `--emit-c -o` 同级 `stringify.h`；输出到 stdout 时回退内联自包含）。
