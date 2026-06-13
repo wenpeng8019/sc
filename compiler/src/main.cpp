@@ -67,6 +67,46 @@ static void usage() {
               << "  '-' 表示从 stdin 读入；'--' 之后的参数传递给被执行的程序\n";
 }
 
+// 从文件读取全部文本；失败返回空串
+static std::string readWholeFile(const std::filesystem::path& p) {
+    std::ifstream fin(p);
+    if (!fin) return {};
+    std::ostringstream ss;
+    ss << fin.rdbuf();
+    return ss.str();
+}
+
+// 写文本到文件；成功返回 true，失败返回 false
+static bool writeTextFile(const std::filesystem::path& p, const std::string& content) {
+    std::ofstream f(p);
+    if (!f) {
+        std::cerr << "错误: 无法写入文件 " << p << "\n";
+        return false;
+    }
+    f << content;
+    return true;
+}
+
+static bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// ---------------- 工具链扩展配置 ----------------
+// 环境变量优先，未设置时取 .sc 配置文件同名键：
+//   SCC_CFLAGS / cflags    额外编译选项（空格分隔）
+//   SCC_LDFLAGS / ldflags  额外链接选项（空格分隔）
+//   SCC_INC / inc          头文件搜索路径，':' 分隔（类似 PATH）→ 逐项 -I
+//   SCC_LIB / lib          库搜索路径，':' 分隔 → 逐项 -L
+//   SCC_LIBS / libs        链接库名，空格或逗号分隔 → 逐项 -l
+
+struct ToolConfig {
+    std::string cflags;   // 编译阶段附加选项（含 -I 展开）
+    std::string ldflags;  // 链接阶段附加选项（含 -L/-l 展开）
+    std::string adtImpl;  // adt 自定义实现（--adt/SCC_ADT/.sc 配置 adt；空=内置默认实现）
+};
+
 // 读取当前目录下的 .sc 配置文件，返回指定 key 的值（未配置返回空串）
 // 格式：每行 key = value，'#' 开头为注释，键值两侧空白忽略
 //   cc = clang
@@ -90,57 +130,7 @@ static std::string readConfig(const std::string& key) {
     return "";
 }
 
-// 诊断辅助函数
-// ============================================================
-// 从源代码中提取指定行号的代码行（用于错误诊断展示）
-static std::string getSourceLine(const std::string& src, int lineNum) {
-    if (lineNum <= 0) return "";
-    int curLine = 1;
-    for (size_t i = 0; i < src.size(); i++) {
-        if (curLine == lineNum) {
-            size_t lineEnd = src.find('\n', i);
-            if (lineEnd == std::string::npos) lineEnd = src.size();
-            std::string line = src.substr(i, lineEnd - i);
-            // 去掉行尾空白
-            while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) {
-                line.pop_back();
-            }
-            return line;
-        }
-        if (src[i] == '\n') curLine++;
-    }
-    return "";
-}
-
-// 为编译错误添加诊断信息（源代码行和错误建议）
-static void enrichError(CompileError& e, const std::string& src, const std::string& filename) {
-    if (e.file.empty()) e.file = filename;
-    if (e.srcLine.empty()) {
-        std::string srcLine = getSourceLine(src, e.line);
-        if (!srcLine.empty()) {
-            e.srcLine = srcLine;
-        }
-    }
-}
-
-// 选择系统 C 编译器：环境变量 SCC_CC > CC > .sc 配置文件 cc 项 > 缺省 gcc
-static std::string pickCC() {
-    const char* cc = std::getenv("SCC_CC");
-    if (cc && *cc) return cc;
-    cc = std::getenv("CC");
-    if (cc && *cc) return cc;
-    std::string conf = readConfig("cc");
-    if (!conf.empty()) return conf;
-    return "gcc";
-}
-
-// ---------------- 工具链扩展配置 ----------------
-// 环境变量优先，未设置时取 .sc 配置文件同名键：
-//   SCC_CFLAGS / cflags    额外编译选项（空格分隔）
-//   SCC_LDFLAGS / ldflags  额外链接选项（空格分隔）
-//   SCC_INC / inc          头文件搜索路径，':' 分隔（类似 PATH）→ 逐项 -I
-//   SCC_LIB / lib          库搜索路径，':' 分隔 → 逐项 -L
-//   SCC_LIBS / libs        链接库名，空格或逗号分隔 → 逐项 -l
+// 获取配置项：环境变量优先
 static std::string configValue(const char* env, const char* key) {
     const char* v = std::getenv(env);
     if (v && *v) return v;
@@ -160,12 +150,6 @@ static std::vector<std::string> splitBy(const std::string& s, const char* seps) 
     return out;
 }
 
-struct ToolConfig {
-    std::string cflags;   // 编译阶段附加选项（含 -I 展开）
-    std::string ldflags;  // 链接阶段附加选项（含 -L/-l 展开）
-    std::string adtImpl;  // adt 自定义实现（--adt/SCC_ADT/.sc 配置 adt；空=内置默认实现）
-};
-
 // 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l
 static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
                                  const std::string& adtOpt = "") {
@@ -184,64 +168,6 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
         tc.ldflags += " -l" + l;
     tc.adtImpl = !adtOpt.empty() ? adtOpt : configValue("SCC_ADT", "adt");
     return tc;
-}
-
-// 编译+执行：C 源码经管道送入 cc（-x c -），产物为临时可执行文件，
-// 运行完立即删除。返回被执行程序的退出码。
-static int compileAndRun(const std::string& csrc,
-                         const std::vector<std::string>& progArgs,
-                         const ToolConfig& tc) {
-    // 1. 创建临时可执行文件路径
-    char bin[] = "/tmp/scc_run_XXXXXX";
-    int fd = mkstemp(bin);
-    if (fd < 0) { std::cerr << "错误: 无法创建临时文件\n"; return 1; }
-    close(fd);
-
-    // 2. 通过管道把 C 源码送给编译器，不落盘中间 .c 文件
-    // 添加 -g 标志生成调试符号，便于 gdb/lldb 进行源代码级调试
-    // 单命令编译+链接：cflags 与 ldflags 都附加
-    std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + bin + tc.ldflags;
-    FILE* pipe = popen(cmd.c_str(), "w");
-    if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(bin); return 1; }
-    fwrite(csrc.data(), 1, csrc.size(), pipe);
-    int crc = pclose(pipe);
-    if (crc != 0) {
-        std::cerr << "错误: C 编译失败（" << cmd << "）\n";
-        unlink(bin);
-        return 1;
-    }
-
-    // 3. fork+exec 运行产物，透传程序参数，避免 shell 转义问题
-    pid_t pid = fork();
-    if (pid < 0) { std::cerr << "错误: fork 失败\n"; unlink(bin); return 1; }
-    if (pid == 0) {
-        std::vector<char*> argv;
-        argv.push_back(bin);
-        for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
-        argv.push_back(nullptr);
-        execv(bin, argv.data());
-        _exit(127);  // exec 失败
-    }
-    int st = 0;
-    waitpid(pid, &st, 0);
-    unlink(bin);  // 4. 清理临时产物
-    if (WIFSIGNALED(st)) {
-        std::cerr << "错误: 程序被信号 " << WTERMSIG(st) << " 终止\n";
-        return 128 + WTERMSIG(st);
-    }
-    return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
-}
-
-static std::string stripDelims(const std::string& s) {
-    if (s.size() >= 2) {
-        if ((s.front() == '"' && s.back() == '"') || (s.front() == '<' && s.back() == '>'))
-            return s.substr(1, s.size() - 2);
-    }
-    return s;
-}
-
-static bool endsWith(const std::string& s, const std::string& suffix) {
-    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 #ifdef SCC_EMBED_BUILTINS
@@ -281,6 +207,9 @@ static std::filesystem::path embeddedBuiltinsDir() {
 }
 #endif
 
+///////////////////////////////////////////////////////////////////////////////
+
+// 从指定路径开始向上搜索 builtins 目录
 static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start) {
     for (auto p = start; !p.empty(); ) {
         auto cand = p / "builtins";
@@ -292,28 +221,213 @@ static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start)
     return {};
 }
 
-// builtins 根目录默认加入编译 -I：platform.h 等根级头文件是面向用户的
-// 跨平台能力层，inc "platform.h" 应与 inc stdint.h 一样开箱即用。
-// 搜索顺序同模块解析：输入文件目录向上 → cwd 向上 → SCC_BUILTINS → 内嵌释放目录
+// builtins 根目录根级头文件默认加入编译 -I：platform.h 等
+// + 搜索顺序同模块解析：输入目标文件所在目录向上 → cwd(当前目录)向上 → SCC_BUILTINS → 内嵌释放目录
 static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
-    namespace fs = std::filesystem;
-    fs::path b;
+
+    namespace fs = std::filesystem; fs::path b;
+
+    // 根据输入目标文件所在目录向上搜索 builtins 目录；
     if (input != "-") {
         std::error_code ec;
         const fs::path abs = fs::absolute(fs::path(input), ec);
         if (!ec) b = findBuiltinsDir(abs.parent_path());
     }
+
+    // 从当前目录向上搜索 builtins 目录；
     if (b.empty()) b = findBuiltinsDir(fs::current_path());
+
+    // 环境变量 SCC_BUILTINS 指定的目录（优先级高于内嵌资源释放目录）；
     if (b.empty())
         if (const char* envB = std::getenv("SCC_BUILTINS")) b = envB;
+
+    // 内嵌资源释放目录（优先级最低）：仅在 SCC_EMBED_BUILTINS 定义时启用
 #ifdef SCC_EMBED_BUILTINS
     if (b.empty()) b = embeddedBuiltinsDir();
 #endif
+
     if (!b.empty()) tc.cflags += " -I " + b.string();
 }
 
-static std::filesystem::path resolveModulePath(const std::string& raw,
-                                               const std::filesystem::path& baseDir) {
+// 生成合法的 C 标识符作为模块文件名/头文件名 token（如输入路径 "foo/bar-baz.sc" → token "scm_foo_bar_baz"）
+static std::string moduleFileToken(const std::string& s) {
+    std::string out = "scm_";
+    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
+    return out;
+}
+
+// 生成合法的 C 预处理器宏名作为 include guard（如输入路径 "foo/bar-baz.sc" → guard "FOO_BAR_BAZ_SC_H"）
+static std::string guardFromHeaderName(const std::string& hname) {
+    std::string g;
+    for (char ch : hname) g += std::isalnum((unsigned char)ch) ? (char)std::toupper(ch) : '_';
+    return g;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// 产物类型由输出文件名后缀决定
+enum class OutKind { Exe, StaticLib, SharedLib };
+
+static OutKind outputKind(const std::string& out) {
+    if (endsWith(out, ".a")) return OutKind::StaticLib;
+    if (endsWith(out, ".so") || endsWith(out, ".dylib")) return OutKind::SharedLib;
+    return OutKind::Exe;
+}
+
+// 选择系统 C 编译器：环境变量 SCC_CC > CC > .sc 配置文件 cc 项 > 缺省 gcc
+static std::string pickCC() {
+    const char* cc = std::getenv("SCC_CC");
+    if (cc && *cc) return cc;
+    cc = std::getenv("CC");
+    if (cc && *cc) return cc;
+    std::string conf = readConfig("cc");
+    if (!conf.empty()) return conf;
+    return "gcc";
+}
+
+// 把 .o 列表合成最终产物：可执行（链接）/ 静态库（ar rcs）/ 动态库（-shared）
+static int linkOutput(OutKind kind,
+                      const std::vector<std::filesystem::path>& objects,
+                      const std::string& output,
+                      const ToolConfig& tc) {
+    std::string cmd;
+    if (kind == OutKind::StaticLib) {
+        cmd = "ar rcs " + output;
+        for (auto& o : objects) cmd += " " + o.string();
+    } else {
+        cmd = pickCC() + " -g";
+        if (kind == OutKind::SharedLib) cmd += " -shared";
+        for (auto& o : objects) cmd += " " + o.string();
+        cmd += " -o " + output + tc.ldflags;
+    }
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "错误: 构建产物失败（" << cmd << "）\n";
+        return 1;
+    }
+#ifdef __APPLE__
+    // macOS 调试信息在 .o 中（产物仅存 debug map），临时 .o 即将删除，
+    // 先用 dsymutil 打包为 .dSYM，使 lldb 能映射回 .sc 源码
+    if (kind != OutKind::StaticLib)
+        std::system(("dsymutil " + output + " >/dev/null 2>&1").c_str());
+#endif
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+
+// 编译 C 源码为产物
+static int buildSource(const std::string& csrc,
+                       const std::string& output,
+                       const ToolConfig& tc) {
+    const OutKind kind = outputKind(output);
+
+    // 构建可执行文件：单命令编译+链接直达输出
+    if (kind == OutKind::Exe) {
+        std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + output + tc.ldflags;
+        FILE* pipe = popen(cmd.c_str(), "w");
+        if (!pipe) { 
+            std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
+             return 1; 
+        }
+        fwrite(csrc.data(), 1, csrc.size(), pipe);
+        if (pclose(pipe) != 0) { 
+            std::cerr << "错误: C 编译失败（" << cmd << "）\n";
+            return 1; 
+        }
+        return 0;
+    }
+
+    // 库：先编译临时 .o，再 ar / -shared 合成
+    char tmpTemplate[] = "/tmp/scc_build_XXXXXX";
+    char* dirC = mkdtemp(tmpTemplate);
+    if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
+    const std::filesystem::path tmpDir(dirC);
+    const std::filesystem::path obj = tmpDir / "unit.o";
+    std::string cmd = pickCC() + " -g" + tc.cflags
+                    + (kind == OutKind::SharedLib ? " -fPIC" : "")
+                    + " -x c - -c -o " + obj.string();
+    FILE* pipe = popen(cmd.c_str(), "w");
+    if (!pipe) {
+        std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
+        std::filesystem::remove_all(tmpDir);
+        return 1;
+    }
+    fwrite(csrc.data(), 1, csrc.size(), pipe);
+    int rc = pclose(pipe) != 0 ? 1 : 0;
+    if (rc != 0) std::cerr << "错误: C 编译失败（" << cmd << "）\n";
+    if (rc == 0) rc = linkOutput(kind, {obj}, output, tc);
+    std::filesystem::remove_all(tmpDir);
+    return rc;
+}
+
+// 编译 C 源码为（临时）可执行文件并运行；程序参数透传，运行结束产物删除
+static int compileAndRunSource(const std::string& csrc,
+                               const std::vector<std::string>& progArgs,
+                               const ToolConfig& tc) {
+
+    // 1. 创建临时可执行文件路径
+    char bin[] = "/tmp/scc_run_XXXXXX";
+    int fd = mkstemp(bin);
+    if (fd < 0) { 
+        std::cerr << "错误: 无法创建临时文件\n";
+        return 1; 
+    }
+    close(fd);
+
+    // 2. 通过管道把 C 源码送给编译器，不落盘中间 .c 文件
+    // 添加 -g 标志生成调试符号，便于 gdb/lldb 进行源代码级调试
+    // 单命令编译+链接：cflags 与 ldflags 都附加
+    std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + bin + tc.ldflags;
+    FILE* pipe = popen(cmd.c_str(), "w");
+    if (!pipe) { 
+        std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(bin);
+        return 1; 
+    }
+    fwrite(csrc.data(), 1, csrc.size(), pipe);
+    int crc = pclose(pipe);
+    if (crc != 0) {
+        std::cerr << "错误: C 编译失败（" << cmd << "）\n";
+        unlink(bin);
+        return 1;
+    }
+
+    // 3. fork+exec 运行产物，透传程序参数，避免 shell 转义问题
+    pid_t pid = fork();
+    if (pid < 0) { std::cerr << "错误: fork 失败\n"; unlink(bin); return 1; }
+    if (pid == 0) {
+        std::vector<char*> argv;
+        argv.push_back(bin);
+        for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+        execv(bin, argv.data());
+        _exit(127);  // exec 失败
+    }
+
+    int st = 0;
+    waitpid(pid, &st, 0);
+    unlink(bin);                // 4. 清理临时产物
+    if (WIFSIGNALED(st)) {
+        std::cerr << "错误: 程序被信号 " << WTERMSIG(st) << " 终止\n";
+        return 128 + WTERMSIG(st);
+    }
+    return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+static std::string stripDelims(const std::string& s) {
+    if (s.size() >= 2) {
+        if ((s.front() == '"' && s.back() == '"') || (s.front() == '<' && s.back() == '>'))
+            return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+// 模块路径解析：根据 @inc 声明的原始字符串和当前单元目录，生成候选路径列表并返回第一个存在的路径
+// + 搜索顺序：输入文件目录向上 → cwd 向上 → SCC_BUILTINS → 内嵌释放目录；
+//   路径解析支持缺省 .sc 后缀（如 @inc "foo" 会搜索 foo 和 foo.sc）
+static std::filesystem::path 
+resolveModulePath(const std::string& raw, const std::filesystem::path& baseDir) {
     const std::string target = stripDelims(raw);
     const std::filesystem::path rel(target);
     const auto builtins = !baseDir.empty() ? findBuiltinsDir(baseDir) : std::filesystem::path{};
@@ -347,52 +461,19 @@ static std::filesystem::path resolveModulePath(const std::string& raw,
     return {};
 }
 
-static std::string readWholeFile(const std::filesystem::path& p) {
-    std::ifstream fin(p);
-    if (!fin) return {};
-    std::ostringstream ss;
-    ss << fin.rdbuf();
-    return ss.str();
-}
-
-static Program parseSourceText(const std::string& src) {
-    return parse(lex(src));
-}
-
-static std::string moduleFileToken(const std::string& s) {
-    std::string out = "scm_";
-    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
-    return out;
-}
-
-static std::string moduleHeaderName(const std::string& s) {
-    return moduleFileToken(s) + ".h";
-}
-
-static std::string guardFromHeaderName(const std::string& hname) {
-    std::string g;
-    for (char ch : hname) g += std::isalnum((unsigned char)ch) ? (char)std::toupper(ch) : '_';
-    return g;
-}
-
-static bool writeTextFile(const std::filesystem::path& p, const std::string& content) {
-    std::ofstream f(p);
-    if (!f) return false;
-    f << content;
-    return true;
-}
-
 struct UnitInfo {
     std::filesystem::path path;
     Program prog;
     std::vector<std::filesystem::path> deps;
 };
 
-static std::vector<std::filesystem::path> resolveUnitDeps(Program& prog,
-                                                          const std::filesystem::path& srcPath) {
+// 解析单元依赖：扫描 @inc 声明，解析模块路径，标记 external 和 origin，返回直接依赖列表
+static std::vector<std::filesystem::path> 
+resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
+
     std::vector<std::filesystem::path> deps;
     const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path()
-                                                    : std::filesystem::current_path();
+                                                   : std::filesystem::current_path();
     for (auto& d : prog.decls) {
         if (d->kind != Decl::IncD) continue;
         auto modPath = resolveModulePath(d->name, baseDir);
@@ -411,7 +492,7 @@ static std::vector<std::filesystem::path> resolveUnitDeps(Program& prog,
         const std::string text = readWholeFile(dep);
         if (text.empty()) continue;
         try {
-            Program mp = parseSourceText(text);
+            Program mp = parse(lex(text));
             for (auto& md : mp.decls) {
                 if (!md->exported) continue;
                 md->external = true;
@@ -425,10 +506,13 @@ static std::vector<std::filesystem::path> resolveUnitDeps(Program& prog,
     return deps;
 }
 
+// 从项目入口文件加载模块图，递归解析依赖，检查语义；成功返回 true，失败返回 false 和错误信息
 static bool loadUnitGraph(const std::filesystem::path& srcPath,
                           std::unordered_map<std::string, UnitInfo>& units,
                           std::unordered_set<std::string>& visiting,
                           std::string& errMsg) {
+
+    // 循环依赖检测：已加载的模块直接返回，正在访问的模块再次访问则报错
     const auto canon = std::filesystem::weakly_canonical(srcPath);
     const std::string key = canon.string();
     if (units.find(key) != units.end()) return true;
@@ -437,6 +521,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
         return false;
     }
 
+    // 读取源文件
     const std::string src = readWholeFile(canon);
     if (src.empty()) {
         errMsg = "无法读取模块文件: " + key;
@@ -446,24 +531,27 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
 
     UnitInfo u;
     u.path = canon;
-    u.prog = parseSourceText(src);
-    u.deps = resolveUnitDeps(u.prog, canon);   // 先合并依赖导出声明（external）
-    semanticCheck(u.prog);                     // 再检查：导入类型/方法可见
+    u.prog = parse(lex(src));                   // 解析源代码为 AST
+    u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
+    semanticCheck(u.prog);                      // 再检查：导入类型/方法可见
 
+    // 递归加载依赖模块
     for (auto& dep : u.deps) {
         if (!loadUnitGraph(dep, units, visiting, errMsg)) {
             visiting.erase(key);
             return false;
         }
     }
+
+    // 加载成功：记录单元信息，标记访问完成
     units[key] = std::move(u);
     visiting.erase(key);
     return true;
 }
 
-// 把模块图中所有单元生成 .c/.h 并编译为 .o（run 与 build 模式共用）
-// extraCFlags 用于追加单元级编译选项（如动态库的 -fPIC）；成功返回 0
-// extraLd 返回子项目需要的额外链接选项（如 Linux 上 m 的 -lpthread）
+// 把模块图中所有单元生成 .c/.h 并编译为 .o
+// + extraCFlags 用于追加单元级编译选项（如动态库的 -fPIC）；成功返回 0
+//   extraLd 返回子项目需要的额外链接选项（如 Linux 上 m 的 -lpthread）
 static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& units,
                                  const ToolConfig& tc,
                                  const std::string& extraCFlags,
@@ -481,26 +569,21 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
     // 第一阶段：为每个模块生成 .c/.h 单元
     for (auto& kv : units) {
         const std::string token = moduleFileToken(kv.first);
-        const std::string hname = moduleHeaderName(kv.first);
+        const std::string hname = token + ".h";
         const std::filesystem::path cpath = tmpDir / (token + ".c");
         const std::filesystem::path hpath = tmpDir / hname;
         const std::filesystem::path opath = tmpDir / (token + ".o");
 
         const std::string csrc = emitC(kv.second.prog, kv.first);  // 带 #line 源码映射
-        if (!writeTextFile(cpath, csrc)) {
-            std::cerr << "错误: 无法写入 " << cpath << "\n";
-            return 1;
-        }
+        if (!writeTextFile(cpath, csrc)) return 1;
 
         std::string hsrc = emitCHeader(kv.second.prog, guardFromHeaderName(hname));
         if (hsrc.empty()) {
             const std::string guard = guardFromHeaderName(hname);
             hsrc = "#ifndef " + guard + "\n#define " + guard + "\n#endif\n";
         }
-        if (!writeTextFile(hpath, hsrc)) {
-            std::cerr << "错误: 无法写入 " << hpath << "\n";
-            return 1;
-        }
+        if (!writeTextFile(hpath, hsrc)) return 1;
+        
         arts.push_back({cpath, hpath, opath, kv.second.path.parent_path()});
     }
 
@@ -563,48 +646,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
     return 0;
 }
 
-// ---------------- 构建产物模式（--build）----------------
-// 产物类型由输出文件名后缀决定
-enum class OutKind { Exe, StaticLib, SharedLib };
-
-static OutKind outputKind(const std::string& out) {
-    if (endsWith(out, ".a")) return OutKind::StaticLib;
-    if (endsWith(out, ".so") || endsWith(out, ".dylib")) return OutKind::SharedLib;
-    return OutKind::Exe;
-}
-
-// 把 .o 列表合成最终产物：可执行（链接）/ 静态库（ar rcs）/ 动态库（-shared）
-static int linkOutput(OutKind kind,
-                      const std::vector<std::filesystem::path>& objects,
-                      const std::string& output,
-                      const ToolConfig& tc) {
-    std::string cmd;
-    if (kind == OutKind::StaticLib) {
-        cmd = "ar rcs " + output;
-        for (auto& o : objects) cmd += " " + o.string();
-    } else {
-        cmd = pickCC() + " -g";
-        if (kind == OutKind::SharedLib) cmd += " -shared";
-        for (auto& o : objects) cmd += " " + o.string();
-        cmd += " -o " + output + tc.ldflags;
-    }
-    if (std::system(cmd.c_str()) != 0) {
-        std::cerr << "错误: 构建产物失败（" << cmd << "）\n";
-        return 1;
-    }
-#ifdef __APPLE__
-    // macOS 调试信息在 .o 中（产物仅存 debug map），临时 .o 即将删除，
-    // 先用 dsymutil 打包为 .dSYM，使 lldb 能映射回 .sc 源码
-    if (kind != OutKind::StaticLib)
-        std::system(("dsymutil " + output + " >/dev/null 2>&1").c_str());
-#endif
-    return 0;
-}
-
-// 文件输入的构建：模块图 → .o → 按类型合成产物（不执行、产物保留）
+// 从项目入口文件加载，编译为目标产物（不执行、产物保留）
 static int buildProject(const std::filesystem::path& rootPath,
                         const std::string& output,
                         const ToolConfig& tc) {
+
+    // 1. 加载模块图
     std::unordered_map<std::string, UnitInfo> units;
     std::unordered_set<std::string> visiting;
     std::string err;
@@ -613,6 +660,7 @@ static int buildProject(const std::filesystem::path& rootPath,
         return 1;
     }
 
+    // 2. 创建临时目录
     char tmpTemplate[] = "/tmp/scc_units_XXXXXX";
     char* dirC = mkdtemp(tmpTemplate);
     if (!dirC) {
@@ -620,61 +668,34 @@ static int buildProject(const std::filesystem::path& rootPath,
         return 1;
     }
     const std::filesystem::path tmpDir(dirC);
+
     const OutKind kind = outputKind(output);
+
+    // 3. 编译所有单元为对象文件到临时目录
     std::vector<std::filesystem::path> objects;
     std::string extraLd;
     int rc = compileUnitsToObjects(units, tc,
                                    kind == OutKind::SharedLib ? " -fPIC" : "",
                                    tmpDir, objects, &extraLd);
     if (rc == 0) {
+
+        // 4. 链接所有对象文件为最终产物
         ToolConfig tcLink = tc;
         tcLink.ldflags += extraLd;
         rc = linkOutput(kind, objects, output, tcLink);
     }
+
+    // 5. 清理临时产物
     std::filesystem::remove_all(tmpDir);
     return rc;
 }
 
-// stdin 输入的构建：单文件 C 源码经管道编译为产物
-static int buildFromCSource(const std::string& csrc,
-                            const std::string& output,
-                            const ToolConfig& tc) {
-    const OutKind kind = outputKind(output);
-    // 可执行：单命令编译+链接直达输出
-    if (kind == OutKind::Exe) {
-        std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + output + tc.ldflags;
-        FILE* pipe = popen(cmd.c_str(), "w");
-        if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; return 1; }
-        fwrite(csrc.data(), 1, csrc.size(), pipe);
-        if (pclose(pipe) != 0) { std::cerr << "错误: C 编译失败（" << cmd << "）\n"; return 1; }
-        return 0;
-    }
-    // 库：先编译临时 .o，再 ar / -shared 合成
-    char tmpTemplate[] = "/tmp/scc_build_XXXXXX";
-    char* dirC = mkdtemp(tmpTemplate);
-    if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
-    const std::filesystem::path tmpDir(dirC);
-    const std::filesystem::path obj = tmpDir / "unit.o";
-    std::string cmd = pickCC() + " -g" + tc.cflags
-                    + (kind == OutKind::SharedLib ? " -fPIC" : "")
-                    + " -x c - -c -o " + obj.string();
-    FILE* pipe = popen(cmd.c_str(), "w");
-    if (!pipe) {
-        std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
-        std::filesystem::remove_all(tmpDir);
-        return 1;
-    }
-    fwrite(csrc.data(), 1, csrc.size(), pipe);
-    int rc = pclose(pipe) != 0 ? 1 : 0;
-    if (rc != 0) std::cerr << "错误: C 编译失败（" << cmd << "）\n";
-    if (rc == 0) rc = linkOutput(kind, {obj}, output, tc);
-    std::filesystem::remove_all(tmpDir);
-    return rc;
-}
-
+// 从项目入口文件加载，编译为（临时）可执行文件并运行；程序参数透传，运行结束产物删除
 static int compileAndRunProject(const std::filesystem::path& rootPath,
                                 const std::vector<std::string>& progArgs,
                                 const ToolConfig& tc) {
+
+    // 1. 加载模块图
     std::unordered_map<std::string, UnitInfo> units;
     std::unordered_set<std::string> visiting;
     std::string err;
@@ -683,6 +704,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         return 1;
     }
 
+    // 2. 编译所有单元为对象文件，产物放在临时目录；成功返回 0，失败清理后退出
     char tmpTemplate[] = "/tmp/scc_units_XXXXXX";
     char* dirC = mkdtemp(tmpTemplate);
     if (!dirC) {
@@ -697,10 +719,10 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         return 1;
     }
 
-    // 链接所有对象文件
+    // 3. 链接所有对象文件为临时可执行文件，添加 -g 以保留调试符号；成功返回 0，失败清理后退出
     const std::filesystem::path bin = tmpDir / "run.out";
-    std::string linkCmd = pickCC() + " -g";  // 添加 -g 保留调试符号
-    for (auto& o : objects) linkCmd += " " + o.string();
+    std::string linkCmd = pickCC() + " -g";                     // 添加 -g 保留调试符号
+    for (auto& o : objects) linkCmd += " " + o.string();        // 构造要链接的所有对象文件列表
     linkCmd += " -o " + bin.string() + tc.ldflags + extraLd;
     if (std::system(linkCmd.c_str()) != 0) {
         std::cerr << "错误: 链接失败（" << linkCmd << "）\n";
@@ -708,6 +730,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         return 1;
     }
 
+    // 4. fork+exec 运行产物，透传程序参数，避免 shell 转义问题；运行结束清理临时目录
     pid_t pid = fork();
     if (pid < 0) {
         std::cerr << "错误: fork 失败\n";
@@ -721,17 +744,23 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
         argv.push_back(nullptr);
         execv(binS.c_str(), argv.data());
-        _exit(127);
+        _exit(127);  // exec 失败
     }
 
     int st = 0;
     waitpid(pid, &st, 0);
-    std::filesystem::remove_all(tmpDir);
-    if (WIFSIGNALED(st)) return 128 + WTERMSIG(st);
+    std::filesystem::remove_all(tmpDir);    // 5. 清理临时产物
+    if (WIFSIGNALED(st)) {
+        std::cerr << "错误: 程序被信号 " << WTERMSIG(st) << " 终止\n";
+        return 128 + WTERMSIG(st);
+    }
     return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
 int main(int argc, char** argv) {
+
     // ---- 1. 解析命令行参数 ----
     std::string input, output, mode = "run";  // 默认：编译+执行
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
@@ -770,105 +799,118 @@ int main(int argc, char** argv) {
         }
         ss << fin.rdbuf();        // 将整个文件读入内存 stringstream
     }
+    std::string src = ss.str();
 
     // ---- 3. 编译流水线 + 输出 ----
-    // 提取源代码字符串用于错误诊断（catch 块中需要）
-    std::string src = ss.str();
-    
     try {
-        // 3a. 词法分析：源码 → token 流
-        auto toks = lex(src);
-        // 3b. 语法分析：token 流 → AST 程序树
-        auto prog = parse(toks);
-        // 3b.0 记录当前单元的模块依赖信息（不展开源码，合并依赖导出声明）
-        if (input != "-") resolveUnitDeps(prog, std::filesystem::path(input));
-        // 3b.1 语义检查：类型兼容/指针安全边界（含导入符号）
-        semanticCheck(prog);;
+
+        auto prog = parse(lex(src));                                // 词法分析(源码 → token 流) -> 语法分析(token 流 → AST 程序树)
+        if (input != "-")                                           // 对于目标工程文件输入
+            resolveUnitDeps(prog, std::filesystem::path(input));    // + 记录当前单元的模块依赖信息（不展开源码，合并依赖导出声明）
+        semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
+
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
-        auto c = mode == "ast" ? emitAstJson(prog)   // AST→JSON
-               : mode == "sc"  ? emitSc(prog)         // AST→规范化sc
-                               : emitC(prog);         // AST→C（run/--emit-c）
+        auto c = mode == "ast" ? emitAstJson(prog)                  // AST→JSON
+               : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
+                               : emitC(prog);                       // AST→C（run/--emit-c）
 
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
         if (mode == "run") {
+            
             ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
-            addBuiltinsInclude(tc, input);   // platform.h 等面向用户的 builtins 根级头默认可见
-            if (input == "-") return compileAndRun(c, progArgs, tc);
+            addBuiltinsInclude(tc, input);                      // builtins 根级别（platform.h 等）头文件默认可见
+            
+            if (input == "-") return compileAndRunSource(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);
         }
 
         // 3d'. build 模式：编译链接为持久产物（类型按 -o 后缀决定）
         if (mode == "build") {
+
             ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
-            addBuiltinsInclude(tc, input);
+            addBuiltinsInclude(tc, input);                      // builtins 根级别（platform.h 等）头文件默认可见
+
             std::string out = output;
             if (out.empty()) {
                 if (input == "-") {
                     std::cerr << "错误: stdin 输入的构建模式必须用 -o 指定输出文件\n";
                     return 1;
                 }
-                out = std::filesystem::path(input).stem().string();  // 缺省：输入名去 .sc
+                out = std::filesystem::path(input).stem().string();  // 默认使用（去除 .sc 后缀的）输入文件名
             }
-            int rc = input == "-" ? buildFromCSource(c, out, tc)
+            int rc = input == "-" ? buildSource(c, out, tc)
                                   : buildProject(std::filesystem::path(input), out, tc);
             if (rc != 0) return rc;
+
             // 构建库时：存在 @导出对象则生成同名 .h 接口头文件（取根模块导出）
             if (outputKind(out) != OutKind::Exe) {
+
+                // 头文件路径：输出文件名去库类型后缀改 .h
                 std::string hpath = out;
                 for (const char* ext : {".a", ".so", ".dylib"}) {
                     if (endsWith(hpath, ext)) { hpath.resize(hpath.size() - strlen(ext)); break; }
                 }
                 hpath += ".h";
+
+                // 构建 include guard 宏名：文件名转大写，非字母数字转 '_'
                 std::string guard;
                 size_t slash = hpath.find_last_of('/');
                 for (char ch : hpath.substr(slash == std::string::npos ? 0 : slash + 1))
                     guard += isalnum((unsigned char)ch) ? (char)toupper(ch) : '_';
+
                 auto h = emitCHeader(prog, guard);
-                if (!h.empty() && !writeTextFile(hpath, h)) {
-                    std::cerr << "错误: 无法写入文件 " << hpath << "\n";
-                    return 1;
-                }
+                if (!h.empty() && !writeTextFile(hpath, h)) return 1;
             }
             return 0;
         }
 
         // 3e. --emit-c 且指定了输出文件：若存在 @导出对象，额外生成 .h 头文件
         if (mode == "c" && !output.empty()) {
+
             // 头文件路径：输出文件名去 .c 后缀改 .h
             std::string hpath = output;
             if (hpath.size() > 2 && hpath.compare(hpath.size() - 2, 2, ".c") == 0)
                 hpath.resize(hpath.size() - 2);
             hpath += ".h";
-            // include guard 宏名：文件名转大写，非字母数字转 '_'
+
+            // 构建 include guard 宏名：文件名转大写，非字母数字转 '_'
             std::string guard;
             size_t slash = hpath.find_last_of('/');
             for (char ch : hpath.substr(slash == std::string::npos ? 0 : slash + 1))
                 guard += isalnum((unsigned char)ch) ? (char)toupper(ch) : '_';
+
             auto h = emitCHeader(prog, guard);
-            if (!h.empty()) {
-                std::ofstream hout(hpath);
-                if (!hout) {
-                    std::cerr << "错误: 无法写入文件 " << hpath << "\n";
-                    return 1;
-                }
-                hout << h;
-            }
+            if (!h.empty() && !writeTextFile(hpath, h)) return 1;
         }
 
         // 3f. 输出结果到文件或 stdout
-        if (output.empty()) {
-            std::cout << c;
-        } else {
-            std::ofstream fout(output);
-            if (!fout) {
-                std::cerr << "错误: 无法写入文件 " << output << "\n";
-                return 1;
-            }
-            fout << c;
-        }
+        if (output.empty()) std::cout << c;
+        else if (!writeTextFile(output, c)) return 1;
+
     } catch (CompileError e) {
-        // 为错误添加诊断信息：源代码行 + 文件名
-        enrichError(e, src, input);
+
+        // 从源码中提取指定行的文本，为编译错误添加源代码行诊断信息
+        if (e.file.empty()) e.file = input;
+        if (e.srcLine.empty() && e.line > 0) { int curLine = 1;
+
+            for (size_t i = 0; i < src.size(); i++) {
+
+                if (curLine == e.line) {
+
+                    // 定位到行首，提取该行文本（不包含行尾换行符）
+                    size_t end = src.find('\n', i);
+                    if (end == std::string::npos) end = src.size();
+                    e.srcLine = src.substr(i, end - i);
+                    
+                    // 去掉行尾空白
+                    while (!e.srcLine.empty() && (e.srcLine.back() == '\r' || e.srcLine.back() == '\n'))
+                        e.srcLine.pop_back();
+                    return;
+                }
+                if (src[i] == '\n') curLine++;
+            }
+        }
+
         // 详细诊断输出：文件:行号: 错误: 消息 + 上下文代码 + 修复建议
         std::cerr << (e.file.empty() ? input : e.file) << ":" << e.line 
                   << ": \033[1;31m错误\033[0m: " << e.msg << "\n";

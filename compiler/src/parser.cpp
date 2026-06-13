@@ -31,16 +31,16 @@ static bool isScModuleName(const std::string& s) {
 }
 
 // 二元运算符优先级表 —— 数字越大优先级越高
-// 返回 -1 表示不是已知的二元运算符
+// + 返回 -1 表示不是已知的二元运算符
 int binPrec(const std::string& op) {
     static const std::unordered_map<std::string, int> m = {
-        {"||", 1}, {"&&", 2},                     // 逻辑
-        {"|", 3}, {"^", 4}, {"&", 5},             // 位运算
-        {"==", 6}, {"!=", 6},                     // 相等
-        {"<", 7}, {">", 7}, {"<=", 7}, {">=", 7}, // 比较
-        {"<<", 8}, {">>", 8},                     // 移位
-        {"+", 9}, {"-", 9},                       // 加减
-        {"*", 10}, {"/", 10}, {"%", 10},          // 乘除取模
+        {"||", 1}, {"&&", 2},                       // 逻辑
+        {"|", 3}, {"^", 4}, {"&", 5},               // 位运算
+        {"==", 6}, {"!=", 6},                       // 相等
+        {"<", 7}, {">", 7}, {"<=", 7}, {">=", 7},   // 比较
+        {"<<", 8}, {">>", 8},                       // 移位
+        {"+", 9}, {"-", 9},                         // 加减
+        {"*", 10}, {"/", 10}, {"%", 10},            // 乘除取模
     };
     auto it = m.find(op);
     return it == m.end() ? -1 : it->second;
@@ -55,44 +55,48 @@ bool isAssignOp(const std::string& op) {
 
 // Parser 内部类 —— 封装所有语法分析状态
 struct Parser {
-    const std::vector<Token>& t;  // 输入 token 序列（引用外部持有）
-    size_t p = 0;                 // 当前读位置（指向下一个待消费的 token）
-    // 表达式括号深度：>0 时括号内的换行/缩进 token 被 skip 跳过
-    int exprBracket = 0;
+    const std::vector<Token>& t;                    // 输入 token 序列（引用外部持有）
+
+    size_t p = 0;                                   // 当前读位置（指向下一个待消费的 token）
+    int exprBracket = 0;                            // 表达式括号深度：>0 时括号内的换行/缩进 token 被 skip 跳过
+
     // 活动三目运算的括号深度栈：其分支内（同括号层）禁用裸强转，
-    // 保证 '?' 之后有且只有一个 ':' 归三目；强转需加括号
+    // + 保证 '?' 之后有且只有一个 ':' 归三目；强转需加括号
     std::vector<int> ternDepth;
+    
     // 结构体内成员函数：parseDef 期间收集，parseProgram 提升为顶层 Decl
     std::vector<DeclPtr> pendingMethods;
 
     explicit Parser(const std::vector<Token>& toks) : t(toks) {}
-    static std::string mangleMethodName(const std::string& owner, const std::string& name) {
-        return owner + "_" + name;
-    }
 
-    // ---- Token 流访问原语 ----
-    const Token& cur() const { return t[p]; }
-    const Token& peek(size_t off = 1) const {
-        return t[p + off < t.size() ? p + off : t.size() - 1];
-    }
-    bool at(Tok k) const { return cur().kind == k; }
-    bool atOp(const char* s) const { return cur().kind == Tok::Op && cur().text == s; }
-    const Token& advance() { return t[p < t.size() - 1 ? p++ : p]; }
-    // accept: 若当前 token 匹配则消费并返回 true，否则不消费
-    bool accept(Tok k) { if (at(k)) { advance(); return true; } return false; }
-    bool acceptOp(const char* s) { if (atOp(s)) { advance(); return true; } return false; }
+    [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
 
     void expect(Tok k, const char* what) {
         if (!accept(k)) err(std::string("期望 ") + what + "，得到 '" + cur().text + "'");
     }
 
-    void skipNewlines() { while (accept(Tok::Newline)) {} }
+    // ----- Token 流访问原语 --------------------------------------------------
 
-    void skipLayout() {
-        while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance();
+    const Token& cur() const { return t[p]; }
+    const Token& peek(size_t off = 1) const { return t[p + off < t.size() ? p + off : t.size() - 1]; }
+    bool at(Tok k) const { return cur().kind == k; }
+    bool atOp(const char* s) const { return cur().kind == Tok::Op && cur().text == s; }
+    const Token& advance() { return t[p < t.size() - 1 ? p++ : p]; }
+
+    // accept: 若当前 token 匹配则消费并返回 true，否则不消费
+    bool accept(Tok k) { if (at(k)) { advance(); return true; } return false; }
+    bool acceptOp(const char* s) { if (atOp(s)) { advance(); return true; } return false; }
+
+    void skipNewlines() { while (accept(Tok::Newline)) {} }
+    void skipLayout() { while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance(); }
+
+    // ------------------------------------------------------------------------
+
+    static std::string mangleMethodName(const std::string& owner, const std::string& name) {
+        return owner + "_" + name;
     }
 
-    [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
+    ///////////////////////////////////////////////////////////////////////////
 
     // 快捷创建表达式节点
     ExprPtr mk(Expr::Kind k) {
@@ -324,7 +328,9 @@ struct Parser {
         return lhs;
     }
 
-    // ---------------- 类型与声明项解析 ----------------
+    ///////////////////////////////////////////////////////////////////////////
+    // 类型与声明项解析
+    //
     // sc 的类型语法有独特之处：
     //   1. 指针标记 & 写在名字后（name& 而非 int* name）
     //   2. 数组标记 [size] 写在名字后
@@ -473,7 +479,7 @@ struct Parser {
         return f;
     }
 
-    // 解析 var/let 声明项：与字段类似，但额外支持 = 初值表达式和内联类型
+    // 解析 var/let/tls 声明项：与字段类似，但额外支持 = 初值表达式和内联类型
     Field parseVarItem() {
         Field f;
         f.line = cur().line;
@@ -521,12 +527,12 @@ struct Parser {
         return f;
     }
 
-    // var/let 列表：支持单行逗号分隔和多行缩进续行两种写法
+    // var/let/tls 列表：支持单行逗号分隔、和多行缩进续行两种写法
     void parseVarList(std::vector<Field>& out) {
         out.push_back(parseVarItem());
-        while (accept(Tok::Comma)) out.push_back(parseVarItem());  // 单行：逗号分隔多项
+        while (accept(Tok::Comma)) out.push_back(parseVarItem());   // 单行：逗号分隔多项
         expect(Tok::Newline, "换行");
-        if (accept(Tok::Indent)) { // 多行缩进续行
+        if (accept(Tok::Indent)) {                                  // 多行缩进续行
             while (!at(Tok::Dedent) && !at(Tok::End)) {
                 skipNewlines();
                 if (at(Tok::Dedent)) break;
@@ -538,12 +544,15 @@ struct Parser {
         }
     }
 
-    // ---------------- def 类型定义解析 ----------------
+    ///////////////////////////////////////////////////////////////////////////
+    // def 类型定义解析
+    //
     // def 支持四种类型定义：
     //   def name: base \n\titem...    → 枚举
     //   def name: { fields }          → 结构体
     //   def name: ( fields )          → 联合体
     //   def name -> target_type       → 类型别名
+
     DeclPtr parseDef() {
         auto d = std::make_unique<Decl>();
         d->line = cur().line;
@@ -624,7 +633,9 @@ struct Parser {
         return d;
     }
 
-    // ---------------- fnc 函数定义解析 ----------------
+    ///////////////////////////////////////////////////////////////////////////
+    // fnc 函数定义解析
+    //
     // fnc 支持三种形态：
     //   1. 函数类型定义：fnc name: ret, params... \n        （无函数体）
     //       → 只有签名，C 中生成 typedef 函数指针类型
@@ -770,7 +781,9 @@ struct Parser {
         return d;
     }
 
-    // ---------------- 语句解析 ----------------
+    ///////////////////////////////////////////////////////////////////////////
+    // 语句解析
+    //
     // 语句以换行结束，缩进块用 Indent/Dedent 界定。
     // 控制流语句（if/while/for）的条件后可跟多行续行条件（续行运算符 + 条件），
     // 通过 '-' 分隔符区分续行条件和语句体。
@@ -1042,29 +1055,34 @@ struct Parser {
         }
     }
 
-    // ---------------- 程序顶层解析 ----------------
+    ///////////////////////////////////////////////////////////////////////////
+    // 程序顶层解析
+    ///////////////////////////////////////////////////////////////////////////
+    //
     // sc 程序的顶层结构：连续的 inc/def/fnc/var/let 声明
-    // 声明前可加 @ 前缀表示导出对象（--emit-c 时生成 .h 声明）
-    Program parseProgram() {
-        Program prog;
-        for (;;) {
-            skipNewlines();
+    // + 声明前可加 @ 前缀表示导出对象（--emit-c 时生成 .h 声明）
+
+    Program parseProgram() { Program prog;
+
+        for (;;) { skipNewlines();
             if (at(Tok::End)) break;
+
             // @ 导出前缀：作用于紧随的 inc/def/fnc/var/let
             bool exported = acceptOp("@");
             switch (cur().kind) {
+
+                // inc 头文件引入：lexer 已将头文件名捕获为 Str token
                 case Tok::KwInc: {
-                    // inc 头文件引入：lexer 已将头文件名捕获为 Str token
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
                     d->kind = Decl::IncD;
-                    advance();  // 跳过 inc 关键字
+                    advance();                                      // 跳过 inc 关键字
                     if (!at(Tok::Str)) err("inc 后期望头文件名");
                     d->name = advance().text;
                     d->external = isScModuleName(d->name);
                     d->origin = d->name;
+                    // 这里先把 sc 模块导入当作外部符号记录，后端会进一步展开
                     if (d->external) {
-                        // 这里先把 sc 模块导入当作外部符号记录，后端会进一步展开
                         prog.externSymbols.push_back(d->name);
                     }
                     d->exported = exported;
@@ -1072,30 +1090,39 @@ struct Parser {
                     prog.decls.push_back(std::move(d));
                     break;
                 }
+
+                // 类型定义
                 case Tok::KwDef:
-                    prog.decls.push_back(parseDef());   // 类型定义
+                    prog.decls.push_back(parseDef());   
                     prog.decls.back()->exported = exported;
-                    // 结构体内的成员函数提升为顶层 Decl（随所属类型导出）
+
+                    // 对于结构体内的成员函数，提升为顶层 Decl（随所属类型导出）
                     for (auto& m : pendingMethods) {
                         m->exported = exported;
                         prog.decls.push_back(std::move(m));
                     }
                     pendingMethods.clear();
                     break;
+
+                // 函数定义
                 case Tok::KwFnc:
-                    prog.decls.push_back(parseFnc());   // 函数定义
+                    prog.decls.push_back(parseFnc());   
                     prog.decls.back()->exported = exported;
                     break;
+
+                // rpc 伪形参函数（参数结构体糖）
                 case Tok::KwRpc:
-                    prog.decls.push_back(parseFnc(true)); // rpc 伪形参函数（参数结构体糖）
+                    prog.decls.push_back(parseFnc(true));
                     prog.decls.back()->exported = exported;
                     break;
+
+                // 全局变量/常量/线程局部变量：包装成 VarD/LetD/TlsD 类型的 Decl
                 case Tok::KwVar:
                 case Tok::KwLet:
-                case Tok::KwTls: {
-                    // 全局变量/常量/线程局部变量：包装成 VarD/LetD/TlsD 类型的 Decl
+                case Tok::KwTls: {                    
                     if (cur().kind == Tok::KwTls && exported)
                         err("tls 变量为线程局部 static 存储，不可 @ 导出");
+
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
                     d->kind = cur().kind == Tok::KwVar ? Decl::VarD
@@ -1106,6 +1133,7 @@ struct Parser {
                     prog.decls.push_back(std::move(d));
                     break;
                 }
+
                 default:
                     // 顶层只允许程序结构对象的几种关键字
                     err("顶层只允许 inc/def/fnc/rpc/var/let/tls，得到 '" + cur().text + "'");

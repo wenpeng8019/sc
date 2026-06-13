@@ -47,11 +47,13 @@ const std::unordered_map<std::string, Tok> kKeywords = {
 // Lexer 内部类 —— 封装所有词法分析状态
 struct Lexer {
     const std::string& s;         // 源码引用（不拷贝）
+    std::vector<Token> out;       // 输出 token 序列
+
     size_t i = 0;                 // 当前扫描位置
     int line = 1;                 // 当前行号（1-based）
+
     int parenDepth = 0;           // 括号嵌套深度，>0 时抑制缩进/换行处理
     std::vector<int> indents{0};  // 缩进级别栈，0=文件顶层
-    std::vector<Token> out;       // 输出 token 序列
 
     explicit Lexer(const std::string& src) : s(src) {}
 
@@ -64,8 +66,8 @@ struct Lexer {
     // 行首缩进计算 —— 产生 Indent/Dedent 的核心逻辑
     void handleIndent() {
         for (;;) {
-            size_t start = i;
-            int spaces = 0;
+            size_t start = i; int spaces = 0;
+
             // 严格缩进规则：仅允许空格，且必须为4的倍数
             while (peek() == '\t' || peek() == ' ') {
                 char c = get();
@@ -74,10 +76,12 @@ struct Lexer {
             }
             if (spaces % 4 != 0) err("缩进必须为 4 的倍数空格");
             int level = spaces / 4;
+
             // 跳过注释行和空行（它们不改变缩进级别）
             if (peek() == '#') { while (peek() && peek() != '\n') get(); }
             if (peek() == '\n') { get(); line++; continue; }
-            if (peek() == '\0') { i = start; return; }  // 文件尾纯空白行忽略
+            if (peek() == '\0') { i = start; return; }          // 文件尾纯空白行忽略
+
             applyLevel(level);
             return;
         }
@@ -96,26 +100,28 @@ struct Lexer {
     }
 
     // 扫描字符串/字符字面量："..." 或 '...'
-    // 支持反斜杠转义（\" \' \\ \n \t 等），会原样保留到 token 文本中
+    // + 支持反斜杠转义（\" \' \\ \n \t 等），会原样保留到 token 文本中
     void lexString(char quote) {
         std::string v(1, quote);
-        get();  // 跳过开始的引号
+
+        get();                                          // 跳过开始的引号
         while (peek() && peek() != quote) {
-            if (peek() == '\\') v += get();  // 转义符：原样记录反斜杠
+            if (peek() == '\\') v += get();             // 转义符：原样记录反斜杠
             if (peek() == '\n') err("字符串不能跨行");
             v += get();
         }
         if (!peek()) err("字符串未闭合");
-        get();  // 跳过结束的引号
+        get();                                          // 跳过结束的引号
+
         v += quote;
         push(quote == '"' ? Tok::Str : Tok::Char, v);
     }
 
     // 扫描数字字面量：支持十进制整数、浮点数、十六进制整数
-    // 以及 C 风格字面量后缀：整数 u/U/l/L（可组合），浮点 f/F/l/L
+    // + 以及 C 风格字面量后缀：整数 u/U/l/L（可组合），浮点 f/F/l/L
     void lexNumber() {
-        std::string v;
-        bool isFloat = false;
+        std::string v; bool isFloat = false;
+
         // 十六进制前缀 0x / 0X
         if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
             v += get(); v += get();
@@ -131,27 +137,35 @@ struct Lexer {
                 while (isdigit((unsigned char)peek())) v += get();
             }
         }
+
         // 字面量后缀：整数 u/U/l/L（如 1u, 100UL, 7LL），浮点 f/F/l/L（如 3.14f）
         const char* sfx = isFloat ? "fFlL" : "uUlL";
         while (peek() && std::strchr(sfx, peek())) v += get();
+
         push(isFloat ? Tok::Float : Tok::Int, v);
     }
 
     // 扫描标识符：字母或下划线开头，后跟字母数字下划线
-    // 扫描完后查 kKeywords 表判断是否为关键字
+    // + 扫描完后查 kKeywords 表判断是否为关键字
     void lexIdent() {
         std::string v;
+        
+        // 标识符必须以字母或下划线开头，后续可包含字母数字或下划线
         while (isalnum((unsigned char)peek()) || peek() == '_') v += get();
+
+        // 查关键字表：命中则产生对应关键字 token，否则为普通标识符 token
         auto it = kKeywords.find(v);
-        if (it != kKeywords.end()) {
-            push(it->second, v);  // 命中关键字
+        if (it != kKeywords.end()) {                    // 命中关键字
+            push(it->second, v);
+
             // inc 特殊处理：头文件名（如 stdio.h、"my.h"）不是常规 token，
-            // 直接捕获其后到行尾/注释前的原始文本作为一个 Str token
+            // + 直接捕获其后到行尾/注释前的原始文本作为一个 Str token
             if (it->second == Tok::KwInc) {
                 while (peek() == ' ' || peek() == '\t') get();
                 std::string h;
                 while (peek() && peek() != '\n' && peek() != '#') h += get();
-                while (!h.empty() && (h.back() == ' ' || h.back() == '\t' ||
+                while (!h.empty() && (h.back() == ' ' || 
+                                      h.back() == '\t' ||
                                       h.back() == '\r')) h.pop_back();
                 if (h.empty()) err("inc 后期望头文件名");
                 push(Tok::Str, h);
@@ -160,43 +174,48 @@ struct Lexer {
         else push(Tok::Ident, v);                         // 普通标识符
     }
 
-    // 多字符运算符识别 —— 最长匹配原则
-    // 按长度从长到短尝试：先试3字符运算符（<<= >>=），再试2字符，最后单字符
-    // → 单独处理为 Arrow token，不在 Op 中
+    // 多字符运算符识别 —— 最长匹配原则（按长度从长到短尝试）
+    // + 先试3字符运算符（<<= >>=）; 再试2字符，最后单字符
+    //   → 单独处理为 Arrow token，不在 Op 中
     bool lexOp() {
-        // 三字符运算符（优先级最高）
-        static const char* ops3[] = {"<<=", ">>="};
-        // 二字符运算符（按优先级排列，先匹配的优先）
-        static const char* ops2[] = {"->", "==", "!=", "<=", ">=", "&&", "||",
-                                     "+=", "-=", "*=", "/=", "%=", "&=", "|=",
-                                     "^=", "<<", ">>", "++", "--"};
+        
+        static const char* ops3[] = {"<<=", ">>="};                 // 三字符运算符（优先级最高）
+        static const char* ops2[] = {"->", "==", "!=", "<=", ">=",  // 二字符运算符（按优先级排列，先匹配的优先）
+                                     "&&", "||", "++", "--",
+                                     "+=", "-=", "*=", "/=", "%=", 
+                                     "&=", "|=", "^=", "<<", ">>"};
         // 尝试三字符匹配
         for (auto* op : ops3)
             if (s.compare(i, 3, op) == 0) { push(Tok::Op, op); i += 3; return true; }
+
         // '...' 可变参数
         if (s.compare(i, 3, "...") == 0) { push(Tok::Ellipsis, "..."); i += 3; return true; }
+
         // 尝试二字符匹配
-        for (auto* op : ops2)
+        for (auto* op : ops2) {
             if (s.compare(i, 2, op) == 0) {
                 if (std::string(op) == "->") push(Tok::Arrow, op);  // -> 特殊处理
                 else push(Tok::Op, op);
                 i += 2;
                 return true;
             }
+        }
+
         // 单字符运算符（@ 为顶层声明的导出前缀）
         static const std::string single = "+-*/%<>=!&|^~.?@";
         if (single.find(peek()) != std::string::npos) {
             push(Tok::Op, std::string(1, get()));
             return true;
         }
+
         return false;  // 不是运算符，让调用者继续尝试其他 token 类型
     }
 
     // 主扫描循环 —— 按当前字符分派到对应的扫描函数
     void run() {
-        handleIndent();  // 先处理第一行的缩进
-        while (i < s.size()) {
-            char c = peek();
+        handleIndent();                                             // 先处理第一行的缩进
+        while (i < s.size()) { char c = peek();
+            
             // ---- 换行：括号内仍产生 Newline 但抑制 Indent/Dedent ----
             if (c == '\n') {
                 get(); line++;
@@ -204,22 +223,28 @@ struct Lexer {
                 if (parenDepth == 0) handleIndent();  // 仅在非括号内处理缩进
                 continue;
             }
+
             // ---- 空白字符：跳过 ----
             if (c == ' ' || c == '\t' || c == '\r') { get(); continue; }
+
             // ---- 注释：# 到行尾 ----
             if (c == '#') { while (peek() && peek() != '\n') get(); continue; }
+
             // ---- 字面量 ----
             if (c == '"' || c == '\'') { lexString(c); continue; }
             if (isdigit((unsigned char)c)) { lexNumber(); continue; }
             if (isalpha((unsigned char)c) || c == '_') { lexIdent(); continue; }
+
             // ---- 分隔符（括号需追踪深度）----
             switch (c) {
                 case '(': get(); parenDepth++; push(Tok::LParen, "("); continue;
                 case ')': get(); if (parenDepth) parenDepth--; push(Tok::RParen, ")"); continue;
+
                 case '{': get(); push(Tok::LBrace, "{"); continue;
                 case '}': get(); push(Tok::RBrace, "}"); continue;
                 case '[': get(); push(Tok::LBracket, "["); continue;
                 case ']': get(); push(Tok::RBracket, "]"); continue;
+
                 case ',': get(); push(Tok::Comma, ","); continue;
                 case ';': get(); push(Tok::Semi, ";"); continue;
                 case ':':
@@ -227,17 +252,22 @@ struct Lexer {
                     else { get(); push(Tok::Colon, ":"); }
                     continue;
             }
+
             // ---- 运算符（最长匹配）----
             if (lexOp()) continue;
+
             // ---- 无法识别 ----
             err(std::string("无法识别的字符: '") + c + "'");
         }
-        // 文件尾收尾：
-        //   确保最后一条语句有换行结束（简化 parser 逻辑）
+
+        // 文件尾收尾：确保最后一条语句有换行结束（简化 parser 逻辑）
         if (!out.empty() && out.back().kind != Tok::Newline) push(Tok::Newline);
-        //   弹出所有剩余缩进级别（自动闭合未结束的块）
+
+        // 弹出所有剩余缩进级别（自动闭合未结束的块）
         while (indents.size() > 1) { indents.pop_back(); push(Tok::Dedent); }
-        push(Tok::End);  // 文件结束标记
+
+        // ---- 文件结束标记 ----
+        push(Tok::End);  
     }
 };
 
