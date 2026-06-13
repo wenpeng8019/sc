@@ -78,26 +78,25 @@ uint8_t  list_clone(list *_this, list *out);
 void     list_sort(list *_this, list_cmp *cmp);
 
 /* ---------------- chain：侵入式双向链表 ----------------
- * 元素为 sc 链表结构体（def T: ~ {}，末尾有 T *_prev, *_next）
+ * 元素为 sc 链表结构体（def T: ~ {}，首位有 void *_prev, *_next）
  * 首元素 _prev = 尾元素（rear），尾元素 _next = NULL；不拥有元素
- * _off 为元素内 _prev 字节偏移，由 sc 编译器在 append/push 调用点注入 */
+ * 导航：用内置 base(o), prev(o), next(o) 函数访问首真实成员和邻接节点 */
 
 typedef struct chain {
     void    *head;     /* 首元素（空链为 NULL） */
-    uint64_t _off;     /* 元素内 _prev 字节偏移 */
 } chain;
 
-void  chain_append(chain *_this, void *it, uint64_t off);   /* 队尾 */
-void  chain_push(chain *_this, void *it, uint64_t off);     /* 队首 */
-void *chain_pop(chain *_this);                              /* 移除并返回首元素 */
+void  chain_append(chain *_this, void *it);           /* 队尾 */
+void  chain_push(chain *_this, void *it);             /* 队首 */
+void *chain_pop(chain *_this);                        /* 移除并返回首元素 */
 void  chain_before(chain *_this, void *pos, void *it);
 void  chain_after(chain *_this, void *pos, void *it);
 void  chain_remove(chain *_this, void *it);
 void *chain_first(chain *_this);
 void *chain_last(chain *_this);
 void  chain_revert(chain *_this);
-void  chain_append_to(chain *_this, chain *dst);             /* 自身清空 */
-void  chain_push_to(chain *_this, chain *dst);               /* 自身清空 */
+void  chain_append_to(chain *_this, chain *dst);     /* 自身清空 */
+void  chain_push_to(chain *_this, chain *dst);       /* 自身清空 */
 void  chain_cut(chain *_this, void *from, void *to, chain *out);
 
 #ifdef __cplusplus

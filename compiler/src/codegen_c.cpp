@@ -777,11 +777,6 @@ struct CGen {
                     VType base;
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
                         if (const Decl* md = findMethod(base.name, e.a->text)) {
-                            // chain::append/push：尾参 _off（元素内 _prev 字节偏移）由编译器注入
-                            bool chainIns = md->methodOwner == "chain" &&
-                                (e.a->text == "append" || e.a->text == "push");
-                            if (chainIns && e.args.size() != 1)
-                                throw CompileError{"chain." + e.a->text + " 需要一个链表元素指针实参", e.line};
                             out << md->name << "(";   // 修饰名 T_m
                             if (e.a->op == ".") out << "&";
                             emitExpr(*e.a->a);
@@ -789,21 +784,10 @@ struct CGen {
                                 out << ", ";
                                 emitExpr(*a, true);
                             }
-                            if (chainIns) {
-                                VType it;
-                                const Decl* sd = nullptr;
-                                if (exprVType(*e.args[0], it) && it.ptr == 1 && it.arr == 0)
-                                    sd = aggrOf(it.name);
-                                if (!sd || !sd->linked)
-                                    throw CompileError{"chain." + e.a->text +
-                                        " 的实参需为链表结构体指针（def T: ~ {}）", e.line};
-                                out << ", offsetof(" << sd->name << ", _prev)";
-                            } else {
-                                // 缺参 0 补全（接收者已占首参，后续皆需逗号）
-                                for (size_t i = e.args.size(); i < md->fields.size(); i++) {
-                                    out << ", ";
-                                    emitDefaultArg(md->fields[i]);
-                                }
+                            // 缺参 0 补全（接收者已占首参，后续皆需逗号）
+                            for (size_t i = e.args.size(); i < md->fields.size(); i++) {
+                                out << ", ";
+                                emitDefaultArg(md->fields[i]);
                             }
                             out << ")";
                             break;

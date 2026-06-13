@@ -73,18 +73,18 @@
 @fnc list::sort: cmp&: list_cmp                       # 按比较回调排序
 
 # ---------------- chain：侵入式双向链表 ----------------
-# 任何链表结构体（def T: ~ {}，末尾自动注入 _prev/_next）皆可入链
+# 任何链表结构体（def T: ~ {}，首位自动注入 void* _prev/_next）皆可入链
 # 机制：首元素 _prev 指向尾元素（即 rear），尾元素 _next 为 nil
+# 导航：base(o) 得到首个真实成员地址，prev(o) 得到前驱节点 void*，next(o) 得到后继节点 void*
 # 不拥有元素：remove/pop/cut 不释放元素本身
-# 同一 chain 只存放同一种结构体（_off 记录 _prev 偏移，append/push 时由编译器注入）
+# 同一 chain 只存放同一种结构体
 
 @def chain: {
     head&:        # 首元素（空链为 nil）
-    _off: u8      # 元素内 _prev 字节偏移（编译器注入，勿手工修改）
 }
 
-@fnc chain::append: it&:, _off: u8                     # 添加到队尾（_off 编译器注入）
-@fnc chain::push: it&:, _off: u8                       # 添加到队首（_off 编译器注入）
+@fnc chain::append: it&:                               # 添加到队尾
+@fnc chain::push: it&:                                 # 添加到队首
 @fnc chain::pop: &                                     # 移除并返回首元素（空返回 nil）
 @fnc chain::before: pos&:, it&:                        # 添加 it 到 pos 之前
 @fnc chain::after: pos&:, it&:                         # 添加 it 到 pos 之后

@@ -277,85 +277,78 @@ void list_sort(list *_this, list_cmp *cmp) {
  * LKP/LKN 展开为单次加法+解引用，与直接成员访问同等机器码。
  * 约定：首元素 _prev = 尾元素（rear），尾元素 _next = NULL。 */
 
-#define LKP(it) (*(void **)((char *)(it) + off))                  /* _prev */
-#define LKN(it) (*(void **)((char *)(it) + off + sizeof(void *))) /* _next */
+/* _prev/_next 固定在结构体最前面（void *_prev, *_next）*/
+#define LPREV(it) (*(void **)((char *)(it) + 0))       /* _prev at offset 0 */
+#define LNEXT(it) (*(void **)((char *)(it) + sizeof(void *))) /* _next at offset 8 */
 
-void chain_append(chain *_this, void *it, uint64_t off_) {
+void chain_append(chain *_this, void *it) {
     if (!it) return;
-    _this->_off = off_;
-    size_t off = (size_t)off_;
     void *h = _this->head;
-    if (!h) { _this->head = it; LKP(it) = it; LKN(it) = NULL; return; }
-    void *r = LKP(h);          /* rear */
-    LKN(r) = it;
-    LKP(it) = r;
-    LKN(it) = NULL;
-    LKP(h) = it;               /* 首元素 _prev 始终指向新 rear */
+    if (!h) { _this->head = it; LPREV(it) = it; LNEXT(it) = NULL; return; }
+    void *r = LPREV(h);        /* rear */
+    LNEXT(r) = it;
+    LPREV(it) = r;
+    LNEXT(it) = NULL;
+    LPREV(h) = it;             /* 首元素 _prev 始终指向新 rear */
 }
 
-void chain_push(chain *_this, void *it, uint64_t off_) {
+void chain_push(chain *_this, void *it) {
     if (!it) return;
-    _this->_off = off_;
-    size_t off = (size_t)off_;
     void *h = _this->head;
-    if (!h) { _this->head = it; LKP(it) = it; LKN(it) = NULL; return; }
-    LKP(it) = LKP(h);          /* 继承 rear */
-    LKN(it) = h;
-    LKP(h) = it;
+    if (!h) { _this->head = it; LPREV(it) = it; LNEXT(it) = NULL; return; }
+    LPREV(it) = LPREV(h);      /* 继承 rear */
+    LNEXT(it) = h;
+    LPREV(h) = it;
     _this->head = it;
 }
 
 void *chain_pop(chain *_this) {
     void *h = _this->head;
     if (!h) return NULL;
-    size_t off = (size_t)_this->_off;
-    void *n = LKN(h);
-    if (n) { LKP(n) = LKP(h); _this->head = n; }
+    void *n = LNEXT(h);
+    if (n) { LPREV(n) = LPREV(h); _this->head = n; }
     else _this->head = NULL;
-    LKP(h) = LKN(h) = NULL;
+    LPREV(h) = LNEXT(h) = NULL;
     return h;
 }
 
 void chain_before(chain *_this, void *pos, void *it) {
     void *h = _this->head;
     if (!h || !pos || !it) return;
-    size_t off = (size_t)_this->_off;
     if (pos == h) {            /* 等价 push */
-        LKP(it) = LKP(h);
-        LKN(it) = h;
-        LKP(h) = it;
+        LPREV(it) = LPREV(h);
+        LNEXT(it) = h;
+        LPREV(h) = it;
         _this->head = it;
         return;
     }
-    void *p = LKP(pos);
-    LKN(p) = it;
-    LKP(it) = p;
-    LKN(it) = pos;
-    LKP(pos) = it;
+    void *p = LPREV(pos);
+    LNEXT(p) = it;
+    LPREV(it) = p;
+    LNEXT(it) = pos;
+    LPREV(pos) = it;
 }
 
 void chain_after(chain *_this, void *pos, void *it) {
     void *h = _this->head;
     if (!h || !pos || !it) return;
-    size_t off = (size_t)_this->_off;
-    void *n = LKN(pos);
-    LKN(pos) = it;
-    LKP(it) = pos;
-    LKN(it) = n;
-    if (n) LKP(n) = it;
-    else LKP(h) = it;          /* it 成为新 rear */
+    void *n = LNEXT(pos);
+    LNEXT(pos) = it;
+    LPREV(it) = pos;
+    LNEXT(it) = n;
+    if (n) LPREV(n) = it;
+    else LPREV(h) = it;        /* it 成为新 rear */
 }
 
 void chain_remove(chain *_this, void *it) {
     void *h = _this->head;
     if (!h || !it) return;
     if (it == h) { chain_pop(_this); return; }
-    size_t off = (size_t)_this->_off;
-    void *p = LKP(it), *n = LKN(it);
-    LKN(p) = n;
-    if (n) LKP(n) = p;
-    else LKP(h) = p;           /* it 原为 rear */
-    LKP(it) = LKN(it) = NULL;
+    void *p = LPREV(it), *n = LNEXT(it);
+    LNEXT(p) = n;
+    if (n) LPREV(n) = p;
+    else LPREV(h) = p;         /* it 原为 rear */
+    LPREV(it) = LNEXT(it) = NULL;
 }
 
 void *chain_first(chain *_this) { return _this->head; }
@@ -363,38 +356,35 @@ void *chain_first(chain *_this) { return _this->head; }
 void *chain_last(chain *_this) {
     void *h = _this->head;
     if (!h) return NULL;
-    size_t off = (size_t)_this->_off;
-    return LKP(h);
+    return LPREV(h);
 }
 
 void chain_revert(chain *_this) {
     void *h = _this->head;
     if (!h) return;
-    size_t off = (size_t)_this->_off;
-    void *r = LKP(h);
+    void *r = LPREV(h);
     if (r == h) return;        /* 单元素 */
     void *cur = h;
     while (cur) {              /* 逐节点交换 prev/next */
-        void *nx = LKN(cur);
-        LKN(cur) = LKP(cur);
-        LKP(cur) = nx;
+        void *nx = LNEXT(cur);
+        LNEXT(cur) = LPREV(cur);
+        LPREV(cur) = nx;
         cur = nx;
     }
     _this->head = r;
-    LKP(r) = h;                /* 新首元素 _prev = 新 rear（原首元素） */
-    LKN(h) = NULL;             /* 新 rear _next = NULL */
+    LPREV(r) = h;              /* 新首元素 _prev = 新 rear（原首元素） */
+    LNEXT(h) = NULL;           /* 新 rear _next = NULL */
 }
 
 void chain_append_to(chain *_this, chain *dst) {
     void *lh = _this->head;
     if (!lh) return;
     void *dh = dst->head;
-    if (!dh) { dst->head = lh; dst->_off = _this->_off; _this->head = NULL; return; }
-    size_t off = (size_t)_this->_off;
-    void *dr = LKP(dh), *lr = LKP(lh);
-    LKN(dr) = lh;
-    LKP(lh) = dr;
-    LKP(dh) = lr;              /* dst 新 rear = 原 self rear */
+    if (!dh) { dst->head = lh; _this->head = NULL; return; }
+    void *dr = LPREV(dh), *lr = LPREV(lh);
+    LNEXT(dr) = lh;
+    LPREV(lh) = dr;
+    LPREV(dh) = lr;            /* dst 新 rear = 原 self rear */
     _this->head = NULL;
 }
 
@@ -402,12 +392,11 @@ void chain_push_to(chain *_this, chain *dst) {
     void *lh = _this->head;
     if (!lh) return;
     void *dh = dst->head;
-    if (!dh) { dst->head = lh; dst->_off = _this->_off; _this->head = NULL; return; }
-    size_t off = (size_t)_this->_off;
-    void *dr = LKP(dh), *lr = LKP(lh);
-    LKN(lr) = dh;
-    LKP(dh) = lr;
-    LKP(lh) = dr;              /* 新首元素（self 首）继承 dst rear */
+    if (!dh) { dst->head = lh; _this->head = NULL; return; }
+    void *dr = LPREV(dh), *lr = LPREV(lh);
+    LNEXT(lr) = dh;
+    LPREV(dh) = lr;
+    LPREV(lh) = dr;            /* 新首元素（self 首）继承 dst rear */
     dst->head = lh;
     _this->head = NULL;
 }
@@ -415,17 +404,15 @@ void chain_push_to(chain *_this, chain *dst) {
 void chain_cut(chain *_this, void *from, void *to, chain *out) {
     void *h = _this->head;
     if (!h || !from || !to || !out) return;
-    size_t off = (size_t)_this->_off;
-    out->_off = _this->_off;
-    void *p = LKP(from), *n = LKN(to);
+    void *p = LPREV(from), *n = LNEXT(to);
     int fromHead = (from == h);
     /* 从原链摘除 [from..to] */
     if (fromHead && !n) _this->head = NULL;
-    else if (fromHead) { LKP(n) = p; _this->head = n; }      /* p 即原 rear */
-    else if (!n) { LKN(p) = NULL; LKP(h) = p; }              /* to 原为 rear */
-    else { LKN(p) = n; LKP(n) = p; }
+    else if (fromHead) { LPREV(n) = p; _this->head = n; }      /* p 即原 rear */
+    else if (!n) { LNEXT(p) = NULL; LPREV(h) = p; }            /* to 原为 rear */
+    else { LNEXT(p) = n; LPREV(n) = p; }
     /* 构成 out */
     out->head = from;
-    LKP(from) = to;
-    LKN(to) = NULL;
+    LPREV(from) = to;
+    LNEXT(to) = NULL;
 }
