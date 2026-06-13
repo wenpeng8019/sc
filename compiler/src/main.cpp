@@ -32,6 +32,7 @@
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include <map>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,12 +52,25 @@ static void usage() {
               << "          lib    = /opt/lib:vendor/lib  # 库搜索路径，':' 分隔 → -L（SCC_LIB 优先）\n"
               << "          libs   = m pthread       # 链接库名，空格/逗号分隔 → -l（SCC_LIBS 优先）\n"
               << "          adt    = my_adt.c        # adt 自定义实现（SCC_ADT/--adt 优先）\n"
+              << "        交叉编译配置项（同样可用环境变量 SCC_* 或 --target 目标档覆盖）：\n"
+              << "          cc/ar/objcopy = <工具>   # 交叉工具链程序（SCC_CC/SCC_AR/SCC_OBJCOPY 优先）\n"
+              << "          target_flags = -mcpu=... # 目标机器选项，同时进入编译与链接（SCC_TARGET_FLAGS）\n"
+              << "          sysroot = /path/sysroot  # 目标 sysroot → --sysroot（SCC_SYSROOT 优先）\n"
+              << "          triple  = aarch64-linux-gnu # 目标三元组，驱动平台表（SCC_TARGET_TRIPLE 优先）\n"
+              << "          threads = -lpthread / none  # 线程库链接选项，显式覆盖平台表（SCC_THREADS）\n"
+              << "          debug   = dsymutil / none   # 链接后调试打包步骤，覆盖平台表（SCC_DEBUG）\n"
+              << "          freestanding = 1         # 裸机目标（无托管运行时；SCC_FREESTANDING 优先）\n"
+              << "          platforms = plat.tbl     # 外置平台表文件（SCC_PLATFORMS 优先；行 pattern:threads:debug）\n"
+              << "          run     = qemu-arm -L .. # 运行包装器/模拟器（SCC_RUN 优先；run 模式用）\n"
               << "  -l <名>    追加链接库（可重复；-lm 写法也支持，与配置的 libs 合并）\n"
               << "  --adt <x>  adt 自定义实现（.c/.o/.a，照 builtins/adt/adt.h 契约实现）；\n"
               << "             未指定时 inc adt.sc 自动链接内置默认实现 builtins/adt/adt_impl.c\n"
+              << "  --target <file>  加载交叉编译目标档（key=value，同 .sc 配置语法；SCC_TARGET 亦可）\n"
+              << "  --builtins <dir> 目标适配 builtins 目录（最高优先级，替换默认库实现）\n"
               << "  --build    构建产物模式：编译链接为持久产物，应用与 run 相同的工具链配置\n"
               << "             产物类型按 -o 后缀决定：.a → 静态库（ar rcs）；\n"
-              << "             .so/.dylib → 动态库（-shared，单元编译附加 -fPIC）；其余 → 可执行文件\n"
+              << "             .so/.dylib → 动态库（-shared，单元编译附加 -fPIC）；\n"
+              << "             .bin/.hex → 裸机镜像（objcopy 转 raw/Intel-HEX）；其余（含 .elf）→ 可执行文件\n"
               << "             构建库且存在 @导出对象时，额外生成同名 .h 头文件\n"
               << "             -o 缺省为输入文件名去 .sc 后缀（stdin 输入必须指定 -o）\n"
               << "  --emit-c   转译为 C 源码（配合 -o 输出到文件，缺省 stdout；\n"
@@ -107,7 +121,25 @@ struct ToolConfig {
     std::string cflags;   // 编译阶段附加选项（含 -I 展开）
     std::string ldflags;  // 链接阶段附加选项（含 -L/-l 展开）
     std::string adtImpl;  // adt 自定义实现（--adt/SCC_ADT/.sc 配置 adt；空=内置默认实现）
+
+    // ---- 交叉编译扩展 ----
+    std::string machine;     // 目标机器选项（target_flags + --sysroot）：同时进入编译与链接
+    std::string ar = "ar";   // 静态库归档器（SCC_AR/ar；交叉如 arm-none-eabi-ar）
+    std::string objcopy;     // 目标文件转换器（SCC_OBJCOPY/objcopy；产 .bin/.hex）
+    std::string runner;      // 运行包装器（SCC_RUN/run；如 "qemu-arm -L <sysroot>"，空=直接执行）
+    std::string triple;      // 目标三元组（SCC_TARGET_TRIPLE/triple；空=本机）
+    std::string threadsLib;  // 线程库链接选项（平台表/显式 threads 解析，如 "-lpthread"）
+    std::string debugTool;   // 链接后调试打包步骤（"dsymutil" / "none"）
+    bool freestanding = false; // 裸机档：目标无托管运行时（SCC_FREESTANDING/freestanding=1）
+    bool crossRun = false;   // 目标平台与本机不同族 → 不能直接 exec（须 runner 或 --build）
 };
+
+// 目标档（--target 文件）键值表：configValue 在环境变量之后、./.sc 配置之前回退到此。
+// 优先级：环境变量 SCC_* > --target 目标档 > ./.sc 配置 > 内置默认
+static std::map<std::string, std::string> g_profile;
+
+// --builtins 指定的目标适配 builtins 目录（最高优先级；空=按默认搜索）
+static std::filesystem::path g_builtinsOverride;
 
 // 读取当前目录下的 .sc 配置文件，返回指定 key 的值（未配置返回空串）
 // 格式：每行 key = value，'#' 开头为注释，键值两侧空白忽略
@@ -132,11 +164,36 @@ static std::string readConfig(const std::string& key) {
     return "";
 }
 
-// 获取配置项：环境变量优先
+// 获取配置项：环境变量 > --target 目标档 > ./.sc 配置文件
 static std::string configValue(const char* env, const char* key) {
     const char* v = std::getenv(env);
     if (v && *v) return v;
+    auto it = g_profile.find(key);
+    if (it != g_profile.end() && !it->second.empty()) return it->second;
     return readConfig(key);
+}
+
+// 加载 --target 目标档（与 .sc 配置同语法：每行 key = value，'#' 注释）；失败即退出
+static void loadProfile(const std::string& path) {
+    std::ifstream fin(path);
+    if (!fin) {
+        std::cerr << "错误: 无法打开目标档 " << path << "\n";
+        std::exit(1);
+    }
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t\r");
+        return s.substr(a, b - a + 1);
+    };
+    std::string line;
+    while (std::getline(fin, line)) {
+        std::string l = trim(line);
+        if (l.empty() || l[0] == '#') continue;
+        size_t eq = l.find('=');
+        if (eq == std::string::npos) continue;
+        g_profile[trim(l.substr(0, eq))] = trim(l.substr(eq + 1));
+    }
 }
 
 static std::vector<std::string> splitBy(const std::string& s, const char* seps) {
@@ -150,6 +207,85 @@ static std::vector<std::string> splitBy(const std::string& s, const char* seps) 
     }
     if (!cur.empty()) out.push_back(cur);
     return out;
+}
+
+// ---------------- 平台表（target triple → 工具链行为）----------------
+// 自动化决策的基础：线程库链接选项、链接后调试打包步骤。
+//   threads：线程实现所需链接选项（如 "-lpthread"，空表示内置/无需）
+//   debug：链接后调试步骤（"dsymutil" 或 "none"）
+//   known：该三元组是否被平台表覆盖（未覆盖且未显式声明则报错）
+struct PlatProps { std::string threads; std::string debug; bool known = false; };
+
+// 本机三元组（按 scc 自身编译期宿主宏推断的平台族）
+static std::string hostTriple() {
+#if defined(__APPLE__)
+    return "apple-darwin";
+#elif defined(_WIN32)
+    return "w64-mingw32";
+#elif defined(__linux__)
+    return "linux-gnu";
+#else
+    return "unknown";
+#endif
+}
+
+// 平台族（用于判定 host≠target：族不同即不能在本机直接运行）
+static std::string platformFamily(const std::string& triple) {
+    auto has = [&](const char* s) { return triple.find(s) != std::string::npos; };
+    // 先判宿主 OS（注意 arm-linux-gnueabihf 含 "eabi" 却是托管 Linux，须先于裸机判定）
+    if (has("darwin") || has("apple")) return "darwin";
+    if (has("mingw") || has("windows") || has("win32") || has("msvc")) return "windows";
+    if (has("linux")) return "linux";
+    if (has("none") || has("eabi") || has("elf")) return "bare";  // 裸机 *-none-eabi/*-elf
+    return "unknown";
+}
+
+// 内置平台表：按三元组族返回工具链行为
+static PlatProps builtinPlatform(const std::string& triple) {
+    const std::string fam = platformFamily(triple);
+    if (fam == "darwin")  return {"", "dsymutil", true};
+    if (fam == "windows") return {"", "none", true};
+    if (fam == "bare")    return {"", "none", true};   // 裸机：无托管线程/调试打包
+    if (fam == "linux")   return {"-lpthread", "none", true};
+    return {"", "none", false};                         // 未知：交由外置表/显式声明
+}
+
+// 外置平台表（配置优先）：SCC_PLATFORMS/platforms 指向的文件，每行
+//   pattern : threads : debug
+// pattern 为三元组子串匹配（如 "linux-musl"），命中即覆盖内置表。
+static PlatProps externalPlatform(const std::string& triple) {
+    const std::string path = configValue("SCC_PLATFORMS", "platforms");
+    if (path.empty()) return {"", "none", false};
+    std::ifstream fin(path);
+    if (!fin) return {"", "none", false};
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t\r");
+        return s.substr(a, b - a + 1);
+    };
+    std::string line;
+    while (std::getline(fin, line)) {
+        std::string l = trim(line);
+        if (l.empty() || l[0] == '#') continue;
+        auto parts = splitBy(l, ":");
+        if (parts.empty()) continue;
+        const std::string pat = trim(parts[0]);
+        if (pat.empty() || triple.find(pat) == std::string::npos) continue;
+        PlatProps p;
+        p.known = true;
+        p.threads = parts.size() > 1 ? trim(parts[1]) : "";
+        p.debug   = parts.size() > 2 ? trim(parts[2]) : "none";
+        if (p.threads == "none") p.threads.clear();
+        return p;
+    }
+    return {"", "none", false};
+}
+
+// 选择工具程序：环境变量 > 目标档/.sc 配置 > 缺省值（空缺省表示可留空）
+static std::string pickTool(const char* env, const char* key, const char* def) {
+    std::string v = configValue(env, key);
+    return v.empty() ? std::string(def ? def : "") : v;
 }
 
 // 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l
@@ -169,6 +305,47 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     for (auto& l : extraLibs)
         tc.ldflags += " -l" + l;
     tc.adtImpl = !adtOpt.empty() ? adtOpt : configValue("SCC_ADT", "adt");
+
+    // ---- 交叉编译：工具程序 + 目标机器选项 + 平台行为解析 ----
+    tc.ar      = pickTool("SCC_AR", "ar", "ar");
+    tc.objcopy = pickTool("SCC_OBJCOPY", "objcopy", "objcopy");
+    tc.runner  = configValue("SCC_RUN", "run");
+
+    // 目标机器选项（target_flags + sysroot）：同时进入编译与链接两步
+    const std::string tflags = configValue("SCC_TARGET_FLAGS", "target_flags");
+    if (!tflags.empty()) tc.machine += " " + tflags;
+    const std::string sysroot = configValue("SCC_SYSROOT", "sysroot");
+    if (!sysroot.empty()) tc.machine += " --sysroot=" + sysroot;
+
+    const std::string fs = configValue("SCC_FREESTANDING", "freestanding");
+    tc.freestanding = (fs == "1" || fs == "true" || fs == "yes");
+
+    // 平台行为：显式声明 > 外置表 > 内置表
+    tc.triple = configValue("SCC_TARGET_TRIPLE", "triple");
+    const std::string host = hostTriple();
+    const std::string effective = tc.triple.empty() ? host : tc.triple;
+    if (platformFamily(effective) == "bare") tc.freestanding = true;
+
+    PlatProps pp = externalPlatform(effective);          // 外置表优先
+    if (!pp.known) pp = builtinPlatform(effective);      // 内置表兜底
+    const std::string thOpt  = configValue("SCC_THREADS", "threads");  // 显式声明最高
+    const std::string dbgOpt = configValue("SCC_DEBUG", "debug");
+    if (!thOpt.empty())  { pp.threads = (thOpt == "none" ? "" : thOpt); pp.known = true; }
+    if (!dbgOpt.empty()) { pp.debug = dbgOpt; pp.known = true; }
+
+    // 未知目标且未显式声明：要求用户声明（裸机档天然 freestanding 免此校验）
+    if (!tc.triple.empty() && !pp.known && !tc.freestanding) {
+        std::cerr << "错误: 未知目标三元组 '" << tc.triple
+                  << "'，平台表未覆盖；请在目标档声明 threads/debug，"
+                     "或提供平台表（SCC_PLATFORMS/platforms）\n";
+        std::exit(1);
+    }
+    tc.threadsLib = pp.threads;
+    tc.debugTool  = pp.known ? pp.debug : "none";
+
+    // host≠target（平台族不同）：不能在本机直接运行
+    tc.crossRun = !tc.triple.empty() &&
+                  platformFamily(tc.triple) != platformFamily(host);
     return tc;
 }
 
@@ -229,8 +406,11 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
 
     namespace fs = std::filesystem; fs::path b;
 
+    // --builtins 指定的目标适配目录：最高优先级（交叉/裸机用适配实现替换默认库）
+    if (!g_builtinsOverride.empty()) b = g_builtinsOverride;
+
     // 根据输入目标文件所在目录向上搜索 builtins 目录；
-    if (input != "-") {
+    if (b.empty() && input != "-") {
         std::error_code ec;
         const fs::path abs = fs::absolute(fs::path(input), ec);
         if (!ec) b = findBuiltinsDir(abs.parent_path());
@@ -274,36 +454,57 @@ static std::string guardFromHeaderName(const std::string& hname) {
 ///////////////////////////////////////////////////////////////////////////////
 
 // 产物类型由输出文件名后缀决定
-enum class OutKind { Exe, StaticLib, SharedLib };
+enum class OutKind { Exe, StaticLib, SharedLib, Bin, Hex };
 
 static OutKind outputKind(const std::string& out) {
     if (endsWith(out, ".a")) return OutKind::StaticLib;
     if (endsWith(out, ".so") || endsWith(out, ".dylib")) return OutKind::SharedLib;
-    return OutKind::Exe;
+    if (endsWith(out, ".bin")) return OutKind::Bin;
+    if (endsWith(out, ".hex")) return OutKind::Hex;
+    return OutKind::Exe;  // 含 .elf：交叉/裸机可执行
 }
 
-// 选择系统 C 编译器：环境变量 SCC_CC > CC > .sc 配置文件 cc 项 > 缺省 gcc
+// 选择系统 C 编译器：环境变量 SCC_CC > CC > 目标档/.sc 配置 cc 项 > 缺省 gcc
 static std::string pickCC() {
     const char* cc = std::getenv("SCC_CC");
     if (cc && *cc) return cc;
     cc = std::getenv("CC");
     if (cc && *cc) return cc;
+    auto it = g_profile.find("cc");
+    if (it != g_profile.end() && !it->second.empty()) return it->second;
     std::string conf = readConfig("cc");
     if (!conf.empty()) return conf;
     return "gcc";
 }
 
-// 把 .o 列表合成最终产物：可执行（链接）/ 静态库（ar rcs）/ 动态库（-shared）
+// 把 .o 列表合成最终产物：可执行（链接）/ 静态库（ar rcs）/ 动态库（-shared）/ 裸机镜像（objcopy）
 static int linkOutput(OutKind kind,
                       const std::vector<std::filesystem::path>& objects,
                       const std::string& output,
                       const ToolConfig& tc) {
+    // 裸机镜像 .bin/.hex：先链接临时 .elf，再 objcopy 转换
+    if (kind == OutKind::Bin || kind == OutKind::Hex) {
+        const std::string elf = output + ".elf";
+        std::string cmd = pickCC() + " -g" + tc.machine;
+        for (auto& o : objects) cmd += " " + o.string();
+        cmd += " -o " + elf + tc.ldflags;
+        if (std::system(cmd.c_str()) != 0) {
+            std::cerr << "错误: 构建产物失败（" << cmd << "）\n";
+            return 1;
+        }
+        const char* fmt = (kind == OutKind::Bin) ? "binary" : "ihex";
+        std::string oc = tc.objcopy + " -O " + fmt + " " + elf + " " + output;
+        int rc = std::system(oc.c_str()) == 0 ? 0 : 1;
+        if (rc != 0) std::cerr << "错误: objcopy 转换失败（" << oc << "）\n";
+        std::filesystem::remove(elf);
+        return rc;
+    }
     std::string cmd;
     if (kind == OutKind::StaticLib) {
-        cmd = "ar rcs " + output;
+        cmd = tc.ar + " rcs " + output;
         for (auto& o : objects) cmd += " " + o.string();
     } else {
-        cmd = pickCC() + " -g";
+        cmd = pickCC() + " -g" + tc.machine;
         if (kind == OutKind::SharedLib) cmd += " -shared";
         for (auto& o : objects) cmd += " " + o.string();
         cmd += " -o " + output + tc.ldflags;
@@ -312,12 +513,10 @@ static int linkOutput(OutKind kind,
         std::cerr << "错误: 构建产物失败（" << cmd << "）\n";
         return 1;
     }
-#ifdef __APPLE__
-    // macOS 调试信息在 .o 中（产物仅存 debug map），临时 .o 即将删除，
-    // 先用 dsymutil 打包为 .dSYM，使 lldb 能映射回 .sc 源码
-    if (kind != OutKind::StaticLib)
+    // 调试信息打包（由目标平台决定）：macOS 把 .o 中的 debug map 打成 .dSYM，
+    // 使 lldb 能映射回 .sc 源码（交叉/裸机目标 debugTool=none，跳过）
+    if (tc.debugTool == "dsymutil" && kind != OutKind::StaticLib)
         std::system(("dsymutil " + output + " >/dev/null 2>&1").c_str());
-#endif
     return 0;
 }
 
@@ -329,9 +528,33 @@ static int buildSource(const std::string& csrc,
                        const ToolConfig& tc) {
     const OutKind kind = outputKind(output);
 
+    // 裸机镜像 .bin/.hex：先链接临时 .elf，再 objcopy 转换为原始/Intel-HEX 镜像
+    if (kind == OutKind::Bin || kind == OutKind::Hex) {
+        char tmpl[] = "/tmp/scc_img_XXXXXX";
+        int fd = mkstemp(tmpl);
+        if (fd < 0) { std::cerr << "错误: 无法创建临时文件\n"; return 1; }
+        close(fd);
+        const std::string elf = std::string(tmpl) + ".elf";
+        std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags
+                        + " -x c - -o " + elf + tc.ldflags;
+        FILE* pipe = popen(cmd.c_str(), "w");
+        if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(tmpl); return 1; }
+        fwrite(csrc.data(), 1, csrc.size(), pipe);
+        if (pclose(pipe) != 0) {
+            std::cerr << "错误: C 编译失败（" << cmd << "）\n";
+            unlink(tmpl); std::filesystem::remove(elf); return 1;
+        }
+        const char* fmt = (kind == OutKind::Bin) ? "binary" : "ihex";
+        std::string oc = tc.objcopy + " -O " + fmt + " " + elf + " " + output;
+        int rc = std::system(oc.c_str()) == 0 ? 0 : 1;
+        if (rc != 0) std::cerr << "错误: objcopy 转换失败（" << oc << "）\n";
+        unlink(tmpl); std::filesystem::remove(elf);
+        return rc;
+    }
+
     // 构建可执行文件：单命令编译+链接直达输出
     if (kind == OutKind::Exe) {
-        std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + output + tc.ldflags;
+        std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags + " -x c - -o " + output + tc.ldflags;
         FILE* pipe = popen(cmd.c_str(), "w");
         if (!pipe) { 
             std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
@@ -351,7 +574,7 @@ static int buildSource(const std::string& csrc,
     if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
     const std::filesystem::path tmpDir(dirC);
     const std::filesystem::path obj = tmpDir / "unit.o";
-    std::string cmd = pickCC() + " -g" + tc.cflags
+    std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags
                     + (kind == OutKind::SharedLib ? " -fPIC" : "")
                     + " -x c - -c -o " + obj.string();
     FILE* pipe = popen(cmd.c_str(), "w");
@@ -384,8 +607,8 @@ static int compileAndRunSource(const std::string& csrc,
 
     // 2. 通过管道把 C 源码送给编译器，不落盘中间 .c 文件
     // 添加 -g 标志生成调试符号，便于 gdb/lldb 进行源代码级调试
-    // 单命令编译+链接：cflags 与 ldflags 都附加
-    std::string cmd = pickCC() + " -g" + tc.cflags + " -x c - -o " + bin + tc.ldflags;
+    // 单命令编译+链接：machine（目标机器选项）/cflags 与 ldflags 都附加
+    std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags + " -x c - -o " + bin + tc.ldflags;
     FILE* pipe = popen(cmd.c_str(), "w");
     if (!pipe) { 
         std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(bin);
@@ -400,14 +623,26 @@ static int compileAndRunSource(const std::string& csrc,
     }
 
     // 3. fork+exec 运行产物，透传程序参数，避免 shell 转义问题
+    //    交叉目标：本机无法直接执行，须经 runner（模拟器）包装；既无 runner
+    //    又是跨平台族目标则报错，引导改用 --build 或配置 run。
+    if (tc.crossRun && tc.runner.empty()) {
+        std::cerr << "错误: 交叉目标无法在本机直接运行；请改用 --build 生成产物，"
+                     "或配置 run = <模拟器>（如 qemu-arm -L <sysroot>）\n";
+        unlink(bin);
+        return 1;
+    }
     pid_t pid = fork();
     if (pid < 0) { std::cerr << "错误: fork 失败\n"; unlink(bin); return 1; }
     if (pid == 0) {
         std::vector<char*> argv;
+        // runner（如 "qemu-arm -L /sysroot"）拆成前缀 argv，再接产物与程序参数
+        std::vector<std::string> runParts = splitBy(tc.runner, " ");
+        for (auto& r : runParts) argv.push_back(const_cast<char*>(r.c_str()));
         argv.push_back(bin);
         for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
         argv.push_back(nullptr);
-        execv(bin, argv.data());
+        if (!runParts.empty()) execvp(argv[0], argv.data());
+        else execv(bin, argv.data());
         _exit(127);  // exec 失败
     }
 
@@ -456,6 +691,7 @@ resolveModulePath(const std::string& raw, const std::filesystem::path& baseDir) 
         candidates.push_back(b / stem / (stem + ".sc"));
         if (!endsWith(target, ".sc")) candidates.push_back(b / (rel.string() + ".sc"));
     };
+    pushBuiltins(g_builtinsOverride);  // --builtins 目标适配目录：最高优先级
     pushBuiltins(builtins);
     if (cwdBuiltins != builtins) pushBuiltins(cwdBuiltins);
     if (const char* envB = std::getenv("SCC_BUILTINS"))
@@ -603,7 +839,7 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
     // 第二阶段：统一编译所有 .c -> .o
     for (auto& a : arts) {
         // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到
-        std::string ccCmd = pickCC() + " -g" + tc.cflags + extraCFlags + " -I " + tmpDir.string();
+        std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags + " -I " + tmpDir.string();
         if (!a.srcDir.empty()) ccCmd += " -I " + a.srcDir.string();
         ccCmd += " -c " + a.cpath.string() + " -o " + a.opath.string();
         if (std::system(ccCmd.c_str()) != 0) {
@@ -636,14 +872,13 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             if (!std::filesystem::exists(impl)) impl = dir / (stem + ".a");
             if (!std::filesystem::exists(impl)) continue;  // 非子项目实现形态
         }
-#if !defined(__APPLE__) && !defined(_WIN32)
-        // Linux 等平台 pthread 需显式链接（macOS 已内置）
-        if (stem == "m" && extraLd && extraLd->find("-lpthread") == std::string::npos)
-            *extraLd += " -lpthread";
-#endif
+        // 线程库由目标平台表决定（Linux=-lpthread；macOS/Windows/裸机=空）
+        if (stem == "m" && extraLd && !tc.threadsLib.empty()
+            && extraLd->find(tc.threadsLib) == std::string::npos)
+            *extraLd += " " + tc.threadsLib;
         if (impl.extension() == ".c") {
             const std::filesystem::path obj = tmpDir / (stem + "_impl.o");
-            std::string ccCmd = pickCC() + " -g" + tc.cflags + extraCFlags
+            std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
                 + " -I " + dir.string()
                 + " -I " + dir.parent_path().string()
                 + " -c " + impl.string() + " -o " + obj.string();
@@ -734,7 +969,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
 
     // 3. 链接所有对象文件为临时可执行文件，添加 -g 以保留调试符号；成功返回 0，失败清理后退出
     const std::filesystem::path bin = tmpDir / "run.out";
-    std::string linkCmd = pickCC() + " -g";                     // 添加 -g 保留调试符号
+    std::string linkCmd = pickCC() + " -g" + tc.machine;        // -g 保留调试符号；machine 目标机器选项
     for (auto& o : objects) linkCmd += " " + o.string();        // 构造要链接的所有对象文件列表
     linkCmd += " -o " + bin.string() + tc.ldflags + extraLd;
     if (std::system(linkCmd.c_str()) != 0) {
@@ -744,6 +979,13 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     }
 
     // 4. fork+exec 运行产物，透传程序参数，避免 shell 转义问题；运行结束清理临时目录
+    //    交叉目标须经 runner（模拟器）包装；跨平台族且无 runner 则报错
+    if (tc.crossRun && tc.runner.empty()) {
+        std::cerr << "错误: 交叉目标无法在本机直接运行；请改用 --build 生成产物，"
+                     "或配置 run = <模拟器>（如 qemu-arm -L <sysroot>）\n";
+        std::filesystem::remove_all(tmpDir);
+        return 1;
+    }
     pid_t pid = fork();
     if (pid < 0) {
         std::cerr << "错误: fork 失败\n";
@@ -753,10 +995,13 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     if (pid == 0) {
         std::vector<char*> argv;
         std::string binS = bin.string();
+        std::vector<std::string> runParts = splitBy(tc.runner, " ");
+        for (auto& r : runParts) argv.push_back(const_cast<char*>(r.c_str()));
         argv.push_back(const_cast<char*>(binS.c_str()));
         for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
         argv.push_back(nullptr);
-        execv(binS.c_str(), argv.data());
+        if (!runParts.empty()) execvp(argv[0], argv.data());
+        else execv(binS.c_str(), argv.data());
         _exit(127);  // exec 失败
     }
 
@@ -773,6 +1018,11 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
 ///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char** argv) {
+
+    // 环境变量 SCC_TARGET 指定的目标档先加载（命令行 --target 后加载可覆盖其键值）
+    if (const char* envT = std::getenv("SCC_TARGET")) {
+        if (*envT) loadProfile(envT);
+    }
 
     // ---- 1. 解析命令行参数 ----
     std::string input, output, mode = "run";  // 默认：编译+执行
@@ -795,6 +1045,9 @@ int main(int argc, char** argv) {
         }
         else if (a == "-l" && i + 1 < argc) cmdLibs.push_back(argv[++i]);  // -l m
         else if (a == "--adt" && i + 1 < argc) adtOpt = argv[++i];  // adt 自定义实现
+        else if (a == "--target" && i + 1 < argc) loadProfile(argv[++i]);  // 交叉编译目标档
+        else if (a == "--builtins" && i + 1 < argc)                 // 目标适配 builtins 目录
+            g_builtinsOverride = argv[++i];
         else if (a.size() > 2 && a.compare(0, 2, "-l") == 0)
             cmdLibs.push_back(a.substr(2));                  // -lm 写法
         else if (a == "--build") mode = "build";             // 构建产物模式

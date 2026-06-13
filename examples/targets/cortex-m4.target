@@ -1,0 +1,27 @@
+# 目标档示例：Cortex-M4 裸机（无 OS，无托管 libc/线程）
+# 用法：scc fw.sc --build -o fw.bin --target examples/targets/cortex-m4.target \
+#                 --builtins path/to/m4-builtins
+#       （.bin/.hex 后缀触发 objcopy 转镜像；--builtins 指向目标适配的库实现）
+#
+# 裸机目标须自备启动文件/链接脚本（经 ldflags 传入）与目标适配 builtins
+# （把 print 等映射到 UART 而非 stdio）。
+
+# ---- 交叉工具链程序 ----
+cc      = arm-none-eabi-gcc
+ar      = arm-none-eabi-ar
+objcopy = arm-none-eabi-objcopy          # 把临时 .elf 转为 .bin/.hex
+
+# ---- 目标机器选项：同时进入编译与链接 ----
+target_flags = -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
+
+# ---- 编译/链接附加选项 ----
+cflags  = -ffreestanding -Os -ffunction-sections -fdata-sections
+ldflags = -nostartfiles -T linker.ld -Wl,--gc-sections startup_m4.o
+
+# ---- 平台行为 ----
+triple       = arm-none-eabi             # *-none-eabi → 平台表判定为裸机
+freestanding = 1                         # 裸机：无托管运行时（threads/debug 自动 none）
+
+# 裸机无法在本机直接运行：run 模式会报错，请用 --build 生成镜像后烧录/用 qemu-system 运行。
+# 如需在 qemu 整机模拟运行，可配置：
+# run = qemu-system-arm -M netduinoplus2 -nographic -kernel

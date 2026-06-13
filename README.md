@@ -1,7 +1,7 @@
 # sc 语言
 
-基于 C 的结构化语言。核心理念：程序即结构，由 `def`/`fnc`/`var`/`let` 四类程序结构对象构成树（另有 `rpc` 作为 `fnc` 的伪形参变体）。
-语言定义见 [syntax](syntax)，编译器参考手册见 [compiler.md](compiler.md)，VS Code 调试配置见 [debugging.md](debugging.md)。
+基于 C 的结构化语言。核心理念：程序即结构，由 `def`/`fnc`/`var`/`let` 四类程序结构对象构成树（另有 `rpc` 作为 `fnc` 的伪形参变体、以及 `tls` 作为 `var` 的线程模式变体）。
+语言定义见 [syntax](syntax)，编译器参考手册见 [compiler.md](compiler.md)，交叉编译参考见 [cross-compile.md](cross-compile.md)，VS Code 调试配置见 [debugging.md](debugging.md)。
 
 ## 定位：与 C 共生，而非取代
 
@@ -47,6 +47,11 @@ SCC_LIB=/opt/homebrew/lib ./build/scc app.sc -l curl -lm
 # 转译为 C 源码；有 @导出对象时额外生成同名 .h（feature1.h）
 ./build/scc ../examples/feature1.sc --emit-c -o feature1.c
 cc feature1.c -o feature1 && ./feature1
+
+# 交叉编译：把工具链整套换成目标工具链，配置写进 .target 目标档（详见 cross-compile.md）
+./build/scc app.sc --build -o app --target ../examples/targets/aarch64-linux.target
+./build/scc fw.sc  --build -o fw.bin --target ../examples/targets/cortex-m4.target \
+            --builtins boards/m4/builtins      # 裸机：.bin 镜像 + 目标适配库
 ```
 
 ## 路线

@@ -1,0 +1,22 @@
+# 目标档示例：64 位 ARM Linux（托管 OS，有 libc/线程）
+# 用法：scc app.sc --build -o app --target examples/targets/aarch64-linux.target
+#       scc app.sc        --target examples/targets/aarch64-linux.target   # run 模式经 run 模拟器执行
+#
+# 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
+
+# ---- 交叉工具链程序 ----
+cc      = aarch64-linux-gnu-gcc          # 目标 C 编译器（SCC_CC 覆盖）
+ar      = aarch64-linux-gnu-ar           # 静态库归档器（SCC_AR 覆盖）
+objcopy = aarch64-linux-gnu-objcopy      # 目标转换器（产 .bin/.hex 时用；SCC_OBJCOPY 覆盖）
+
+# ---- 目标机器选项：同时进入编译与链接两步 ----
+target_flags = -march=armv8-a            # 机器架构（SCC_TARGET_FLAGS 覆盖）
+sysroot      = /opt/sysroots/aarch64     # 目标 sysroot → --sysroot（SCC_SYSROOT 覆盖）
+
+# ---- 平台行为（可省略：triple 命中内置平台表则自动推导）----
+triple  = aarch64-linux-gnu              # 目标三元组，驱动平台表（SCC_TARGET_TRIPLE 覆盖）
+# threads = -lpthread                    # 线程库链接选项；linux 三元组已自动为 -lpthread，无需写
+# debug   = none                         # 链接后调试打包；非 macOS 目标自动 none
+
+# ---- 运行包装器（run 模式用模拟器在本机跑交叉产物）----
+run = qemu-aarch64 -L /opt/sysroots/aarch64
