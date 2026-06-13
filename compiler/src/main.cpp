@@ -928,6 +928,35 @@ int main(int argc, char** argv) {
             if (!writeTextFile(sofPath, sofHeaderSrc)) return 1;
         }
 
+        // 3f''. --emit-c 到文件：为每个 .sc 模块依赖生成同级 scm_<token>.h，
+        // 使输出目录自包含；用户编译时只需 -I <输出目录> -I <builtins>。
+        if (mode == "c" && !output.empty() && input != "-") {
+            std::unordered_map<std::string, UnitInfo> depUnits;
+            std::unordered_set<std::string> visiting;
+            std::string depErr;
+            if (loadUnitGraph(std::filesystem::path(input),
+                              depUnits, visiting, depErr)) {
+                const std::string rootKey = std::filesystem::weakly_canonical(
+                    std::filesystem::path(input)).string();
+                const std::filesystem::path outPath = output;
+                const std::filesystem::path outDir =
+                    outPath.has_parent_path() ? outPath.parent_path()
+                                              : std::filesystem::path(".");
+                for (auto& kv : depUnits) {
+                    if (kv.first == rootKey) continue;  // 根模块由 .c 自身提供
+                    const std::string token = moduleFileToken(kv.first);
+                    const std::string hname = token + ".h";
+                    std::string hsrc = emitCHeader(kv.second.prog,
+                                                   guardFromHeaderName(hname));
+                    if (hsrc.empty()) {
+                        const std::string g = guardFromHeaderName(hname);
+                        hsrc = "#ifndef " + g + "\n#define " + g + "\n#endif\n";
+                    }
+                    if (!writeTextFile((outDir / hname).string(), hsrc)) return 1;
+                }
+            }
+        }
+
     } catch (CompileError e) {
 
         // 从源码中提取指定行的文本，为编译错误添加源代码行诊断信息
