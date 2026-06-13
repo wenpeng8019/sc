@@ -3,7 +3,9 @@
 // ============================================================
 // 核心工作：
 //   1. 类型映射：sc 内置类型 → C 标准类型（i4→int32_t 等）
-//   2. 默认类型推断：无类型对象→char*，无类型指针→void*
+//   2. 默认类型推断：
+//        - 有初值的无类型 var/let：按初值字面量推断（见 inferLiteralType）
+//        - 其余无类型对象→char*，无类型指针→void*
 //   3. 函数类型展开：fnc name -> func_type 从函数类型表查找签名
 //   4. 输出顺序：类型定义 → 全局变量 → 函数原型 → 函数实现
 // 两遍扫描：第一遍输出类型/变量/原型，第二遍输出函数体。
@@ -31,6 +33,41 @@ std::string mapBase(const std::string& n) {
     };
     auto it = m.find(n);
     return it == m.end() ? n : it->second;
+}
+
+// 无类型 var/let 声明（var x: = 初值）时，依据初值字面量推断默认类型。
+// 规则：
+//   字符串字面量 "..."  → char*（ptr=1）
+//   字符字面量   '...'   → char
+//   浮点字面量   3.14    → 默认 f8（double，避免精度损失）；带 f/F 后缀 → f4
+//   整数字面量   42      → 默认 i4（32 位）；数值超出 32 位或带 l/L 后缀 → i8；
+//                          带 u/U 后缀取无符号 u4，超出 32 位 → u8
+// 穿透前缀正负号（var n: = -5）。返回 true 表示成功推断（填入 base/ptr），
+// false 表示初值非字面量，沿用旧默认规则（char*/void*）。
+bool inferLiteralType(const Expr& init, std::string& base, int& ptr) {
+    const Expr* e = &init;
+    while (e->kind == Expr::Unary && (e->op == "-" || e->op == "+") && e->a)
+        e = e->a.get();
+    switch (e->kind) {
+        case Expr::StrLit:  base = "char"; ptr = 1; return true;
+        case Expr::CharLit: base = "char"; ptr = 0; return true;
+        case Expr::FloatLit: {
+            bool f32 = e->text.find_first_of("fF") != std::string::npos;
+            base = f32 ? "f4" : "f8"; ptr = 0; return true;
+        }
+        case Expr::IntLit: {
+            const std::string& t = e->text;
+            bool uns = t.find_first_of("uU") != std::string::npos;
+            bool lng = t.find_first_of("lL") != std::string::npos;
+            std::string digits = t.substr(0, t.find_first_of("uUlL"));
+            unsigned long long mag = 0;
+            try { mag = std::stoull(digits, nullptr, 0); } catch (...) { mag = 0; }
+            if (uns) base = (lng || mag > 0xFFFFFFFFull) ? "u8" : "u4";
+            else     base = (lng || mag > 0x7FFFFFFFull) ? "i8" : "i4";
+            ptr = 0; return true;
+        }
+        default: return false;
+    }
 }
 
 bool endsWith(const std::string& s, const std::string& suffix) {
@@ -887,11 +924,25 @@ struct CGen {
     void emitVarDecls(const std::vector<Field>& decls, bool asConst,
                       bool isStatic = false, bool isTls = false) {
         for (auto& f : decls) {
-            regVar(f);
+            // 无类型 var/let（var x: = 初值）：依据初值字面量推断默认类型；
+            // 推断成功时跳过 emitDeclarator，按推断结果输出声明并登记轻量类型
+            std::string infBase; int infPtr = 0; bool inferred = false;
+            if (f.init && f.type.name.empty() && !f.type.hasInline
+                && f.type.fnKind == TypeRef::FncKind::None
+                && f.type.ptr == 0 && f.type.arrayDims.empty())
+                inferred = inferLiteralType(*f.init, infBase, infPtr);
+
+            if (inferred) (inFunc ? localsT : globalsT)[f.name] = VType{infBase, infPtr, 0};
+            else regVar(f);
             indent();
             if (isTls) out << "static TLS ";   // tls：必为 static（C 规范），TLS 宏见 platform.h
             else if (isStatic) out << "static ";
-            emitDeclarator(f, asConst);
+            if (inferred) {
+                if (asConst) out << "const ";
+                out << mapBase(infBase) << " ";
+                for (int i = 0; i < infPtr; i++) out << "*";
+                out << f.name;
+            } else emitDeclarator(f, asConst);
             if (f.init) {
                 out << " = ";
                 emitExpr(*f.init, true);
