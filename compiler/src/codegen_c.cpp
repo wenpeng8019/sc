@@ -13,6 +13,7 @@
 #include "codegen_c.h"
 #include "error.h"
 #include <cctype>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <sstream>
@@ -1531,6 +1532,21 @@ struct CGen {
         const std::string& h = d.name;
         if (endsWith(h, ".sc")) {
             const std::string key = d.origin.empty() ? h : d.origin;
+            // 带手写 C ABI 头的子项目模块（<root>/<name>/<name>.sc + 同目录 <name>.h，
+            // 如 builtins 的 adt/io）：直接引用其手写头，路径含根目录名以明确归属
+            // （<root>/<name>/<name>.h，如 "builtins/adt/adt.h"），随 -I <root的上级>
+            // 可见，无需生成/复制内部 scm_<token>.h。
+            const std::filesystem::path p(key);
+            const std::string stem = p.stem().string();
+            if (p.has_parent_path() && p.parent_path().filename() == stem &&
+                std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
+                const std::filesystem::path root = p.parent_path().parent_path();
+                const std::string rootName = root.empty() ? std::string()
+                                                          : root.filename().string();
+                out << "#include \"" << (rootName.empty() ? "" : rootName + "/")
+                    << stem << "/" << stem << ".h\"\n";
+                return;
+            }
             out << "#include \"" << moduleHeaderName(key) << "\"\n";
             return;
         }

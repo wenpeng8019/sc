@@ -287,6 +287,15 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 
 运行模式下每个模块单元也按同一机制生成接口头，模块间通过头文件连接。
 
+`inc x.sc` 依赖的 `#include` 生成规则：
+
+- 带手写 C ABI 头的子项目模块（`<root>/<name>/<name>.sc` + 同目录 `<name>.h`，
+  如 builtins 的 `adt`/`io`）→ `#include "<root>/<name>/<name>.h"`（含根目录名以
+  明确归属，如 `"builtins/adt/adt.h"`），随 `-I <root的上级>` 可见，不生成内部
+  `scm_<token>.h`；编译时同时加入 `-I <builtins>` 与 `-I <builtins的上级>`。
+- 其余用户模块 → `#include "scm_<token>.h"`（`<token>` 为路径转义的合法标识符）。
+  `--emit-c -o` 模式下，这些用户模块的接口头会写到输出 `.c` 同级目录，使其自包含。
+
 ### 5.8 链表结构体（def T: ~）与 chain 偏移注入
 
 - 解析期：`def T: ~ {}` 置 `Decl::linked`，并在字段表**末尾**追加两个

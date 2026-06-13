@@ -248,7 +248,13 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
     if (b.empty()) b = embeddedBuiltinsDir();
 #endif
 
-    if (!b.empty()) tc.cflags += " -I " + b.string();
+    if (!b.empty()) {
+        tc.cflags += " -I " + b.string();
+        // builtins 根的上级目录：使生成代码中带根名的引用（如
+        // #include "builtins/adt/adt.h"）可解析
+        const fs::path parent = b.parent_path();
+        if (!parent.empty() && parent != b) tc.cflags += " -I " + parent.string();
+    }
 }
 
 // 生成合法的 C 标识符作为模块文件名/头文件名 token（如输入路径 "foo/bar-baz.sc" → token "scm_foo_bar_baz"）
@@ -928,8 +934,10 @@ int main(int argc, char** argv) {
             if (!writeTextFile(sofPath, sofHeaderSrc)) return 1;
         }
 
-        // 3f''. --emit-c 到文件：为每个 .sc 模块依赖生成同级 scm_<token>.h，
+        // 3f''. --emit-c 到文件：为每个用户 .sc 模块依赖生成同级 scm_<token>.h，
         // 使输出目录自包含；用户编译时只需 -I <输出目录> -I <builtins>。
+        // 带手写 C ABI 头的子项目模块（builtins adt/io 等）由 .c 直接 #include
+        // "<name>/<name>.h"（随 -I <builtins> 可见），不复制其内部 scm 头。
         if (mode == "c" && !output.empty() && input != "-") {
             std::unordered_map<std::string, UnitInfo> depUnits;
             std::unordered_set<std::string> visiting;
@@ -944,6 +952,13 @@ int main(int argc, char** argv) {
                                               : std::filesystem::path(".");
                 for (auto& kv : depUnits) {
                     if (kv.first == rootKey) continue;  // 根模块由 .c 自身提供
+                    // 子项目契约模块（<dir>/<name>/<name>.sc + 同目录 <name>.h）跳过
+                    const std::filesystem::path mp = kv.second.path;
+                    const std::string mstem = mp.stem().string();
+                    if (mp.has_parent_path() &&
+                        mp.parent_path().filename() == mstem &&
+                        std::filesystem::exists(mp.parent_path() / (mstem + ".h")))
+                        continue;
                     const std::string token = moduleFileToken(kv.first);
                     const std::string hname = token + ".h";
                     std::string hsrc = emitCHeader(kv.second.prog,
