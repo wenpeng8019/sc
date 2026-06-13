@@ -64,6 +64,8 @@ static void usage() {
               << "  --ast      输出 AST JSON 树\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
+              << "             裸 -o 不带值时按输入文件名 + 模式后缀推导：\n"
+              << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
               << "  '-' 表示从 stdin 读入；'--' 之后的参数传递给被执行的程序\n";
 }
 
@@ -771,13 +773,20 @@ int main(int argc, char** argv) {
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
     std::vector<std::string> cmdLibs;         // -l 指定的链接库名
     std::string adtOpt;                       // --adt 指定的 adt 自定义实现
+    bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--") {                                     // 其后全部为程序参数
             for (i++; i < argc; i++) progArgs.push_back(argv[i]);
             break;
         }
-        else if (a == "-o" && i + 1 < argc) output = argv[++i];  // 输出文件（可选）
+        else if (a == "-o") {
+            // -o 后跟非选项值则为输出文件名；缺省（最后一个参数 / 后接选项 / 后接 '--'）
+            // 视为 bareO，最后按输入文件名 + 模式后缀推导输出路径
+            if (i + 1 < argc && argv[i + 1][0] != '-' && std::string(argv[i + 1]) != "--")
+                output = argv[++i];
+            else bareO = true;
+        }
         else if (a == "-l" && i + 1 < argc) cmdLibs.push_back(argv[++i]);  // -l m
         else if (a == "--adt" && i + 1 < argc) adtOpt = argv[++i];  // adt 自定义实现
         else if (a.size() > 2 && a.compare(0, 2, "-l") == 0)
@@ -791,6 +800,17 @@ int main(int argc, char** argv) {
         else { usage(); return 1; }
     }
     if (input.empty()) { usage(); return 1; }
+
+    // 裸 -o（未指定文件名）：按输入文件名 + 模式后缀推导输出路径，写入当前工作目录
+    //   --emit-c → .c     --ast → .json     --emit-sc → .out.sc     --build → 无后缀
+    //   run 模式：忽略 bareO（无中间产物）；stdin 输入：要求显式 -o <file>
+    if (bareO && output.empty() && input != "-") {
+        const std::string stem = std::filesystem::path(input).stem().string();
+        if (mode == "c")        output = stem + ".c";
+        else if (mode == "ast") output = stem + ".json";
+        else if (mode == "sc")  output = stem + ".out.sc";
+        else if (mode == "build") output = stem;
+    }
 
     // ---- 2. 读取源码（文件或 stdin）----
     std::stringstream ss;
