@@ -574,8 +574,13 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         const std::filesystem::path hpath = tmpDir / hname;
         const std::filesystem::path opath = tmpDir / (token + ".o");
 
-        const std::string csrc = emitC(kv.second.prog, kv.first);  // 带 #line 源码映射
+        // stringify 关键字：按类型生成的 JSON 格式化器写入独立 <token>_stringify.h，
+        // 由本单元 .c 在类型定义之后 #include（-I tmpDir 使其可见）
+        const std::string sofName = token + "_stringify.h";
+        std::string sofSrc;
+        const std::string csrc = emitC(kv.second.prog, kv.first, sofName, &sofSrc);  // 带 #line 源码映射
         if (!writeTextFile(cpath, csrc)) return 1;
+        if (!sofSrc.empty() && !writeTextFile(tmpDir / sofName, sofSrc)) return 1;
 
         std::string hsrc = emitCHeader(kv.second.prog, guardFromHeaderName(hname));
         if (hsrc.empty()) {
@@ -810,9 +815,12 @@ int main(int argc, char** argv) {
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
+        std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
         auto c = mode == "ast" ? emitAstJson(prog)                  // AST→JSON
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
-                               : emitC(prog);                       // AST→C（run/--emit-c）
+               : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h
+                     ? emitC(prog, "", "stringify.h", &sofHeaderSrc)
+                     : emitC(prog);                                 // run/stdout：内联自包含
 
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
         if (mode == "run") {
@@ -886,6 +894,13 @@ int main(int argc, char** argv) {
         // 3f. 输出结果到文件或 stdout
         if (output.empty()) std::cout << c;
         else if (!writeTextFile(output, c)) return 1;
+
+        // 3f'. --emit-c 到文件且程序使用了 stringify：在同目录写出 stringify.h（由 .c #include）
+        if (mode == "c" && !output.empty() && !sofHeaderSrc.empty()) {
+            std::filesystem::path sofPath =
+                std::filesystem::path(output).parent_path() / "stringify.h";
+            if (!writeTextFile(sofPath, sofHeaderSrc)) return 1;
+        }
 
     } catch (CompileError e) {
 

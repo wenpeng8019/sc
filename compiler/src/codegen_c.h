@@ -31,6 +31,13 @@
 // 传绝对路径以保证调试器在任意工作目录都能找到源文件。
 std::string emitC(const Program& prog, const std::string& srcFile = "");
 
+// emitC 变体：程序使用 stringify(...) 时，将按类型生成的 JSON 格式化器写入独立头文件。
+//   stringifyHeaderName 非空且 stringifyHeaderOut 非空：格式化器写入 *stringifyHeaderOut
+//   （含 include guard），生成的 .c 在类型定义之后 #include 该头文件名；程序未使用
+//   stringify 时 *stringifyHeaderOut 为空。stringifyHeaderName 为空时回退为内联进 .c。
+std::string emitC(const Program& prog, const std::string& srcFile,
+                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut);
+
 // 生成 C 头文件内容：仅包含 @导出对象的声明
 //   导出类型 → 完整 typedef；导出变量/常量 → extern 声明；导出函数 → 原型
 // 程序中没有任何 @导出对象时返回空字符串。

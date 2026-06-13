@@ -72,7 +72,7 @@
                 },
                 {
                     "name": "keyword.control.io.sc",
-                    "match": "\\b(print)\\b|\\bstring\\b(?=\\s*\\((?!\\s*\\)))"
+                    "match": "\\b(print|stringify)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",

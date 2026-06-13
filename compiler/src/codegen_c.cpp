@@ -96,7 +96,7 @@ struct CGen {
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
     int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + sc_print 原型）
-    int  usesStrof = 0;         // string(值) 格式化关键字首次出现行号（需 adt string 可见）
+    int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -214,10 +214,10 @@ struct CGen {
     void scanExprForNew(const Expr& e) {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
-        // print / string 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
+        // print / stringify 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "print" && !usesPrint) usesPrint = e.line;
-            if (e.a->text == "string" && !e.args.empty() && !usesStrof) usesStrof = e.line;
+            if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
         }
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
@@ -261,11 +261,12 @@ struct CGen {
         }
     }
 
-    // ---------------- string 格式化关键字：按静态类型生成格式化器 ----------------
-    // string(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
-    // string(expr, 缓存, 大小) → sc_strofb__KEY(expr, 缓存, 大小)，在给定缓存内
+    // ---------------- stringify 格式化关键字：按静态类型生成格式化器 ----------------
+    // stringify(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
+    // stringify(expr, 缓存, 大小) → sc_strofb__KEY(expr, 缓存, 大小)，在给定缓存内
     // 构建（截断保证 NUL 结尾），返回 char*（即缓存首址，无需 drop）。
-    // 包装函数/聚合格式化器在函数体输出后按需生成（emitSofHelpers 回填）。
+    // 输出为 JSON 字符串格式（键加双引号）。按类型生成的静态内联格式化器在函数体
+    // 输出后回填（emitSofHelpers）：开启头文件模式时写入独立 stringify.h，由 .c include。
     struct SofReq {
         std::string key;                // 包装函数名后缀（类型唯一键）
         std::string cParam;             // 包装函数形参 C 声明
@@ -276,6 +277,10 @@ struct CGen {
     };
     std::map<std::string, SofReq> sofReqs;  // key → 顶层格式化请求
     std::set<std::string> sofAggrs;         // 需生成 sc__sof_T 的聚合（不含 string）
+    // 非空时：stringify 支撑代码写入独立头文件（此名），.c 在回填处 #include 它；
+    // 空时回退为内联进 .c（--emit-c 输出到 stdout 时保持单文件自包含）。
+    std::string sofHeaderName;
+    std::string sofHeaderOut;           // 头文件模式下回填生成的头文件全文
 
     // 穿透别名得到最终类型名（最多 8 层防环）
     std::string resolveAliasName(std::string n) const {
@@ -336,12 +341,12 @@ struct CGen {
     // string 格式化调用点：校验类型并登记格式化请求，输出包装函数调用
     void emitStrofCall(const Expr& e) {
         if (e.args.size() != 1 && e.args.size() != 3)
-            throw CompileError{"string(值[, 缓存, 大小]) 需要 1 或 3 个实参", e.line};
+            throw CompileError{"stringify(值[, 缓存, 大小]) 需要 1 或 3 个实参", e.line};
         if (!aggrOf("string"))
-            throw CompileError{"string(...) 格式化依赖内置 string，请先 inc adt.sc", e.line};
+            throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", e.line};
         VType vt;
         if (!exprVType(*e.args[0], vt))
-            throw CompileError{"string(...) 无法推断实参类型", e.line};
+            throw CompileError{"stringify(...) 无法推断实参类型", e.line};
         SofReq r;
         r.name = vt.name;
         r.ptr = vt.ptr;
@@ -349,11 +354,11 @@ struct CGen {
             if (!exprDims(*e.args[0], r.dims) || (int)r.dims.size() != vt.arr)
                 throw CompileError{"string(...) 无法确定数组维度", e.line};
             if (r.dims.size() > 1)
-                throw CompileError{"string(...) 暂不支持多维数组", e.line};
+                throw CompileError{"stringify(...) 暂不支持多维数组", e.line};
         }
         const Decl* sd = aggrOf(vt.name);
         if (r.dims.empty() && vt.ptr == 0 && !sd && !scalarClass(vt.name))
-            throw CompileError{"string(...) 不支持该类型：" +
+            throw CompileError{"stringify(...) 不支持该类型：" +
                 (vt.name.empty() ? std::string("(无类型)") : vt.name), e.line};
         // 类型唯一键：规范名 + _p（每层指针）+ _a维度
         std::string key = sd ? sd->name
@@ -422,9 +427,27 @@ struct CGen {
             return;
         }
         if (ptr > 0) {
+            const Decl* sd = aggrOf(name);
             pad();
-            if (sc == 'c' && ptr == 1) out << "sc__sof_cstr(_o, " << lv << ");\n";
-            else out << "sc__sof_ptr(_o, (const void *)(" << lv << "));\n";
+            if (sc == 'c' && ptr == 1) {
+                out << "sc__sof_cstr(_o, " << lv << ");\n";          // char* → "文本"
+            } else if (ptr == 1 && sd && sd->name != "string") {
+                // 结构体一级指针：类型名@地址（不深递归）
+                out << "sc__sof_named_ptr(_o, \"" << sd->name << "\", (const void *)("
+                    << lv << "));\n";
+            } else if (ptr == 1 && sc && sc != 'c') {
+                // 标量一级指针：&值（nil → nil）
+                out << "if (!(" << lv << ")) string_append(_o, \"nil\");\n";
+                pad();
+                switch (sc) {
+                    case 'i': out << "else sc__sof_amp_i64(_o, (long long)(*(" << lv << ")));\n"; break;
+                    case 'u': out << "else sc__sof_amp_u64(_o, (unsigned long long)(*(" << lv << ")));\n"; break;
+                    case 'f': out << "else sc__sof_amp_f64(_o, (double)(*(" << lv << ")));\n"; break;
+                    case 'b': out << "else sc__sof_amp_bool(_o, (unsigned char)(*(" << lv << ")));\n"; break;
+                }
+            } else {
+                out << "sc__sof_ptr(_o, (const void *)(" << lv << "));\n";  // void*/多级/string* → 0x地址
+            }
             return;
         }
         if (sc) {
@@ -441,18 +464,19 @@ struct CGen {
         const Decl* sd = aggrOf(name);
         if (sd && sd->name == "string") { pad(); out << "sc__sof_str(_o, &(" << lv << "));\n"; return; }
         if (sd) { pad(); out << "sc__sof_" << sd->name << "(_o, &(" << lv << "));\n"; return; }
-        pad(); out << "string_append(_o, \"?\");\n";
+        pad(); out << "string_append(_o, \"null\");\n";
     }
 
-    // 聚合格式化器：{字段: 值, ...}（synthetic/函数指针字段跳过；联合体按全部成员输出）
+    // 聚合格式化器：{"字段": 值, ...}（JSON：键加双引号；synthetic/函数指针字段跳过）
     void emitSofAggrBody(const Decl& sd) {
         out << "static void sc__sof_" << sd.name << "(string *_o, " << sd.name << " *_v) {\n"
             << "    string_append(_o, \"{\");\n";
         bool first = true;
         for (auto& f : sd.fields) {
             if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None) continue;
-            out << "    string_append(_o, \"" << (first ? "" : ", ") << f.name << ": \");\n";
-            if (f.type.hasInline) out << "    string_append(_o, \"?\");\n";
+            out << "    string_append(_o, \"" << (first ? "" : ", ")
+                << "\\\"" << f.name << "\\\": \");\n";
+            if (f.type.hasInline) out << "    string_append(_o, \"null\");\n";
             else emitSofValue("_v->" + f.name, f.type.name, f.type.ptr, f.type.arrayDims, 0, 1);
             first = false;
         }
@@ -489,7 +513,21 @@ struct CGen {
     // string 格式化支撑代码回填：原语 + 聚合格式化器 + 顶层包装
     void emitSofHelpers() {
         if (sofReqs.empty()) return;
-        out << "/* ---- string 格式化关键字支撑：格式化原语与按类型生成的格式化器 ---- */\n"
+        // 头文件模式：先把支撑代码生成到临时流，包上 include guard 后存入
+        // sofHeaderOut，并在当前位置向 .c 输出 #include；否则直接内联进 .c。
+        std::ostringstream savedOut;
+        const bool toHeader = !sofHeaderName.empty();
+        if (toHeader) {
+            savedOut = std::move(out);
+            out = std::ostringstream();
+            std::string guard;
+            for (char c : sofHeaderName) guard += std::isalnum((unsigned char)c)
+                ? (char)std::toupper((unsigned char)c) : '_';
+            out << "#ifndef " << guard << "\n#define " << guard << "\n"
+                << "/* 由 scc 生成：stringify 关键字按类型生成的 JSON 格式化器。\n"
+                   "   需在 string 类型与各结构体 typedef 之后 #include（由生成的 .c 自动完成）。 */\n";
+        }
+        out << "/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */\n"
             << "static inline void sc__sof_i64(string *_o, long long _v) {\n"
             << "    char _b[24]; snprintf(_b, sizeof(_b), \"%lld\", _v); string_append(_o, _b); }\n"
             << "static inline void sc__sof_u64(string *_o, unsigned long long _v) {\n"
@@ -507,6 +545,19 @@ struct CGen {
             << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
             << "    char _b[24]; snprintf(_b, sizeof(_b), \"0x%llx\", (unsigned long long)(uintptr_t)_v);\n"
             << "    string_append(_o, _b); }\n"
+            << "static inline void sc__sof_named_ptr(string *_o, const char *_tn, const void *_v) {\n"
+            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
+            << "    char _b[28]; snprintf(_b, sizeof(_b), \"@0x%llx\", (unsigned long long)(uintptr_t)_v);\n"
+            << "    string_append_char(_o, '\"'); string_append(_o, (char *)_tn);\n"
+            << "    string_append(_o, _b); string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_amp_i64(string *_o, long long _v) {\n"
+            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%lld\\\"\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_u64(string *_o, unsigned long long _v) {\n"
+            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%llu\\\"\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_f64(string *_o, double _v) {\n"
+            << "    char _b[44]; snprintf(_b, sizeof(_b), \"\\\"&%g\\\"\", _v); string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_bool(string *_o, unsigned char _v) {\n"
+            << "    string_append(_o, _v ? \"\\\"&true\\\"\" : \"\\\"&false\\\"\"); }\n"
             << "static inline void sc__sof_str(string *_o, string *_v) {\n"
             << "    string_append_char(_o, '\"');\n"
             << "    if (_v->data) string_append_n(_o, _v->data, _v->size);\n"
@@ -522,6 +573,12 @@ struct CGen {
         if (!sofAggrs.empty()) out << "\n";
         for (auto& n : sofAggrs) emitSofAggrBody(*aggrs.at(n));
         for (auto& kv : sofReqs) emitSofWrapper(kv.second);
+        if (toHeader) {
+            out << "#endif\n";
+            sofHeaderOut = out.str();
+            out = std::move(savedOut);
+            out << "#include \"" << sofHeaderName << "\"\n\n";
+        }
     }
 
     // 查找顶层方法：类型名（穿透别名）→ 方法 Decl（未找到 nullptr）
@@ -814,10 +871,10 @@ struct CGen {
                     out << ")";
                     break;
                 }
-                // string 格式化关键字：string(值) → adt string；string(值, 缓存, 大小) → char*
+                // stringify 格式化关键字：stringify(值) → adt string；stringify(值, 缓存, 大小) → char*
                 // （无参 string() 走上面的 T() 堆构造糖；被同名定义遮蔽时按普通调用）
-                if (e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
-                    && !localsT.count("string") && !globalsT.count("string") && !funcs.count("string")) {
+                if (e.a->kind == Expr::Ident && e.a->text == "stringify" && !e.args.empty()
+                    && !localsT.count("stringify") && !globalsT.count("stringify") && !funcs.count("stringify")) {
                     emitStrofCall(e);
                     break;
                 }
@@ -1551,9 +1608,9 @@ struct CGen {
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
             out << "extern void sc_print(const char *, ...);\n\n";
         }
-        // string 格式化关键字：依赖 adt string
-        if (usesStrof && !funcs.count("string") && !aggrOf("string"))
-            throw CompileError{"string(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
+        // stringify 格式化关键字：依赖 adt string
+        if (usesStrof && !funcs.count("stringify") && !aggrOf("string"))
+            throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
         if (usesRun) {
@@ -1692,6 +1749,16 @@ std::string emitC(const Program& prog, const std::string& srcFile) {
     CGen g(prog);
     g.srcFile = srcFile;
     return g.run();
+}
+
+std::string emitC(const Program& prog, const std::string& srcFile,
+                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut) {
+    CGen g(prog);
+    g.srcFile = srcFile;
+    g.sofHeaderName = stringifyHeaderName;
+    std::string c = g.run();
+    if (stringifyHeaderOut) *stringifyHeaderOut = g.sofHeaderOut;
+    return c;
 }
 
 std::string emitCHeader(const Program& prog, const std::string& guardName) {

@@ -5,8 +5,8 @@
  *   - 输出 stdout：HH:MM:SS.mmm L| 文本（自动补换行）
  *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取
  *
- * string(值[, 缓存, 大小]) 格式化关键字由编译器按静态类型生成格式化器
- * （依赖 adt string），不经由本契约。
+ * stringify(值[, 缓存, 大小]) JSON 格式化关键字由编译器按静态类型生成格式化器
+ * （写入独立 stringify.h，依赖 adt string），不经由本契约。
  */
 #ifndef SC_IO_H
 #define SC_IO_H

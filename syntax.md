@@ -692,7 +692,7 @@ var tab[2][3]: i4 = {
 }
 ```
 
-### 10.3 print 与 string(...) 格式化（io 内置关键字）
+### 10.3 print 与 stringify(...) 格式化（io 内置关键字）
 
 `print` 是 C 风格日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）：
 
@@ -708,27 +708,30 @@ print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
 - 输出格式 `HH:MM:SS.mmm L| 文本`，自动换行，单次 fprintf 保证多线程不串行。
 - 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
 
-`string(值)` 括号非空时为格式化关键字（区别于类型 `string` 与堆构造
-`string()`）：按实参的静态类型生成格式化代码，返回内置 `string`
-（需 `inc adt.sc`，调用方负责 `drop`）；三参形态 `string(值, 缓存, 大小)`
-在给定缓存内构建（截断保证 NUL 结尾），返回 `char&` 即缓存首址，无需 drop：
+`stringify(值)` 是 JSON 字符串格式化关键字（区别于类型 `string` 与堆构造
+`string()`）：按实参的静态类型生成格式化代码，返回内置 `string`（需 `inc adt.sc`，
+调用方负责 `drop`）；三参形态 `stringify(值, 缓存, 大小)` 在给定缓存内构建
+（截断保证 NUL 结尾），返回 `char&` 即缓存首址，无需 drop。转 C 时，按类型生成的
+静态内联格式化器写入独立的 `stringify.h`，由生成的 `.c` 在类型定义之后 `#include`：
 
 ```sc
-var s: string = string(t)           # {id: 1, name: "AB", pos: {x: 3, y: 4}}
+var s: string = stringify(t)        # {"id": 1, "name": "AB", "pos": {"x": 3, "y": 4}}
 print("t=%s", s.cstr())
 s.drop()
 
 var b[256]: char
-print("t=%s", string(t, b, 256))    # 缓存形态：返回 char&，无堆分配交接
+print("t=%s", stringify(t, b, 256)) # 缓存形态：返回 char&，无堆分配交接
 ```
 
-格式化规则：整数/浮点→数字（枚举按整数）；`bool`→true/false；`char`→'a'；
-`char&`→"文本"（nil→nil）；其他指针→十六进制地址；结构/联合→`{字段: 值, ...}`
-递归展开（一级指针自动解引用，nil→"nil"；函数指针/合成字段跳过）；
-一维数组→`[v, v, ...]`（char 一维数组按文本加引号）；`string`→"内容"。
+格式化规则（输出合法 JSON，对象键加双引号）：整数/浮点→数字（枚举按整数）；
+`bool`→true/false；`char`→'a'；`char&` / char 一维数组→"文本"；`string`→"内容"；
+结构/联合→`{"字段": 值, ...}` JSON 对象（函数指针/合成字段跳过），其中
+子成员为结构体（值）递归展开，成员为**结构体指针**→`"类型名@0x地址"`（不深递归），
+成员为**标量指针**→`"&值"`（nil→nil），其它指针（`void&`/多级）→`"0x地址"`；
+一维数组→`[v, v, ...]`；顶层实参为结构体一级指针时自动解引用展开内容（nil→"nil"）。
 暂不支持多维数组。
 
-`print` / `string(...)` 是上下文关键字：若作用域内存在同名函数/变量，
+`print` / `stringify(...)` 是上下文关键字：若作用域内存在同名函数/变量，
 按普通标识符解析。
 
 ## 11. 语句与控制流
@@ -964,7 +967,7 @@ var a:i1
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `chain` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
 - 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）；成员访问位提供 `prev`/`next` 上下文关键字
-- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`string(值[, 缓存, 大小])` 按静态类型格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`）
+- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`stringify(值[, 缓存, 大小])` 按静态类型 JSON 格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`，转 C 时生成独立 `stringify.h`）
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
 

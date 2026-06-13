@@ -238,8 +238,8 @@ struct Checker {
                     && globals.find(e.a->text) == globals.end()
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
-                // string 格式化关键字：string(值)→string，string(值,缓存,大小)→char&
-                if (e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
+                // stringify 格式化关键字：stringify(值)→string，stringify(值,缓存,大小)→char&
+                if (e.a->kind == Expr::Ident && e.a->text == "stringify" && !e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()) {
                     for (auto& a : e.args) (void)inferExpr(*a, locals, line);
