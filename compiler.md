@@ -305,9 +305,9 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 ### 5.9 print 与 stringify(...) 格式化关键字
 
 - `print(fmt, ...)`：成员表/全局表/函数表均无 `print` 时按关键字处理，
-  生成 `sc_print(fmt, ...)` 调用并在单元头部输出 extern 原型；要求单元
+  生成 `print(fmt, ...)` 调用并在单元头部输出 extern 原型；要求单元
   `inc io.sc`（拉入 `builtins/io/io_impl.c` 链接），否则编译报错。
-  级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `sc_print` 内完成。
+  级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `print` 内完成。
 - `stringify(值[, 缓存, 大小])`：JSON 格式化关键字（空括号 `string()`
   仍走 T() 堆构造糖；同名定义遮蔽时按普通调用），要求 `inc adt.sc`（依赖内置
   `string`）。代码生成按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记

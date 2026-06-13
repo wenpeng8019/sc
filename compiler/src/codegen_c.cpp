@@ -95,7 +95,7 @@ struct CGen {
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
-    int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + sc_print 原型）
+    int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + print 原型）
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
@@ -858,12 +858,12 @@ struct CGen {
                     out << td->name << "__new()";
                     break;
                 }
-                // print 关键字：C 风格日志输出（io 子项目 sc_print，未被同名定义遮蔽时）
+                // print 关键字：C 风格日志输出（io 子项目 print，未被同名定义遮蔽时）
                 if (e.a->kind == Expr::Ident && e.a->text == "print"
                     && !localsT.count("print") && !globalsT.count("print") && !funcs.count("print")) {
                     if (e.args.empty())
                         throw CompileError{"print 需要格式串实参", e.line};
-                    out << "sc_print(";
+                    out << "print(";
                     for (size_t i = 0; i < e.args.size(); i++) {
                         if (i) out << ", ";
                         emitExpr(*e.args[i], true);
@@ -1599,14 +1599,14 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
 
-        // print 关键字：需 io 模块实现 sc_print（inc io.sc 参与链接）
+        // print 关键字：需 io 模块实现 print（inc io.sc 参与链接）
         if (usesPrint && !funcs.count("print")) {
             bool hasIo = false;
             for (auto& d : prog.decls)
                 if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
             if (!hasIo)
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
-            out << "extern void sc_print(const char *, ...);\n\n";
+            out << "extern void print(const char *, ...);\n\n";
         }
         // stringify 格式化关键字：依赖 adt string
         if (usesStrof && !funcs.count("stringify") && !aggrOf("string"))

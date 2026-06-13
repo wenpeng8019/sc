@@ -26,7 +26,7 @@ static int sc_log_level(void) {
     return s_level;
 }
 
-void sc_print(const char *fmt, ...) {
+void print(const char *fmt, ...) {
     if (!fmt) return;
 
     /* "X:" 级别前缀 */

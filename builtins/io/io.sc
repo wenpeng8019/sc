@@ -3,7 +3,7 @@
 #
 # 用法：inc io.sc
 #
-# print —— 日志输出（语言关键字，编译器生成 sc_print 调用）：
+# print —— 日志输出（语言关键字，编译器生成 print 调用）：
 #   print("x = %d", x)          # C printf 风格格式化
 #   print("E: open %s 失败", p) # fmt 前缀 "X:" 指定级别，X ∈ F/E/W/I/D/V
 #                               # F=致命 E=错误 W=警告 I=状态 D=调试(默认) V=详尽

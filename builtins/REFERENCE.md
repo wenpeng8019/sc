@@ -305,7 +305,7 @@ fnc main: i4
 
 ### print —— C 风格日志输出（关键字）
 
-`print(fmt, ...)` 由编译器直接生成对 `sc_print`（io_impl.c，C ABI 见 io.h）
+`print(fmt, ...)` 由编译器直接生成对 `print`（io_impl.c，C ABI 见 io.h）
 的调用：
 
 ```sc
