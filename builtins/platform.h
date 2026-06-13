@@ -19,6 +19,8 @@
 #include <string.h>
 #include <time.h>
 
+typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
+
 /* ---------------- 平台判定 ---------------- */
 
 /* defined(_WIN32) 也包含 defined(_WIN64) */
