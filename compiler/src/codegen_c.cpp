@@ -707,7 +707,8 @@ struct CGen {
                             }
                         };
 
-                        auto emitTypedCast = [&](const Expr& castExpr) {
+                        // base(o: T) 直接把节点首址重解释为 T*
+                        auto emitBaseCast = [&](const Expr& castExpr) {
                             out << "((" << mapBase(castExpr.text);
                             for (int i = 0; i < castExpr.castPtr + 1; i++) out << "*";
                             out << ")(";
@@ -716,7 +717,7 @@ struct CGen {
                         };
 
                         if (kw == "base") {
-                            if (typed) { emitTypedCast(*e.args[0]); break; }
+                            if (typed) { emitBaseCast(*e.args[0]); break; }
                             if (hasVt && sd && sd->linked) {
                                 const Field* rf = firstRealField(sd);
                                 if (rf) {
@@ -739,10 +740,21 @@ struct CGen {
                         }
 
                         if (kw == "prev" || kw == "next") {
-                            if (typed) { emitTypedCast(*e.args[0]); break; }
-                            out << "((void *)*(void **)(";
+                            // _prev 在偏移 0，_next 在偏移 sizeof(void*)
+                            const char* off = kw == "prev" ? "0" : "sizeof(void *)";
+                            if (typed) {
+                                // next(o: T) → 读链接字段并转为 T*
+                                const Expr& c = *e.args[0];
+                                out << "((" << mapBase(c.text);
+                                for (int i = 0; i < c.castPtr + 1; i++) out << "*";
+                                out << ")*(void **)((char *)(";
+                                emitRawSrc();
+                                out << ") + " << off << "))";
+                                break;
+                            }
+                            out << "((void *)*(void **)((char *)(";
                             emitRawSrc();
-                            out << "))";
+                            out << ") + " << off << "))";
                             break;
                         }
                     }

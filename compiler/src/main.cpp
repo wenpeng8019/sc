@@ -905,7 +905,7 @@ int main(int argc, char** argv) {
                     // 去掉行尾空白
                     while (!e.srcLine.empty() && (e.srcLine.back() == '\r' || e.srcLine.back() == '\n'))
                         e.srcLine.pop_back();
-                    return;
+                    break;
                 }
                 if (src[i] == '\n') curLine++;
             }
