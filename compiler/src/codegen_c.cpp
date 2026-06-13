@@ -262,8 +262,8 @@ struct CGen {
     }
 
     // ---------------- stringify 格式化关键字：按静态类型生成格式化器 ----------------
-    // stringify(expr) → sc_strof__KEY(expr)，返回 adt string（调用者负责 drop）。
-    // stringify(expr, 缓存, 大小) → sc_strofb__KEY(expr, 缓存, 大小)，在给定缓存内
+    // stringify(expr) → stringify_KEY(expr)，返回 adt string（调用者负责 drop）。
+    // stringify(expr, 缓存, 大小) → stringify_KEY_buf(expr, 缓存, 大小)，在给定缓存内
     // 构建（截断保证 NUL 结尾），返回 char*（即缓存首址，无需 drop）。
     // 输出为 JSON 字符串格式（键加双引号）。按类型生成的静态内联格式化器在函数体
     // 输出后回填（emitSofHelpers）：开启头文件模式时写入独立 stringify.h，由 .c include。
@@ -272,7 +272,7 @@ struct CGen {
         std::string cParam;             // 包装函数形参 C 声明
         std::string name;               // sc 类型名
         int ptr = 0;                    // 指针层数
-        bool needBuf = false;           // 需生成缓存变体 sc_strofb__KEY
+        bool needBuf = false;           // 需生成缓存变体 stringify_KEY_buf
         std::vector<std::string> dims;  // 数组维度（仅一维）
     };
     std::map<std::string, SofReq> sofReqs;  // key → 顶层格式化请求
@@ -377,7 +377,7 @@ struct CGen {
         auto it = sofReqs.find(r.key);
         if (it == sofReqs.end()) sofReqs[r.key] = r;
         else if (buf) it->second.needBuf = true;  // 已登记请求按需追加缓存变体
-        out << (buf ? "sc_strofb__" : "sc_strof__") << r.key << "(";
+        out << "stringify_" << r.key << (buf ? "_buf" : "") << "(";
         emitExpr(*e.args[0], true);
         if (buf) {
             out << ", ";
@@ -483,9 +483,9 @@ struct CGen {
         out << "    string_append(_o, \"}\");\n}\n\n";
     }
 
-    // 顶层包装：string sc_strof__KEY(T) —— 构造 string、格式化、按值返回
+    // 顶层包装：string stringify_KEY(T) —— 构造 string、格式化、按值返回
     void emitSofWrapper(const SofReq& r) {
-        out << "static string sc_strof__" << r.key << "(" << r.cParam << ") {\n"
+        out << "static string stringify_" << r.key << "(" << r.cParam << ") {\n"
             << "    string _s;\n    string_init(&_s);\n    string *_o = &_s;\n";
         const Decl* sd = aggrOf(r.name);
         if (r.dims.empty() && r.ptr == 1 && sd) {
@@ -498,11 +498,11 @@ struct CGen {
         }
         out << "    return _s;\n}\n\n";
         if (!r.needBuf) return;
-        // 缓存变体：char *sc_strofb__KEY(T, 缓存, 大小) —— 截断拷贝进缓存，返回缓存首址
-        out << "static char *sc_strofb__" << r.key << "(" << r.cParam
+        // 缓存变体：char *stringify_KEY_buf(T, 缓存, 大小) —— 截断拷贝进缓存，返回缓存首址
+        out << "static char *stringify_" << r.key << "_buf(" << r.cParam
             << ", char *_buf, uint64_t _n) {\n"
             << "    if (!_buf || !_n) return _buf;\n"
-            << "    string _s = sc_strof__" << r.key << "(_v);\n"
+            << "    string _s = stringify_" << r.key << "(_v);\n"
             << "    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;\n"
             << "    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);\n"
             << "    _buf[_l] = 0;\n"
