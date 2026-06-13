@@ -64,7 +64,7 @@ static void usage() {
               << "  --ast      输出 AST JSON 树\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
-              << "             裸 -o 不带值时按输入文件名 + 模式后缀推导：\n"
+              << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
               << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
               << "  '-' 表示从 stdin 读入；'--' 之后的参数传递给被执行的程序\n";
 }
@@ -801,15 +801,21 @@ int main(int argc, char** argv) {
     }
     if (input.empty()) { usage(); return 1; }
 
-    // 裸 -o（未指定文件名）：按输入文件名 + 模式后缀推导输出路径，写入当前工作目录
+    // 裸 -o（未指定文件名）：按输入文件名 + 模式后缀推导输出路径，写入输入文件所在目录
     //   --emit-c → .c     --ast → .json     --emit-sc → .out.sc     --build → 无后缀
     //   run 模式：忽略 bareO（无中间产物）；stdin 输入：要求显式 -o <file>
     if (bareO && output.empty() && input != "-") {
-        const std::string stem = std::filesystem::path(input).stem().string();
-        if (mode == "c")        output = stem + ".c";
-        else if (mode == "ast") output = stem + ".json";
-        else if (mode == "sc")  output = stem + ".out.sc";
-        else if (mode == "build") output = stem;
+        const std::filesystem::path ip = input;
+        const std::string stem = ip.stem().string();
+        std::string name;
+        if (mode == "c")        name = stem + ".c";
+        else if (mode == "ast") name = stem + ".json";
+        else if (mode == "sc")  name = stem + ".out.sc";
+        else if (mode == "build") name = stem;
+        if (!name.empty()) {
+            const auto dir = ip.has_parent_path() ? ip.parent_path() : std::filesystem::path(".");
+            output = (dir / name).string();
+        }
     }
 
     // ---- 2. 读取源码（文件或 stdin）----
