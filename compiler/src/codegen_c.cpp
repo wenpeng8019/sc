@@ -1528,6 +1528,7 @@ struct CGen {
     //   inc stdio.h    → #include <stdio.h>
     //   inc "my.h"     → #include "my.h"
     //   inc <stdio.h>  → #include <stdio.h>（原样）
+    // platform.h 已带入的标准头（stdio/stdlib/string 等）会被跳过，避免重复引入。
     void emitInclude(const Decl& d) {
         const std::string& h = d.name;
         if (endsWith(h, ".sc")) {
@@ -1549,6 +1550,17 @@ struct CGen {
             }
             out << "#include \"" << moduleHeaderName(key) << "\"\n";
             return;
+        }
+        // platform.h 已带入的标准 C 头：跳过（避免与文件头部 #include "platform.h" 重复）
+        {
+            static const std::unordered_set<std::string> kPlatformHdrs = {
+                "stdint.h", "stddef.h", "stdbool.h", "stdarg.h",
+                "stdio.h", "stdlib.h", "string.h", "time.h",
+            };
+            std::string bare = h;
+            if (!bare.empty() && (bare.front() == '<' || bare.front() == '"'))
+                bare = bare.substr(1, bare.size() - 2);
+            if (kPlatformHdrs.count(bare)) return;
         }
         if (!h.empty() && (h[0] == '"' || h[0] == '<')) out << "#include " << h << "\n";
         else out << "#include <" << h << ">\n";
