@@ -19,177 +19,222 @@
 //   3. unique_ptr 明确所有权 —— Expr/Stmt/Decl 均为独占所有权
 // ============================================================
 
-// ---------- 表达式 ----------
-// 表达式树是 AST 中最细粒度的节点。所有运算、字面量、调用都是表达式。
+// 前向声明
+struct TypeRef;
+struct Field;
 struct Expr;
+struct Decl;
+struct Stmt;
+
 using ExprPtr = std::unique_ptr<Expr>;
+using DeclPtr = std::unique_ptr<Decl>;
+using StmtPtr = std::unique_ptr<Stmt>;
 
-struct Expr {
-    enum Kind {
-        // 叶子节点 —— 语法分析遇到终结符时直接创建
-        IntLit,     // 整数字面量   eg. 42, 0xFF
-        FloatLit,   // 浮点字面量   eg. 3.14
-        StrLit,     // 字符串字面量 eg. "hello"
-        CharLit,    // 字符字面量   eg. 'a'
-        Ident,      // 标识符       eg. varName
-
-        // 一元运算 —— parseUnary() 解析前缀运算符
-        Unary,      // 前缀运算     eg. -x, !x, ~x, *p, &x
-        PostUnary,  // 后缀运算     eg. i++, i--  (a 持有操作数, op 为 "++"/"--")
-
-        // 二元运算 —— parseBinary() 解析，按优先级递归
-        Binary,     // 二元运算     eg. a+b, a>b, a=b, a+=b
-                    // op 存储运算符文本，a/b 分别为左右操作数
-
-        // 三元运算 —— parseTernary() 解析
-        Ternary,    // 三元条件     eg. a ? b : c  (a=条件, b=真值, c=假值)
-
-        // 后缀链 —— parsePostfix() 循环解析，可连续组合
-        Call,       // 函数调用     eg. foo(a, b)  (a=被调函数, args=实参列表)
-        Index,      // 下标访问     eg. arr[0]     (a=数组, b=下标)
-        Member,     // 成员访问     eg. obj.f  或 ptr->f
-                    //              op="." 或 "->", text=成员名
-        Sizeof,     // sizeof(表达式或类型名)  a=内层表达式
-        Offsetof,   // offsetof(Type, field)  text=类型名, op=字段名
-        Cast,       // 强制类型转换  右值位置可裸写 expr: type&，
-                    //              需继续 ->/. 等操作时加括号 (expr: type&)->f
-                    //              a=被转换表达式, text=目标类型名,
-                    //              castPtr=指针层数（& 个数）
-        InitList,   // 初始化列表 {1, 2, 3}  args=元素列表（可嵌套）
-    } kind;
-
-    std::string text;       // 字面量值 / 标识符名（Ident时）/ 成员名（Member时）
-    std::string op;         // 运算符拼写（Unary/PostUnary/Binary时）
-                            // Member场景：op="." 或 "->"
-    ExprPtr a, b, c;        // 子表达式指针
-                            // Unary/PostUnary: a=操作数
-                            // Binary: a=左操作数, b=右操作数
-                            // Ternary: a=条件, b=真值分支, c=假值分支
-                            // Call/Index/Member: a=被操作对象
-    std::vector<ExprPtr> args;  // 函数调用的实参列表（Call 时有效）
-                                // InitList 时为初始化元素列表
-    int castPtr = 0;            // Cast: 目标类型的指针层数
-    // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
-    // 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
-    std::vector<std::pair<std::string, long long>> sofOpts;
-    int line = 0;               // 表达式起始行号（用于错误报告）
-};
-
-// ---------- 类型引用 ----------
-// TypeRef 统一表示 sc 中所有可能的类型写法。
-// 与 C 不同，sc 的指针声明在名字一侧（name& 而非 int* name）。
-// 解析时 & 被计入 ptr 字段，最终由 codegen 还原为 C 的 T* 形式。
-struct Field;  // 前向声明，TypeRef 内嵌的字段列表需用到 Field
-
+// --------------------------
+// 类型引用：用来统一表示（描述）sc 中所有可能的类型写法
+// --------------------------
 struct TypeRef {
-    enum class FncKind {
-        None,
-        PlainPtr,   // 普通函数指针：fnc: ret, params...
-    };
 
-    // 类型名："i4" "f8" "u1" 等内置类型，或用户 def 的自定义类型名
-    // 空字符串表示未指定类型，由 codegen 按默认规则推断：
+    // 类型名。即 "i4" "f8" "u1" 等内置类型，或用户 def 的自定义类型名
+    // + 空字符串表示未指定类型，由 codegen 按默认规则推断：
     //   ptr > 0 → void*    （无类型指针默认指向 void）
     //   ptr = 0 → char*    （无类型对象默认字符串/字节缓冲区）
     std::string name;
 
-    int ptr = 0;             // 指针层数（源码中 name 后面 & 的个数）
-    // 数组维度列表：name[x][y] → {"x","y"}；空字符串表示未指定长度（name[]）
-    // 非空即为数组类型，与 C 的多维数组对齐
-    std::vector<std::string> arrayDims;
+    //---------
 
-    // 内联结构/联合 —— 类型直接写在变量声明处，无需预先 def
-    //   var obj: {x:i4, y:i4}  → hasInline=true, inlineUnion=false
-    //   var tag: (i:i4, f:f4)  → hasInline=true, inlineUnion=true
+    // 对于指针类型：eg: name&，name&&
+    // + 这里 ptr 用来记录 & 的个数，即指针层数，最终由 codegen 还原为 C 的 T* 形式。
+    //   与 C 不同，sc 的指针声明在名字右侧（name& 而非 int *name）
+    int ptr = 0;
+
+    //---------
+
+    // 对于数组类型：eg: name[x][y]
+    // + 这里要记录维度 shape 列表 → {"x","y"}；
+    //   空字符串表示未指定长度（name[]）；
+    //   非空即为数组类型（也就是数组的 size），与 C 的多维数组对齐
+    std::vector<std::string> arrayDims; 
+
+    //---------
+
+    // 对于内联结构/联合：即类型直接写在变量声明处，无需预先 def
+    // eg: var obj: {x:i4, y:i4}  → hasInline=true, inlineUnion=false
+    //     var tag: (i:i4, f:f4)  → hasInline=true, inlineUnion=true
+    std::vector<Field> inlineFields;    // 内联类型的字段定义，即内联结构
     bool hasInline = false;
-    bool inlineUnion = false; // true=(联合), false={结构}
-    std::vector<Field> inlineFields;  // 内联类型的字段定义
+    bool inlineUnion = false;           // true=(联合), false={结构}
 
-    // 函数指针字段 —— 结构体字段类型为内联函数签名（无函数体）：
-    //   def obj: { func: fnc: i4, x:i4, y:i4 }
-    // C 中展开为：Ret (*func)(params...)
-    // 若字段签名后跟缩进函数体，则不是字段而是成员函数（parser 提升为
-    // 带 methodOwner 的顶层 FuncD，C 中生成 T_m(T *_this, ...)）。
-    FncKind fnKind = FncKind::None;
-    std::shared_ptr<TypeRef> fnRet;  // 返回类型（空 = void）
-    std::vector<Field> fnParams;     // 显式参数列表（不含隐式 this）
-    bool fnVariadic = false;         // 可变参数（'...'）
-};
+    //---------
 
-// ---------- 字段 / 声明项 ----------
-// Field 是一个多用途结构体，在不同 Decl 上下文中含义不同：
-//   struct/union 成员 → name + type
-//   函数参数          → name + type
-//   var/let 变量项    → name + type + init（可选的初值表达式）
-//   枚举项            → name + init（可选的枚举常量值）
-//
-// name 为空时表示匿名结构/联合成员（直接内嵌另一个 {}/() 类型）。
-struct Field {
-    std::string name;        // 字段/参数/变量/枚举项名称；空 = 匿名嵌入
-    TypeRef type;            // 类型信息（含指针层数、数组标记、内联结构等）
-    ExprPtr init;            // 初值表达式（var/let 声明和枚举项使用）
-    bool synthetic = false;  // 编译器注入的隐藏成员（如链表 _prev/_next，emit-sc 不输出）
-    int line = 0;            // 声明所在行号
-};
-
-// ---------- 语句 ----------
-// 语句是函数体的基本单位。一条语句通常占一行（或一个缩进块）。
-struct Decl;   // 前向声明，Stmt 中的 DeclS 需要引用 Decl
-using DeclPtr = std::unique_ptr<Decl>;
-struct Stmt;
-using StmtPtr = std::unique_ptr<Stmt>;
-
-struct Stmt {
-    struct CaseArm {
-        std::vector<ExprPtr> labels;  // 空=default 分支
-        std::vector<StmtPtr> body;    // 分支体
-        bool through = false;         // 末尾 through：贯穿到下一分支
-        int line = 0;
+    enum class FncKind {
+        None,
+        PlainPtr,                       // 普通函数指针：fnc: ret, params...
     };
 
+    // 对于内联函数指针 —— 特指结构体成员的类型为函数签名（且无函数体）：
+    // eg: def obj: { func: fnc: i4, x:i4, y:i4 } → 对应 C 中的展开为 int32_t (*func)(int32_t x, int32_t y)
+    // ! 若字段签名后跟缩进函数体，则不是字段而是成员函数
+    //   此时 parser 会将其提升为带 methodOwner 的顶层(Decl) FuncD，
+    //   同时 C 中会对应生成 T_m(T *_this, ...) 成员函数声明
+    FncKind fnKind = FncKind::None;
+    std::shared_ptr<TypeRef> fnRet;     // 返回类型（空 = void）
+    std::vector<Field> fnParams;        // 显式参数列表（不含隐式 this）
+    bool fnVariadic = false;            // 可变参数（'...'）
+};
+
+// --------------------------
+// 字段 / 声明项：用来统一描述程序（定义/声明中的）实际访问和操作的目标数据对象
+// --------------------------
+// Field 是一个多用途结构体，在不同 Decl 上下文中含义不同：
+// > let/var/tls 常/变量项    → name + type + init（可选的初值表达式）
+// > struct/union 成员       → [name] + type
+//   + 这里 name 可以为空，用来表示匿名结构，即直接内嵌另一个 {}/() TypeRef 类型，该 TypeRef 的 hasInline=true && !inlineFields.empty
+// > 函数参数                → name + type
+// > 枚举项                  → name + init（可选的枚举常量值）
+struct Field {
+    std::string name;                   // 变量/成员/参数/枚举项名称
+    TypeRef     type;                   // 类型信息（含指针层数、数组标记、内联结构等）
+    ExprPtr     init;                   // 初值表达式（用于 let/var/tls 声明、和枚举项）
+
+    bool        synthetic = false;      // 编译器注入的隐藏成员（如链表 _prev/_next，emit-sc 不输出）
+
+    int         line = 0;               // 声明所在行号
+};
+
+// --------------------------
+// 表达式：AST 中最细粒度的节点（子树）。所有运算、字面量、调用都是表达式
+// --------------------------
+struct Expr {
+
     enum Kind {
-        ExprS,      // 表达式语句      eg. foo(); a = 1;  (以 expr 字段存储)
-        VarS,       // 变量声明语句    eg. var x: i4      (以 decls 字段存储多项)
-        LetS,       // 常量声明语句    eg. let MAX = 100
-        TlsS,       // 线程局部变量声明 eg. tls cnt: i4   (static 存储期，每线程独立)
+        // 叶子节点 —— 语法分析遇到终结符时直接创建（也就是作为被访问/操作的数据对象）
+        Ident,      // 标识符      eg. varName
+        IntLit,     // 整数字面量   eg. 42, 0xFF
+        FloatLit,   // 浮点字面量   eg. 3.14
+        StrLit,     // 字符串字面量 eg. "hello"
+        CharLit,    // 字符字面量   eg. 'a'
+
+        // 一元运算 —— parseUnary() 解析前缀运算符
+        Unary,      // 前缀运算     eg. -x, !x, ~x, *p, &x
+        PostUnary,  // 后缀运算     eg. i++, i--  
+                    //             > a=操作数（子表达式）, op 为运算符文本
+
+        // 二元运算 —— parseBinary() 解析，按优先级递归
+        Binary,     // 二元运算     eg. a+b, a>b, a=b, a+=b
+                    //             > a/b 分别为左右操作数（子表达式）, op 为运算符文本
+
+        // 三元运算 —— parseTernary() 解析
+        Ternary,    // 三元条件     eg. a ? b : c 
+                    //             > a=条件（子表达式）, b=真值分支（子表达式）, c=假值分支（子表达式）
+
+        // 后缀链 —— parsePostfix() 循环解析，可连续组合
+        Index,      // 下标访问     eg. arr[0]
+                    //             > a=数组（子表达式）, b=下标（子表达式）
+        Member,     // 成员访问     eg. obj.f  或 ptr->f
+                    //             > op="." 或 "->", text=成员名
+        Call,       // 函数调用     eg. foo(a, b)
+                    //             > a=被调函数（子表达式）, args=实参（子表达式）列表
+        InitList,   // 初始化列表   eg: {1, 2, 3} 
+                    //             > args=元素列表（可嵌套）
+        Sizeof,     // sizeof(表达式或类型名)  
+                    //             > a=内层表达式
+        Offsetof,   // offsetof(Type, field)  
+                    //             > text=类型名, op=成员名
+        Cast,       // 强制类型转换  右值位置可裸写 
+                    //             + 可以不加括号：eg. expr: type& （作为右值时）
+                    //             + 但如果继续 ->/. 等操作时，则需要加括号，eg. (expr: type&)->f
+                    //             > a=被转换表达式, text=目标类型名, castPtr=指针层数（& 个数）
+    } kind;
+
+    std::string text;           // 标识符名 / 字面量值 / 成员名 / 类型名
+                                // 1. 指定了表达式操作的目标
+                                // 2. 对于 Cast 则是记录目标类型名
+                                //    todo: 可以改成用 op 来记录，这样 text 字段就完全是标识符/成员名了
+    ExprPtr a, b, c;            // 子表达式指针
+                                // Unary/PostUnary: a=操作数
+                                // Binary: a=左操作数, b=右操作数
+                                // Ternary: a=条件, b=真值分支, c=假值分支
+                                // Index/Member/Call: a=被操作对象
+    std::vector<ExprPtr> args;  // Call 函数调用的实参列表
+                                // InitList 时为初始化元素列表
+
+    std::string op;             // 针对目标项的运算和操作
+    int castPtr = 0;            // Cast: 目标类型的指针层数
+
+    // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
+    // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
+    std::vector<std::pair<std::string, long long>> sofOpts;
+
+    int line = 0;               // 表达式起始行号（用于错误报告）
+};
+
+// --------------------------
+// 语句：函数体的基本单位。一条语句通常占一行（或一个缩进块）。
+// --------------------------
+struct Stmt {
+
+    enum Kind {
+        ExprS,      // 表达式语句       eg. foo(); a = 1;  (以 expr 字段存储)
+                    // + 赋值/调用语句，也就是 I/O/JP
+        LetS,       // 常量声明语句     eg. let MAX = 100
+        VarS,       // 变量声明语句     eg. var x: i4      (以 decls 字段存储多项)
+        TlsS,       // 线程局部变量声明  eg. tls cnt: i4   (static 存储期，每线程独立)
         ReturnS,    // return 语句     eg. return expr;   (expr 可为空 = return;)
         IfS,        // if/else 条件分支
         WhileS,     // while 循环
         DoWhileS,   // do-while 循环
         ForS,       // for 循环        for init; cond; step \n body
         CaseS,      // case 分支       case expr: labels/default + 自动 break
-        GotoS,      // goto 标签跳转
-        LabelS,     // 标签定义
         BreakS,     // break 语句      (无附加数据)
         ContinueS,  // continue 语句   (无附加数据)
-        DeclS,      // 内嵌类型声明    函数体内用 def 定义局部类型（不常见但允许）
+        GotoS,      // goto 标签跳转
+        LabelS,     // 标签定义
+
+        DeclS,      // 内嵌类型声明     函数体内用 def 定义局部类型（不常见但允许）
         RunS,       // run 线程语句    run rpc调用 [, thread出参地址]
-                    //                 expr=rpc 调用（Expr::Call），forInit=可选出参（&t，t 为 thread&）
-                    //                 有出参 → joinable（join 等待并回收）；无 → detach 自释放
+                    //                > expr=rpc 调用（Expr::Call）
+                    //                > forInit=可选出参（&t，t 为 thread&）
+                    //                  + 有出参 → joinable（join 等待并回收）；无 → detach 自释放
         WaitS,      // wait 条件等待   wait cond, mutex [, nsec [, sec]]
-                    //                 expr=cond，forInit=mutex，forCond=可选纳秒，forStep=可选秒
-                    //                 nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
+                    //                > expr=cond，
+                    //                > forInit=mutex，forCond=可选纳秒，forStep=可选秒
+                    //                  + nsec/sec 全 0 或省略 → 无限等待；调用前须已持有(lock) mutex
     } kind;
 
-    ExprPtr expr;                      // ExprS: 表达式的值
-                                       // ReturnS: 返回的表达式（空=无返回值 return;）
-                                       // IfS/WhileS: 条件表达式（必须可求值为布尔）
-    std::vector<Field> decls;          // VarS/LetS: 声明的变量/常量列表
-                                       // 单行多变量以逗号分隔，多行以缩进续行
-    std::vector<StmtPtr> body;         // IfS/WhileS/ForS: 条件成立时执行的主体语句
-    std::vector<StmtPtr> elseBody;     // IfS: else 分支（可能为空、单条 else if、或多条语句块）
-    ExprPtr forInit, forCond, forStep; // ForS: for (init; cond; step) 三段表达式
-    std::vector<CaseArm> caseArms;     // CaseS: 分支列表（labels 为空表示 default）
-    std::string text;                  // GotoS/LabelS: 标签名
-    DeclPtr decl;                      // DeclS: 内嵌的类型定义（def）
-    int line = 0;                      // 语句起始行号
+    ExprPtr expr;                       // ExprS: 表达式的值
+                                        // ReturnS: 返回的表达式（空=无返回值 return;）
+                                        // IfS/WhileS: 条件表达式（必须可求值为布尔）
+
+    std::vector<Field> decls;           // LetS/VarS/TlsS: 声明的常量/变量/线程局部变量列表
+                                        // + 单行多变量以逗号分隔，多行以缩进续行
+
+    std::vector<StmtPtr> body;          // IfS/WhileS/ForS: 条件成立时执行的主体语句
+    std::vector<StmtPtr> elseBody;      // IfS: else 分支（可能为空、单条 else if、或多条语句块）
+
+    ExprPtr forInit, forCond, forStep;  // ForS: for (init; cond; step) 三段表达式
+
+    struct CaseArm {
+        std::vector<ExprPtr> labels;    // 空=default 分支
+        std::vector<StmtPtr> body;      // 分支体
+        bool through = false;           // 末尾 through：贯穿到下一分支
+        int line = 0;
+    };
+    std::vector<CaseArm> caseArms;      // CaseS: 分支列表（labels 为空表示 default）
+
+    std::string text;                   // GotoS/LabelS: 标签名
+    
+    DeclPtr decl;                       // DeclS:（函数内部）内嵌的类型定义（def）
+
+    int line = 0;                       // 语句起始行号
 };
 
-// ---------- 程序结构对象（顶层声明） ----------
-// sc 语言的核心概念："程序即结构树"。
-// 程序由四种结构对象组成：def（类型）、fnc（函数）、var（变量）、let（常量）。
-// 所有顶层元素在 AST 中都是 Decl，通过 kind 字段区分。
+// --------------------------
+// 顶层声明：即程序结构对象，所有顶层元素在 AST 中都是 Decl，通过 kind 字段区分。
+// --------------------------
+// 程序由四种结构对象组成：def（类型）、fnc（函数）、let（常量）、var（变量）、tls（线程局部变量）和 inc（头文件引入）
 struct Decl {
+
     enum Kind {
         // -- def 定义的类型 --
         EnumD,      // 枚举       def name: base \n\tItem1=0, Item2 ...
@@ -215,34 +260,35 @@ struct Decl {
 
     std::string name;            // 类型名 / 函数名；IncD 时为头文件文本
 
-    bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
-    bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
-    bool linked = false;         // 链表结构体 def T: ~ {}：末尾注入 _prev/_next 自链指针
     std::string origin;          // 外部符号来源（导入文件路径或 builtin 名称）
+    bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
+    bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
+    bool linked = false;         // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
     TypeRef type;                // AliasD: 别名指向的目标类型
                                  // EnumD:  枚举的底层整数基类型
 
-    std::vector<Field> fields;   // 多用途：结构/联合的成员字段
-                                 //        枚举的项列表（name+可选的=value）
-                                 //        函数的形参列表
-                                 //        var/let 的声明变量列表
+    std::vector<Field> fields;   // 多用途：
+                                 // > 结构/联合: 成员字段
+                                 // > 枚举: 项列表（name+可选的=value）
+                                 // > 函数: 形参列表
+                                 // > let/var/tls: 声明变量列表
 
     TypeRef retType;             // FuncTypeD/FuncD: 函数的返回类型声明
+    bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
+    std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
+                                 // + FuncTypeD 的 body 为空，只有签名无实现
 
+    bool isRpc = false;          // rpc 声明：参数/返回值展开为同名结构体，实际函数为 void name_rpc(struct name*)
+                                 // + FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
+                                 
     std::string funcTypeName;    // fnc name -> func_type 中的预定义函数类型名
                                  // 非空时表示此函数"实现"某个已定义的函数类型，
                                  // 函数签名从该类型展开，无需重复声明参数和返回类型
+
     std::string methodOwner;     // 方法所属结构名：结构体内实现的成员函数（FuncD）
                                  // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
     std::string methodName;      // 方法名（name 为修饰名 owner_method）
-    bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
-    bool isRpc = false;          // rpc 声明：参数/返回值展开为同名结构体，
-                                 // 实际函数为 void name_rpc(struct name*)，
-                                 // FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
-
-    std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
-                                 // （FuncTypeD 的 body 为空，只有签名无实现）
 
     int line = 0;                // 声明首行行号
 };
@@ -251,6 +297,6 @@ struct Decl {
 // 语法分析的最终产出。一个完整的 sc 程序 = 一组有序的顶层声明。
 // 所有后端（codegen_c / codegen_sc / ast_json）都从 Program 结构开始遍历。
 struct Program {
-    std::vector<DeclPtr> decls;  // 顶层声明列表，按源码中的书写顺序排列
+    std::vector<DeclPtr> decls;             // 顶层声明列表，按源码中的书写顺序排列
     std::vector<std::string> externSymbols; // 当前单元引用到的外部符号（模块/头文件导入后汇总）
 };

@@ -88,7 +88,9 @@ struct Parser {
     bool accept(Tok k) { if (at(k)) { advance(); return true; } return false; }
     bool acceptOp(const char* s) { if (atOp(s)) { advance(); return true; } return false; }
 
+    // 跳过连续的换（空）行
     void skipNewlines() { while (accept(Tok::Newline)) {} }
+    // 跳过连续换行和缩进
     void skipLayout() { while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance(); }
 
     // ------------------------------------------------------------------------
@@ -98,8 +100,536 @@ struct Parser {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    // 程序（定义/声明中的）实际访问和操作的目标数据对象
+    //
+    // sc 的类型语法有独特之处：
+    //   1. 指针标记 & 写在名字后（name& 而非 int* name）
+    //   2. 数组标记 [size] 写在名字后
+    //   3. 支持内联结构/联合（直接在变量声明处定义 {}/() 类型）
+    //   4. 未指定类型时由代码生成阶段推断默认类型
 
-    // 快捷创建表达式节点
+    // 解析名字后的元类型后缀：连续的 &（多级指针）和 [size]...（多维数组）
+    // 注意：词法器按最长匹配将 && 识别为单个 token，故此处需同时接受
+    // & （一级）和 &&（两级），如 name&&: 即指针的指针
+    void parseMeta(TypeRef& ty) {
+
+        for (;;) {
+            if (acceptOp("&")) ty.ptr++;            // 每个 & 增加一级指针
+            else if (acceptOp("&&")) ty.ptr += 2;   // && 为两级指针
+            else break;
+        }
+
+        // 多维数组：name[x][y] 与 C 对齐，每个 [维度] 追加一维
+        while (accept(Tok::LBracket)) {
+            std::string dim;
+            if (!at(Tok::RBracket)) {
+                if (!at(Tok::Int) && !at(Tok::Ident)) err("期望数组大小");
+                dim = advance().text;  // 维度大小（数字或常量标识符）
+            }
+            expect(Tok::RBracket, "']'");
+            ty.arrayDims.push_back(std::move(dim));
+        }
+    }
+
+    // 解析类型引用：可以是命名类型 name&&、或者是内联 {struct} 或 (union) 类型
+    TypeRef parseTypeRef() { TypeRef ty;
+        
+        // 内联结构/联合：直接以 { 或 ( 开头
+        if (at(Tok::LBrace) || at(Tok::LParen)) {
+            ty.hasInline = true;
+            ty.inlineUnion = at(Tok::LParen);  // '(' → union, '{' → struct
+            parseFieldBlock(ty.inlineFields);   // 递归解析字段列表
+            return ty;
+        }
+
+        // 获取类型名
+        if (at(Tok::Ident)) ty.name = advance().text;
+        // 对于（无名）裸 & / &&，即 void* 指针
+        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&")))
+            err("期望类型名");
+
+        // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
+        for (;;) {
+            if (acceptOp("&")) ty.ptr++;
+            else if (acceptOp("&&")) ty.ptr += 2;
+            else break;
+        }
+        return ty;
+    }
+
+    // 解析单个字段项：name[meta][: type] 或匿名 {}/()
+    Field parseFieldItem() { Field f;
+
+        f.line = cur().line;                    // 须在（发生）报错前记录行号，以便错误信息准确指向字段定义处
+        
+        // 对于匿名嵌套结构/联合：即直接以 { 或 ( 开头，没有字段名
+        if (at(Tok::LBrace) || at(Tok::LParen)) {
+            f.type.hasInline = true;
+            f.type.inlineUnion = at(Tok::LParen);
+            parseFieldBlock(f.type.inlineFields);
+            return f;
+        }
+
+        if (!at(Tok::Ident)) err("期望字段名");  // 当前 token 必须是标识符（变量名）
+        f.name = advance().text;                // 消费当前 token（作为变量名）并前进到下一个 token
+        parseMeta(f.type);                      // 先解析名字后的 & 和 [] 元类型
+        if (accept(Tok::Colon)) {               // 验证并消费 ':'，冒号后为显式类型（可选：省略时由代码生成推断默认类型，？成员字段可以吗）
+
+            // 如果冒号后是 fnc
+            // + 解析为内联函数类型（如 name: fnc[: ret, params...]）
+            //   这里分为两种情况：函数指针类型的字段、或成员函数实现。具体由调用者来区分（见 parseFieldBlock）
+            if (at(Tok::KwFnc)) {
+
+                advance();                                          // 跳过 fnc 关键字
+                TypeRef ty; ty.fnKind = TypeRef::FncKind::PlainPtr; // 创建函数指针类型引用，初始为普通函数指针
+                if (accept(Tok::Colon)) {                           // ':' 可省略（无返回值且无参数，如成员函数 init: fnc）
+
+                    for (bool haveRet = false;;) {
+                        
+                        // 对于可变参数 '...'：必须在参数列表末尾，且前面至少有一个参数
+                        if (at(Tok::Ellipsis)) {
+                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
+                            advance(); ty.fnVariadic = true; 
+                            break;
+                        }
+
+                        // 如果看起来像参数（标识符后跟冒号），则解析为参数
+                        if (looksLikeParam()) {
+                            ty.fnParams.push_back(parseFieldItem());
+                        }
+                        // 否则解析为（单例）返回值类型（冒号可省略）
+                        else {
+                            if (haveRet) err("重复的返回类型");
+                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
+                            haveRet = true;
+                        }
+
+                        // 如果不是逗号分隔，则结束参数/返回值列表的解析
+                        if (!accept(Tok::Comma)) break;
+                    }
+                }
+                f.type = std::move(ty);
+            }
+            // 否则解析为普通类型（如 name: type）
+            else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
+                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合）
+                ty.ptr += f.type.ptr;                           // 合并指针层数
+                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并数组维度
+                                    f.type.arrayDims.begin(), 
+                                    f.type.arrayDims.end());
+                f.type = std::move(ty);
+            }
+        }
+        return f;
+    }
+
+    // 解析字段块：{ fields } 或 ( fields )，字段间以逗号或换行分隔。
+    // + methodsOut 非空（顶层 def 结构体）时：
+    //   > 函数签名字段后跟缩进块，则是成员函数实现
+    //     此时提升为带 methodOwner 的顶层 FuncD（且该 field 不计入字段列表）
+    //   > 无函数体则仍是普通函数指针字段 
+    void parseFieldBlock(std::vector<Field>& out,
+                         std::vector<DeclPtr>* methodsOut = nullptr) {
+
+        Tok close = at(Tok::LBrace) ? Tok::RBrace : Tok::RParen;
+        bool inParen = at(Tok::LParen);
+        if (inParen) exprBracket++;         // 联合使用 ()，需增加括号计数以抑制内部缩进
+        advance();                          // 跳过开始的 { 或 (
+        for (;;) {
+            skipLayout();                   // 跳过字段间的换行和缩进（逗号分隔时也可有换行/缩进）
+            if (at(close)) break;
+            if (at(Tok::End)) err("结构/联合未闭合");
+
+            Field f = parseFieldItem();                             // 解析单个字段项：name[meta][: type] 或匿名 {}/()
+            if (acceptOp("=")) f.init = parseExpr();                // 字段初值（可选）：name: type = expr
+
+            // 对于成员函数：字段为函数签名 ，且后面是缩进函数体
+            if (f.type.fnKind == TypeRef::FncKind::PlainPtr
+                 && at(Tok::Newline) && peek().kind == Tok::Indent) {
+                    
+                if (!methodsOut)
+                    err("成员函数只能在顶层 def 结构体内实现");
+                if (f.init) err("成员函数不能带初值");
+
+                // 将 field 提升为顶层方法声明
+                auto m = std::make_unique<Decl>();
+                m->kind = Decl::FuncD;
+                m->line = f.line;
+                m->methodName = f.name;
+                if (f.type.fnRet) m->retType = std::move(*f.type.fnRet);
+                m->fields = std::move(f.type.fnParams);
+                m->variadic = f.type.fnVariadic;
+                
+                //解析函数体
+                advance(); advance();  // Newline + Indent
+                parseStmts(m->body);
+                accept(Tok::Dedent);
+
+                // 返回作为顶层方法声明（methodOwner 在提升阶段补齐），而非结构字段
+                methodsOut->push_back(std::move(m));
+            }
+            // 否则按普通字段处理
+            else out.push_back(std::move(f));
+            
+            skipLayout();
+            accept(Tok::Comma);  // 逗号分隔是可选的（也可纯粹以换行分隔）
+        }
+        advance();  // 跳过结束的 } 或 )
+        if (inParen) exprBracket--;
+    }
+
+    // 解析 var/let/tls 声明项：与字段类似，但额外支持 = 初值表达式和内联类型
+    Field parseVarItem() { Field f;
+
+        f.line = cur().line;                    // 须在（发生）报错前记录行号
+        if (!at(Tok::Ident)) err("期望变量名");  // 当前 token 必须是标识符（变量名）
+        f.name = advance().text;                // 消费当前 token（作为变量名）并前进到下一个 token
+        parseMeta(f.type);                      // 解析名字后的 & 和 [] 元类型（如 name&: 表示指针，name[10]: 表示数组）
+        if (accept(Tok::Colon)) {               // 验证并消费 ':'，冒号后为显式类型（可选：省略时由代码生成推断默认类型）
+
+            // 如果冒号后是 fnc
+            // + 则解析为内联函数指针类型（如 name: fnc[: ret, params...]）
+            if (at(Tok::KwFnc)) { 
+                
+                advance();                                          // 跳过 fnc 关键字
+                TypeRef ty; ty.fnKind = TypeRef::FncKind::PlainPtr; // 创建函数指针类型引用，初始为普通函数指针                
+                if (accept(Tok::Colon)) {                           // ':' 可省略（无返回值且无参数，如函数 func: fnc）
+
+                    for (bool haveRet = false;;) {
+
+                        // 对于可变参数 '...'：必须在参数列表末尾，且前面至少有一个参数
+                        if (at(Tok::Ellipsis)) {
+                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
+                            advance(); ty.fnVariadic = true; 
+                            break;
+                        }
+
+                        // 如果看起来像参数（标识符后跟冒号），则解析为参数
+                        if (looksLikeParam()) {
+                            ty.fnParams.push_back(parseFieldItem());
+                        }
+                        // 否则解析为（单例）返回值类型（冒号可省略）
+                        else {
+                            if (haveRet) err("重复的返回类型");
+                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
+                            haveRet = true;
+                        }
+
+                        // 如果不是逗号分隔，则结束参数/返回值列表的解析
+                        if (!accept(Tok::Comma)) break;
+                    }
+                }
+                f.type = std::move(ty);
+            }
+            // 否则解析为普通类型（如 name: type）
+            else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
+                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合）
+                ty.ptr += f.type.ptr;                           // 合并指针层数
+                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并数组维度
+                                    f.type.arrayDims.begin(),
+                                    f.type.arrayDims.end());
+                f.type = std::move(ty);
+            }
+        }
+        // 无冒号直接跟 {/( ：内联结构/联合（如 var name {field:type}）
+        // ? 内联可以没有冒号 ？
+        else if (at(Tok::LBrace) || at(Tok::LParen)) {
+            f.type.hasInline = true;
+            f.type.inlineUnion = at(Tok::LParen);
+            parseFieldBlock(f.type.inlineFields);
+        }
+
+        if (acceptOp("=")) f.init = parseExpr();  // 可选的初值表达式
+        return f;
+    }
+
+    // 解析 var/let/tls 列表：支持单行逗号分隔、和多行缩进续行两种写法
+    void parseVarList(std::vector<Field>& out) {
+        
+        out.push_back(parseVarItem());
+        while (accept(Tok::Comma)) out.push_back(parseVarItem());   // 单行：逗号分隔多项
+        expect(Tok::Newline, "换行");
+
+        if (accept(Tok::Indent)) {                                  // 多行缩进续行
+            while (!at(Tok::Dedent) && !at(Tok::End)) {
+                skipNewlines(); if (at(Tok::Dedent)) break;
+
+                out.push_back(parseVarItem());
+                while (accept(Tok::Comma)) out.push_back(parseVarItem());
+                expect(Tok::Newline, "换行");
+            }
+            accept(Tok::Dedent);
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    // def 类型定义解析
+    //
+    // def 支持四种类型定义：
+    //   def name -> target_type       → 类型别名
+    //   def name: { fields }          → 结构体
+    //   def name: ( fields )          → 联合体
+    //   def name: base \n\titem...    → 枚举
+
+    DeclPtr parseDef() {
+
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        advance();                                      // 跳过 def 关键字
+        if (!at(Tok::Ident)) err("期望类型名");           // 当前 token 必须是标识符（类型名）   
+        d->name = advance().text;                       // 类型名
+
+        // 1. 对于 -> 箭头语法：类型别名  def name -> target
+        if (accept(Tok::Arrow)) {
+            d->kind = Decl::AliasD;
+            d->type = parseTypeRef();
+            expect(Tok::Newline, "换行");
+            return d;
+        }
+        expect(Tok::Colon, "':'");
+
+        // ~：链表标记（仅结构体）—— 转 C 时在成员前面注入 _prev/_next 自链指针
+        bool linked = acceptOp("~");
+
+        // 2. 对于 { ... } 结构体
+        if (at(Tok::LBrace)) {
+
+            d->kind = Decl::StructD;                        // 标记为结构体定义
+            parseFieldBlock(d->fields, &pendingMethods);    // 解析字段块
+            for (auto& m : pendingMethods) {                // 处理成员函数：补齐 methodOwner 和 name（mangle 后）
+                m->methodOwner = d->name;
+                m->name = mangleMethodName(d->name, m->methodName);
+            }
+
+            // 如果需要注入链表指针，则在字段列表前注入 _prev 和 _next 字段
+            d->linked = linked;
+            if (linked) {
+                for (auto& f : d->fields)
+                    if (f.name == "_prev" || f.name == "_next" ||
+                        f.name == "prev" || f.name == "next")
+                        err("prev/next/_prev/_next 为链表结构体内置成员，不可显式定义");
+
+                std::vector<Field> injected;
+                for (const char* n : {"_prev", "_next"}) {
+                    Field f;
+                    f.name = n;
+                    f.type.ptr = 1;
+                    f.synthetic = true;
+                    f.line = d->line;
+                    injected.push_back(std::move(f));
+                }
+                d->fields.insert(d->fields.begin(),
+                                 std::make_move_iterator(injected.begin()),
+                                 std::make_move_iterator(injected.end()));
+            }
+
+            expect(Tok::Newline, "换行");
+            return d;
+        }
+
+        // 只有结构体支持链表标记 '~'
+        if (linked) err("'~' 链表标记仅支持结构体 {}");
+
+        // 3. 对于 ( ... ) 联合体
+        if (at(Tok::LParen)) {
+
+            d->kind = Decl::UnionD;
+            parseFieldBlock(d->fields);
+
+            expect(Tok::Newline, "换行");
+            return d;
+        }
+
+        // 4. 对于枚举：def name: base_type \n\tItem1, Item2 ...
+        d->kind = Decl::EnumD;
+        d->type = parseTypeRef();                           // 枚举的底层整数类型
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "缩进的枚举项");
+        while (!at(Tok::Dedent) && !at(Tok::End)) {
+            skipNewlines();
+            if (at(Tok::Dedent)) break;
+
+            for (;;) {
+                Field item;
+                item.line = cur().line;
+                if (!at(Tok::Ident)) err("期望枚举项名");
+                item.name = advance().text;                 // 枚举项名
+                if (acceptOp("=")) item.init = parseExpr(); // 可选的显式值
+                d->fields.push_back(std::move(item));
+                if (!accept(Tok::Comma)) break;             // 逗号分隔多项
+            }
+            expect(Tok::Newline, "换行");
+        }
+        accept(Tok::Dedent);
+        return d;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    // fnc 函数定义解析
+    //
+    // fnc 支持三种形态：
+    //   1. 函数类型定义：fnc name: ret, params... \n        （无函数体）
+    //       → 只有签名，C 中生成 typedef 函数指针类型
+    //   2. 函数实现：    fnc name: ret, params... \n\tbody  （直接定义+实现）
+    //   3. 预定义类型实现：fnc name -> func_type \n\tbody    （实现已有函数类型）
+    //
+    // 函数签名可以单行写全部参数，也可以多行缩进（每行一个参数）。
+    // 参数行与函数体之间用单独的 '-' 行分隔。
+
+    // 前瞻判断：当前 token 序列是否像参数声明（Ident + 可能的&/[] + Colon）
+    bool looksLikeParam() const {
+
+        // 当前 token 必须是标识符（参数名）
+        if (!at(Tok::Ident)) return false;
+
+        size_t q = p + 1;
+        while (q < t.size()) { const Token& tk = t[q];  // 获取下一个 token
+
+            // 如果下一个 token 是 & 或 && 元类型，则继续向前看
+            if (tk.kind == Tok::Op && (tk.text == "&" || tk.text == "&&")) { q++; continue; }
+            // 如果下一个 token 是 [size] 元类型，则跳过整个 [size] 块继续向前看
+            if (tk.kind == Tok::LBracket) { q++;
+                while (q < t.size() && t[q].kind != Tok::RBracket &&
+                       t[q].kind != Tok::Newline) q++;
+                if (q < t.size() && t[q].kind == Tok::RBracket) { q++; continue; }
+                return false;
+            }
+            return tk.kind == Tok::Colon;  // 参数一定有冒号后跟类型
+        }
+        return false;
+    }
+
+    // 解析 fnc 冒号后的单行项：可能是返回类型，也可能是参数
+    void parseFncItem(Decl& d, bool& haveRet) {
+
+        if (at(Tok::Ellipsis)) {
+            if (d.fields.empty()) err("'...' 前必须有至少一个命名参数");
+            d.variadic = true;
+            advance();
+            return;
+        }
+        if (looksLikeParam()) {
+            d.fields.push_back(parseFieldItem());   // 是参数
+            return;
+        }
+        if (haveRet) err("重复的返回类型");
+        d.retType = parseTypeRef();                 // 是返回类型（只有一个）
+        haveRet = true;
+    }
+
+    DeclPtr parseFnc(bool isRpc = false) {
+
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        d->isRpc = isRpc;
+        advance();                                  // 跳过 fnc/rpc 关键字
+        if (!at(Tok::Ident)) err(isRpc ? "期望 rpc 名" : "期望函数名");
+        d->name = advance().text;                   // 函数名（rpc 时为接口名，后续会在函数名前加上 rpc_ 前缀）
+
+        // rpc 是伪形参函数糖：不支持方法形态与函数类型实现形态
+        if (isRpc && at(Tok::DColon)) err("rpc 不支持方法定义（::）");
+        if (isRpc && at(Tok::Arrow)) err("rpc 不支持实现预定义函数类型（->）");
+
+        // 方法声明形态：fnc obj::m: ret, params...
+        // + 这里仅声明，实现在 C 侧；
+        //   而带函数体的成员函数请在结构体定义内实现
+        if (accept(Tok::DColon)) {
+            d->methodOwner = d->name;
+            if (!at(Tok::Ident)) err("期望方法名");
+            d->methodName = advance().text;
+            d->name = mangleMethodName(d->methodOwner, d->methodName);
+        }
+
+        // 形态3：fnc name -> func_type —— 实现预定义函数类型
+        if (accept(Tok::Arrow)) {
+            if (!d->methodOwner.empty())
+                err("方法不支持实现预定义函数类型（->）");
+            d->kind = Decl::FuncD;
+            if (!at(Tok::Ident)) err("期望函数类型名");
+            d->funcTypeName = advance().text;   // 记录引用的函数类型名
+            expect(Tok::Newline, "换行");
+            expect(Tok::Indent, "函数体");
+            parseStmts(d->body);                // 函数体由 codegen 从函数类型展开签名
+            accept(Tok::Dedent);
+            return d;
+        }
+
+        // 签名：':' 后接签名项；省略返回类型 = void（首项是否参数由
+        // looksLikeParam 前瞻区分）；无返回值且无参数时 ':' 可整体省略
+        bool haveRet = false;
+        if (accept(Tok::Colon)) {
+            if (!at(Tok::Newline)) {
+                parseFncItem(*d, haveRet);
+                while (!d->variadic && accept(Tok::Comma))
+                    parseFncItem(*d, haveRet);
+            }
+        } else if (!at(Tok::Newline)) {
+            err("期望 ':' 或换行");
+        }
+        expect(Tok::Newline, "换行");
+
+        // 无缩进块 → 形态1：纯函数类型定义（只有签名，无实现）
+        if (!accept(Tok::Indent)) {
+            d->kind = Decl::FuncTypeD;
+            return d;
+        }
+
+        // 有缩进块 → 可能是形态2（函数实现）或多行参数续行
+        bool isBody = false;
+        for (;;) {
+            
+            skipNewlines();
+            if (at(Tok::Dedent) || at(Tok::End)) break;
+
+            // '-' 分隔符：之后是函数体语句
+            if (atOp("-") && peek().kind == Tok::Newline) {
+                advance(); advance();   // 跳过 '-' 和换行
+                isBody = true;
+                break;
+            }
+
+            // 看起来像参数声明 → 多行参数
+            if (looksLikeParam()) {
+                d->fields.push_back(parseFieldItem());
+                while (accept(Tok::Comma)) {
+                    if (at(Tok::Ellipsis)) {
+                        if (d->fields.empty()) err("'...' 前必须有参数");
+                        d->variadic = true; advance(); break;
+                    }
+                    d->fields.push_back(parseFieldItem());
+                }
+                expect(Tok::Newline, "换行");
+                continue;
+            }
+
+            // 其他情况：以语句开头 → 函数体
+            isBody = true;
+            break;
+        }
+
+        if (isBody) {
+            d->kind = Decl::FuncD;      // 有函数体的函数定义
+            if (!d->methodOwner.empty())
+                err("成员函数请在结构体定义内实现（fnc T::m 仅用于无函数体的方法声明）");
+            parseStmts(d->body);
+        } else {
+            d->kind = Decl::FuncTypeD;  // 只有参数，无函数体：函数类型（rpc 时为声明）
+        }
+        accept(Tok::Dedent);
+
+        // rpc 参数将成为结构体字段：不支持变参与数组参数
+        if (d->isRpc) {
+            if (d->variadic) err("rpc 不支持可变参数 '...'");
+            for (auto& f : d->fields)
+                if (!f.type.arrayDims.empty()) err("rpc 参数不支持数组，请改用指针（&）");
+        }
+
+        return d;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+
+    // 创建表达式节点
     ExprPtr mk(Expr::Kind k) {
         auto e = std::make_unique<Expr>();
         e->kind = k;
@@ -112,9 +642,12 @@ struct Parser {
 
     // 原子表达式 —— 递归下降的最底层
     ExprPtr parsePrimary() {
-        skipNlInBracket();
+        skipNlInBracket();                  // 跳过括号内的换行和缩进（允许括号内跨行书写）
+
         // 字面量：整数、浮点、字符串、字符
-        // 相邻字符串字面量拼接（C 风格 "aa" "bb"；括号内可跨行）
+
+        // 对于字符串字面量
+        // + 支持相邻字符串字面量拼接（C 风格 "aa" "bb"；括号内可跨行）
         if (at(Tok::Str)) {
             auto e = mk(Expr::StrLit);
             std::string v = advance().text;
@@ -128,28 +661,32 @@ struct Parser {
             e->text = std::move(v);
             return e;
         }
+        // 对于数值字面量
         if (at(Tok::Int) || at(Tok::Float) || at(Tok::Char)) {
-            auto e = mk(at(Tok::Int) ? Expr::IntLit
-                        : at(Tok::Float) ? Expr::FloatLit : Expr::CharLit);
+            auto e = mk(at(Tok::Int) ? Expr::IntLit : 
+                      at(Tok::Float) ? Expr::FloatLit : Expr::CharLit);
             e->text = advance().text;
             return e;
         }
-        // 标识符
+        // 对于标识符
         if (at(Tok::Ident)) {
             auto e = mk(Expr::Ident);
             e->text = advance().text;
             return e;
         }
-        // 括号分组：(expr)；若括号内出现 "expr : type"，则为强制类型转换
+
+        // 对于括号分组：(expr)；若括号内出现 "expr : type"，则为强制类型转换
         //   (p + 1: Node&)->next  等价于 C 的 ((Node*)(p + 1))->next
         if (accept(Tok::LParen)) {
             exprBracket++;
-            auto e = parseExpr();
-            skipNlInBracket();
-            if (accept(Tok::Colon)) {  // 强转：目标类型名 + 可选 & 后缀
+
+            auto e = parseExpr();           // 先解析括号内的表达式（可能是普通的括号分组，也可能是强转表达式的主体部分）
+            skipNlInBracket();              // 跳过括号内的换行和缩进（允许括号内跨行书写）
+            if (accept(Tok::Colon)) {       // 如果冒号存在，则解析为强制类型转换表达式
                 skipNlInBracket();
                 if (!at(Tok::Ident)) err("强转期望类型名");
-                auto c = mk(Expr::Cast);
+
+                auto c = mk(Expr::Cast);    // 创建强制类型转换节点
                 c->text = advance().text;
                 while (atOp("&") || atOp("&&"))
                     c->castPtr += advance().text == "&&" ? 2 : 1;
@@ -158,29 +695,34 @@ struct Parser {
                 skipNlInBracket();
             }
             expect(Tok::RParen, "')'");
+
             exprBracket--;
             return e;
         }
-        // 初始化列表：{e1, e2, ...}，可嵌套，允许尾逗号
+
+        // 对于初始化列表：{e1, e2, ...}，可嵌套，允许尾逗号
         if (accept(Tok::LBrace)) {
             exprBracket++;
+            
             auto e = mk(Expr::InitList);
             skipNlInBracket();
             if (!at(Tok::RBrace)) {
                 for (;;) {
-                    e->args.push_back(parseExpr());
+                    e->args.push_back(parseExpr());     // 解析逗号分隔的表达式列表
                     skipNlInBracket();
-                    if (!accept(Tok::Comma)) break;
+                    if (!accept(Tok::Comma)) break;     // 后面不再是逗号，则结束列表
                     skipNlInBracket();
-                    if (at(Tok::RBrace)) break;  // 尾逗号
+                    if (at(Tok::RBrace)) break;         // 逗号后允许直接跟 '}' 结束列表（尾逗号）
                 }
             }
             skipNlInBracket();
             expect(Tok::RBrace, "'}'");
+
             exprBracket--;
             return e;
         }
-        // sizeof(expr | type)
+
+        // 对于 sizeof(expr | type)
         if (at(Tok::KwSizeof)) {
             auto e = mk(Expr::Sizeof);
             advance();
@@ -191,7 +733,8 @@ struct Parser {
             expect(Tok::RParen, "')'");
             return e;
         }
-        // offsetof(Type, field)
+
+        // 对于 offsetof(Type, field)
         if (at(Tok::KwOffsetof)) {
             auto e = mk(Expr::Offsetof);
             advance();
@@ -204,12 +747,14 @@ struct Parser {
             expect(Tok::RParen, "')'");
             return e;
         }
+
         err("期望表达式，得到 '" + cur().text + "'");
     }
 
     // 后缀表达式 —— 循环解析调用链、下标、成员访问、后缀++
     ExprPtr parsePostfix() {
-        auto e = parsePrimary();
+        auto e = parsePrimary();                // 递归优先解析原子表达式，后续在此基础上解析后缀操作
+
         // stringify<key:val, ...>(...) 选项块：仅 stringify 关键字后紧跟 '<' 时触发。
         // 选项值限整数字面量（如 compact:1）；解析后随调用链附到对应 Call 节点。
         std::vector<std::pair<std::string, long long>> pendingSofOpts;
@@ -269,9 +814,9 @@ struct Parser {
                 advance();
                 m->a = std::move(e);
                 if (!at(Tok::Ident)) err("期望成员名");
-                m->text = advance().text;  // text = 成员名
+                m->text = advance().text;           // text = 成员名
                 e = std::move(m);
-            } else if (atOp("++") || atOp("--")) { // 后缀自增/自减
+            } else if (atOp("++") || atOp("--")) {  // 后缀自增/自减
                 auto u = mk(Expr::PostUnary);
                 u->op = advance().text;
                 u->a = std::move(e);
@@ -284,30 +829,36 @@ struct Parser {
 
     // 前缀一元表达式 —— 递归处理多个连续前缀运算符（如 !!x, *&x）
     ExprPtr parseUnary() {
+
         skipNlInBracket();
         if (atOp("!") || atOp("~") || atOp("-") || atOp("+") ||
             atOp("*") || atOp("&") || atOp("++") || atOp("--")) {
             auto u = mk(Expr::Unary);
             u->op = advance().text;
-            u->a = parseUnary();  // 递归：允许连续一元运算符
+            u->a = parseUnary();                // 递归：允许连续一元运算符
             return u;
         }
+
         return parsePostfix();
     }
 
     // 二元表达式 —— 按优先级递归的左结合解析
     // minPrec: 当前上下文允许的最低优先级，低于此优先级停止解析
     ExprPtr parseBinary(int minPrec) {
-        auto lhs = parseUnary();
+        auto lhs = parseUnary();                // 递归优先解析一元表达式
+
         for (;;) {
-            if (exprBracket > 0 && at(Tok::Newline)) skipLayout();  // 括号内跳过换行
+            if (exprBracket > 0 && at(Tok::Newline))
+                skipLayout();                   // 括号内跳过换行
             if (cur().kind != Tok::Op) break;
+
             int prec = binPrec(cur().text);
-            if (prec < minPrec) break;  // 优先级低于阈值，留给上层处理
+            if (prec < minPrec) break;          // 优先级低于阈值，留给上层处理
+
             auto b = mk(Expr::Binary);
             b->op = advance().text;
             b->a = std::move(lhs);
-            b->b = parseBinary(prec + 1);  // 递归：prec+1 保证左结合
+            b->b = parseBinary(prec + 1);       // 递归：prec+1 保证左结合
             lhs = std::move(b);
         }
         return lhs;
@@ -315,14 +866,15 @@ struct Parser {
 
     // 三元条件表达式 —— 右结合
     ExprPtr parseTernary() {
-        auto c = parseBinary(1);  // 从最低优先级开始
+        auto c = parseBinary(1);                // 递归优先解析二元表达式
+
         if (acceptOp("?")) {
             auto e = mk(Expr::Ternary);
-            e->a = std::move(c);       // 条件
-            ternDepth.push_back(exprBracket);  // 分支内禁用裸强转（':' 归三目）
-            e->b = parseExpr();         // 真值分支
-            expect(Tok::Colon, "':'");  // 必须的 : 分隔符
-            e->c = parseTernary();     // 假值分支（右结合，可嵌套 a?b:c?d:e）
+            e->a = std::move(c);                // 条件
+            ternDepth.push_back(exprBracket);   // 分支内禁用裸强转（':' 归三目）
+            e->b = parseExpr();                 // 真值分支
+            expect(Tok::Colon, "':'");          // 必须的 : 分隔符
+            e->c = parseTernary();              // 假值分支（右结合，可嵌套 a?b:c?d:e）
             ternDepth.pop_back();
             return e;
         }
@@ -331,7 +883,8 @@ struct Parser {
 
     // 顶层表达式 —— 处理裸右值强转与赋值（右结合）
     ExprPtr parseExpr() {
-        auto lhs = parseTernary();
+        auto lhs = parseTernary();              // 递归优先解析三元表达式
+
         // 裸右值强转：expr: type&...（仅作右值时免括号；需继续 ->/. 等
         // 后缀操作时仍需 (expr: type&) 括号形态）。限制：
         //   1. 三目分支内（同括号层）禁用 —— ':' 归三目，强转请加括号
@@ -347,6 +900,7 @@ struct Parser {
             c->a = std::move(lhs);
             lhs = std::move(c);
         }
+
         // 赋值运算符：右结合（递归调用 parseExpr 而非 parseTernary）
         if (cur().kind == Tok::Op && isAssignOp(cur().text)) {
             auto b = mk(Expr::Binary);  // 赋值也用 Binary 节点，op="=" / "+=" 等
@@ -355,460 +909,8 @@ struct Parser {
             b->b = parseExpr();  // 右结合递归
             return b;
         }
+
         return lhs;
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-    // 元类型与（var/let/tls）声明项解析
-    //
-    // sc 的类型语法有独特之处：
-    //   1. 指针标记 & 写在名字后（name& 而非 int* name）
-    //   2. 数组标记 [size] 写在名字后
-    //   3. 支持内联结构/联合（直接在变量声明处定义 {}/() 类型）
-    //   4. 未指定类型时由代码生成阶段推断默认类型
-
-    // 解析名字后的元类型后缀：连续的 &（指针）和 [size]...（数组，可多维）
-    // 注意：词法器按最长匹配将 && 识别为单个 token，故此处需同时接受
-    // & （一级）和 &&（两级），如 name&&: 即指针的指针
-    void parseMeta(TypeRef& ty) {
-        for (;;) {
-            if (acceptOp("&")) ty.ptr++;            // 每个 & 增加一级指针
-            else if (acceptOp("&&")) ty.ptr += 2;   // && 为两级指针
-            else break;
-        }
-        // 多维数组：name[x][y] 与 C 对齐，每个 [维度] 追加一维
-        while (accept(Tok::LBracket)) {
-            std::string dim;
-            if (!at(Tok::RBracket)) {
-                if (!at(Tok::Int) && !at(Tok::Ident)) err("期望数组大小");
-                dim = advance().text;  // 维度大小（数字或常量标识符）
-            }
-            expect(Tok::RBracket, "']'");
-            ty.arrayDims.push_back(std::move(dim));
-        }
-    }
-
-    // 解析类型引用：可以是命名类型 name&&、内联 {struct} 或 (union)
-    TypeRef parseTypeRef() {
-        TypeRef ty;
-        // 内联结构/联合：直接以 { 或 ( 开头
-        if (at(Tok::LBrace) || at(Tok::LParen)) {
-            ty.hasInline = true;
-            ty.inlineUnion = at(Tok::LParen);  // '(' → union, '{' → struct
-            parseFieldBlock(ty.inlineFields);   // 递归解析字段列表
-            return ty;
-        }
-        // 裸 & / &&：无名指针 = void 指针（与字段省略类型时 name&: 规则一致）
-        if (at(Tok::Ident)) ty.name = advance().text;
-        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&")))
-            err("期望类型名");
-        // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
-        for (;;) {
-            if (acceptOp("&")) ty.ptr++;
-            else if (acceptOp("&&")) ty.ptr += 2;
-            else break;
-        }
-        return ty;
-    }
-
-    // 解析字段块：{ fields } 或 ( fields )，字段间以逗号或换行分隔。
-    // methodsOut 非空（顶层 def 结构体）时：函数签名字段后跟缩进块
-    // = 成员函数实现，提升为带 methodOwner 的顶层 FuncD（不入字段）；
-    // 无函数体则仍是普通函数指针字段 —— 有无函数体即区分二者。
-    void parseFieldBlock(std::vector<Field>& out,
-                         std::vector<DeclPtr>* methodsOut = nullptr) {
-        Tok close = at(Tok::LBrace) ? Tok::RBrace : Tok::RParen;
-        bool inParen = at(Tok::LParen);
-        if (inParen) exprBracket++;  // 联合使用 ()，需增加括号计数以抑制内部缩进
-        advance();  // 跳过开始的 { 或 (
-        for (;;) {
-            skipLayout();
-            if (at(close)) break;
-            if (at(Tok::End)) err("结构/联合未闭合");
-            Field f = parseFieldItem();
-            if (acceptOp("=")) f.init = parseExpr();
-            // 成员函数：函数签名字段 + 缩进函数体
-            if (f.type.fnKind == TypeRef::FncKind::PlainPtr &&
-                at(Tok::Newline) && peek().kind == Tok::Indent) {
-                if (!methodsOut)
-                    err("成员函数只能在顶层 def 结构体内实现");
-                if (f.init) err("成员函数不能带初值");
-                auto m = std::make_unique<Decl>();
-                m->kind = Decl::FuncD;
-                m->line = f.line;
-                m->methodName = f.name;
-                if (f.type.fnRet) m->retType = std::move(*f.type.fnRet);
-                m->fields = std::move(f.type.fnParams);
-                m->variadic = f.type.fnVariadic;
-                advance(); advance();  // Newline + Indent
-                parseStmts(m->body);
-                accept(Tok::Dedent);
-                methodsOut->push_back(std::move(m));
-            } else {
-                out.push_back(std::move(f));
-            }
-            skipLayout();
-            accept(Tok::Comma);  // 逗号分隔是可选的（也可纯粹以换行分隔）
-        }
-        advance();  // 跳过结束的 } 或 )
-        if (inParen) exprBracket--;
-    }
-
-    // 解析单个字段项：name[meta][: type] 或匿名 {}/()
-    Field parseFieldItem() {
-        Field f;
-        f.line = cur().line;
-        // 匿名嵌套结构/联合：直接以 { 或 ( 开头，没有字段名
-        if (at(Tok::LBrace) || at(Tok::LParen)) {
-            f.type.hasInline = true;
-            f.type.inlineUnion = at(Tok::LParen);
-            parseFieldBlock(f.type.inlineFields);
-            return f;
-        }
-        if (!at(Tok::Ident)) err("期望字段名");
-        f.name = advance().text;
-        parseMeta(f.type);  // 先解析名字后的 & 和 [] 元类型
-        // 冒号后的显式类型（可选：省略时由代码生成推断默认类型）
-        if (accept(Tok::Colon)) {
-            // 函数签名字段：name: fnc[: ret, params...]
-            // （无后续函数体 = 普通函数指针字段；有 = 成员函数，见 parseFieldBlock）
-            if (at(Tok::KwFnc)) {
-                advance();  // 跳过 fnc
-                TypeRef ty;
-                ty.fnKind = TypeRef::FncKind::PlainPtr;
-                bool haveRet = false;
-                // ':' 可省略（无返回值且无参数，如成员函数 init: fnc）
-                if (accept(Tok::Colon)) {
-                    for (;;) {
-                        if (at(Tok::Ellipsis)) {
-                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
-                            ty.fnVariadic = true; advance(); break;
-                        }
-                        if (looksLikeParam()) {
-                            ty.fnParams.push_back(parseFieldItem());  // 参数
-                        } else {
-                            if (haveRet) err("重复的返回类型");
-                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
-                            haveRet = true;
-                        }
-                        if (!accept(Tok::Comma)) break;
-                    }
-                }
-                f.type = std::move(ty);
-                return f;
-            }
-            if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
-                TypeRef ty = parseTypeRef();
-                // 合并元类型信息：名字后的 & 和 [] 与冒号后的类型信息合并
-                ty.ptr += f.type.ptr;
-                ty.arrayDims.insert(ty.arrayDims.end(),
-                                    f.type.arrayDims.begin(), f.type.arrayDims.end());
-                f.type = std::move(ty);
-            }
-        }
-        return f;
-    }
-
-    // 解析 var/let/tls 声明项：与字段类似，但额外支持 = 初值表达式和内联类型
-    Field parseVarItem() {
-        Field f;
-        f.line = cur().line;
-        if (!at(Tok::Ident)) err("期望变量名");
-        f.name = advance().text;
-        parseMeta(f.type);
-        if (accept(Tok::Colon)) {
-            // 显式类型声明
-            if (at(Tok::KwFnc)) {
-                advance();
-                TypeRef ty;
-                ty.fnKind = TypeRef::FncKind::PlainPtr;
-                bool haveRet = false;
-                if (accept(Tok::Colon)) {
-                    for (;;) {
-                        if (at(Tok::Ellipsis)) {
-                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
-                            ty.fnVariadic = true; advance(); break;
-                        }
-                        if (looksLikeParam()) {
-                            ty.fnParams.push_back(parseFieldItem());
-                        } else {
-                            if (haveRet) err("重复的返回类型");
-                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
-                            haveRet = true;
-                        }
-                        if (!accept(Tok::Comma)) break;
-                    }
-                }
-                f.type = std::move(ty);
-            } else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
-                TypeRef ty = parseTypeRef();
-                ty.ptr += f.type.ptr;
-                ty.arrayDims.insert(ty.arrayDims.end(),
-                                    f.type.arrayDims.begin(), f.type.arrayDims.end());
-                f.type = std::move(ty);
-            }
-        } else if (at(Tok::LBrace) || at(Tok::LParen)) {
-            // 无冒号直接跟 {/( ：内联结构/联合（如 var name {field:type}）
-            f.type.hasInline = true;
-            f.type.inlineUnion = at(Tok::LParen);
-            parseFieldBlock(f.type.inlineFields);
-        }
-        if (acceptOp("=")) f.init = parseExpr();  // 可选的初值表达式
-        return f;
-    }
-
-    // var/let/tls 列表：支持单行逗号分隔、和多行缩进续行两种写法
-    void parseVarList(std::vector<Field>& out) {
-        out.push_back(parseVarItem());
-        while (accept(Tok::Comma)) out.push_back(parseVarItem());   // 单行：逗号分隔多项
-        expect(Tok::Newline, "换行");
-        if (accept(Tok::Indent)) {                                  // 多行缩进续行
-            while (!at(Tok::Dedent) && !at(Tok::End)) {
-                skipNewlines();
-                if (at(Tok::Dedent)) break;
-                out.push_back(parseVarItem());
-                while (accept(Tok::Comma)) out.push_back(parseVarItem());
-                expect(Tok::Newline, "换行");
-            }
-            accept(Tok::Dedent);
-        }
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-    // def 类型定义解析
-    //
-    // def 支持四种类型定义：
-    //   def name: base \n\titem...    → 枚举
-    //   def name: { fields }          → 结构体
-    //   def name: ( fields )          → 联合体
-    //   def name -> target_type       → 类型别名
-
-    DeclPtr parseDef() {
-        auto d = std::make_unique<Decl>();
-        d->line = cur().line;
-        advance(); // 跳过 def 关键字
-        if (!at(Tok::Ident)) err("期望类型名");
-        d->name = advance().text;  // 类型名
-
-        // --> 箭头语法：类型别名  def name -> target
-        if (accept(Tok::Arrow)) {
-            d->kind = Decl::AliasD;
-            d->type = parseTypeRef();
-            expect(Tok::Newline, "换行");
-            return d;
-        }
-        expect(Tok::Colon, "':'");
-
-        // ~：链表标记（仅结构体）—— 转 C 时在成员前面注入 _prev/_next 自链指针
-        bool linked = acceptOp("~");
-
-        // { ... }：结构体（函数签名字段后跟缩进函数体 = 成员函数）
-        if (at(Tok::LBrace)) {
-            d->kind = Decl::StructD;
-            d->linked = linked;
-            parseFieldBlock(d->fields, &pendingMethods);
-            for (auto& m : pendingMethods) {
-                m->methodOwner = d->name;
-                m->name = mangleMethodName(d->name, m->methodName);
-            }
-            if (linked) {
-                for (auto& f : d->fields)
-                    if (f.name == "_prev" || f.name == "_next" ||
-                        f.name == "prev" || f.name == "next")
-                        err("prev/next/_prev/_next 为链表结构体内置成员，不可显式定义");
-                std::vector<Field> injected;
-                for (const char* n : {"_prev", "_next"}) {
-                    Field f;
-                    f.name = n;
-                    f.type.ptr = 1;
-                    f.synthetic = true;
-                    f.line = d->line;
-                    injected.push_back(std::move(f));
-                }
-                d->fields.insert(d->fields.begin(),
-                                 std::make_move_iterator(injected.begin()),
-                                 std::make_move_iterator(injected.end()));
-            }
-            expect(Tok::Newline, "换行");
-            return d;
-        }
-        if (linked) err("'~' 链表标记仅支持结构体 {}");
-        // ( ... )：联合体
-        if (at(Tok::LParen)) {
-            d->kind = Decl::UnionD;
-            parseFieldBlock(d->fields);
-            expect(Tok::Newline, "换行");
-            return d;
-        }
-        // 其余：枚举  def name: base_type \n\tItem1, Item2 ...
-        d->kind = Decl::EnumD;
-        d->type = parseTypeRef();  // 枚举的底层整数类型
-        expect(Tok::Newline, "换行");
-        expect(Tok::Indent, "缩进的枚举项");
-        while (!at(Tok::Dedent) && !at(Tok::End)) {
-            skipNewlines();
-            if (at(Tok::Dedent)) break;
-            for (;;) {
-                Field item;
-                item.line = cur().line;
-                if (!at(Tok::Ident)) err("期望枚举项名");
-                item.name = advance().text;
-                if (acceptOp("=")) item.init = parseExpr();  // 可选的显式值
-                d->fields.push_back(std::move(item));
-                if (!accept(Tok::Comma)) break;  // 逗号分隔多项
-            }
-            expect(Tok::Newline, "换行");
-        }
-        accept(Tok::Dedent);
-        return d;
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-    // fnc 函数定义解析
-    //
-    // fnc 支持三种形态：
-    //   1. 函数类型定义：fnc name: ret, params... \n        （无函数体）
-    //       → 只有签名，C 中生成 typedef 函数指针类型
-    //   2. 函数实现：    fnc name: ret, params... \n\tbody  （直接定义+实现）
-    //   3. 预定义类型实现：fnc name -> func_type \n\tbody    （实现已有函数类型）
-    //
-    // 函数签名可以单行写全部参数，也可以多行缩进（每行一个参数）。
-    // 参数行与函数体之间用单独的 '-' 行分隔。
-
-    // 前瞻判断：当前 token 序列是否像参数声明（Ident + 可能的&/[] + Colon）
-    bool looksLikeParam() const {
-        if (!at(Tok::Ident)) return false;
-        size_t q = p + 1;
-        while (q < t.size()) {
-            const Token& tk = t[q];
-            if (tk.kind == Tok::Op && (tk.text == "&" || tk.text == "&&")) { q++; continue; }
-            if (tk.kind == Tok::LBracket) {  // 跳过 [size]
-                q++;
-                while (q < t.size() && t[q].kind != Tok::RBracket &&
-                       t[q].kind != Tok::Newline) q++;
-                if (q < t.size() && t[q].kind == Tok::RBracket) { q++; continue; }
-                return false;
-            }
-            return tk.kind == Tok::Colon;  // 参数一定有冒号后跟类型
-        }
-        return false;
-    }
-
-    // 解析 fnc 冒号后的单行项：可能是返回类型，也可能是参数
-    void parseFncItem(Decl& d, bool& haveRet) {
-        if (at(Tok::Ellipsis)) {
-            if (d.fields.empty()) err("'...' 前必须有至少一个命名参数");
-            d.variadic = true;
-            advance();
-            return;
-        }
-        if (looksLikeParam()) {
-            d.fields.push_back(parseFieldItem());  // 是参数
-            return;
-        }
-        if (haveRet) err("重复的返回类型");
-        d.retType = parseTypeRef();  // 是返回类型（只有一个）
-        haveRet = true;
-    }
-
-    DeclPtr parseFnc(bool isRpc = false) {
-        auto d = std::make_unique<Decl>();
-        d->line = cur().line;
-        d->isRpc = isRpc;
-        advance(); // 跳过 fnc/rpc 关键字
-        if (!at(Tok::Ident)) err(isRpc ? "期望 rpc 名" : "期望函数名");
-        d->name = advance().text;
-
-        // rpc 是伪形参函数糖：不支持方法形态与函数类型实现形态
-        if (isRpc && at(Tok::DColon)) err("rpc 不支持方法定义（::）");
-        if (isRpc && at(Tok::Arrow)) err("rpc 不支持实现预定义函数类型（->）");
-
-        // 方法声明形态：fnc obj::m: ret, params...（仅声明，实现在 C 侧；
-        // 带函数体的成员函数请在结构体定义内实现）
-        if (accept(Tok::DColon)) {
-            d->methodOwner = d->name;
-            if (!at(Tok::Ident)) err("期望方法名");
-            d->methodName = advance().text;
-            d->name = mangleMethodName(d->methodOwner, d->methodName);
-        }
-
-        // 形态3：fnc name -> func_type —— 实现预定义函数类型
-        if (accept(Tok::Arrow)) {
-            if (!d->methodOwner.empty())
-                err("方法不支持实现预定义函数类型（->）");
-            d->kind = Decl::FuncD;
-            if (!at(Tok::Ident)) err("期望函数类型名");
-            d->funcTypeName = advance().text;  // 记录引用的函数类型名
-            expect(Tok::Newline, "换行");
-            expect(Tok::Indent, "函数体");
-            parseStmts(d->body);  // 函数体由 codegen 从函数类型展开签名
-            accept(Tok::Dedent);
-            return d;
-        }
-
-        // 签名：':' 后接签名项；省略返回类型 = void（首项是否参数由
-        // looksLikeParam 前瞻区分）；无返回值且无参数时 ':' 可整体省略
-        bool haveRet = false;
-        if (accept(Tok::Colon)) {
-            if (!at(Tok::Newline)) {
-                parseFncItem(*d, haveRet);
-                while (!d->variadic && accept(Tok::Comma)) parseFncItem(*d, haveRet);
-            }
-        } else if (!at(Tok::Newline)) {
-            err("期望 ':' 或换行");
-        }
-        expect(Tok::Newline, "换行");
-
-        // 无缩进块 → 形态1：纯函数类型定义（只有签名，无实现）
-        if (!accept(Tok::Indent)) {
-            d->kind = Decl::FuncTypeD;
-            return d;
-        }
-
-        // 有缩进块 → 可能是形态2（函数实现）或多行参数续行
-        bool isBody = false;
-        for (;;) {
-            skipNewlines();
-            if (at(Tok::Dedent) || at(Tok::End)) break;
-            // '-' 分隔符：之后是函数体语句
-            if (atOp("-") && peek().kind == Tok::Newline) {
-                advance(); advance();  // 跳过 '-' 和换行
-                isBody = true;
-                break;
-            }
-            // 看起来像参数声明 → 多行参数
-            if (looksLikeParam()) {
-                d->fields.push_back(parseFieldItem());
-                while (accept(Tok::Comma)) {
-                    if (at(Tok::Ellipsis)) {
-                        if (d->fields.empty()) err("'...' 前必须有参数");
-                        d->variadic = true; advance(); break;
-                    }
-                    d->fields.push_back(parseFieldItem());
-                }
-                expect(Tok::Newline, "换行");
-                continue;
-            }
-            // 其他情况：以语句开头 → 函数体
-            isBody = true;
-            break;
-        }
-        if (isBody) {
-            d->kind = Decl::FuncD;      // 有函数体的函数定义
-            if (!d->methodOwner.empty())
-                err("成员函数请在结构体定义内实现（fnc T::m 仅用于无函数体的方法声明）");
-            parseStmts(d->body);
-        } else {
-            d->kind = Decl::FuncTypeD;  // 只有参数，无函数体：函数类型（rpc 时为声明）
-        }
-        accept(Tok::Dedent);
-        // rpc 参数将成为结构体字段：不支持变参与数组参数
-        if (d->isRpc) {
-            if (d->variadic) err("rpc 不支持可变参数 '...'");
-            for (auto& f : d->fields)
-                if (!f.type.arrayDims.empty()) err("rpc 参数不支持数组，请改用指针（&）");
-        }
-        return d;
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -818,20 +920,22 @@ struct Parser {
     // 控制流语句（if/while/for）的条件后可跟多行续行条件（续行运算符 + 条件），
     // 通过 '-' 分隔符区分续行条件和语句体。
 
-    // 解析连续的语句序列，直到遇到 Dedent 或 End
+    // 创建语句节点
+    StmtPtr mkStmt(Stmt::Kind k) {
+        auto s = std::make_unique<Stmt>();
+        s->kind = k;
+        s->line = cur().line;
+        return s;
+    }
+
+    // 解析连续兄弟语句序列
+    // + 直到遇到 Dedent 或 End（也就是当前缩进块结束）
     void parseStmts(std::vector<StmtPtr>& out) {
         while (!at(Tok::Dedent) && !at(Tok::End)) {
             skipNewlines();
             if (at(Tok::Dedent) || at(Tok::End)) break;
             out.push_back(parseStmt());
         }
-    }
-
-    StmtPtr mkStmt(Stmt::Kind k) {
-        auto s = std::make_unique<Stmt>();
-        s->kind = k;
-        s->line = cur().line;
-        return s;
     }
 
     // 解析缩进块：\n Indent stmts... Dedent
@@ -843,77 +947,119 @@ struct Parser {
     }
 
     // 解析条件表达式 + 缩进块（if/while 共用）
-    // 支持多行条件：后续行以二元运算符开头时作为条件续行
-    // '-' 分隔符区分续行条件与语句体
+    // + 支持多行条件：后续行以二元运算符开头时作为条件续行
+    //   '-' 分隔符区分续行条件与语句体
     void parseCondBlock(ExprPtr& cond, std::vector<StmtPtr>& out) {
-        cond = parseExpr();
+
+        cond = parseExpr();                 // 解析条件表达式
         expect(Tok::Newline, "换行");
         expect(Tok::Indent, "缩进块");
-        // 多行条件续行：行首为二元运算符时（如 &&、||）视为同一条件的延续
+
+        // 支持多行条件续行：行首为二元运算符时（如 &&、||）视为同一条件的延续
         while (cur().kind == Tok::Op && binPrec(cur().text) >= 0 &&
                !(atOp("-") && peek().kind == Tok::Newline)) {
+
             auto b = mk(Expr::Binary);
-            b->op = advance().text;
+            b->op = advance().text;         // 解析二元运算符
             b->a = std::move(cond);
-            b->b = parseExpr();  // 新行上的右操作数
+            b->b = parseExpr();             // 新行上的右操作数（表达式）
             cond = std::move(b);
             expect(Tok::Newline, "换行");
         }
         // '-' 分隔符：跳过，之后是真正的语句体
         if (atOp("-") && peek().kind == Tok::Newline) { advance(); advance(); }
-        parseStmts(out);  // 解析语句体
+
+        parseStmts(out);
         accept(Tok::Dedent);
     }
 
-    // case 分支：
+    // 解析 if 语句：
+    // if cond:
+    //     body...
+    // [elif cond:
+    //     body...]
+    // [else:
+    //     body...]
+    StmtPtr parseIfStmt() {
+
+        auto s = mkStmt(Stmt::IfS);
+        advance();                          // 跳过 if 关键字
+
+        parseCondBlock(s->expr, s->body);   // 条件 + if 主体
+
+        if (at(Tok::KwElse)) {
+            advance();                      // 跳过 else 关键字
+            
+            // 对于 else if ，逻辑可以（递归）折叠为一级（避免深层嵌套）
+            // + 对应的 parser 中 elseBody[0] 是 IfS 时，codegen 生成 else if 链
+            if (at(Tok::KwIf)) 
+                s->elseBody.push_back(parseIfStmt());
+
+            // 普通 else 块
+            else parseBlock(s->elseBody);  
+        }
+        return s;
+    }
+
+    // 解析 case 语句
     // case expr:
     //     1, 2:
     //         ...
     //     :
     //         ...
     StmtPtr parseCaseStmt() {
+
         auto s = mkStmt(Stmt::CaseS);
-        advance();  // 跳过 case
-        s->expr = parseExpr();
+        advance();                          // 跳过 case 关键字
+
+        s->expr = parseExpr();              // 解析 case 表达式
         expect(Tok::Colon, "':'");
+
         expect(Tok::Newline, "换行");
         expect(Tok::Indent, "缩进块");
-
-        bool haveDefault = false;
-        for (;;) {
+        for (bool haveDefault = false;;) {
             skipNewlines();
-            if (at(Tok::Dedent) || at(Tok::End)) break;
+            if (at(Tok::Dedent) || at(Tok::End)) break;     // 缩进块结束，即 case 语句结束
 
+            // 解析 case 分支
             Stmt::CaseArm arm;
             arm.line = cur().line;
 
-            // 分支标签：v1, v2: 或 :（default）
+            // 对于无标签的 default 分支
             if (accept(Tok::Colon)) {
                 if (haveDefault) err("case 中 default 分支重复");
                 haveDefault = true;
-            } else {
-                arm.labels.push_back(parseExpr());
-                while (accept(Tok::Comma)) arm.labels.push_back(parseExpr());
+            }
+            // 对于普通带标签的 case 分支
+            else {
+                arm.labels.push_back(parseExpr());          // 解析 case 标签表达式
+                while (accept(Tok::Comma))                  // 支持逗号分隔多个标签
+                    arm.labels.push_back(parseExpr());
                 expect(Tok::Colon, "':'");
             }
 
+            // case 分支体：换行 + 缩进块
             expect(Tok::Newline, "换行");
             expect(Tok::Indent, "case 分支体");
-
             for (;;) {
                 skipNewlines();
-                if (at(Tok::Dedent) || at(Tok::End)) break;
+                if (at(Tok::Dedent) || at(Tok::End)) break; // 缩进块结束，即 case 分支体结束
+
+                // 通过 'through' 关键字支持 case 分支贯通（fallthrough）
                 if (at(Tok::KwThrough)) {
-                    advance();
+                    advance();                              // 跳过 through 关键字
                     expect(Tok::Newline, "换行");
                     arm.through = true;
                     skipNewlines();
                     if (!at(Tok::Dedent)) err("through 必须位于 case 分支末尾");
                     break;
                 }
+
+                // 解析 case 分支体内的一条语句
                 arm.body.push_back(parseStmt());
             }
             accept(Tok::Dedent);
+
             s->caseArms.push_back(std::move(arm));
         }
 
@@ -922,31 +1068,48 @@ struct Parser {
         return s;
     }
 
+    // 解析 do-while 语句：
+    // do 
+    //     body...
+    // while cond
     StmtPtr parseDoWhileStmt() {
+
         auto s = mkStmt(Stmt::DoWhileS);
-        advance();  // do
+        advance();                          // 跳过 do 关键字
+
         parseBlock(s->body);
         if (!accept(Tok::KwWhile)) err("do 语句后必须跟 while 条件");
+
         s->expr = parseExpr();
         expect(Tok::Newline, "换行");
         return s;
     }
 
+    // 解析 goto 语句：
+    // goto label
     StmtPtr parseGotoStmt() {
+
         auto s = mkStmt(Stmt::GotoS);
-        advance();  // goto
+        advance();                          // 跳过 goto 关键字
         if (!at(Tok::Ident)) err("goto 后期望标签名");
+
         s->text = advance().text;
         expect(Tok::Newline, "换行");
         return s;
     }
 
+    // 解析标签语句：
+    // label:       
+    //     body...  
     StmtPtr parseLabelStmt() {
+
         auto s = mkStmt(Stmt::LabelS);
-        s->text = advance().text;
+        s->text = advance().text;           // 获取并跳过 label 标识符
         expect(Tok::Colon, "':'");
+
+        // 冒号后必须换行 + 缩进块
         expect(Tok::Newline, "换行");
-        expect(Tok::Indent, "标签缩进块");
+        expect(Tok::Indent,  "标签缩进块");
         parseStmts(s->body);
         accept(Tok::Dedent);
         return s;
@@ -954,11 +1117,19 @@ struct Parser {
 
     // 单条语句解析 —— 按首 token 分派
     StmtPtr parseStmt() {
+
+        // 这里要先判断是否为标签语句（Ident + Colon + Newline）
+        // + 因为需要和普通表达式语句（如函数调用）区分
         if (at(Tok::Ident) && peek().kind == Tok::Colon && peek(2).kind == Tok::Newline)
             return parseLabelStmt();
 
         switch (cur().kind) {
-            // var / let / tls 声明语句
+
+            // goto 标签语句：goto label
+            case Tok::KwGoto:
+                return parseGotoStmt();
+
+            // var / let / tls 声明语句（局部变量，块级作用域）
             case Tok::KwVar:
             case Tok::KwLet:
             case Tok::KwTls: {
@@ -968,6 +1139,7 @@ struct Parser {
                 parseVarList(s->decls);
                 return s;
             }
+            
             // 函数体内嵌套的类型定义（较少见但允许）
             case Tok::KwDef: {
                 auto s = mkStmt(Stmt::DeclS);
@@ -976,8 +1148,10 @@ struct Parser {
                     err("局部类型不支持成员函数");
                 return s;
             }
+
             case Tok::KwFnc:
                 err("暂不支持嵌套函数定义");  // 限制：函数只能在顶层定义
+
             // return [expr]
             case Tok::KwReturn: {
                 auto s = mkStmt(Stmt::ReturnS);
@@ -986,32 +1160,25 @@ struct Parser {
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
             case Tok::KwBreak: {
                 auto s = mkStmt(Stmt::BreakS);
                 advance();
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
             case Tok::KwContinue: {
                 auto s = mkStmt(Stmt::ContinueS);
                 advance();
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
             // if 条件分支（支持 else 和 else if 链）
-            case Tok::KwIf: {
-                auto s = mkStmt(Stmt::IfS);
-                advance();
-                parseCondBlock(s->expr, s->body);  // 条件 + if 主体
-                if (at(Tok::KwElse)) {
-                    advance();
-                    // else if 折叠为一级（避免深层嵌套）
-                    // parser 中 elseBody[0] 是 IfS 时，codegen 生成 else if 链
-                    if (at(Tok::KwIf)) s->elseBody.push_back(parseStmt());
-                    else parseBlock(s->elseBody);  // 普通 else 块
-                }
-                return s;
-            }
+            case Tok::KwIf:
+                return parseIfStmt();
+
             // while 循环
             case Tok::KwWhile: {
                 auto s = mkStmt(Stmt::WhileS);
@@ -1019,8 +1186,11 @@ struct Parser {
                 parseCondBlock(s->expr, s->body);
                 return s;
             }
+            
+            // do-while 循环
             case Tok::KwDo:
                 return parseDoWhileStmt();
+
             // for 循环：for init; cond; step \n body
             case Tok::KwFor: {
                 auto s = mkStmt(Stmt::ForS);
@@ -1033,12 +1203,13 @@ struct Parser {
                 parseBlock(s->body);
                 return s;
             }
+
             case Tok::KwCase:
                 return parseCaseStmt();
+
             case Tok::KwThrough:
                 err("through 只能出现在 case 分支末尾");
-            case Tok::KwGoto:
-                return parseGotoStmt();
+
             // run 线程语句：run rpc调用 [, &thread指针]
             //   有出参 → joinable（join 等待并回收）；无 → detach 自释放
             case Tok::KwRun: {
@@ -1052,6 +1223,7 @@ struct Parser {
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
             // wait 条件等待语句：wait cond, mutex [, nsec [, sec]]
             //   nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
             case Tok::KwWait: {
@@ -1062,15 +1234,18 @@ struct Parser {
                 s->forInit = parseExpr();                           // mutex
                 if (accept(Tok::Comma)) {
                     s->forCond = parseExpr();                       // 纳秒
-                    if (accept(Tok::Comma)) s->forStep = parseExpr(); // 秒
+                    if (accept(Tok::Comma)) 
+                        s->forStep = parseExpr();                   // 秒
                 }
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);
                 s->expr = parseExpr();
+
                 // 单行多语句：逗号运算符 a, b, c
                 while (accept(Tok::Comma)) {
                     auto b = mk(Expr::Binary);
@@ -1094,7 +1269,7 @@ struct Parser {
 
     Program parseProgram() { Program prog;
 
-        for (;;) { skipNewlines();
+        for (;;) { skipNewlines();                                  // 跳过顶层连续空行
             if (at(Tok::End)) break;
 
             // @ 导出前缀：作用于紧随的 inc/def/fnc/var/let
@@ -1103,14 +1278,17 @@ struct Parser {
 
                 // inc 头文件引入：lexer 已将头文件名捕获为 Str token
                 case Tok::KwInc: {
+
                     auto d = std::make_unique<Decl>();
                     d->line = cur().line;
                     d->kind = Decl::IncD;
                     advance();                                      // 跳过 inc 关键字
                     if (!at(Tok::Str)) err("inc 后期望头文件名");
+
                     d->name = advance().text;
                     d->external = isScModuleName(d->name);
                     d->origin = d->name;
+
                     // 这里先把 sc 模块导入当作外部符号记录，后端会进一步展开
                     if (d->external) {
                         prog.externSymbols.push_back(d->name);
