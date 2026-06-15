@@ -473,22 +473,26 @@ struct Parser {
         }
     }
 
+    // 解析 fnc 定义：根据是否有函数体、以及签名的写法，区分函数类型定义、函数实现、预定义类型实现三种形态
     DeclPtr parseFnc(bool isRpc = false) {
 
         auto d = std::make_unique<Decl>();
         d->line = cur().line;
         d->isRpc = isRpc;
+
         advance();                                  // 跳过 fnc/rpc 关键字
         if (!at(Tok::Ident)) err(isRpc ? "期望 rpc 名" : "期望函数名");
+
         d->name = advance().text;                   // 函数名（rpc 时为接口名，后续会在函数名前加上 rpc_ 前缀）
 
         // rpc 是伪形参函数糖：不支持方法形态与函数类型实现形态
         if (isRpc && at(Tok::DColon)) err("rpc 不支持方法定义（::）");
         if (isRpc && at(Tok::Arrow)) err("rpc 不支持实现预定义函数类型（->）");
 
-        // 方法声明形态：fnc obj::m: ret, params...
+        // 方法（成员函数）声明形态：fnc obj::m: ret, params...
         // + 这里仅声明，实现在 C 侧；
-        //   而带函数体的成员函数请在结构体定义内实现
+        //   此外，带函数体的成员函数请在结构体定义内实现
+        // todo: 这个形态应该改到结构体定义内实现（目前放在这里是为了兼容原有测试用例），即 fnc T::m 仅用于无函数体的方法声明，带函数体的成员函数仍在结构体定义内实现
         if (accept(Tok::DColon)) {
             d->methodOwner = d->name;
             if (!at(Tok::Ident)) err("期望方法名");
@@ -498,19 +502,23 @@ struct Parser {
 
         // 形态3：fnc name -> func_type —— 实现预定义函数类型
         if (accept(Tok::Arrow)) {
+
             if (!d->methodOwner.empty())
-                err("方法不支持实现预定义函数类型（->）");
+                err("成员函数不能使用预定义函数类型（->）");
+
             d->kind = Decl::FuncD;
             if (!at(Tok::Ident)) err("期望函数类型名");
-            d->funcTypeName = advance().text;   // 记录引用的函数类型名
+            d->funcTypeName = advance().text;       // 记录引用的函数类型名
+
             expect(Tok::Newline, "换行");
             expect(Tok::Indent, "函数体");
-            parseStmts(d->body);                // 函数体由 codegen 从函数类型展开签名
+            parseStmts(d->body);                    // 函数体由 codegen 从函数类型展开签名
             accept(Tok::Dedent);
             return d;
         }
 
-        // 签名：':' 后接签名项；无返回值且无参数时 ':' 可整体省略
+        // 解析（冒号分隔的）函数返回类型和参数列表
+        // + 两者都可单行写在冒号后，也可多行缩进续行
         if (accept(Tok::Colon)) {
             if (!at(Tok::Newline)) {
                 parseFncVars(d->structCommon);
@@ -529,13 +537,12 @@ struct Parser {
         // 有缩进块 → 可能是形态2（函数实现）或多行参数续行
         bool isBody = false;
         for (;;) {
-            
             skipNewlines();
             if (at(Tok::Dedent) || at(Tok::End)) break;
 
             // '-' 分隔符：之后是函数体语句
             if (atOp("-") && peek().kind == Tok::Newline) {
-                advance(); advance();   // 跳过 '-' 和换行
+                advance(); advance();               // 跳过 '-' 和换行
                 isBody = true;
                 break;
             }
@@ -544,8 +551,7 @@ struct Parser {
             if (looksLikeParam()) {
 
                 d->structCommon.fields.push_back(parseFieldItem());
-                
-                while (accept(Tok::Comma)) {
+                while (accept(Tok::Comma)) {        // 逗号分隔多项
 
                     if (at(Tok::Ellipsis)) {
                         if (d->structCommon.fields.empty()) err("'...' 前必须有参数");
@@ -565,17 +571,18 @@ struct Parser {
             break;
         }
 
+        // 有函数体的函数定义
         if (isBody) {
-            d->kind = Decl::FuncD;      // 有函数体的函数定义
+            d->kind = Decl::FuncD;      
             if (!d->methodOwner.empty())
                 err("成员函数请在结构体定义内实现（fnc T::m 仅用于无函数体的方法声明）");
             parseStmts(d->body);
-        } else {
-            d->kind = Decl::FuncTypeD;  // 只有参数，无函数体：函数类型（rpc 时为声明）
         }
+        // 只有参数，无函数体：函数类型（rpc 时为声明）
+        else d->kind = Decl::FuncTypeD;
         accept(Tok::Dedent);
 
-        // rpc 参数将成为结构体字段：不支持变参与数组参数
+        // rpc 参数将成为结构体字段：所以不支持变参与数组参数
         if (d->isRpc) {
             if (d->structCommon.variadic) err("rpc 不支持可变参数 '...'");
             for (auto& f : d->structCommon.fields)
@@ -886,7 +893,7 @@ struct Parser {
         return s;
     }
 
-    // 解析连续兄弟语句序列
+    // 解析连续（兄弟）语句序列
     // + 直到遇到 Dedent 或 End（也就是当前缩进块结束）
     void parseStmts(std::vector<StmtPtr>& out) {
         while (!at(Tok::Dedent) && !at(Tok::End)) {
@@ -1153,11 +1160,11 @@ struct Parser {
             case Tok::KwFor: {
                 auto s = mkStmt(Stmt::ForS);
                 advance();
-                if (!at(Tok::Semi)) s->forInit = parseExpr();  // 初始化表达式（可为空）
+                if (!at(Tok::Semi)) s->forInit = parseExpr();       // 初始化表达式（可为空）
                 expect(Tok::Semi, "';'");
-                if (!at(Tok::Semi)) s->forCond = parseExpr();  // 条件表达式（可为空）
+                if (!at(Tok::Semi)) s->forCond = parseExpr();       // 条件表达式（可为空）
                 expect(Tok::Semi, "';'");
-                if (!at(Tok::Newline)) s->forStep = parseExpr(); // 步进表达式（可为空）
+                if (!at(Tok::Newline)) s->forStep = parseExpr();    // 步进表达式（可为空）
                 parseBlock(s->body);
                 return s;
             }
@@ -1177,7 +1184,7 @@ struct Parser {
                 if (!s->expr || s->expr->kind != Expr::Call ||
                     !s->expr->a || s->expr->a->kind != Expr::Ident)
                     err("run 期望 rpc 调用形式 name(args)");
-                if (accept(Tok::Comma)) s->forInit = parseExpr();  // thread 出参地址
+                if (accept(Tok::Comma)) s->forInit = parseExpr();   // thread 出参地址
                 expect(Tok::Newline, "换行");
                 return s;
             }

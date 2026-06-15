@@ -1,3 +1,20 @@
+// ============================================================
+// 语义分析器 —— 基于 AST 的类型兼容和安全性检查
+// ============================================================
+// 在 parse 完成、codegen 之前执行。不修改 AST，仅做验证和报错。
+//
+// 检查项目：
+//   - 赋值/初始化/返回的类型兼容（标量⇄指针不可混用）
+//   - nil 只能赋给指针/数组类型
+//   - 解引用 *x / 下标 x[] 的操作数必须是指针或数组
+//   - 结构/联合按值递归包含检测（会导致无限大类型）
+//   - 禁止返回局部变量地址、禁止将局部地址写入全局存储
+//   - void 值不能作为表达式使用
+//   - 无返回值函数（省略返回类型）不能 return 表达式
+//
+// 注意：语义检查不与 import 符号做硬绑定 —— 无法推导类型时返回
+// invalid Ty，跳过该检查，避免因缺少模块依赖信息而误报错误。
+// ============================================================
 #include "semantic.h"
 #include "error.h"
 
@@ -7,22 +24,30 @@
 
 namespace {
 
+// ---------------- 内部类型表示 ----------------
+// 轻量级类型描述，比完整的 TypeRef 更紧凑、便于比较。
+// valid=false 表示类型未知（如调用未登记的模块函数），跳过后续检查。
 struct Ty {
-    std::string name;
-    int ptr = 0;
-    int arr = 0;
-    bool valid = false;
-    bool isNil = false;
+    std::string name;   // 基类型名（"i4", "char", ""=void* 规则）
+    int ptr = 0;        // 指针层数（& 个数）
+    int arr = 0;        // 数组维度数（[] 个数）
+    bool valid = false; // true=能确定类型，false=跳过检查
+    bool isNil = false; // 字面量 nil，只能赋给指针/数组
 };
 
+// ---------------- 运算符辅助函数 ----------------
+
+// 赋值类运算符（包括复合赋值 += -= 等）
 bool isAssignOp(const std::string& op) {
     return op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" ||
            op == "%=" || op == "&=" || op == "|=" || op == "^=" ||
            op == "<<=" || op == ">>=";
 }
 
+// 指针或数组：均可解引用
 bool isPointerLike(const Ty& t) { return t.ptr > 0 || t.arr > 0; }
 
+// TypeRef → Ty 转换
 Ty fromTypeRef(const TypeRef& t) {
     Ty ty;
     ty.name = t.name;
@@ -32,12 +57,17 @@ Ty fromTypeRef(const TypeRef& t) {
     return ty;
 }
 
+// ---------------- 语义检查器 ----------------
+// 单次语义分析的状态。先 collectTop() 登记所有顶层符号，
+// 再做结构体按值环检测，最后遍历所有函数体 checkFunctions()。
 struct Checker {
     const Program& prog;
-    std::unordered_map<std::string, const Decl*> funcTypes;
-    std::unordered_map<std::string, const Decl*> structs;
-    std::unordered_map<std::string, std::string> aliases;
-    std::unordered_map<std::string, Ty> globals;
+
+    // 顶层符号表
+    std::unordered_map<std::string, const Decl*> funcTypes; // 函数类型声明（用于查找 -> 引用）
+    std::unordered_map<std::string, const Decl*> structs;   // 结构/联合定义
+    std::unordered_map<std::string, std::string> aliases;   // 类型别名（name → 目标类型）
+    std::unordered_map<std::string, Ty> globals;            // 全局 var/let/tls 的类型
 
     explicit Checker(const Program& p) : prog(p) {}
 
@@ -45,6 +75,9 @@ struct Checker {
         throw CompileError{msg, line};
     }
 
+    // ---- 符号解析 ----
+
+    // 解析结构体名：沿别名链最多追踪 8 步，防止循环别名死循环
     const Decl* resolveStruct(std::string name) const {
         for (int i = 0; i < 8 && !name.empty(); i++) {
             auto it = structs.find(name);
@@ -56,6 +89,7 @@ struct Checker {
         return nullptr;
     }
 
+    // 将别名展开为最终类型名（最多 16 步），用于按值包含图的结点去重
     std::string resolveAliasToName(std::string name) const {
         for (int i = 0; i < 16 && !name.empty(); i++) {
             auto al = aliases.find(name);
@@ -65,13 +99,18 @@ struct Checker {
         return name;
     }
 
+    // ---- 按值递归包含检测 ----
+    // 结构体 A 的字段按值包含结构体 B（非指针/非数组），则建立边 A→B。
+    // 图中的回边意味着存在按值递归环，会导致 C 中类型无限大，编译报错。
+
+    // 从一个 TypeRef 递归收集其按值包含的结构体
     void collectByValueDepsFromType(const TypeRef& t,
                                     std::vector<std::pair<std::string, int>>& out,
                                     int line) const {
-        // 函数字段不参与按值包含图
+        // 函数字段不参与按值包含图（函数指针大小固定）
         if (t.fnKind != TypeRef::FncKind::None) return;
 
-        // 指针或数组字段不会形成“按值递归包含”
+        // 指针或数组字段不会形成"按值递归包含"（它们只是引用，大小固定）
         if (t.ptr == 0 && t.arrayDims.empty() && !t.name.empty()) {
             const std::string base = resolveAliasToName(t.name);
             if (structs.find(base) != structs.end()) out.push_back({base, line});
@@ -84,11 +123,12 @@ struct Checker {
         }
     }
 
+    // 构建包含图并用 DFS 检测环
     void checkAggregateByValueCycles() const {
+        // 建图：每个结构体 A → 字段按值包含的结构体列表
         std::unordered_map<std::string, std::vector<std::pair<std::string, int>>> g;
         for (auto& kv : structs) g[kv.first] = {};
 
-        // 建图：A 的字段按值包含 B，则 A -> B
         for (auto& kv : structs) {
             const Decl* d = kv.second;
             auto& edges = g[d->name];
@@ -97,7 +137,8 @@ struct Checker {
             }
         }
 
-        std::unordered_map<std::string, int> state;  // 0=未访问,1=栈上,2=完成
+        // 三色 DFS 检测回边
+        std::unordered_map<std::string, int> state;  // 0=未访问, 1=栈上, 2=完成
         std::vector<std::string> stack;
 
         auto findEdgeLine = [&](const std::string& from, const std::string& to) -> int {
@@ -148,14 +189,20 @@ struct Checker {
             if (state[kv.first] == 0) dfs(kv.first);
     }
 
+    // ---- 表达式类型推导 ----
+    // 遍历表达式树，推导出表达式的类型 Ty。
+    // 推导失败返回 valid=false（多发生在调用未登记函数/模块时），
+    // 调用方应跳过后续类型检查，避免误报。
     Ty inferExpr(const Expr& e,
                  const std::unordered_map<std::string, Ty>& locals,
                  int line) {
         switch (e.kind) {
-            case Expr::IntLit: return Ty{"i4", 0, 0, true, false};
+            // -- 字面量：类型固定 ------------------------------------------------
+            case Expr::IntLit:  return Ty{"i4", 0, 0, true, false};
             case Expr::FloatLit: return Ty{"f8", 0, 0, true, false};
-            case Expr::StrLit: return Ty{"char", 1, 0, true, false};
+            case Expr::StrLit:  return Ty{"char", 1, 0, true, false};  // 字符串字面量 = char*
             case Expr::CharLit: return Ty{"i1", 0, 0, true, false};
+            // -- 标识符：查找 locals → globals，nil/true/false 特殊处理 ----------
             case Expr::Ident: {
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
                 if (e.text == "true" || e.text == "false") return Ty{"bool", 0, 0, true, false};
@@ -163,8 +210,9 @@ struct Checker {
                 if (it != locals.end()) return it->second;
                 it = globals.find(e.text);
                 if (it != globals.end()) return it->second;
-                return Ty{};
+                return Ty{};  // 未找到 = C 宏/未登记符号，跳过检查
             }
+            // -- 一元运算：* 解引用 → ptr/arr-1; & 取地址 → ptr+1 ----------------
             case Expr::Unary: {
                 Ty a = inferExpr(*e.a, locals, line);
                 if (e.op == "*") {
@@ -179,8 +227,9 @@ struct Checker {
                     if (a.valid) a.ptr++;
                     return a;
                 }
-                return a;
+                return a;  // ! ~ - + 等保持类型不变
             }
+            // -- 下标：相当于 *，操作数必须是指针/数组 --------------------------
             case Expr::Index: {
                 Ty a = inferExpr(*e.a, locals, line);
                 if (a.valid && !isPointerLike(a)) err(e.line, "非法下标：操作数不是指针/数组");
@@ -188,15 +237,16 @@ struct Checker {
                     if (a.arr > 0) a.arr--;
                     else if (a.ptr > 0) a.ptr--;
                 }
-                (void)inferExpr(*e.b, locals, line);
+                (void)inferExpr(*e.b, locals, line);  // 下标表达式本身不参与类型推导
                 return a;
             }
+            // -- 成员访问：在结构体中查找字段名返回其类型 -----------------------
             case Expr::Member: {
                 Ty base = inferExpr(*e.a, locals, line);
                 if (!base.valid) return Ty{};
                 const Decl* sd = resolveStruct(base.name);
                 if (!sd) return Ty{};
-                // prev/next 上下文关键字：链表结构体上映射到内置 _prev/_next
+                // prev/next 在链表结构体上映射为内部维护的 _prev/_next 指针字段
                 std::string fn = e.text;
                 if (sd->linked && (fn == "prev" || fn == "next")) fn = "_" + fn;
                 for (auto& f : sd->structCommon.fields) {
@@ -204,12 +254,16 @@ struct Checker {
                 }
                 return Ty{};
             }
+            // -- sizeof 返回 u8（size_t）---------------------------------------
             case Expr::Sizeof:
                 (void)inferExpr(*e.a, locals, line);
                 return Ty{"u8", 0, 0, true, false};
+            // -- offsetof 返回 u8（size_t）-------------------------------------
             case Expr::Offsetof:
                 return Ty{"u8", 0, 0, true, false};
+            // -- 函数调用：多种内建伪调用优先，然后是普通函数调用 ----------------
             case Expr::Call: {
+                // base(x) 伪函数：等价于 *(T*)&x，结果类型为 T*+1 层指针
                 if (e.a && e.a->kind == Expr::Ident && e.a->text == "base"
                     && !locals.count("base") && !globals.count("base")) {
                     if (e.args.size() != 1) err(e.line, "base 需要 1 个实参");
@@ -221,6 +275,7 @@ struct Checker {
                     (void)inferExpr(*e.args[0], locals, line);
                     return Ty{"void", 1, 0, true, false};
                 }
+                // prev(x)/next(x) 伪函数：等价于链表 _prev/_next 的 base
                 if (e.a && e.a->kind == Expr::Ident && (e.a->text == "prev" || e.a->text == "next")
                     && !locals.count(e.a->text) && !globals.count(e.a->text)) {
                     if (e.args.size() != 1) err(e.line, "prev/next 需要 1 个实参");
@@ -232,13 +287,15 @@ struct Checker {
                     (void)inferExpr(*e.args[0], locals, line);
                     return Ty{"void", 1, 0, true, false};
                 }
-                // T() 类型伪调用（堆构造糖）：结果类型为 T&
+                // T() 无参伪调用：堆分配构造糖，结果类型为 T&
                 if (e.a->kind == Expr::Ident && e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
-                // stringify 格式化关键字：stringify(值)→string，stringify(值,缓存,大小)→char&
+                // stringify 格式化关键字：
+                //   stringify(x) → string（单参数格式化）
+                //   stringify(x, buf, n) → char&（三参数，结果写入 buf）
                 if (e.a->kind == Expr::Ident && e.a->text == "stringify" && !e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()) {
@@ -246,17 +303,20 @@ struct Checker {
                     if (e.args.size() == 3) return Ty{"char", 1, 0, true, false};
                     return Ty{"string", 0, 0, true, false};
                 }
+                // 普通函数调用
                 Ty callee = inferExpr(*e.a, locals, line);
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 if (callee.valid && callee.name == "v" && callee.ptr == 0 && callee.arr == 0)
                     err(e.line, "void 值不能作为表达式使用");
-                // 调用结果类型未知（语义层不登记函数返回类型；
+                // 调用结果类型未登记（语义层不跟踪函数返回类型；
                 // stdin 单文件解析时 T() 的 T 也可能来自未合并依赖），
                 // 返回 invalid 跳过后续检查，避免误报
                 return Ty{};
             }
+            // -- 后缀 ++/--：类型不变 -------------------------------------------
             case Expr::PostUnary:
                 return inferExpr(*e.a, locals, line);
+            // -- 三元条件 a ? b : c：取第一个有类型的边 -------------------------
             case Expr::Ternary: {
                 (void)inferExpr(*e.a, locals, line);
                 Ty b = inferExpr(*e.b, locals, line);
@@ -264,6 +324,7 @@ struct Checker {
                 if (b.valid) return b;
                 return c;
             }
+            // -- 二元运算：赋值类做兼容检查并返回左值类型，其他返回左侧类型 -----
             case Expr::Binary: {
                 Ty l = inferExpr(*e.a, locals, line);
                 Ty r = inferExpr(*e.b, locals, line);
@@ -273,9 +334,11 @@ struct Checker {
                 }
                 return l.valid ? l : r;
             }
+            // -- 类型强转 (T)x：返回声明类型 -----------------------------------
             case Expr::Cast:
                 (void)inferExpr(*e.a, locals, line);
                 return Ty{e.op, e.castPtr, 0, true, false};
+            // -- 初始化列表 {a, b, c}：类型由赋值目标决定，此处返回 invalid -----
             case Expr::InitList:
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 return Ty{};
@@ -283,6 +346,11 @@ struct Checker {
         return Ty{};
     }
 
+    // ---- 赋值兼容检查 ----
+    // 核心规则：
+    //   - nil 只能赋给指针/数组（nil 是空指针，不能赋给标量）
+    //   - 指针/数组不能赋值为非指针标量（不允许隐式地址→整数转换）
+    //   - 标量不能赋值为指针/数组（不允许隐式整数→地址转换）
     void checkAssignable(const Ty& lhs, const Ty& rhs, int line) {
         if (!lhs.valid || !rhs.valid) return;
         const bool lp = isPointerLike(lhs);
@@ -296,6 +364,9 @@ struct Checker {
         if (!lp && rp) err(line, "标量不能赋值为指针/数组");
     }
 
+    // ---- 逃逸分析辅助函数 ----
+
+    // 判断表达式是否是对局部变量取地址 &localVar 或 &localVar.field
     bool isAddrOfLocalExpr(const Expr& e,
                            const std::unordered_map<std::string, Ty>& locals) const {
         if (e.kind != Expr::Unary || e.op != "&" || !e.a) return false;
@@ -310,6 +381,7 @@ struct Checker {
         return false;
     }
 
+    // 递归检查表达式树中是否包含对局部变量取地址的操作
     bool containsAddrOfLocal(const Expr& e,
                              const std::unordered_map<std::string, Ty>& locals) const {
         if (isAddrOfLocalExpr(e, locals)) return true;
@@ -320,6 +392,7 @@ struct Checker {
         return false;
     }
 
+    // 判断表达式根是否为全局变量（*p, a[i], p->f 递归查看根，&x 也穿透）
     bool rootedAtGlobal(const Expr& e,
                         const std::unordered_map<std::string, Ty>& locals) const {
         if (e.kind == Expr::Ident) {
@@ -333,19 +406,24 @@ struct Checker {
         return false;
     }
 
+    // ---- 变量声明 ----
+
+    // 确定变量声明的类型：优先用显式声明的类型，否则从初值推导
+    // 无声明无初值的默认类型为 char&（兼容既有语义：无类型对象默认字符串/缓冲区）
     Ty declaredOrInferredType(const Field& f,
                               const std::unordered_map<std::string, Ty>& locals) {
         const bool declared = f.type.hasInline || !f.type.name.empty() ||
                               f.type.ptr > 0 || !f.type.arrayDims.empty() ||
                               f.type.fnKind != TypeRef::FncKind::None;
         if (declared) return fromTypeRef(f.type);
-        if (!f.init) return Ty{"char", 1, 0, true, false};  // 兼容既有默认语义
+        if (!f.init) return Ty{"char", 1, 0, true, false};
 
         Ty t = inferExpr(*f.init, locals, f.line);
         if (t.isNil) err(f.line, "nil 不能用于无类型推断，请显式声明指针类型");
         return t;
     }
 
+    // var/let/tls 多变量声明：逐项推导类型、检查初值兼容、登记到 locals
     void checkVarDecls(const std::vector<Field>& ds,
                        std::unordered_map<std::string, Ty>& locals) {
         for (auto& f : ds) {
@@ -358,32 +436,38 @@ struct Checker {
         }
     }
 
-    // 函数返回类型：省略 = void（内部以 "v" 标记，供 void 边界检查）；
-    // 引用的函数类型未知（如 stdin 单文件解析时依赖未合并）时
-    // 返回 invalid，表示“不知道”而非假定 void，跳过返回值检查
+    // ---- 函数返回类型 ----
+    // 返回类型省略 = void（内部标记 "v"，用于检查 return 语句兼容性）。
+    // 引用的函数类型在依赖未合并时查不到 → 返回 invalid，调用方跳过检查。
     Ty funcRetType(const Decl& d) const {
+        // -> func_type 引用：从 funcTypes 表展开返回类型
         if (!d.funcTypeName.empty()) {
             auto it = funcTypes.find(d.funcTypeName);
-            if (it == funcTypes.end()) return Ty{};  // 未知函数类型：不检查
+            if (it == funcTypes.end()) return Ty{};  // 未合并依赖，跳过检查
             const auto& rt = it->second->structCommon.type;
-            if (!rt) return Ty{"v", 0, 0, true, false};  // 空指针 = void
+            if (!rt) return Ty{"v", 0, 0, true, false};
             Ty t = fromTypeRef(*rt);
             if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
                 return Ty{"v", 0, 0, true, false};
             return t;
         }
+        // 直接声明的返回类型
         const auto& rt = d.structCommon.type;
-        if (!rt) return Ty{"v", 0, 0, true, false};  // 空指针 = void
+        if (!rt) return Ty{"v", 0, 0, true, false};
         Ty t = fromTypeRef(*rt);
         if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
             return Ty{"v", 0, 0, true, false};
         return t;
     }
 
+    // ---- 语句遍历 ----
+    // 对一条语句及其子语句做语义检查。locals 传递当前作用域的局部变量表，
+    // if/while/for/case 的分支在 locals 副本上检查（不影响外层）。
     void checkStmt(const Stmt& s,
                    std::unordered_map<std::string, Ty>& locals,
                    const Ty& retTy) {
         switch (s.kind) {
+            // -- 表达式语句：赋值时检查逃逸（禁止局部地址泄露到全局存储）--------
             case Stmt::ExprS:
                 if (s.expr && s.expr->kind == Expr::Binary && isAssignOp(s.expr->op)) {
                     if (containsAddrOfLocal(*s.expr->b, locals) &&
@@ -393,11 +477,13 @@ struct Checker {
                 }
                 (void)inferExpr(*s.expr, locals, s.line);
                 break;
+            // -- 变量/常量/线程局部声明 ----------------------------------------
             case Stmt::VarS:
             case Stmt::LetS:
             case Stmt::TlsS:
                 checkVarDecls(s.decls, locals);
                 break;
+            // -- return：检查返回类型兼容 + 禁止返回局部地址 --------------------
             case Stmt::ReturnS:
                 if (s.expr) {
                     if (retTy.valid && retTy.name == "v" && retTy.ptr == 0)
@@ -408,6 +494,7 @@ struct Checker {
                     checkAssignable(retTy, rt, s.line);
                 }
                 break;
+            // -- if/else：条件检查，两个分支独立作用域 --------------------------
             case Stmt::IfS: {
                 (void)inferExpr(*s.expr, locals, s.line);
                 auto a = locals, b = locals;
@@ -415,18 +502,21 @@ struct Checker {
                 for (auto& x : s.elseBody) checkStmt(*x, b, retTy);
                 break;
             }
+            // -- while：条件检查，体在独立作用域 ---------------------------------
             case Stmt::WhileS: {
                 (void)inferExpr(*s.expr, locals, s.line);
                 auto a = locals;
                 for (auto& x : s.body) checkStmt(*x, a, retTy);
                 break;
             }
+            // -- do-while：先检查体，再检查条件（条件可引用体中声明的变量）-------
             case Stmt::DoWhileS: {
                 auto a = locals;
                 for (auto& x : s.body) checkStmt(*x, a, retTy);
                 (void)inferExpr(*s.expr, a, s.line);
                 break;
             }
+            // -- for：init/cond/step 三段，体在独立作用域 ------------------------
             case Stmt::ForS: {
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);
                 if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line);
@@ -435,6 +525,7 @@ struct Checker {
                 for (auto& x : s.body) checkStmt(*x, a, retTy);
                 break;
             }
+            // -- case 多分支：每个 arm 独立作用域 -------------------------------
             case Stmt::CaseS: {
                 (void)inferExpr(*s.expr, locals, s.line);
                 for (auto& arm : s.caseArms) {
@@ -444,6 +535,7 @@ struct Checker {
                 }
                 break;
             }
+            // -- goto / label：无额外类型检查 ----------------------------------
             case Stmt::GotoS:
                 break;
             case Stmt::LabelS: {
@@ -451,39 +543,50 @@ struct Checker {
                 for (auto& x : s.body) checkStmt(*x, a, retTy);
                 break;
             }
+            // -- break / continue：无类型数据 ----------------------------------
             case Stmt::BreakS:
             case Stmt::ContinueS:
                 break;
+            // -- def（内嵌类型声明）：无需检查 ---------------------------------
             case Stmt::DeclS:
                 break;
+            // -- run：rpc 线程创建调用的实参与 thread 出参 ----------------------
             case Stmt::RunS:
-                (void)inferExpr(*s.expr, locals, s.line);             // rpc 调用实参
-                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);  // thread 出参
+                (void)inferExpr(*s.expr, locals, s.line);
+                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);
                 break;
+            // -- wait：条件变量 cond + mutex + 超时参数 ------------------------
             case Stmt::WaitS:
-                (void)inferExpr(*s.expr, locals, s.line);             // cond
-                (void)inferExpr(*s.forInit, locals, s.line);          // mutex
-                if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line);  // 纳秒
-                if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line);  // 秒
+                (void)inferExpr(*s.expr, locals, s.line);              // cond
+                (void)inferExpr(*s.forInit, locals, s.line);           // mutex
+                if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line); // 纳秒
+                if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line); // 秒
                 break;
         }
     }
 
+    // ---- 顶层遍历：收集符号 + 检查全局变量初值 -------------------------------
     void collectTop() {
+        // 第一遍：登记函数类型、结构体、别名到符号表
         for (auto& d : prog.decls) {
             if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
-            if (d->kind == Decl::StructD || d->kind == Decl::UnionD) structs[d->name] = d.get();
-            if (d->kind == Decl::AliasD) aliases[d->name] = d->structCommon.type->name;
+            if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
+                structs[d->name] = d.get();
+            if (d->kind == Decl::AliasD)
+                aliases[d->name] = d->structCommon.type->name;
         }
 
+        // 第二遍：检查全局 var/let/tls 声明
         for (auto& d : prog.decls) {
             if (d->kind != Decl::VarD && d->kind != Decl::LetD && d->kind != Decl::TlsD)
                 continue;
             for (auto& f : d->structCommon.fields) {
+                // 优先使用显式声明的类型，否则从初值推导或默认 char*
                 Ty lhs = fromTypeRef(f.type);
                 if (!lhs.valid || (lhs.name.empty() && lhs.ptr == 0 && lhs.arr == 0)) {
-                    lhs = f.init ? inferExpr(*f.init, globals, f.line) : Ty{"char", 1, 0, true, false};
+                    lhs = f.init ? inferExpr(*f.init, globals, f.line)
+                                 : Ty{"char", 1, 0, true, false};
                 }
                 if (f.init) {
                     Ty rhs = inferExpr(*f.init, globals, f.line);
@@ -494,33 +597,41 @@ struct Checker {
         }
     }
 
+    // ---- 遍历所有函数体 ---------------------------------
     void checkFunctions() {
         for (auto& d : prog.decls) {
             if (d->kind != Decl::FuncD) continue;
+
             std::unordered_map<std::string, Ty> locals;
 
+            // 建立函数的形参符号表（含 -> func_type 展开）
             const Decl* sig = d.get();
             if (!d->funcTypeName.empty()) {
                 auto it = funcTypes.find(d->funcTypeName);
                 if (it != funcTypes.end()) sig = it->second;
             }
-            for (auto& p : sig->structCommon.fields) locals[p.name] = fromTypeRef(p.type);
-            if (!d->methodOwner.empty()) locals["this"] = Ty{d->methodOwner, 1, 0, true, false};
+            for (auto& p : sig->structCommon.fields)
+                locals[p.name] = fromTypeRef(p.type);
+            // 方法：隐式 this 参数
+            if (!d->methodOwner.empty())
+                locals["this"] = Ty{d->methodOwner, 1, 0, true, false};
 
             Ty ret = funcRetType(*d);
             for (auto& s : d->body) checkStmt(*s, locals, ret);
         }
     }
 
+    // ---- 主入口：三阶段检查 ---------------------------------
     void run() {
-        collectTop();
-        checkAggregateByValueCycles();
-        checkFunctions();
+        collectTop();                   // 1. 收集顶层符号 + 检查全局初值
+        checkAggregateByValueCycles();  // 2. 按值包含环检测
+        checkFunctions();               // 3. 遍历所有函数体
     }
 };
 
 } // namespace
 
+// 对外接口：对 AST 执行完整语义检查，错误通过 CompileError 抛出
 void semanticCheck(const Program& prog) {
     Checker c(prog);
     c.run();
