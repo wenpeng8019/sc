@@ -1,0 +1,2 @@
+feature_bad_value_cycle.sc:8: [1;31m错误[0m: 结构/联合按值循环包含: aa -> bb -> aa。请改为指针字段（&）打破递归包含
+  |      a: aa

@@ -16,7 +16,8 @@ usage() {
 命令:
   build      构建 scc 编译器 (默认)
   dist       构建发行版 scc（builtins 资源 + 预编译 adt.a 内嵌，单二进制免携带 builtins）
-  test       构建并用 examples/feature*.sc 做端到端验证
+  test       构建 + examples 冒烟运行 + tests 黄金快照回归（--emit-c/--emit-sc 产物比对）
+             加 --update 重新生成黄金文件：./build.sh test --update
   install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图）
   uninstall  卸载 scc 与 VSCode 插件
   clean      清理构建产物
@@ -59,6 +60,7 @@ EOF
 }
 
 do_test() {
+    local update="${1:-}"
     do_build
     echo "==> 端到端验证 examples/feature*.sc"
     # 可运行特性系列：默认模式（编译+执行）
@@ -87,6 +89,13 @@ do_test() {
         exit 1
     fi
     echo "已按预期报错"
+    # 黄金快照回归：emit-c / emit-sc 产物比对（详见 tests/run.sh）
+    echo "==> 产物回归 tests/run.sh"
+    bash "$ROOT/tests/run.sh" $update
+    if [ "$update" = "--update" ]; then
+        echo "==> 黄金文件已更新"
+        return
+    fi
     echo "==> 验证通过"
 }
 
@@ -128,7 +137,7 @@ do_clean() {
 case "${1:-build}" in
     build)     do_build ;;
     dist)      do_dist ;;
-    test)      do_test ;;
+    test)      do_test "${2:-}" ;;
     install)   do_install ;;
     uninstall) do_uninstall ;;
     clean)     do_clean ;;

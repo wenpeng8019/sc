@@ -156,29 +156,29 @@ std::string declNode(const Decl& d) {
             return nodeExt("inc", d.name, "", d.line, d.external, d.origin);
         case Decl::EnumD: {
             std::vector<std::string> c;
-            for (auto& f : d.fields)
+            for (auto& f : d.structCommon.fields)
                 c.push_back(node("item", f.name,
                                  f.init ? "= " + exprToStr(*f.init) : "", f.line));
-            return nodeExt("enum", d.name, X + ": " + typeToStr(d.type), d.line,
+            return nodeExt("enum", d.name, X + ": " + typeToStr(d.structCommon.type), d.line,
                            d.external, d.origin, c);
         }
         case Decl::StructD:
         case Decl::UnionD: {
             std::vector<std::string> c;
-            for (auto& f : d.fields)
+            for (auto& f : d.structCommon.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
                            d.name, X, d.line, d.external, d.origin, c);
         }
         case Decl::AliasD:
-            return nodeExt("alias", d.name, X + "-> " + typeToStr(d.type), d.line,
+            return nodeExt("alias", d.name, X + "-> " + typeToStr(d.structCommon.type), d.line,
                            d.external, d.origin);
         case Decl::FuncTypeD: {
             std::vector<std::string> c;
-            for (auto& f : d.fields)
+            for (auto& f : d.structCommon.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
-            if (d.variadic) c.push_back(node("param", "...", "", d.line));
-            std::string ret = typeToStr(d.retType);
+            if (d.structCommon.variadic) c.push_back(node("param", "...", "", d.line));
+            std::string ret = typeToStr(d.structCommon.type);
             std::string ftName = !d.methodOwner.empty()
                 ? d.methodOwner + "::" + d.methodName : d.name;
             return nodeExt(d.isRpc ? "rpc" : "fnctype", ftName,
@@ -187,14 +187,14 @@ std::string declNode(const Decl& d) {
         }
         case Decl::FuncD: {
             std::vector<std::string> c;
-            for (auto& f : d.fields)
+            for (auto& f : d.structCommon.fields)
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
-            if (d.variadic) c.push_back(node("param", "...", "", d.line));
+            if (d.structCommon.variadic) c.push_back(node("param", "...", "", d.line));
             for (auto& s : d.body) c.push_back(stmtNode(*s));
             std::string detail;
             if (!d.funcTypeName.empty()) detail = "-> " + d.funcTypeName;
             else {
-                std::string ret = typeToStr(d.retType);
+                std::string ret = typeToStr(d.structCommon.type);
                 if (!ret.empty()) detail = ": " + ret;
             }
             const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
@@ -206,7 +206,7 @@ std::string declNode(const Decl& d) {
         case Decl::LetD:
         case Decl::TlsD: {
             std::vector<std::string> c;
-            for (auto& f : d.fields)
+            for (auto& f : d.structCommon.fields)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
             return nodeExt(d.kind == Decl::VarD ? "var"
                          : d.kind == Decl::LetD ? "let" : "tls", "", X, d.line,

@@ -19,6 +19,7 @@
 
 - `compiler/` — scc 编译器（C++17，手写词法 + 递归下降，AST 与后端解耦）
 - `examples/` — 示例源码（`.sc`）
+- `tests/` — 回归测试（`--emit-c`/`--emit-sc` 产物黄金快照，供优化后回归验证）
 - `vscode-sc/` — VSCode 语法高亮插件
 
 ## 构建与使用

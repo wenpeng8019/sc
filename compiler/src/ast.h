@@ -30,6 +30,19 @@ using ExprPtr = std::unique_ptr<Expr>;
 using DeclPtr = std::unique_ptr<Decl>;
 using StmtPtr = std::unique_ptr<Stmt>;
 
+struct StructCommon {
+    std::vector<Field>          fields;             // 通用字段结构信息
+                                                    // > 结构/联合: 成员字段
+                                                    // > 函数: 形参列表
+                                                    // > let/var/tls: 声明变量列表
+                                                    // > 枚举: 项列表
+    std::shared_ptr<TypeRef>    type;               // 通用类型结构信息
+                                                    // > 函数: 函数的返回类型
+                                                    // > 别名：指向的目标类型
+                                                    // > 枚举: 枚举的底层整数基类型
+    bool                        variadic = false;   // 结构信息中是否有可变参数（函数/远程调用）
+};
+
 // --------------------------
 // 类型引用：用来统一表示（描述）sc 中所有可能的类型写法
 // --------------------------
@@ -61,7 +74,6 @@ struct TypeRef {
     // 对于内联结构/联合：即类型直接写在变量声明处，无需预先 def
     // eg: var obj: {x:i4, y:i4}  → hasInline=true, inlineUnion=false
     //     var tag: (i:i4, f:f4)  → hasInline=true, inlineUnion=true
-    std::vector<Field> inlineFields;    // 内联类型的字段定义，即内联结构
     bool hasInline = false;
     bool inlineUnion = false;           // true=(联合), false={结构}
 
@@ -78,9 +90,10 @@ struct TypeRef {
     //   此时 parser 会将其提升为带 methodOwner 的顶层(Decl) FuncD，
     //   同时 C 中会对应生成 T_m(T *_this, ...) 成员函数声明
     FncKind fnKind = FncKind::None;
-    std::shared_ptr<TypeRef> fnRet;     // 返回类型（空 = void）
-    std::vector<Field> fnParams;        // 显式参数列表（不含隐式 this）
-    bool fnVariadic = false;            // 可变参数（'...'）
+
+    //---------
+
+    StructCommon structCommon;
 };
 
 // --------------------------
@@ -144,13 +157,11 @@ struct Expr {
         Cast,       // 强制类型转换  右值位置可裸写 
                     //             + 可以不加括号：eg. expr: type& （作为右值时）
                     //             + 但如果继续 ->/. 等操作时，则需要加括号，eg. (expr: type&)->f
-                    //             > a=被转换表达式, text=目标类型名, castPtr=指针层数（& 个数）
+                    //             > a=被转换表达式, op=目标类型名, castPtr=指针层数（& 个数）
     } kind;
 
-    std::string text;           // 标识符名 / 字面量值 / 成员名 / 类型名
-                                // 1. 指定了表达式操作的目标
-                                // 2. 对于 Cast 则是记录目标类型名
-                                //    todo: 可以改成用 op 来记录，这样 text 字段就完全是标识符/成员名了
+    std::string text;           // 标识符名 / 字面量值 / 成员名 / Offsetof 的目标类型名
+                                // 始终表示表达式操作的目标项
     ExprPtr a, b, c;            // 子表达式指针
                                 // Unary/PostUnary: a=操作数
                                 // Binary: a=左操作数, b=右操作数
@@ -159,7 +170,7 @@ struct Expr {
     std::vector<ExprPtr> args;  // Call 函数调用的实参列表
                                 // InitList 时为初始化元素列表
 
-    std::string op;             // 针对目标项的运算和操作
+    std::string op;             // 针对目标项的运算和操作（Cast 时为目标类型名）
     int castPtr = 0;            // Cast: 目标类型的指针层数
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
@@ -265,17 +276,6 @@ struct Decl {
     bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
     bool linked = false;         // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
-    TypeRef type;                // AliasD: 别名指向的目标类型
-                                 // EnumD:  枚举的底层整数基类型
-
-    std::vector<Field> fields;   // 多用途：
-                                 // > 结构/联合: 成员字段
-                                 // > 枚举: 项列表（name+可选的=value）
-                                 // > 函数: 形参列表
-                                 // > let/var/tls: 声明变量列表
-
-    TypeRef retType;             // FuncTypeD/FuncD: 函数的返回类型声明
-    bool variadic = false;       // FuncD/FuncTypeD: 可变参数函数 (...)
     std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
                                  // + FuncTypeD 的 body 为空，只有签名无实现
 
@@ -289,6 +289,10 @@ struct Decl {
     std::string methodOwner;     // 方法所属结构名：结构体内实现的成员函数（FuncD）
                                  // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
     std::string methodName;      // 方法名（name 为修饰名 owner_method）
+
+    //---------
+
+    StructCommon structCommon;
 
     int line = 0;                // 声明首行行号
 };

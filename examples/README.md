@@ -1,6 +1,7 @@
 # examples 示例索引
 
-两类示例，均由 `./build.sh test` 端到端验证。
+两类示例，均由 `./build.sh test` 冒烟运行（编译 + 执行，校验不崩溃）。
+面向"产物不变"的回归验证（`--emit-c`/`--emit-sc` 黄金快照）见 [../tests](../tests)。
 
 ## 编号系列（featureN.sc）：语言特性递进
 

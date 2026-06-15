@@ -140,25 +140,25 @@ struct CGen {
     // 声明一个字段/变量：T [*...]name[size]
     void emitDeclarator(const Field& f, bool asConst = false) {
         if (f.type.fnKind != TypeRef::FncKind::None) {
-            if (f.type.fnRet) {
+            if (f.type.structCommon.type) {
                 std::string base; int ptr;
-                resolveType(*f.type.fnRet, base, ptr);
+                resolveType(*f.type.structCommon.type, base, ptr);
                 out << base << " ";
                 for (int i = 0; i < ptr; i++) out << "*";
             } else out << "void ";  // 省略返回类型 = void
             out << "(*" << f.name << ")(";
-            for (size_t i = 0; i < f.type.fnParams.size(); i++) {
+            for (size_t i = 0; i < f.type.structCommon.fields.size(); i++) {
                 if (i) out << ", ";
-                emitDeclarator(f.type.fnParams[i]);
+                emitDeclarator(f.type.structCommon.fields[i]);
             }
-            if (f.type.fnVariadic) out << (f.type.fnParams.empty() ? "..." : ", ...");
+            if (f.type.structCommon.variadic) out << (f.type.structCommon.fields.empty() ? "..." : ", ...");
             out << ")";
             return;
         }
         if (f.type.hasInline) { // 内联/匿名结构联合
             out << (f.type.inlineUnion ? "union" : "struct") << " {\n";
             depth++;
-            for (auto& sub : f.type.inlineFields) {
+            for (auto& sub : f.type.structCommon.fields) {
                 indent();
                 emitDeclarator(sub);
                 out << ";\n";
@@ -205,7 +205,7 @@ struct CGen {
     // 链表结构体首个真实成员（跳过前置注入的 synthetic _prev/_next）
     const Field* firstRealField(const Decl* sd) const {
         if (!sd) return nullptr;
-        for (auto& f : sd->fields) if (!f.synthetic) return &f;
+        for (auto& f : sd->structCommon.fields) if (!f.synthetic) return &f;
         return nullptr;
     }
 
@@ -256,7 +256,7 @@ struct CGen {
             else
                 out << "        memset(_p, 0, sizeof(" << tn << "));\n";
             const Decl* im = findMethod(tn, "init");
-            if (im && im->fields.empty())
+            if (im && im->structCommon.fields.empty())
                 out << "        " << im->name << "(_p);\n";
             out << "    }\n    return _p;\n}\n\n";
         }
@@ -333,7 +333,7 @@ struct CGen {
             if (!exprVType(*e.a, base)) return false;
             const Decl* sd = aggrOf(base.name);
             if (!sd) return false;
-            for (auto& f : sd->fields)
+            for (auto& f : sd->structCommon.fields)
                 if (f.name == e.text) { dims = f.type.arrayDims; return true; }
         }
         return false;
@@ -402,7 +402,7 @@ struct CGen {
         const Decl* sd = aggrOf(name);
         if (!sd || sd->name == "string") return;
         if (!sofAggrs.insert(sd->name).second) return;
-        for (auto& f : sd->fields) {
+        for (auto& f : sd->structCommon.fields) {
             if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None || f.type.hasInline)
                 continue;
             if (f.type.ptr > 0) continue;
@@ -487,7 +487,7 @@ struct CGen {
             << " *_v, stringify_t _opt, int _depth) {\n"
             << "    string_append(_o, \"{\");\n";
         bool any = false;
-        for (auto& f : sd.fields) {
+        for (auto& f : sd.structCommon.fields) {
             if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None) continue;
             if (any) out << "    string_append(_o, \",\");\n";
             out << "    sc__sof_nl(_o, _opt, _depth + 1);\n";
@@ -630,7 +630,7 @@ struct CGen {
     }
 
     static bool hasFieldDefaults(const Decl* d) {
-        for (auto& f : d->fields) if (f.init) return true;
+        for (auto& f : d->structCommon.fields) if (f.init) return true;
         return false;
     }
 
@@ -650,7 +650,7 @@ struct CGen {
                 const Decl* sd = aggrOf(base.name);
                 if (!sd) return false;
                 const std::string fn = memberFieldName(*sd, e.text);
-                for (auto& f : sd->fields)
+                for (auto& f : sd->structCommon.fields)
                     if (f.name == fn) {
                         vt = {f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
                         return true;
@@ -674,7 +674,7 @@ struct CGen {
                 }
                 return false;
             case Expr::Cast:
-                vt = {e.text, e.castPtr, 0};
+                vt = {e.op, e.castPtr, 0};
                 return true;
             case Expr::Binary:
                 // 赋值表达式的结果类型 = 左操作数类型（支持 (p = T())->m() 等）
@@ -707,7 +707,7 @@ struct CGen {
         if (!exprVType(*m.a, base)) return nullptr;
         const Decl* sd = aggrOf(base.name);
         if (!sd) return nullptr;
-        for (auto& f : sd->fields)
+        for (auto& f : sd->structCommon.fields)
             if (f.name == m.text && f.type.fnKind != TypeRef::FncKind::None) return &f;
         return nullptr;
     }
@@ -735,12 +735,12 @@ struct CGen {
         if (isLocal || globalsT.count(n)) {
             auto& fnVars = isLocal ? fnVarsL : fnVarsG;
             auto fv = fnVars.find(n);
-            if (fv != fnVars.end()) return &fv->second->fnParams;
+            if (fv != fnVars.end()) return &fv->second->structCommon.fields;
             // 命名函数类型的变量：var cb&: my_fnc_type
             std::string tn = (isLocal ? localsT : globalsT).at(n).name;
             for (int i = 0; i < 8 && !tn.empty(); i++) {
                 auto it = funcTypes.find(tn);
-                if (it != funcTypes.end()) return &it->second->fields;
+                if (it != funcTypes.end()) return &it->second->structCommon.fields;
                 auto al = aliases.find(tn);
                 if (al == aliases.end()) break;
                 tn = al->second;
@@ -755,10 +755,10 @@ struct CGen {
                 if (it == funcTypes.end()) return nullptr;
                 sig = it->second;
             }
-            return &sig->fields;
+            return &sig->structCommon.fields;
         }
         auto r = rpcs.find(n);
-        if (r != rpcs.end()) return &r->second->fields;
+        if (r != rpcs.end()) return &r->second->structCommon.fields;
         return nullptr;
     }
 
@@ -915,9 +915,9 @@ struct CGen {
                                 emitExpr(*a, true);
                             }
                             // 缺参 0 补全（接收者已占首参，后续皆需逗号）
-                            for (size_t i = e.args.size(); i < md->fields.size(); i++) {
+                            for (size_t i = e.args.size(); i < md->structCommon.fields.size(); i++) {
                                 out << ", ";
-                                emitDefaultArg(md->fields[i]);
+                                emitDefaultArg(md->structCommon.fields[i]);
                             }
                             out << ")";
                             break;
@@ -927,7 +927,7 @@ struct CGen {
                 // 函数指针字段/变量/顶层函数调用（含缺参 0 补全）
                 const Field* mf = callableField(*e.a);
                 const std::vector<Field>* params = nullptr;
-                if (mf) params = &mf->type.fnParams;
+                if (mf) params = &mf->type.structCommon.fields;
                 else if (e.a->kind == Expr::Ident && e.a->text != "this")
                     params = calleeParams(e.a->text);
                 emitExpr(*e.a);
@@ -982,7 +982,7 @@ struct CGen {
                 break;
             case Expr::Cast: {
                 // (expr: type&) → ((T*)(expr))
-                out << "((" << mapBase(e.text);
+                out << "((" << mapBase(e.op);
                 for (int i = 0; i < e.castPtr; i++) out << "*";
                 out << ")(";
                 emitExpr(*e.a, true);
@@ -1044,7 +1044,7 @@ struct CGen {
             if (inFunc && !isTls && !f.init && f.type.ptr == 0 && f.type.arrayDims.empty()
                 && !f.type.hasInline) {
                 const Decl* im = findMethod(f.type.name, "init");
-                if (im && im->fields.empty()) {
+                if (im && im->structCommon.fields.empty()) {
                     indent();
                     out << im->name << "(&" << f.name << ");\n";
                 }
@@ -1220,9 +1220,9 @@ struct CGen {
         if (it == rpcs.end())
             throw CompileError{"run 的目标必须是 rpc: " + call.a->text, s.line};
         const Decl* r = it->second;
-        if (call.args.size() > r->fields.size())
+        if (call.args.size() > r->structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出: " + r->name + " 期望至多 " +
-                               std::to_string(r->fields.size()) + " 个", s.line};
+                               std::to_string(r->structCommon.fields.size()) + " 个", s.line};
         if (!aggrOf("thread"))
             throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
         // 第二参类型分派：pool（对象/指针）→ 入池；其余 → thread 出参
@@ -1239,7 +1239,7 @@ struct CGen {
         indent(); out << "struct " << r->name << " _rp = {0};\n";
         for (size_t i = 0; i < call.args.size(); i++) {
             indent();
-            out << "_rp." << r->fields[i].name << " = ";
+            out << "_rp." << r->structCommon.fields[i].name << " = ";
             emitExpr(*call.args[i], true);
             out << ";\n";
         }
@@ -1322,16 +1322,16 @@ struct CGen {
         switch (d.kind) {
             case Decl::EnumD:
                 indent();
-                out << "typedef enum { /* base: " << mapBase(d.type.name) << " */\n";
+                out << "typedef enum { /* base: " << mapBase(d.structCommon.type->name) << " */\n";
                 depth++;
-                for (size_t i = 0; i < d.fields.size(); i++) {
+                for (size_t i = 0; i < d.structCommon.fields.size(); i++) {
                     indent();
-                    out << d.fields[i].name;
-                    if (d.fields[i].init) {
+                    out << d.structCommon.fields[i].name;
+                    if (d.structCommon.fields[i].init) {
                         out << " = ";
-                        emitExpr(*d.fields[i].init, true);
+                        emitExpr(*d.structCommon.fields[i].init, true);
                     }
-                    if (i + 1 < d.fields.size()) out << ",";
+                    if (i + 1 < d.structCommon.fields.size()) out << ",";
                     out << "\n";
                 }
                 depth--;
@@ -1343,7 +1343,7 @@ struct CGen {
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
                     << " " << d.name << " {\n";
-                emitFieldList(d.fields);
+                emitFieldList(d.structCommon.fields);
                 indent();
                 out << "} " << d.name << ";\n\n";
                 if (d.kind == Decl::StructD && hasFieldDefaults(&d)) {
@@ -1351,7 +1351,7 @@ struct CGen {
                     out << "static inline " << d.name << " " << d.name << "__default(void) {\n";
                     depth++;
                     indent(); out << d.name << " _v = {0};\n";
-                    for (auto& f : d.fields) {
+                    for (auto& f : d.structCommon.fields) {
                         if (!f.init) continue;
                         indent();
                         out << "_v." << f.name << " = ";
@@ -1365,7 +1365,7 @@ struct CGen {
                 break;
             case Decl::AliasD: {
                 std::string base; int ptr;
-                resolveType(d.type, base, ptr);
+                resolveType(*d.structCommon.type, base, ptr);
                 indent();
                 out << "typedef " << base << " ";
                 for (int i = 0; i < ptr; i++) out << "*";
@@ -1377,7 +1377,7 @@ struct CGen {
                 out << "typedef ";
                 emitRetType(d);
                 out << " " << d.name << "(";
-                emitParams(d.fields, d.variadic);
+                emitParams(d.structCommon.fields, d.structCommon.variadic);
                 out << ");\n\n";
                 break;
             }
@@ -1388,12 +1388,13 @@ struct CGen {
 
     // ---------------- 函数 ----------------
     void emitRetType(const Decl& d) {
-        if (d.retType.name.empty() && d.retType.ptr == 0) {
-            out << "void"; // 省略返回类型 = void
+        const auto& rt = d.structCommon.type;
+        if (!rt || (rt->name.empty() && rt->ptr == 0)) {
+            out << "void"; // 空指针 / 省略返回类型 = void
             return;
         }
         std::string base; int ptr;
-        resolveType(d.retType, base, ptr);
+        resolveType(*rt, base, ptr);
         out << base;
         for (int i = 0; i < ptr; i++) out << " *";
     }
@@ -1420,12 +1421,12 @@ struct CGen {
         out << " " << d.name << "(";
         if (!d.methodOwner.empty()) {
             out << d.methodOwner << " *_this";
-            if (!sig->fields.empty() || sig->variadic) {
+            if (!sig->structCommon.fields.empty() || sig->structCommon.variadic) {
                 out << ", ";
-                emitParams(sig->fields, sig->variadic);
+                emitParams(sig->structCommon.fields, sig->structCommon.variadic);
             }
         } else {
-            emitParams(sig->fields, sig->variadic);
+            emitParams(sig->structCommon.fields, sig->structCommon.variadic);
         }
         out << ")";
     }
@@ -1448,7 +1449,7 @@ struct CGen {
             auto it = funcTypes.find(d.funcTypeName);
             if (it != funcTypes.end()) sig = it->second;
         }
-        for (auto& p : sig->fields) regVar(p);
+        for (auto& p : sig->structCommon.fields) regVar(p);
         depth++;
         emitStmts(d.body);
         depth--;
@@ -1464,9 +1465,10 @@ struct CGen {
     // 结构体仅用 tag（不 typedef）：C 中 struct tag 与函数名分属不同
     // 命名空间，故二者可同名，调用形式与 fnc 完全一致。
 
-    // 是否有返回值（与 fnc 一致：省略返回类型 = void 无返回值）
+    // 是否有返回值（与 fnc 一致：空指针 / 省略返回类型 = void 无返回值）
     static bool rpcHasRet(const Decl& d) {
-        return !d.retType.name.empty() || d.retType.ptr > 0;
+        const auto& rt = d.structCommon.type;
+        return rt && (!rt->name.empty() || rt->ptr > 0);
     }
 
     // 同名参数结构体：返回槽 _ 为首个默认成员（C 侧可用 _ 访问）
@@ -1477,11 +1479,11 @@ struct CGen {
             indent();
             emitRetType(d);
             out << " _;\n";
-        } else if (d.fields.empty()) {
+        } else if (d.structCommon.fields.empty()) {
             indent();
             out << "char _;\n";  // C 不允许空结构体：占位
         }
-        for (auto& f : d.fields) {
+        for (auto& f : d.structCommon.fields) {
             indent();
             emitDeclarator(f);
             out << ";\n";
@@ -1500,11 +1502,11 @@ struct CGen {
         out << "static inline ";
         emitRetType(d);
         out << " " << d.name << "(";
-        emitParams(d.fields);
+        emitParams(d.structCommon.fields, d.structCommon.variadic);
         out << ") {\n";
         depth++;
         indent(); out << "struct " << d.name << " _p = {0};\n";
-        for (auto& f : d.fields) {
+        for (auto& f : d.structCommon.fields) {
             indent();
             out << "_p." << f.name << " = "
                 << (f.name == "this" ? "_this" : f.name) << ";\n";
@@ -1534,10 +1536,10 @@ struct CGen {
         fnVarsL.clear();
         varDimsL.clear();
         inFunc = true;
-        for (auto& p : d.fields) regVar(p);
+        for (auto& p : d.structCommon.fields) regVar(p);
         curRpc = &d;
         rpcParams.clear();
-        for (auto& p : d.fields) rpcParams.insert(p.name);
+        for (auto& p : d.structCommon.fields) rpcParams.insert(p.name);
         depth++;
         emitStmts(d.body);
         depth--;
@@ -1630,7 +1632,7 @@ struct CGen {
                 funcTypes[d->name] = d.get();
             else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
                 aggrs[d->name] = d.get();
-            else if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
+            else if (d->kind == Decl::AliasD) aliases[d->name] = d->structCommon.type->name;
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
             else if (d->kind == Decl::FuncD && !d->isRpc)
@@ -1642,7 +1644,7 @@ struct CGen {
         heapNews.clear();
         for (auto& d : prog.decls) {
             if (d->external) continue;
-            for (auto& f : d->fields) if (f.init) scanExprForNew(*f.init);
+            for (auto& f : d->structCommon.fields) if (f.init) scanExprForNew(*f.init);
             for (auto& s : d->body) scanStmtForNew(*s);
         }
 
@@ -1703,13 +1705,13 @@ struct CGen {
                     else emitTypeDecl(*d);
                     break;
                 case Decl::VarD:
-                    emitVarDecls(d->fields, false, shouldStaticize(*d));
+                    emitVarDecls(d->structCommon.fields, false, shouldStaticize(*d));
                     break;
                 case Decl::LetD:
-                    emitVarDecls(d->fields, true, shouldStaticize(*d));
+                    emitVarDecls(d->structCommon.fields, true, shouldStaticize(*d));
                     break;
                 case Decl::TlsD:
-                    emitVarDecls(d->fields, false, false, true);  // 始终 static TLS
+                    emitVarDecls(d->structCommon.fields, false, false, true);  // 始终 static TLS
                     break;
                 case Decl::FuncD:
                     if (d->isRpc) { emitRpcInterface(*d, shouldStaticize(*d)); break; }
@@ -1773,8 +1775,8 @@ struct CGen {
                     else if (!d->methodOwner.empty()) { emitFuncSig(*d); out << ";\n"; }
                     else emitTypeDecl(*d);
                     break;
-                case Decl::VarD: emitExternVars(d->fields, false); break;
-                case Decl::LetD: emitExternVars(d->fields, true); break;
+                case Decl::VarD: emitExternVars(d->structCommon.fields, false); break;
+                case Decl::LetD: emitExternVars(d->structCommon.fields, true); break;
                 case Decl::TlsD: break;  // tls 不可导出（parser 已拦截）
                 case Decl::FuncD:
                     if (d->isRpc) { emitRpcInterface(*d, false); break; }

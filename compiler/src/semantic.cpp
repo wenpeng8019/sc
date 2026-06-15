@@ -79,7 +79,7 @@ struct Checker {
 
         // 内联结构/联合：递归检查其字段
         if (t.hasInline) {
-            for (auto& f : t.inlineFields)
+            for (auto& f : t.structCommon.fields)
                 collectByValueDepsFromType(f.type, out, f.line ? f.line : line);
         }
     }
@@ -92,7 +92,7 @@ struct Checker {
         for (auto& kv : structs) {
             const Decl* d = kv.second;
             auto& edges = g[d->name];
-            for (auto& f : d->fields) {
+            for (auto& f : d->structCommon.fields) {
                 collectByValueDepsFromType(f.type, edges, f.line ? f.line : d->line);
             }
         }
@@ -199,7 +199,7 @@ struct Checker {
                 // prev/next 上下文关键字：链表结构体上映射到内置 _prev/_next
                 std::string fn = e.text;
                 if (sd->linked && (fn == "prev" || fn == "next")) fn = "_" + fn;
-                for (auto& f : sd->fields) {
+                for (auto& f : sd->structCommon.fields) {
                     if (f.name == fn) return fromTypeRef(f.type);
                 }
                 return Ty{};
@@ -216,7 +216,7 @@ struct Checker {
                     if (e.args[0]->kind == Expr::Cast) {
                         Ty t = inferExpr(*e.args[0]->a, locals, line);
                         if (!t.valid) return Ty{};
-                        return Ty{e.args[0]->text, e.args[0]->castPtr + 1, 0, true, false};
+                        return Ty{e.args[0]->op, e.args[0]->castPtr + 1, 0, true, false};
                     }
                     (void)inferExpr(*e.args[0], locals, line);
                     return Ty{"void", 1, 0, true, false};
@@ -227,7 +227,7 @@ struct Checker {
                     if (e.args[0]->kind == Expr::Cast) {
                         Ty t = inferExpr(*e.args[0]->a, locals, line);
                         if (!t.valid) return Ty{};
-                        return Ty{e.args[0]->text, e.args[0]->castPtr + 1, 0, true, false};
+                        return Ty{e.args[0]->op, e.args[0]->castPtr + 1, 0, true, false};
                     }
                     (void)inferExpr(*e.args[0], locals, line);
                     return Ty{"void", 1, 0, true, false};
@@ -275,7 +275,7 @@ struct Checker {
             }
             case Expr::Cast:
                 (void)inferExpr(*e.a, locals, line);
-                return Ty{e.text, e.castPtr, 0, true, false};
+                return Ty{e.op, e.castPtr, 0, true, false};
             case Expr::InitList:
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 return Ty{};
@@ -365,12 +365,16 @@ struct Checker {
         if (!d.funcTypeName.empty()) {
             auto it = funcTypes.find(d.funcTypeName);
             if (it == funcTypes.end()) return Ty{};  // 未知函数类型：不检查
-            Ty t = fromTypeRef(it->second->retType);
+            const auto& rt = it->second->structCommon.type;
+            if (!rt) return Ty{"v", 0, 0, true, false};  // 空指针 = void
+            Ty t = fromTypeRef(*rt);
             if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
                 return Ty{"v", 0, 0, true, false};
             return t;
         }
-        Ty t = fromTypeRef(d.retType);
+        const auto& rt = d.structCommon.type;
+        if (!rt) return Ty{"v", 0, 0, true, false};  // 空指针 = void
+        Ty t = fromTypeRef(*rt);
         if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
             return Ty{"v", 0, 0, true, false};
         return t;
@@ -470,13 +474,13 @@ struct Checker {
             if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
             if (d->kind == Decl::StructD || d->kind == Decl::UnionD) structs[d->name] = d.get();
-            if (d->kind == Decl::AliasD) aliases[d->name] = d->type.name;
+            if (d->kind == Decl::AliasD) aliases[d->name] = d->structCommon.type->name;
         }
 
         for (auto& d : prog.decls) {
             if (d->kind != Decl::VarD && d->kind != Decl::LetD && d->kind != Decl::TlsD)
                 continue;
-            for (auto& f : d->fields) {
+            for (auto& f : d->structCommon.fields) {
                 Ty lhs = fromTypeRef(f.type);
                 if (!lhs.valid || (lhs.name.empty() && lhs.ptr == 0 && lhs.arr == 0)) {
                     lhs = f.init ? inferExpr(*f.init, globals, f.line) : Ty{"char", 1, 0, true, false};
@@ -500,7 +504,7 @@ struct Checker {
                 auto it = funcTypes.find(d->funcTypeName);
                 if (it != funcTypes.end()) sig = it->second;
             }
-            for (auto& p : sig->fields) locals[p.name] = fromTypeRef(p.type);
+            for (auto& p : sig->structCommon.fields) locals[p.name] = fromTypeRef(p.type);
             if (!d->methodOwner.empty()) locals["this"] = Ty{d->methodOwner, 1, 0, true, false};
 
             Ty ret = funcRetType(*d);

@@ -17,6 +17,7 @@
 // ============================================================
 std::string exprToStr(const Expr& e);                    // 表达式→字符串（含自动加括号）
 std::string typeToStr(const TypeRef& t);                 // 类型引用→字符串 eg. "i4&&"
+std::string typeToStr(const std::shared_ptr<TypeRef>& t);// 空指针（void/无类型）→空串，否则解引用
 std::string inlineStr(const TypeRef& t);                 // 内联类型→字符串 eg. "{x:i4,y:i4}"
 std::string fieldDetail(const Field& f, bool withInit);  // 字段类型与初值部分 eg. "&:i4 = 1"
 std::string fieldToStr(const Field& f, bool withInit);   // 完整字段名+类型+初值

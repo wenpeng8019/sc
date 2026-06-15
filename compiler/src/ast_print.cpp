@@ -46,7 +46,7 @@ std::string rec(const Expr& e, bool top) {
         case Expr::Offsetof:
             return "offsetof(" + e.text + ", " + e.op + ")";
         case Expr::Cast: {
-            std::string s = "(" + rec(*e.a, true) + ": " + e.text;
+            std::string s = "(" + rec(*e.a, true) + ": " + e.op;
             for (int i = 0; i < e.castPtr; i++) s += "&";
             return s + ")";
         }
@@ -70,13 +70,13 @@ std::string exprToStr(const Expr& e) { return rec(e, true); }
 static std::string fncSigStr(const TypeRef& t) {
     std::string s = "fnc";
     std::vector<std::string> parts;
-    if (t.fnRet) {
-        std::string r = typeToStr(*t.fnRet);
+    if (t.structCommon.type) {
+        std::string r = typeToStr(*t.structCommon.type);
         if (!r.empty()) parts.push_back(r);
     }
-    for (auto& p : t.fnParams) parts.push_back(fieldToStr(p, false));
+    for (auto& p : t.structCommon.fields) parts.push_back(fieldToStr(p, false));
     for (size_t i = 0; i < parts.size(); i++) s += (i ? ", " : ": ") + parts[i];
-    if (t.fnVariadic) s += parts.empty() ? ": ..." : ", ...";
+    if (t.structCommon.variadic) s += parts.empty() ? ": ..." : ", ...";
     return s;
 }
 
@@ -88,11 +88,16 @@ std::string typeToStr(const TypeRef& t) {
     return s;
 }
 
+// StructCommon::type 重载：空指针（函数省略返回类型 = void）返回空串
+std::string typeToStr(const std::shared_ptr<TypeRef>& t) {
+    return t ? typeToStr(*t) : std::string();
+}
+
 std::string inlineStr(const TypeRef& t) {
     std::string s = t.inlineUnion ? "( " : "{ ";
-    for (size_t i = 0; i < t.inlineFields.size(); i++) {
+    for (size_t i = 0; i < t.structCommon.fields.size(); i++) {
         if (i) s += ", ";
-        s += fieldToStr(t.inlineFields[i], false);
+        s += fieldToStr(t.structCommon.fields[i], false);
     }
     s += t.inlineUnion ? " )" : " }";
     return s;

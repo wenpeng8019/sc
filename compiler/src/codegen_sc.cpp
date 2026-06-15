@@ -139,9 +139,9 @@ struct SGen {
                 ind(); out << (d.exported ? "@inc " : "inc ") << d.name << "\n";
                 break;
             case Decl::EnumD:
-                ind(); out << X << "def " << d.name << ": " << typeToStr(d.type) << "\n";
+                ind(); out << X << "def " << d.name << ": " << typeToStr(d.structCommon.type) << "\n";
                 depth++;
-                for (auto& f : d.fields) {
+                for (auto& f : d.structCommon.fields) {
                     ind();
                     out << f.name;
                     if (f.init) out << " = " << exprToStr(*f.init);
@@ -156,7 +156,7 @@ struct SGen {
                 ind(); out << X << "def " << d.name << ": "
                            << (d.linked ? "~ " : "") << open << "\n";
                 depth++;
-                for (auto& f : d.fields) {
+                for (auto& f : d.structCommon.fields) {
                     if (f.synthetic) continue;  // 链表注入成员由 ~ 标记再生
                     ind(); out << fieldToStr(f, true) << "\n";
                 }
@@ -175,7 +175,7 @@ struct SGen {
                 break;
             }
             case Decl::AliasD:
-                ind(); out << X << "def " << d.name << " -> " << typeToStr(d.type) << "\n";
+                ind(); out << X << "def " << d.name << " -> " << typeToStr(d.structCommon.type) << "\n";
                 break;
             case Decl::FuncTypeD:
                 ind();
@@ -196,22 +196,22 @@ struct SGen {
                 emitStmts(d.body);
                 depth--;
                 break;
-            case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.fields); break;
-            case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.fields); break;
-            case Decl::TlsD: emitVarLine("tls", d.fields); break;
+            case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.structCommon.fields); break;
+            case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.structCommon.fields); break;
+            case Decl::TlsD: emitVarLine("tls", d.structCommon.fields); break;
         }
     }
 
     // fnc 单行项：返回类型 + 参数（皆无时连同 ':' 一并省略）
     std::string fncItems(const Decl& d) {
         std::vector<std::string> parts;
-        std::string ret = typeToStr(d.retType);
+        std::string ret = typeToStr(d.structCommon.type);
         if (!ret.empty()) parts.push_back(ret);
-        for (auto& f : d.fields) parts.push_back(fieldToStr(f, false));
+        for (auto& f : d.structCommon.fields) parts.push_back(fieldToStr(f, false));
         std::string s;
         for (size_t i = 0; i < parts.size(); i++)
             s += (i ? ", " : " ") + parts[i];
-        if (d.variadic) s += parts.empty() ? " ..." : ", ...";
+        if (d.structCommon.variadic) s += parts.empty() ? " ..." : ", ...";
         return s.empty() ? s : ":" + s;
     }
 

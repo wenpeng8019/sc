@@ -1,0 +1,111 @@
+# 由 scc --emit-sc 从 AST 再生成
+
+inc stdio.h
+
+inc "platform.h"
+
+inc m.sc
+
+def ctx: {
+    mu: mutex
+    n: i4
+}
+
+rpc work: c&: ctx, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        c->mu.lock()
+        c->n = (c->n + 1)
+        c->mu.unlock()
+
+rpc note: tag: i4
+    printf("detached note: tag=%d\n", tag)
+
+tls hits: i4 = 0
+
+rpc bump: c&: ctx, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        hits = (hits + 1)
+    if hits == rounds
+        c->mu.lock()
+        c->n = (c->n + 1)
+        c->mu.unlock()
+
+fnc next_id: i4
+    tls id: i4 = 100
+    id++
+    return id
+
+def sig: {
+    mu: mutex
+    cv: cond
+    ready: i4
+}
+
+rpc ping: s&: sig
+    s->mu.lock()
+    s->ready = 1
+    s->cv.one()
+    s->mu.unlock()
+
+fnc main: i4
+    var c: ctx
+    c.n = 0
+    c.mu.init()
+    var t1&: thread = nil
+    var t2&: thread = nil
+    run work(&c, 10000), &t1
+    run work(&c, 10000), &t2
+    printf("t1 id set: %d\n", t1 != nil)
+    t1->join()
+    t2->join()
+    printf("threads done: n=%d\n", c.n)
+    run note(7)
+    P_usleep(50000)
+    if c.mu.try_lock()
+        printf("try_lock ok\n")
+        c.mu.unlock()
+    next_id()
+    next_id()
+    printf("tls id=%d\n", next_id())
+    c.n = 0
+    var b1&: thread = nil
+    var b2&: thread = nil
+    run bump(&c, 10000), &b1
+    run bump(&c, 20000), &b2
+    b1->join()
+    b2->join()
+    printf("tls threads ok: %d\n", c.n)
+    c.mu.drop()
+    var s: sig
+    s.ready = 0
+    s.mu.init()
+    s.cv.init()
+    run ping(&s)
+    s.mu.lock()
+    while s.ready == 0
+        wait s.cv, s.mu
+    s.mu.unlock()
+    printf("cond wait ok: ready=%d\n", s.ready)
+    s.mu.lock()
+    wait s.cv, s.mu, 5000000, 0
+    s.mu.unlock()
+    printf("cond timeout ok\n")
+    s.cv.drop()
+    s.mu.drop()
+    var c2: ctx
+    c2.n = 0
+    c2.mu.init()
+    var p: pool
+    p.init(4)
+    var k: i4 = 0
+    for k = 0; k < 8; k++
+        run work(&c2, 1000), p
+    p.join()
+    printf("pool done: n=%d\n", c2.n)
+    run work(&c2, 1000), p
+    p.drop()
+    printf("pool drop: n=%d\n", c2.n)
+    c2.mu.drop()
+    return 0

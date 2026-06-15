@@ -138,7 +138,7 @@ struct Parser {
         if (at(Tok::LBrace) || at(Tok::LParen)) {
             ty.hasInline = true;
             ty.inlineUnion = at(Tok::LParen);  // '(' → union, '{' → struct
-            parseFieldBlock(ty.inlineFields);   // 递归解析字段列表
+            parseFieldBlock(ty.structCommon.fields);   // 递归解析字段列表
             return ty;
         }
 
@@ -166,7 +166,7 @@ struct Parser {
         if (at(Tok::LBrace) || at(Tok::LParen)) {
             f.type.hasInline = true;
             f.type.inlineUnion = at(Tok::LParen);
-            parseFieldBlock(f.type.inlineFields);
+            parseFieldBlock(f.type.structCommon.fields);
             return f;
         }
 
@@ -183,30 +183,7 @@ struct Parser {
                 advance();                                          // 跳过 fnc 关键字
                 TypeRef ty; ty.fnKind = TypeRef::FncKind::PlainPtr; // 创建函数指针类型引用，初始为普通函数指针
                 if (accept(Tok::Colon)) {                           // ':' 可省略（无返回值且无参数，如成员函数 init: fnc）
-
-                    for (bool haveRet = false;;) {
-                        
-                        // 对于可变参数 '...'：必须在参数列表末尾，且前面至少有一个参数
-                        if (at(Tok::Ellipsis)) {
-                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
-                            advance(); ty.fnVariadic = true; 
-                            break;
-                        }
-
-                        // 如果看起来像参数（标识符后跟冒号），则解析为参数
-                        if (looksLikeParam()) {
-                            ty.fnParams.push_back(parseFieldItem());
-                        }
-                        // 否则解析为（单例）返回值类型（冒号可省略）
-                        else {
-                            if (haveRet) err("重复的返回类型");
-                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
-                            haveRet = true;
-                        }
-
-                        // 如果不是逗号分隔，则结束参数/返回值列表的解析
-                        if (!accept(Tok::Comma)) break;
-                    }
+                    parseFncVars(ty.structCommon);                  // 解析函数参数和返回类型（冒号分隔的参数列表，或单一返回类型）
                 }
                 f.type = std::move(ty);
             }
@@ -256,9 +233,7 @@ struct Parser {
                 m->kind = Decl::FuncD;
                 m->line = f.line;
                 m->methodName = f.name;
-                if (f.type.fnRet) m->retType = std::move(*f.type.fnRet);
-                m->fields = std::move(f.type.fnParams);
-                m->variadic = f.type.fnVariadic;
+                m->structCommon = std::move(f.type.structCommon);
                 
                 //解析函数体
                 advance(); advance();  // Newline + Indent
@@ -294,30 +269,7 @@ struct Parser {
                 advance();                                          // 跳过 fnc 关键字
                 TypeRef ty; ty.fnKind = TypeRef::FncKind::PlainPtr; // 创建函数指针类型引用，初始为普通函数指针                
                 if (accept(Tok::Colon)) {                           // ':' 可省略（无返回值且无参数，如函数 func: fnc）
-
-                    for (bool haveRet = false;;) {
-
-                        // 对于可变参数 '...'：必须在参数列表末尾，且前面至少有一个参数
-                        if (at(Tok::Ellipsis)) {
-                            if (ty.fnParams.empty()) err("'...' 前必须有参数");
-                            advance(); ty.fnVariadic = true; 
-                            break;
-                        }
-
-                        // 如果看起来像参数（标识符后跟冒号），则解析为参数
-                        if (looksLikeParam()) {
-                            ty.fnParams.push_back(parseFieldItem());
-                        }
-                        // 否则解析为（单例）返回值类型（冒号可省略）
-                        else {
-                            if (haveRet) err("重复的返回类型");
-                            ty.fnRet = std::make_shared<TypeRef>(parseTypeRef());
-                            haveRet = true;
-                        }
-
-                        // 如果不是逗号分隔，则结束参数/返回值列表的解析
-                        if (!accept(Tok::Comma)) break;
-                    }
+                    parseFncVars(ty.structCommon);                  // 解析函数参数和返回类型（冒号分隔的参数列表，或单一返回类型）
                 }
                 f.type = std::move(ty);
             }
@@ -330,13 +282,6 @@ struct Parser {
                                     f.type.arrayDims.end());
                 f.type = std::move(ty);
             }
-        }
-        // 无冒号直接跟 {/( ：内联结构/联合（如 var name {field:type}）
-        // ? 内联可以没有冒号 ？
-        else if (at(Tok::LBrace) || at(Tok::LParen)) {
-            f.type.hasInline = true;
-            f.type.inlineUnion = at(Tok::LParen);
-            parseFieldBlock(f.type.inlineFields);
         }
 
         if (acceptOp("=")) f.init = parseExpr();  // 可选的初值表达式
@@ -382,7 +327,7 @@ struct Parser {
         // 1. 对于 -> 箭头语法：类型别名  def name -> target
         if (accept(Tok::Arrow)) {
             d->kind = Decl::AliasD;
-            d->type = parseTypeRef();
+            d->structCommon.type = std::make_shared<TypeRef>(parseTypeRef());
             expect(Tok::Newline, "换行");
             return d;
         }
@@ -395,7 +340,7 @@ struct Parser {
         if (at(Tok::LBrace)) {
 
             d->kind = Decl::StructD;                        // 标记为结构体定义
-            parseFieldBlock(d->fields, &pendingMethods);    // 解析字段块
+            parseFieldBlock(d->structCommon.fields, &pendingMethods);    // 解析字段块
             for (auto& m : pendingMethods) {                // 处理成员函数：补齐 methodOwner 和 name（mangle 后）
                 m->methodOwner = d->name;
                 m->name = mangleMethodName(d->name, m->methodName);
@@ -404,7 +349,7 @@ struct Parser {
             // 如果需要注入链表指针，则在字段列表前注入 _prev 和 _next 字段
             d->linked = linked;
             if (linked) {
-                for (auto& f : d->fields)
+                for (auto& f : d->structCommon.fields)
                     if (f.name == "_prev" || f.name == "_next" ||
                         f.name == "prev" || f.name == "next")
                         err("prev/next/_prev/_next 为链表结构体内置成员，不可显式定义");
@@ -418,7 +363,7 @@ struct Parser {
                     f.line = d->line;
                     injected.push_back(std::move(f));
                 }
-                d->fields.insert(d->fields.begin(),
+                d->structCommon.fields.insert(d->structCommon.fields.begin(),
                                  std::make_move_iterator(injected.begin()),
                                  std::make_move_iterator(injected.end()));
             }
@@ -434,7 +379,7 @@ struct Parser {
         if (at(Tok::LParen)) {
 
             d->kind = Decl::UnionD;
-            parseFieldBlock(d->fields);
+            parseFieldBlock(d->structCommon.fields);
 
             expect(Tok::Newline, "换行");
             return d;
@@ -442,7 +387,7 @@ struct Parser {
 
         // 4. 对于枚举：def name: base_type \n\tItem1, Item2 ...
         d->kind = Decl::EnumD;
-        d->type = parseTypeRef();                           // 枚举的底层整数类型
+        d->structCommon.type = std::make_shared<TypeRef>(parseTypeRef());                           // 枚举的底层整数类型
         expect(Tok::Newline, "换行");
         expect(Tok::Indent, "缩进的枚举项");
         while (!at(Tok::Dedent) && !at(Tok::End)) {
@@ -455,7 +400,7 @@ struct Parser {
                 if (!at(Tok::Ident)) err("期望枚举项名");
                 item.name = advance().text;                 // 枚举项名
                 if (acceptOp("=")) item.init = parseExpr(); // 可选的显式值
-                d->fields.push_back(std::move(item));
+                d->structCommon.fields.push_back(std::move(item));
                 if (!accept(Tok::Comma)) break;             // 逗号分隔多项
             }
             expect(Tok::Newline, "换行");
@@ -500,21 +445,32 @@ struct Parser {
     }
 
     // 解析 fnc 冒号后的单行项：可能是返回类型，也可能是参数
-    void parseFncItem(Decl& d, bool& haveRet) {
+    void parseFncVars(StructCommon& structCommon) {
 
-        if (at(Tok::Ellipsis)) {
-            if (d.fields.empty()) err("'...' 前必须有至少一个命名参数");
-            d.variadic = true;
-            advance();
-            return;
+        for (bool haveRet = false;;) {
+
+            // 对于可变参数 '...'：必须在参数列表末尾，且前面至少有一个参数
+            if (at(Tok::Ellipsis)) {
+                if (structCommon.fields.empty()) err("'...' 前必须有至少一个命名参数");
+                structCommon.variadic = true;
+                advance();
+                return;
+            }
+
+            // 如果看起来像参数（标识符后跟冒号），则解析为参数
+            if (looksLikeParam()) {
+                structCommon.fields.push_back(parseFieldItem());
+            }
+            // 否则解析为（单例）返回值类型（冒号可省略）
+            else  {
+                if (haveRet) err("重复的返回类型");
+                structCommon.type = std::make_shared<TypeRef>(parseTypeRef());
+                haveRet = true;
+            }
+
+            // 如果后面不再是逗号分隔，则结束参数/返回值列表的解析
+            if (!accept(Tok::Comma)) return;
         }
-        if (looksLikeParam()) {
-            d.fields.push_back(parseFieldItem());   // 是参数
-            return;
-        }
-        if (haveRet) err("重复的返回类型");
-        d.retType = parseTypeRef();                 // 是返回类型（只有一个）
-        haveRet = true;
     }
 
     DeclPtr parseFnc(bool isRpc = false) {
@@ -554,14 +510,10 @@ struct Parser {
             return d;
         }
 
-        // 签名：':' 后接签名项；省略返回类型 = void（首项是否参数由
-        // looksLikeParam 前瞻区分）；无返回值且无参数时 ':' 可整体省略
-        bool haveRet = false;
+        // 签名：':' 后接签名项；无返回值且无参数时 ':' 可整体省略
         if (accept(Tok::Colon)) {
             if (!at(Tok::Newline)) {
-                parseFncItem(*d, haveRet);
-                while (!d->variadic && accept(Tok::Comma))
-                    parseFncItem(*d, haveRet);
+                parseFncVars(d->structCommon);
             }
         } else if (!at(Tok::Newline)) {
             err("期望 ':' 或换行");
@@ -590,13 +542,19 @@ struct Parser {
 
             // 看起来像参数声明 → 多行参数
             if (looksLikeParam()) {
-                d->fields.push_back(parseFieldItem());
+
+                d->structCommon.fields.push_back(parseFieldItem());
+                
                 while (accept(Tok::Comma)) {
+
                     if (at(Tok::Ellipsis)) {
-                        if (d->fields.empty()) err("'...' 前必须有参数");
-                        d->variadic = true; advance(); break;
+                        if (d->structCommon.fields.empty()) err("'...' 前必须有参数");
+                        d->structCommon.variadic = true;
+                        advance();
+                        break;
                     }
-                    d->fields.push_back(parseFieldItem());
+
+                    d->structCommon.fields.push_back(parseFieldItem());
                 }
                 expect(Tok::Newline, "换行");
                 continue;
@@ -619,8 +577,8 @@ struct Parser {
 
         // rpc 参数将成为结构体字段：不支持变参与数组参数
         if (d->isRpc) {
-            if (d->variadic) err("rpc 不支持可变参数 '...'");
-            for (auto& f : d->fields)
+            if (d->structCommon.variadic) err("rpc 不支持可变参数 '...'");
+            for (auto& f : d->structCommon.fields)
                 if (!f.type.arrayDims.empty()) err("rpc 参数不支持数组，请改用指针（&）");
         }
 
@@ -687,7 +645,7 @@ struct Parser {
                 if (!at(Tok::Ident)) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
-                c->text = advance().text;
+                c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
                 while (atOp("&") || atOp("&&"))
                     c->castPtr += advance().text == "&&" ? 2 : 1;
                 c->a = std::move(e);
@@ -894,7 +852,7 @@ struct Parser {
             (ternDepth.empty() || exprBracket > ternDepth.back())) {
             advance();  // ':'
             auto c = mk(Expr::Cast);
-            c->text = advance().text;
+            c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
             while (atOp("&") || atOp("&&"))
                 c->castPtr += advance().text == "&&" ? 2 : 1;
             c->a = std::move(lhs);
@@ -1337,7 +1295,7 @@ struct Parser {
                             : cur().kind == Tok::KwLet ? Decl::LetD : Decl::TlsD;
                     d->exported = exported;
                     advance();
-                    parseVarList(d->fields);  // 解析一项或多项（逗号或多行）
+                    parseVarList(d->structCommon.fields);  // 解析一项或多项（逗号或多行）
                     prog.decls.push_back(std::move(d));
                     break;
                 }
