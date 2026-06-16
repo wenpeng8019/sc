@@ -57,9 +57,8 @@ fnc main: i4
 
     var f&: task = l.first(): task&
     var b&: task = l.last(): task&
-    # 首元素 prev 指向尾元素（rear 约定）
-    var r&: task = f->prev: task&
-    printf("first=%d last=%d rear=%d\n", f->id, b->id, r->id)
+    # 边界安全：head 无前驱 → prev 返回 nil；尾元素（rear）经 last() 获取
+    printf("first=%d last=%d head_prev_nil=%d\n", f->id, b->id, f->prev == nil)
 
     l.remove(&t[2])
     var p&: task = l.pop(): task&

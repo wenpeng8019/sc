@@ -58,6 +58,20 @@ std::string rec(const Expr& e, bool top) {
             }
             return s + "}";
         }
+        case Expr::FncLit: {
+            // 匿名函数签名（不含函数体；函数体由 codegen_sc 在语句层多行输出）
+            std::string s = "fnc";
+            std::vector<std::string> parts;
+            if (e.fncSig.type) {
+                std::string ret = typeToStr(*e.fncSig.type);
+                if (!ret.empty()) parts.push_back(ret);
+            }
+            for (auto& f : e.fncSig.fields) parts.push_back(f.name + fieldDetail(f, false));
+            if (e.fncSig.variadic) parts.push_back("...");
+            for (size_t i = 0; i < parts.size(); i++) s += (i ? ", " : ": ") + parts[i];
+            if (parts.empty()) s += ":";
+            return s;
+        }
     }
     return "";
 }

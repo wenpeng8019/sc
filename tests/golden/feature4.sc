@@ -19,8 +19,6 @@ def point: {
 
 def obj: {
     id: i4
-    dump: fnc
-    calc: fnc: i4, a: i4, b: i4
     fnc dump::
     fnc calc::: i4, a: i4, b: i4
 }

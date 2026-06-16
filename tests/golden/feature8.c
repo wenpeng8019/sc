@@ -79,11 +79,11 @@ static void work_rpc(struct work *_p) {
     /* line 32 */
     for (i = 0; i < _p->rounds; i++) {
         /* line 33 */
-        _p->c->mu.lock();
+        mutex_lock(&_p->c->mu);
         /* line 34 */
         _p->c->n = (_p->c->n + 1);
         /* line 35 */
-        _p->c->mu.unlock();
+        mutex_unlock(&_p->c->mu);
     }
 }
 
@@ -103,11 +103,11 @@ static void bump_rpc(struct bump *_p) {
     /* line 48 */
     if (hits == _p->rounds) {
         /* line 49 */
-        _p->c->mu.lock();
+        mutex_lock(&_p->c->mu);
         /* line 50 */
         _p->c->n = (_p->c->n + 1);
         /* line 51 */
-        _p->c->mu.unlock();
+        mutex_unlock(&_p->c->mu);
     }
 }
 
@@ -122,13 +122,13 @@ static int32_t next_id(void) {
 
 static void ping_rpc(struct ping *_p) {
     /* line 67 */
-    _p->s->mu.lock();
+    mutex_lock(&_p->s->mu);
     /* line 68 */
     _p->s->ready = 1;
     /* line 69 */
-    _p->s->cv.one();
+    cond_one(&_p->s->cv);
     /* line 70 */
-    _p->s->mu.unlock();
+    mutex_unlock(&_p->s->mu);
 }
 
 int32_t main(void) {
@@ -137,7 +137,7 @@ int32_t main(void) {
     /* line 74 */
     c.n = 0;
     /* line 75 */
-    c.mu.init();
+    mutex_init(&c.mu);
     /* line 78 */
     thread *t1 = NULL;
     /* line 79 */
@@ -159,9 +159,9 @@ int32_t main(void) {
     /* line 82 */
     printf("t1 id set: %d\n", t1 != NULL);
     /* line 83 */
-    t1->join();
+    thread_join(t1);
     /* line 84 */
-    t2->join();
+    thread_join(t2);
     /* line 85 */
     printf("threads done: n=%d\n", c.n);
     /* line 88 */
@@ -173,11 +173,11 @@ int32_t main(void) {
     /* line 89 */
     P_usleep(50000);
     /* line 92 */
-    if (c.mu.try_lock()) {
+    if (mutex_try_lock(&c.mu)) {
         /* line 93 */
         printf("try_lock ok\n");
         /* line 94 */
-        c.mu.unlock();
+        mutex_unlock(&c.mu);
     }
     /* line 97 */
     next_id();
@@ -206,21 +206,21 @@ int32_t main(void) {
         thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)));
     }
     /* line 107 */
-    b1->join();
+    thread_join(b1);
     /* line 108 */
-    b2->join();
+    thread_join(b2);
     /* line 109 */
     printf("tls threads ok: %d\n", c.n);
     /* line 111 */
-    c.mu.drop();
+    mutex_drop(&c.mu);
     /* line 114 */
     sig s = {0};
     /* line 115 */
     s.ready = 0;
     /* line 116 */
-    s.mu.init();
+    mutex_init(&s.mu);
     /* line 117 */
-    s.cv.init();
+    cond_init(&s.cv);
     /* line 118 */
     {
         struct ping _rp = {0};
@@ -228,38 +228,38 @@ int32_t main(void) {
         thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL);
     }
     /* line 119 */
-    s.mu.lock();
+    mutex_lock(&s.mu);
     /* line 120 */
     while (s.ready == 0) {
         /* line 121 */
         cond_wait(&(s.cv), &(s.mu), 0, 0);
     }
     /* line 122 */
-    s.mu.unlock();
+    mutex_unlock(&s.mu);
     /* line 123 */
     printf("cond wait ok: ready=%d\n", s.ready);
     /* line 126 */
-    s.mu.lock();
+    mutex_lock(&s.mu);
     /* line 127 */
     cond_wait(&(s.cv), &(s.mu), 5000000, 0);
     /* line 128 */
-    s.mu.unlock();
+    mutex_unlock(&s.mu);
     /* line 129 */
     printf("cond timeout ok\n");
     /* line 131 */
-    s.cv.drop();
+    cond_drop(&s.cv);
     /* line 132 */
-    s.mu.drop();
+    mutex_drop(&s.mu);
     /* line 135 */
     ctx c2 = {0};
     /* line 136 */
     c2.n = 0;
     /* line 137 */
-    c2.mu.init();
+    mutex_init(&c2.mu);
     /* line 138 */
     pool p = {0};
     /* line 139 */
-    p.init(4);
+    pool_init(&p, 4);
     /* line 140 */
     int32_t k = 0;
     /* line 141 */
@@ -273,7 +273,7 @@ int32_t main(void) {
         }
     }
     /* line 143 */
-    p.join();
+    pool_join(&p);
     /* line 144 */
     printf("pool done: n=%d\n", c2.n);
     /* line 145 */
@@ -284,11 +284,11 @@ int32_t main(void) {
         pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
     }
     /* line 146 */
-    p.drop();
+    pool_drop(&p);
     /* line 147 */
     printf("pool drop: n=%d\n", c2.n);
     /* line 148 */
-    c2.mu.drop();
+    mutex_drop(&c2.mu);
     /* line 149 */
     return 0;
 }

@@ -98,6 +98,7 @@ struct CGen {
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
     int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + print 原型）
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见）
+    bool usesLPrev = false;     // 出现 prev 链表导航：需输出边界安全前驱 helper sc__lprev
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -120,6 +121,18 @@ struct CGen {
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
     std::unordered_set<std::string> rpcParams;  // 当前 rpc 的参数名集合
+
+    // ---- 匿名函数字面量（FncLit）支撑 ----
+    // 不捕获外层变量的「伪闭包」：提升为顶层 static 函数，表达式处替换为函数名。
+    std::ostringstream lambdaOut;                       // 提升后的 static 函数定义（在函数体前回填）
+    std::unordered_map<const Expr*, std::string> lambdaNames;  // FncLit 节点 → 生成的函数名
+    int lambdaSeq = 0;                                  // 函数名序号
+
+    // ---- 聚合体定义顺序无关支撑 ----
+    // 按值包含要求被包含者「完整类型」先于包含者出现（前置声明仅满足指针引用）。
+    // 第一遍输出 struct/union 时惰性前移其按值依赖，使源码定义顺序无关（见 doc §5.3）。
+    std::unordered_set<const Decl*> emittedAggr;        // 已输出完整定义的聚合体
+
     explicit CGen(const Program& p) : prog(p) {}
 
     void indent() { for (int i = 0; i < depth; i++) out << "    "; }
@@ -219,7 +232,11 @@ struct CGen {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "print" && !usesPrint) usesPrint = e.line;
             if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
+            // prev(o) 导航函数形式：边界安全前驱 helper
+            if (e.a->text == "prev" && e.args.size() == 1) usesLPrev = true;
         }
+        // it->prev 成员形式：链表前驱导航（边界安全 helper sc__lprev）
+        if (e.kind == Expr::Member && e.text == "prev") usesLPrev = true;
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
         if (e.c) scanExprForNew(*e.c);
@@ -860,6 +877,22 @@ struct CGen {
                         if (kw == "prev" || kw == "next") {
                             // _prev 在偏移 0，_next 在偏移 sizeof(void*)
                             const char* off = kw == "prev" ? "0" : "sizeof(void *)";
+                            // prev：边界安全前驱（head→NULL），经 adt 契约 chain_prev
+                            if (kw == "prev") {
+                                if (typed) {
+                                    const Expr& c = *e.args[0];
+                                    out << "((" << mapBase(c.text);
+                                    for (int i = 0; i < c.castPtr + 1; i++) out << "*";
+                                    out << ")chain_prev(";
+                                    emitRawSrc();
+                                    out << "))";
+                                    break;
+                                }
+                                out << "((void *)chain_prev(";
+                                emitRawSrc();
+                                out << "))";
+                                break;
+                            }
                             if (typed) {
                                 // next(o: T) → 读链接字段并转为 T*
                                 const Expr& c = *e.args[0];
@@ -951,14 +984,28 @@ struct CGen {
                 out << "]";
                 break;
             case Expr::Member: {
-                emitExpr(*e.a);
-                std::string fn = e.text;
-                if (e.text == "prev" || e.text == "next") {
-                    // 上下文关键字：链表结构体上 prev/next 映射到内置 _prev/_next
+                // prev 上下文关键字（链表结构体）：边界安全前驱 → head 返回 NULL
+                if (e.text == "prev") {
                     VType base;
                     if (exprVType(*e.a, base)) {
                         const Decl* sd = aggrOf(base.name);
-                        if (sd && sd->linked) fn = "_" + e.text;
+                        if (sd && sd->linked) {
+                            out << "((void *)chain_prev(";
+                            if (e.op == "->") emitExpr(*e.a);
+                            else { out << "&("; emitExpr(*e.a, true); out << ")"; }
+                            out << "))";
+                            break;
+                        }
+                    }
+                }
+                emitExpr(*e.a);
+                std::string fn = e.text;
+                if (e.text == "next") {
+                    // 上下文关键字：链表结构体上 next 映射到内置 _next（rear 的 _next=NULL 自然终止）
+                    VType base;
+                    if (exprVType(*e.a, base)) {
+                        const Decl* sd = aggrOf(base.name);
+                        if (sd && sd->linked) fn = "_next";
                     }
                 }
                 out << e.op << fn;
@@ -996,6 +1043,20 @@ struct CGen {
                     emitExpr(*e.args[i], true);
                 }
                 out << "}";
+                break;
+            }
+            case Expr::FncLit: {
+                // 匿名函数字面量（不捕获外层变量）：首次遇到时提升为顶层 static
+                // 函数（定义写入 lambdaOut，在所有函数体前回填），表达式处输出函数名。
+                auto it = lambdaNames.find(&e);
+                if (it == lambdaNames.end()) {
+                    std::string name = "sc__lambda_" + std::to_string(lambdaSeq++);
+                    lambdaNames.emplace(&e, name);
+                    emitLambdaDef(e, name);
+                    out << name;
+                } else {
+                    out << it->second;
+                }
                 break;
             }
         }
@@ -1318,6 +1379,30 @@ struct CGen {
         depth--;
     }
 
+    // 收集 sc 内按值（非指针、非内联）直接引用的命名聚合体依赖
+    void collectValueDeps(const StructCommon& sc, std::vector<const Decl*>& deps) {
+        for (auto& f : sc.fields) {
+            if (f.type.ptr == 0 && !f.type.hasInline) {
+                if (const Decl* dep = aggrOf(f.type.name)) deps.push_back(dep);
+            }
+            if (f.type.hasInline) collectValueDeps(f.type.structCommon, deps);
+        }
+    }
+
+    // 输出聚合体完整定义，先递归前移其按值依赖（定义顺序无关）。
+    // 标记先于递归，天然防御非法的相互按值包含（由语义阶段另行报错）。
+    void emitAggrWithDeps(const Decl& d) {
+        if (emittedAggr.count(&d)) return;
+        emittedAggr.insert(&d);
+        std::vector<const Decl*> deps;
+        collectValueDeps(d.structCommon, deps);
+        for (auto* dep : deps)
+            if ((dep->kind == Decl::StructD || dep->kind == Decl::UnionD)
+                && !dep->external && !dep->isRpc)
+                emitAggrWithDeps(*dep);
+        emitTypeDecl(d);
+    }
+
     void emitTypeDecl(const Decl& d) {
         switch (d.kind) {
             case Decl::EnumD:
@@ -1373,10 +1458,11 @@ struct CGen {
                 break;
             }
             case Decl::FuncTypeD: {
+                if (d.cImpl) break;  // C 实现的接口：不生成 typedef，在 pass 1 中生成 extern 声明
                 indent();
                 out << "typedef ";
                 emitRetType(d);
-                out << " " << d.name << "(";
+                out << " (*" << d.name << ")(";
                 emitParams(d.structCommon.fields, d.structCommon.variadic);
                 out << ");\n\n";
                 break;
@@ -1455,6 +1541,47 @@ struct CGen {
         depth--;
         inFunc = false;
         out << "}\n\n";
+    }
+
+    // 提升匿名函数字面量为顶层 static 函数，定义追加到 lambdaOut。
+    // 保存/恢复外层函数的代码生成状态（输出流 + 局部符号表 + 缩进），可重入。
+    void emitLambdaDef(const Expr& e, const std::string& name) {
+        // 保存外层状态
+        auto savedLocalsT  = std::move(localsT);
+        auto savedFnVarsL  = std::move(fnVarsL);
+        auto savedVarDimsL = std::move(varDimsL);
+        const bool savedInFunc = inFunc;
+        const int  savedDepth  = depth;
+        std::ostringstream savedOut = std::move(out);
+        out = std::ostringstream();
+
+        // 干净的函数作用域
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear();
+        inFunc = true;
+        depth = 0;
+
+        Decl sigDecl;                                   // 仅承载返回类型给 emitRetType
+        sigDecl.structCommon.type = e.fncSig.type;
+        out << "static ";
+        emitRetType(sigDecl);
+        out << " " << name << "(";
+        emitParams(e.fncSig.fields, e.fncSig.variadic);
+        out << ") {\n";
+        for (auto& p : e.fncSig.fields) regVar(p);
+        depth++;
+        emitStmts(e.fncBody);
+        depth--;
+        out << "}\n\n";
+
+        lambdaOut << out.str();                         // 收集定义（嵌套 lambda 已先行追加）
+
+        // 恢复外层状态
+        out = std::move(savedOut);
+        localsT  = std::move(savedLocalsT);
+        fnVarsL  = std::move(savedFnVarsL);
+        varDimsL = std::move(savedVarDimsL);
+        inFunc = savedInFunc;
+        depth  = savedDepth;
     }
 
     // ---------------- rpc：伪形参函数糖 ----------------
@@ -1628,7 +1755,7 @@ struct CGen {
 
         // 收集函数类型、聚合类型、顶层函数与方法注册表（含外部模块合并声明，供语法糖识别）
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && !d->cImpl && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
             else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
                 aggrs[d->name] = d.get();
@@ -1689,19 +1816,34 @@ struct CGen {
                 << "typedef struct mutex mutex;\n"
                 << "extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);\n\n";
 
+        // prev 链表导航：边界安全前驱由 adt 的 C 契约 chain_prev 提供（rear 约定属 chain 概念）。
+        // head 无前驱 → NULL（rear 仅经 last() 获取）。codegen 只生成调用，要求先 inc adt.sc。
+        if (usesLPrev && !aggrOf("chain")) {
+            bool hasAdt = false;
+            for (auto& d : prog.decls)
+                if (d->kind == Decl::IncD && endsWith(d->name, "adt.sc")) hasAdt = true;
+            if (!hasAdt)
+                throw CompileError{"prev 边界安全前驱依赖内置 chain，请先 inc adt.sc", 0};
+        }
+
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
             if (d->external && d->kind != Decl::IncD) continue;
             switch (d->kind) {
-                case Decl::EnumD: case Decl::StructD:
-                case Decl::UnionD: case Decl::AliasD:
+                case Decl::EnumD: case Decl::AliasD:
                     emitTypeDecl(*d);
+                    break;
+                case Decl::StructD: case Decl::UnionD:
+                    emitAggrWithDeps(*d);  // 惰性前移按值依赖，定义顺序无关
                     break;
                 case Decl::FuncTypeD:
                     // rpc 仅声明：接口三件套，实际函数在外部（C 侧）实现
                     if (d->isRpc) emitRpcInterface(*d, false);
-                    // 方法声明（fnc T::m 无函数体）：extern 原型，实现在外部（C 侧）
-                    else if (!d->methodOwner.empty()) { emitFuncSig(*d); out << ";\n"; }
+                    // C 实现接口（fnc name:: 或成员 fnc m::）：extern 原型，实现在 C 侧
+                    else if (d->cImpl || !d->methodOwner.empty()) {
+                        out << "extern ";
+                        emitFuncSig(*d); out << ";\n";
+                    }
                     else emitTypeDecl(*d);
                     break;
                 case Decl::VarD:
@@ -1736,6 +1878,7 @@ struct CGen {
         std::string funcsPart = out.str();
         out = std::move(mainOut);
         emitSofHelpers();
+        out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
         return out.str();
     }
@@ -1757,7 +1900,7 @@ struct CGen {
 
         // 函数类型表与方法表（导出函数可能引用未导出的函数类型签名）
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && !d->cImpl && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
@@ -1772,7 +1915,10 @@ struct CGen {
                     break;
                 case Decl::FuncTypeD:
                     if (d->isRpc) emitRpcInterface(*d, false);
-                    else if (!d->methodOwner.empty()) { emitFuncSig(*d); out << ";\n"; }
+                    else if (d->cImpl || !d->methodOwner.empty()) {
+                        out << "extern ";
+                        emitFuncSig(*d); out << ";\n";
+                    }
                     else emitTypeDecl(*d);
                     break;
                 case Decl::VarD: emitExternVars(d->structCommon.fields, false); break;

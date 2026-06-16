@@ -208,9 +208,9 @@ int32_t main(void) {
     /* line 48 */
     s = stringify_point(p, (stringify_t){ .compact = 1 });
     /* line 49 */
-    print("point 值: %s", s.cstr());
+    print("point 值: %s", string_cstr(&s));
     /* line 50 */
-    s.drop();
+    string_drop(&s);
     /* line 52 */
     node n = {0};
     /* line 53 */
@@ -234,23 +234,23 @@ int32_t main(void) {
     /* line 62 */
     s = stringify_node(n, (stringify_t){ .compact = 1 });
     /* line 63 */
-    print("node 值: %s", s.cstr());
+    print("node 值: %s", string_cstr(&s));
     /* line 64 */
-    s.drop();
+    string_drop(&s);
     /* line 67 */
     s = stringify_node(n, (stringify_t){ .compact = 0 });
     /* line 68 */
-    print("node 美化:\n%s", s.cstr());
+    print("node 美化:\n%s", string_cstr(&s));
     /* line 69 */
-    s.drop();
+    string_drop(&s);
     /* line 71 */
     node *pn = &(n);
     /* line 72 */
     s = stringify_node_p(pn, (stringify_t){ .compact = 1 });
     /* line 73 */
-    print("node 指针: %s", s.cstr());
+    print("node 指针: %s", string_cstr(&s));
     /* line 74 */
-    s.drop();
+    string_drop(&s);
     /* line 77 */
     int32_t arr[4];
     /* line 78 */
@@ -263,17 +263,17 @@ int32_t main(void) {
     /* line 81 */
     s = stringify_i4_a4(arr, (stringify_t){ .compact = 1 });
     /* line 82 */
-    print("一维数组: %s", s.cstr());
+    print("一维数组: %s", string_cstr(&s));
     /* line 83 */
-    s.drop();
+    string_drop(&s);
     /* line 85 */
     color c = Green;
     /* line 86 */
     s = stringify_color(c, (stringify_t){ .compact = 1 });
     /* line 87 */
-    print("枚举: %s", s.cstr());
+    print("枚举: %s", string_cstr(&s));
     /* line 88 */
-    s.drop();
+    string_drop(&s);
     /* line 91 */
     char buf[64];
     /* line 92 */

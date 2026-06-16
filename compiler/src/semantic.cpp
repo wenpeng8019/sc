@@ -203,6 +203,7 @@ struct Checker {
             case Expr::FloatLit: return Ty{"f8", 0, 0, true, false};
             case Expr::StrLit:  return Ty{"char", 1, 0, true, false};  // 字符串字面量 = char*
             case Expr::CharLit: return Ty{"i1", 0, 0, true, false};
+            case Expr::FncLit: return Ty{"fnc", 0, 0, true, false};  // 匿名函数字面量类型从 lhs 推断
             // -- 标识符：查找 locals → globals，nil/true/false 特殊处理 ----------
             case Expr::Ident: {
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
@@ -571,7 +572,7 @@ struct Checker {
 
         // 第一遍：登记函数类型、结构体、别名到符号表
         for (auto& d : prog.decls) {
-            if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
+            if (d->kind == Decl::FuncTypeD && !d->isRpc && !d->cImpl && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
             if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
                 structs[d->name] = d.get();

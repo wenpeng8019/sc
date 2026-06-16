@@ -18,7 +18,6 @@ int32_t total = 0;
 int32_t add(int32_t a, int32_t b);
 typedef struct tracker {
     int32_t val;
-    int32_t (*read)();
 } tracker;
 
 void tracker_init(tracker *_this);

@@ -86,6 +86,7 @@ typedef struct chain {
     void    *head;     /* 首元素（空链为 NULL） */
 } chain;
 
+void *chain_prev(void *it);                           /* 边界安全逻辑前驱：head→NULL（内置 prev(o) 后端） */
 void  chain_append(chain *_this, void *it);           /* 队尾 */
 void  chain_push(chain *_this, void *it);             /* 队首 */
 void *chain_pop(chain *_this);                        /* 移除并返回首元素 */

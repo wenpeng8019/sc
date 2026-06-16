@@ -18,7 +18,6 @@ inc stdio.h
 
 @def tracker: {
     val: i4
-    read: fnc: i4
     init: fnc
         this->val = 0
     add: fnc: k: i4

@@ -48,58 +48,58 @@ int32_t main(void) {
     string s = {0};
     string_init(&s);
     /* line 34 */
-    s.append("Hello");
+    string_append(&s, "Hello");
     /* line 35 */
-    s.append(", sc!");
+    string_append(&s, ", sc!");
     /* line 36 */
-    printf("s=%s len=%llu\n", s.cstr(), s.len());
+    printf("s=%s len=%llu\n", string_cstr(&s), string_len(&s));
     /* line 37 */
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", s.find("sc", 0), s.starts_with("Hello"));
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(&s, "sc", 0), string_starts_with(&s, "Hello"));
     /* line 39 */
     string part = {0};
     string_init(&part);
     /* line 40 */
-    s.slice(-(3), -(1), &(part));
+    string_slice(&s, -(3), -(1), &(part));
     /* line 41 */
-    printf("slice(-3,-1)=%s\n", part.cstr());
+    printf("slice(-3,-1)=%s\n", string_cstr(&part));
     /* line 42 */
-    s.upper();
+    string_upper(&s);
     /* line 43 */
-    printf("upper=%s\n", s.cstr());
+    printf("upper=%s\n", string_cstr(&s));
     /* line 46 */
     list l = {0};
     list_init(&l);
     /* line 47 */
-    l.push("banana");
+    list_push(&l, "banana");
     /* line 48 */
-    l.push("apple");
+    list_push(&l, "apple");
     /* line 49 */
-    l.push("cherry");
+    list_push(&l, "cherry");
     /* line 50 */
-    l.sort(str_cmp);
+    list_sort(&l, str_cmp);
     /* line 51 */
     uint64_t i = 0;
     /* line 52 */
-    for (i = 0; i < l.len(); i++) {
+    for (i = 0; i < list_len(&l); i++) {
         /* line 53 */
-        printf("list[%llu]=%s\n", i, ((char*)(l.get(i))));
+        printf("list[%llu]=%s\n", i, ((char*)(list_get(&l, i))));
     }
     /* line 56 */
     list *lp = &(l);
     /* line 57 */
-    lp->drop();
+    list_drop(lp);
     /* line 58 */
-    part.drop();
+    string_drop(&part);
     /* line 59 */
-    s.drop();
+    string_drop(&s);
     /* line 62 */
     string *hs = string__new();
     /* line 63 */
-    hs->append("on the heap");
+    string_append(hs, "on the heap");
     /* line 64 */
-    printf("heap: %s\n", hs->cstr());
+    printf("heap: %s\n", string_cstr(hs));
     /* line 65 */
-    hs->drop();
+    string_drop(hs);
     /* line 66 */
     free(hs);
     /* line 67 */

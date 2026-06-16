@@ -190,9 +190,10 @@ std::string declNode(const Decl& d) {
                 c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
             if (d.structCommon.variadic) c.push_back(node("param", "...", "", d.line));
             std::string ret = typeToStr(d.structCommon.type);
-            std::string ftName = !d.methodOwner.empty()
-                ? d.methodOwner + "::" + d.methodName : d.name;
-            return nodeExt(d.isRpc ? "rpc" : "fnctype", ftName,
+            std::string ftName = d.cImpl ? (d.name + "::")
+                : !d.methodOwner.empty() ? (d.methodOwner + "::" + d.methodName)
+                : d.name;
+            return nodeExt(d.isRpc ? "rpc" : d.cImpl ? "fncimpl" : "fnctype", ftName,
                            ret.empty() ? X : X + ": " + ret,
                            d.line, d.external, d.origin, d.used, c);
         }

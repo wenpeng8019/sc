@@ -281,6 +281,15 @@ void list_sort(list *_this, list_cmp *cmp) {
 #define LPREV(it) (*(void **)((char *)(it) + 0))       /* _prev at offset 0 */
 #define LNEXT(it) (*(void **)((char *)(it) + sizeof(void *))) /* _next at offset 8 */
 
+/* 边界安全逻辑前驱：head 无前驱 → 返回 NULL（供编译器 prev(o) 内置导航调用）。
+ * 约定 head._prev = rear（复用指针省一个 rear 字段），故裸 _prev 不能直接当前驱。
+ * 判定：真前驱 p 满足 LNEXT(p) == it；head 的 _prev(=rear) 其 _next == NULL ≠ it → NULL。 */
+void *chain_prev(void *it) {
+    if (!it) return NULL;
+    void *p = LPREV(it);
+    return (p && LNEXT(p) == it) ? p : NULL;
+}
+
 void chain_append(chain *_this, void *it) {
     if (!it) return;
     void *h = _this->head;

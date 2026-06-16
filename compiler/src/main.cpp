@@ -775,9 +775,15 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     // 读取源文件
     const std::string src = readWholeFile(canon);
     if (src.empty()) {
-        errMsg = "无法读取模块文件: " + key;
-        visiting.erase(key);
-        return false;
+        // 区分「打不开/不存在」与「存在但为空」：空文件合法（空模块，无声明），仅告警
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(canon, ec) && !ec;
+        if (!exists || !std::ifstream(canon)) {
+            errMsg = "无法读取模块文件: " + key;
+            visiting.erase(key);
+            return false;
+        }
+        std::cerr << "警告: 模块文件为空: " << key << "\n";
     }
 
     UnitInfo u;

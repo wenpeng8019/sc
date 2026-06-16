@@ -200,6 +200,44 @@ struct Parser {
         return f;
     }
 
+    // 解析结构体内部的 fnc 成员函数声明：fnc name[::][: ret, params...]
+    // + 用于 def 结构体 {} 内部的函数声明，支持两种形式：
+    //   > fnc name:: ret, params... → C 实现接口（无函数体，cImpl=true）
+    //   > fnc name: ret, params...  → sc 实现（后续跟缩进函数体时）
+    //   > fnc name: ret, params...  → 函数指针字段（无后续缩进体）
+    DeclPtr parseMemberFnc() {
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        advance();                                  // 跳过 fnc 关键字
+        if (!at(Tok::Ident)) err("期望成员函数名");
+        d->methodName = advance().text;
+        if (accept(Tok::DColon)) d->cImpl = true;   // :: → C 实现接口
+
+        // 解析 : ret, params...（:: 后可直接跟签名，或可选的 ':'）
+        if (d->cImpl && !at(Tok::Colon) && !at(Tok::Newline))
+            parseFncVars(d->structCommon);
+        else if (accept(Tok::Colon)) {
+            if (!at(Tok::Newline))
+                parseFncVars(d->structCommon);
+        } else if (!at(Tok::Newline))
+            err("期望 ':' 或换行");
+        expect(Tok::Newline, "换行");
+
+        // 无缩进 → 函数指针字段 或 C 实现声明
+        if (!at(Tok::Newline) || peek().kind != Tok::Indent) {
+            d->kind = Decl::FuncTypeD;
+            return d;
+        }
+
+        // 有缩进函数体 → sc 实现成员函数
+        if (d->cImpl) err("C 实现接口（::）不能有函数体");
+        d->kind = Decl::FuncD;
+        advance(); advance();  // Newline + Indent
+        parseStmts(d->body);
+        accept(Tok::Dedent);
+        return d;
+    }
+
     // 解析字段块：{ fields } 或 ( fields )，字段间以逗号或换行分隔。
     // + methodsOut 非空（顶层 def 结构体）时：
     //   > 函数签名字段后跟缩进块，则是成员函数实现
@@ -217,35 +255,62 @@ struct Parser {
             if (at(close)) break;
             if (at(Tok::End)) err("结构/联合未闭合");
 
-            Field f = parseFieldItem();                             // 解析单个字段项：name[meta][: type] 或匿名 {}/()
-            if (acceptOp("=")) f.init = parseExpr();                // 字段初值（可选）：name: type = expr
-
-            // 对于成员函数：字段为函数签名 ，且后面是缩进函数体
-            if (f.type.fnKind == TypeRef::FncKind::PlainPtr
-                 && at(Tok::Newline) && peek().kind == Tok::Indent) {
-                    
-                if (!methodsOut)
-                    err("成员函数只能在顶层 def 结构体内实现");
-                if (f.init) err("成员函数不能带初值");
-
-                // 将 field 提升为顶层方法声明
-                auto m = std::make_unique<Decl>();
-                m->kind = Decl::FuncD;
-                m->line = f.line;
-                m->methodName = f.name;
-                m->structCommon = std::move(f.type.structCommon);
-                
-                //解析函数体
-                advance(); advance();  // Newline + Indent
-                parseStmts(m->body);
-                accept(Tok::Dedent);
-
-                // 返回作为顶层方法声明（methodOwner 在提升阶段补齐），而非结构字段
-                methodsOut->push_back(std::move(m));
+            // fnc 关键字 → 成员函数声明（fnc name:: 或 fnc name:）
+            if (at(Tok::KwFnc)) {
+                auto m = parseMemberFnc();
+                if (m->cImpl) {
+                    // C 实现成员函数：提升为顶层方法（extern 原型 + 方法调用糖），
+                    // 结构体本身不含函数指针字段（与 @fnc T::m 旧形态语义一致，
+                    // 保持纯数据布局的 C ABI 契约）
+                    if (!methodsOut)
+                        err("成员函数只能在顶层 def 结构体内实现");
+                    methodsOut->push_back(std::move(m));
+                } else if (m->kind == Decl::FuncD) {
+                    // sc 实现成员函数（有函数体）→ 提升为顶层方法
+                    if (!methodsOut)
+                        err("成员函数只能在顶层 def 结构体内实现");
+                    methodsOut->push_back(std::move(m));
+                } else {
+                    // 无 body 非 :: → 普通函数指针字段
+                    Field f;
+                    f.line = m->line;
+                    f.name = m->methodName;
+                    f.type.fnKind = TypeRef::FncKind::PlainPtr;
+                    f.type.structCommon = std::move(m->structCommon);
+                    out.push_back(std::move(f));
+                }
             }
             // 否则按普通字段处理
-            else out.push_back(std::move(f));
-            
+            else {
+                Field f = parseFieldItem();                         // 解析单个字段项：name[meta][: type] 或匿名 {}/()
+                if (acceptOp("=")) f.init = parseExpr();            // 字段初值（可选）：name: type = expr
+
+                // 对于成员函数：字段为函数签名，且后面是缩进函数体
+                if (f.type.fnKind == TypeRef::FncKind::PlainPtr
+                     && at(Tok::Newline) && peek().kind == Tok::Indent) {
+
+                    if (!methodsOut)
+                        err("成员函数只能在顶层 def 结构体内实现");
+                    if (f.init) err("成员函数不能带初值");
+
+                    // 将 field 提升为顶层方法声明
+                    auto m = std::make_unique<Decl>();
+                    m->kind = Decl::FuncD;
+                    m->line = f.line;
+                    m->methodName = f.name;
+                    m->structCommon = std::move(f.type.structCommon);
+
+                    // 解析函数体
+                    advance(); advance();  // Newline + Indent
+                    parseStmts(m->body);
+                    accept(Tok::Dedent);
+
+                    methodsOut->push_back(std::move(m));
+                }
+                // 否则按普通字段处理
+                else out.push_back(std::move(f));
+            }
+
             skipLayout();
             accept(Tok::Comma);  // 逗号分隔是可选的（也可纯粹以换行分隔）
         }
@@ -485,26 +550,18 @@ struct Parser {
 
         d->name = advance().text;                   // 函数名（rpc 时为接口名，后续会在函数名前加上 rpc_ 前缀）
 
-        // rpc 是伪形参函数糖：不支持方法形态与函数类型实现形态
-        if (isRpc && at(Tok::DColon)) err("rpc 不支持方法定义（::）");
+        // rpc 伪形参糖不支持 :: 和 ->
+        if (isRpc && at(Tok::DColon)) err("rpc 不支持 ::（C 实现接口）");
         if (isRpc && at(Tok::Arrow)) err("rpc 不支持实现预定义函数类型（->）");
 
-        // 方法（成员函数）声明形态：fnc obj::m: ret, params...
-        // + 这里仅声明，实现在 C 侧；
-        //   此外，带函数体的成员函数请在结构体定义内实现
-        // todo: 这个形态应该改到结构体定义内实现（目前放在这里是为了兼容原有测试用例），即 fnc T::m 仅用于无函数体的方法声明，带函数体的成员函数仍在结构体定义内实现
-        if (accept(Tok::DColon)) {
-            d->methodOwner = d->name;
-            if (!at(Tok::Ident)) err("期望方法名");
-            d->methodName = advance().text;
-            d->name = mangleMethodName(d->methodOwner, d->methodName);
-        }
+        // :: 后缀 → 由 C 实现的接口（无函数体）
+        if (accept(Tok::DColon)) d->cImpl = true;
 
         // 形态3：fnc name -> func_type —— 实现预定义函数类型
         if (accept(Tok::Arrow)) {
 
-            if (!d->methodOwner.empty())
-                err("成员函数不能使用预定义函数类型（->）");
+            if (d->cImpl)
+                err("C 实现接口（::）不能使用预定义函数类型（->）");
 
             d->kind = Decl::FuncD;
             if (!at(Tok::Ident)) err("期望函数类型名");
@@ -517,13 +574,17 @@ struct Parser {
             return d;
         }
 
-        // 解析（冒号分隔的）函数返回类型和参数列表
-        // + 两者都可单行写在冒号后，也可多行缩进续行
-        if (accept(Tok::Colon)) {
+        // 解析函数返回类型和参数列表
+        // + :: 之后可直接跟签名（:: 即分隔），也可用 ':' 显式分隔（兼容）
+        // + 非 :: 函数必须有 ':' 分隔签名
+        if (d->cImpl && !at(Tok::Colon) && !at(Tok::Newline)) {
+            // :: 后直接跟返回类型/参数（无 ':' 分隔）
+            parseFncVars(d->structCommon);
+        } else if (accept(Tok::Colon)) {
             if (!at(Tok::Newline)) {
                 parseFncVars(d->structCommon);
             }
-        } else if (!at(Tok::Newline)) {
+        } else if (!at(Tok::Newline) && !d->cImpl) {
             err("期望 ':' 或换行");
         }
         expect(Tok::Newline, "换行");
@@ -571,11 +632,10 @@ struct Parser {
             break;
         }
 
-        // 有函数体的函数定义
+        // 有函数体的函数实现
         if (isBody) {
-            d->kind = Decl::FuncD;      
-            if (!d->methodOwner.empty())
-                err("成员函数请在结构体定义内实现（fnc T::m 仅用于无函数体的方法声明）");
+            if (d->cImpl) err("C 实现接口（::）不能有函数体");
+            d->kind = Decl::FuncD;
             parseStmts(d->body);
         }
         // 只有参数，无函数体：函数类型（rpc 时为声明）
@@ -640,7 +700,29 @@ struct Parser {
             return e;
         }
 
-        // 对于括号分组：(expr)；若括号内出现 "expr : type"，则为强制类型转换
+        // 对于匿名函数字面量：fnc: ret, params \n - \n\tbody
+        // + 绑定到函数指针变量时，签名需与变量类型一致
+        if (at(Tok::KwFnc) && peek().kind == Tok::Colon) {
+            advance(); advance();  // 跳过 fnc 和 :
+            auto e = mk(Expr::FncLit);
+            e->line = cur().line;
+            // 解析返回类型和参数（复用 parseFncVars）
+            if (!at(Tok::Newline))
+                parseFncVars(e->fncSig);
+            expect(Tok::Newline, "换行");
+            // 可选 '-' 分隔符
+            if (atOp("-") && peek().kind == Tok::Newline) {
+                advance(); advance();
+            }
+            expect(Tok::Indent, "匿名函数体需要缩进块");
+            parseStmts(e->fncBody);
+            accept(Tok::Dedent);
+            skipNewlines();
+            return e;
+        }
+
+        // 对于括号分组：(expr)；
+        // + 若括号内出现 "expr : type"，则为强制类型转换
         //   (p + 1: Node&)->next  等价于 C 的 ((Node*)(p + 1))->next
         if (accept(Tok::LParen)) {
             exprBracket++;
@@ -868,10 +950,10 @@ struct Parser {
 
         // 赋值运算符：右结合（递归调用 parseExpr 而非 parseTernary）
         if (cur().kind == Tok::Op && isAssignOp(cur().text)) {
-            auto b = mk(Expr::Binary);  // 赋值也用 Binary 节点，op="=" / "+=" 等
+            auto b = mk(Expr::Binary);          // 赋值也用 Binary 节点，op="=" / "+=" 等
             b->op = advance().text;
             b->a = std::move(lhs);
-            b->b = parseExpr();  // 右结合递归
+            b->b = parseExpr();                 // 右结合递归
             return b;
         }
 
@@ -1219,7 +1301,7 @@ struct Parser {
                     b->b = parseExpr();
                     s->expr = std::move(b);
                 }
-                expect(Tok::Newline, "换行");
+                skipNewlines();
                 return s;
             }
         }

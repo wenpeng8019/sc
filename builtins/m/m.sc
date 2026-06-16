@@ -2,7 +2,7 @@
 #
 # 本文件是 m 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
-#   @fnc T::m 方法声明（无函数体）：extern 原型，实现在 C 侧
+#   fnc name:: 方法声明（无函数体）：extern 原型，实现在 C 侧
 #   @rpc 仅声明：调用包装由编译器生成，实际函数（*_rpc）在 C 侧实现
 #
 # 默认实现：同目录 m_impl.c（编译器自动编译并链接，
@@ -31,42 +31,42 @@
 @def thread: {
     id: u8        # 跨平台统一线程 id（线程启动后由其自身填写）
     h&:           # 实现私有区指针（同块分配，调用方不直接访问）
-}
 
-@fnc thread::join          # 等待结束并回收（含 thread 对象本身，之后指针失效）
+    fnc join::          # 等待结束并回收（含 thread 对象本身，之后指针失效）
+}
 
 # ---------------- mutex：互斥锁 ----------------
 
 @def mutex: {
     h&:           # 平台锁句柄（实现私有）
-}
 
-@fnc mutex::init           # 构造（声明即构造适用）
-@fnc mutex::drop           # 析构
-@fnc mutex::lock           # 加锁（阻塞）
-@fnc mutex::unlock         # 解锁
-@fnc mutex::try_lock: bool # 取锁成功返回 1，已被占用返回 0
+    fnc init::           # 构造（声明即构造适用）
+    fnc drop::           # 析构
+    fnc lock::           # 加锁（阻塞）
+    fnc unlock::         # 解锁
+    fnc try_lock:: bool # 取锁成功返回 1，已被占用返回 0
+}
 
 # ---------------- cond：条件变量（配合 wait 语句使用） ----------------
 
 @def cond: {
     h&:           # 平台条件变量句柄（实现私有）
-}
 
-@fnc cond::init            # 构造（声明即构造适用）
-@fnc cond::drop            # 析构
-@fnc cond::one             # 唤醒一个等待者
-@fnc cond::all             # 唤醒全部等待者
+    fnc init::            # 构造（声明即构造适用）
+    fnc drop::            # 析构
+    fnc one::             # 唤醒一个等待者
+    fnc all::             # 唤醒全部等待者
+}
 
 # ---------------- pool：线程池（run 语句的另一种执行目标） ----------------
 
 @def pool: {
     h&:           # 实现私有区指针（队列 + 同步原语 + 工作线程）
-}
 
-@fnc pool::init: n: u4     # n 个工作线程；0 → CPU 逻辑核数
-@fnc pool::join            # 屏障：等待全部已提交任务完成（后续仍可提交）
-@fnc pool::drop            # 析构：等任务完成 → 停工作线程 → 回收
+    fnc init:: n: u4     # n 个工作线程；0 → CPU 逻辑核数
+    fnc join::            # 屏障：等待全部已提交任务完成（后续仍可提交）
+    fnc drop::            # 析构：等任务完成 → 停工作线程 → 回收
+}
 
 # 任务提交复用 run 语句（无新增方法）：run work(a, b), p
 # 任务节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，

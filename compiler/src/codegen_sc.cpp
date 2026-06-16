@@ -25,6 +25,14 @@ struct SGen {
         for (auto& s : stmts) emitStmt(*s);
     }
 
+    // 赋值链尾部的匿名函数字面量（var/赋值 RHS 为 fnc: ...）：用于语句层多行输出函数体
+    static const Expr* trailingFncLit(const Expr& e) {
+        if (e.kind == Expr::FncLit) return &e;
+        if (e.kind == Expr::Binary && e.op == "=" && e.b)
+            return trailingFncLit(*e.b);
+        return nullptr;
+    }
+
     void emitVarLine(const char* kw, const std::vector<Field>& items) {
         ind();
         out << kw << " ";
@@ -39,6 +47,10 @@ struct SGen {
         switch (s.kind) {
             case Stmt::ExprS:
                 ind(); out << exprToStr(*s.expr) << "\n";
+                // 赋值右侧为匿名函数字面量：签名已单行输出，再缩进输出函数体
+                if (const Expr* fl = trailingFncLit(*s.expr)) {
+                    depth++; emitStmts(fl->fncBody); depth--;
+                }
                 break;
             case Stmt::VarS: emitVarLine("var", s.decls); break;
             case Stmt::LetS: emitVarLine("let", s.decls); break;
@@ -164,10 +176,16 @@ struct SGen {
                 auto mi = methodImpls.find(d.name);
                 if (mi != methodImpls.end()) {
                     for (const Decl* m : mi->second) {
-                        ind(); out << m->methodName << ": fnc" << fncItems(*m) << "\n";
-                        depth++;
-                        emitStmts(m->body);
-                        depth--;
+                        if (m->cImpl) {
+                            // C 实现接口成员函数：fnc name:: ...（无函数体）
+                            ind(); out << "fnc " << m->methodName << "::" << fncItems(*m) << "\n";
+                        } else if (m->kind == Decl::FuncD) {
+                            // sc 实现成员函数：name: fnc ... + 缩进函数体
+                            ind(); out << m->methodName << ": fnc" << fncItems(*m) << "\n";
+                            depth++;
+                            emitStmts(m->body);
+                            depth--;
+                        }
                     }
                 }
                 depth--;
@@ -179,7 +197,11 @@ struct SGen {
                 break;
             case Decl::FuncTypeD:
                 ind();
-                if (!d.methodOwner.empty())
+                if (d.cImpl) {
+                    // C 实现接口：fnc name:: ... （methodOwner 非空时在结构体内输出）
+                    if (!d.methodOwner.empty()) break;  // 在结构体内输出
+                    out << X << "fnc " << d.name << "::" << fncItems(d) << "\n";
+                } else if (!d.methodOwner.empty())
                     out << X << "fnc " << d.methodOwner << "::" << d.methodName
                         << fncItems(d) << "\n";
                 else
@@ -216,9 +238,11 @@ struct SGen {
     }
 
     std::string run(const Program& prog) {
-        // 预扫：结构内实现的成员函数（FuncD + methodOwner）归入所属类型
+        // 预扫：结构内成员函数（FuncD / cImpl FuncTypeD + methodOwner）归入所属类型
         for (auto& d : prog.decls)
-            if (d->kind == Decl::FuncD && !d->methodOwner.empty() && !d->external)
+            if (!d->external && (
+                (d->kind == Decl::FuncD && !d->methodOwner.empty()) ||
+                (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())))
                 methodImpls[d->methodOwner].push_back(d.get());
         out << "# 由 scc --emit-sc 从 AST 再生成\n\n";
         for (auto& d : prog.decls) {
@@ -226,7 +250,8 @@ struct SGen {
             // 但 inc 行本身保留（与 codegen_c 第一遍的跳过规则一致）
             if (d->external && d->kind != Decl::IncD) continue;
             // 结构内成员函数随所属类型输出，顶层不单独成段
-            if (d->kind == Decl::FuncD && !d->methodOwner.empty()) continue;
+            if ((d->kind == Decl::FuncD && !d->methodOwner.empty())
+                || (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())) continue;
             emitDecl(*d);
             out << "\n";
         }

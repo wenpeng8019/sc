@@ -154,10 +154,12 @@ struct Expr {
                     //             > a=内层表达式
         Offsetof,   // offsetof(Type, field)  
                     //             > text=类型名, op=成员名
-        Cast,       // 强制类型转换  右值位置可裸写 
+        Cast,       // 强制类型转换  右值位置可裸写
                     //             + 可以不加括号：eg. expr: type& （作为右值时）
                     //             + 但如果继续 ->/. 等操作时，则需要加括号，eg. (expr: type&)->f
                     //             > a=被转换表达式, op=目标类型名, castPtr=指针层数（& 个数）
+        FncLit,     // 匿名函数字面量  var = fnc: ret, params \n\tbody
+                    //             > fncSig=签名, fncBody=函数体，赋值给同签名的函数指针变量
     } kind;
 
     std::string text;           // 标识符名 / 字面量值 / 成员名 / Offsetof 的目标类型名
@@ -178,6 +180,10 @@ struct Expr {
     std::vector<std::pair<std::string, long long>> sofOpts;
 
     int line = 0;               // 表达式起始行号（用于错误报告）
+
+    // 匿名函数字面量（FncLit）专用
+    StructCommon fncSig;                // 匿名函数签名（返回类型 + 参数列表）
+    std::vector<StmtPtr> fncBody;       // 匿名函数体
 };
 
 // --------------------------
@@ -269,38 +275,40 @@ struct Decl {
                     //              inc "my.h"  → #include "my.h"
     } kind;
 
-    std::string name;            // 类型名 / 函数名；IncD 时为头文件文本
+    std::string name;               // 类型名 / 函数名；IncD 时为头文件文本
 
-    std::string origin;          // 外部符号来源（导入文件路径或 builtin 名称）
-    bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
-    bool used = false;           // external 描述符是否被当前单元引用（仅对 external 有意义；
-                                 // 由 analyzeExternalUsage 统计，供插件区分"已引用/仅导入未用"）
-    int  externDeclared = -1;    // 仅 external IncD：该来源(模块/头文件)声明的描述符总数；
-                                 // -1=未知（C 头退化文本匹配模式无法枚举全集）。供插件显示"已用 N / 共 M"
-    bool externAnalyzed = false; // 仅 external IncD：是否已确定该来源的符号全集
-                                 //（.sc 合并 / libclang 解析 / 退化读到头文件）→ 允许"导入未使用"警告
-    bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
-    bool linked = false;         // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
+    std::string origin;             // 外部符号来源（导入文件路径或 builtin 名称）
+    bool external = false;          // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
+    bool used = false;              // external 描述符是否被当前单元引用（仅对 external 有意义；
+                                    // 由 analyzeExternalUsage 统计，供插件区分"已引用/仅导入未用"）
+    int  externDeclared = -1;       // 仅 external IncD：该来源(模块/头文件)声明的描述符总数；
+                                    // -1=未知（C 头退化文本匹配模式无法枚举全集）。供插件显示"已用 N / 共 M"
+    bool externAnalyzed = false;    // 仅 external IncD：是否已确定该来源的符号全集
+                                    //（.sc 合并 / libclang 解析 / 退化读到头文件）→ 允许"导入未使用"警告
+    bool exported = false;          // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
+    bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
-    std::vector<StmtPtr> body;   // FuncD: 函数体的语句列表
-                                 // + FuncTypeD 的 body 为空，只有签名无实现
+    std::vector<StmtPtr> body;      // FuncD: 函数体的语句列表
+                                    // + FuncTypeD 的 body 为空，只有签名无实现
 
-    bool isRpc = false;          // rpc 声明：参数/返回值展开为同名结构体，实际函数为 void name_rpc(struct name*)
-                                 // + FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
+    bool isRpc = false;             // rpc 声明：参数/返回值展开为同名结构体，实际函数为 void name_rpc(struct name*)
+                                    // + FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
+    bool cImpl = false;             // :: 后缀标记：由 C 实现的接口（仅 FuncTypeD）
+                                    // + 无函数体，转 C 时生成 extern 声明而非 typedef
                                  
-    std::string funcTypeName;    // fnc name -> func_type 中的预定义函数类型名
-                                 // 非空时表示此函数"实现"某个已定义的函数类型，
-                                 // 函数签名从该类型展开，无需重复声明参数和返回类型
+    std::string funcTypeName;       // fnc name -> func_type 中的预定义函数类型名
+                                    // 非空时表示此函数"实现"某个已定义的函数类型，
+                                    // 函数签名从该类型展开，无需重复声明参数和返回类型
 
-    std::string methodOwner;     // 方法所属结构名：结构体内实现的成员函数（FuncD）
-                                 // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
-    std::string methodName;      // 方法名（name 为修饰名 owner_method）
+    std::string methodOwner;        // 方法所属结构名：结构体内实现的成员函数（FuncD）
+                                    // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
+    std::string methodName;         // 方法名（name 为修饰名 owner_method）
 
     //---------
 
     StructCommon structCommon;
 
-    int line = 0;                // 声明首行行号
+    int line = 0;                   // 声明首行行号
 };
 
 // ---------- 程序根节点 ----------
