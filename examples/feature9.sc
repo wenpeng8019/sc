@@ -1,67 +1,149 @@
-# 特性 9：内置 ADT
-# > builtins/adt 模块：实现
+# 特性 8：内置多线程支持
+# > 语言层面的支持：run/wait/tls
+# > builtins/m 模块：线程/互斥锁/条件变量/线程池等基本多线程原语的实现
 #
-#   - 成员函数：结构体内直接实现（签名字段 + 缩进函数体）
-#   - 方法声明：fnc T::m 仅声明形态（实现在 C 侧，见 adt.sc）
-#   - 栈构造：var x: T 声明即自动调用 T 的 init（局部、无初值、非指针）
-#   - 堆构造：T() 类型伪调用 → malloc + 字段默认值/清零 + init
-#   - drop 析构：手动调用（命名保留，未来支持自动插入）；堆对象再 free
-#   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
+#   - run 语句以 rpc 调用创建线程（rpc 参数天然可打包，正好作线程上下文）：
+#       run work(&c, 10000), &t1   # joinable：t1: thread&，join 等待并回收
+#       run note(7)                # detach：线程结束后自释放
+#   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
+#     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
+#   - 线程休眠用 platform.h 的 P_usleep(us)（默认 -I，直接 inc）
+#   - wait 语句：条件变量等待 wait cond, mutex[, nsec[, sec]]
+#     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
+#   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
+#     run work(...), p —— 与独立线程同一个动词，按类型静态分派
+#   - tls：线程局部变量（static 存储期，每线程独立实例，可顶层/函数内）
+#   - run<stack:N, prio:M> 选项块：设置线程属性（栈字节数 u4 / 优先级 u1），
+#     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
+#
 inc stdio.h
-inc stdlib.h
-inc adt.sc
+inc "platform.h"
+inc m.sc
 
-# 成员函数：结构体内直接实现，函数体内用 this 访问接收者
-def counter: {
+# 共享上下文：互斥锁保护计数器
+def ctx: {
+    mu: mutex
     n: i4
-    init: fnc
-        this->n = 100
-    add: fnc: i4, k: i4
-        this->n = this->n + k
-        return this->n
 }
 
-fnc str_cmp -> list_cmp
-    return strcmp(a: char&, b: char&)    # 裸强转：实参位置免括号
+# 线程体：rpc 即线程入口，参数即线程上下文
+rpc work: c: ctx&, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        c->mu.lock()
+        c->n = c->n + 1
+        c->mu.unlock()
+
+# detach 线程体：自释放，无需 join
+rpc note: tag: i4
+    printf("detached note: tag=%d\n", tag)
+
+# tls：顶层线程局部变量，每线程独立计数
+tls hits: i4 = 0
+
+rpc bump: c: ctx&, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        hits = hits + 1
+    if hits == rounds          # tls 正确 ⇒ 每线程恰好等于自己的 rounds
+        c->mu.lock()
+        c->n = c->n + 1
+        c->mu.unlock()
+
+# tls：函数内线程局部变量（static 存储期，跨调用保持）
+fnc next_id: i4
+    tls id: i4 = 100
+    id++
+    return id
+
+# 条件变量信号：加锁置位后唤醒等待者
+def sig: {
+    mu: mutex
+    cv: cond
+    ready: i4
+}
+
+rpc ping: s: sig&
+    s->mu.lock()
+    s->ready = 1
+    s->cv.one()
+    s->mu.unlock()
 
 fnc main: i4
-    # 声明即构造：自动调用 counter_init/string_init/list_init
-    var c: counter
-    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
+    var c: ctx
+    c.n = 0
+    c.mu.init()        # 嵌套字段不自动构造，手动 init
 
-    # string：动态字符串
-    var s: string
-    s.append("Hello")
-    s.append(", sc!")
-    printf("s=%s len=%llu\n", s.cstr(), s.len())
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
-           s.find("sc", 0), s.starts_with("Hello"))
-    var part: string
-    s.slice(-3, -1, &part)              # 负索引切片
-    printf("slice(-3,-1)=%s\n", part.cstr())
-    s.upper()
-    printf("upper=%s\n", s.cstr())
+    # joinable：第二参数接收 thread 指针
+    var t1: thread& = nil
+    var t2: thread& = nil
+    run work(&c, 10000), &t1
+    run<stack:262144, prio:5> work(&c, 10000), &t2   # 选项块：自定义栈/优先级
+    printf("t1 id set: %d\n", t1 != nil)   # run 返回即拿到 thread 对象
+    t1->join()         # 等待并回收（含 thread 对象本身）
+    t2->join()
+    printf("threads done: n=%d\n", c.n)    # 期望 20000
 
-    # list：动态指针数组（元素 v&，不拥有元素）
-    var l: list
-    l.push("banana")
-    l.push("apple")
-    l.push("cherry")
-    l.sort(str_cmp)
-    var i: u8 = 0
-    for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
+    # detach：无出参，线程结束后自释放
+    run note(7)
+    P_usleep(50000)    # 等 detach 线程打印完（platform.h）
 
-    # 析构：手动 drop（指针接收者用 ->）
-    var lp: list& = &l
-    lp->drop()
-    part.drop()
-    s.drop()
+    # try_lock：未占用时成功
+    if c.mu.try_lock()
+        printf("try_lock ok\n")
+        c.mu.unlock()
 
-    # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
-    var hs: string& = string()
-    hs->append("on the heap")
-    printf("heap: %s\n", hs->cstr())
-    hs->drop()
-    free(hs)
+    # tls：函数内 static 存储期，跨调用保持
+    next_id()
+    next_id()
+    printf("tls id=%d\n", next_id())       # 期望 103
+
+    # tls：两线程各自独立计数，互不可见
+    c.n = 0
+    var b1: thread& = nil
+    var b2: thread& = nil
+    run bump(&c, 10000), &b1
+    run bump(&c, 20000), &b2
+    b1->join()
+    b2->join()
+    printf("tls threads ok: %d\n", c.n)    # 期望 2
+
+    c.mu.drop()
+
+    # wait 语句：条件变量等待（虚假唤醒需循环复查条件）
+    var s: sig
+    s.ready = 0
+    s.mu.init()
+    s.cv.init()
+    run ping(&s)
+    s.mu.lock()
+    while s.ready == 0
+        wait s.cv, s.mu          # 无限等待，被 one() 唤醒
+    s.mu.unlock()
+    printf("cond wait ok: ready=%d\n", s.ready)
+
+    # 超时等待：无人唤醒，约 5ms（5000000 纳秒）后超时返回
+    s.mu.lock()
+    wait s.cv, s.mu, 5000000, 0
+    s.mu.unlock()
+    printf("cond timeout ok\n")
+
+    s.cv.drop()
+    s.mu.drop()
+
+    # pool：run 第二参为 pool → 任务入池（4 个 worker 跑 8 个任务）
+    var c2: ctx
+    c2.n = 0
+    c2.mu.init()
+    var p: pool
+    p.init(4)                  # 0 → CPU 核数
+    var k: i4 = 0
+    for k = 0; k < 8; k++
+        run work(&c2, 1000), p # 入池：与 run 独立线程同一语句
+    p.join()                   # 屏障：等全部任务完成（pool 仍可用）
+    printf("pool done: n=%d\n", c2.n)      # 期望 8000
+    run work(&c2, 1000), p     # join 后继续提交
+    p.drop()                   # 析构：等任务完成后停池回收
+    printf("pool drop: n=%d\n", c2.n)      # 期望 9000
+    c2.mu.drop()
     return 0

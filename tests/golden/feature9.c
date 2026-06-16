@@ -1,107 +1,294 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/adt/adt.h"
+#include "platform.h"
+#include "builtins/m/m.h"
 
-typedef struct counter counter;
+typedef struct ctx ctx;
+typedef struct sig sig;
 
-typedef struct counter {
+typedef struct thread thread;
+extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **, uint32_t, uint8_t);
+typedef struct pool pool;
+extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
+
+typedef struct cond cond;
+typedef struct mutex mutex;
+extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);
+
+typedef struct ctx {
+    mutex mu;
     int32_t n;
-} counter;
+} ctx;
 
-static void counter_init(counter *_this);
-static int32_t counter_add(counter *_this, int32_t k);
-static int32_t str_cmp(void *a, void *b);
+struct work {
+    ctx *c;
+    int32_t rounds;
+};
+static void work_rpc(struct work *_p);
+static inline void work(ctx *c, int32_t rounds) {
+    struct work _p = {0};
+    _p.c = c;
+    _p.rounds = rounds;
+    work_rpc(&_p);
+}
 
-static inline string *string__new(void) {
-    string *_p = (string *)malloc(sizeof(string));
-    if (_p) {
-        memset(_p, 0, sizeof(string));
-        string_init(_p);
+struct note {
+    int32_t tag;
+};
+static void note_rpc(struct note *_p);
+static inline void note(int32_t tag) {
+    struct note _p = {0};
+    _p.tag = tag;
+    note_rpc(&_p);
+}
+
+static TLS int32_t hits = 0;
+struct bump {
+    ctx *c;
+    int32_t rounds;
+};
+static void bump_rpc(struct bump *_p);
+static inline void bump(ctx *c, int32_t rounds) {
+    struct bump _p = {0};
+    _p.c = c;
+    _p.rounds = rounds;
+    bump_rpc(&_p);
+}
+
+static int32_t next_id(void);
+typedef struct sig {
+    mutex mu;
+    cond cv;
+    int32_t ready;
+} sig;
+
+struct ping {
+    sig *s;
+};
+static void ping_rpc(struct ping *_p);
+static inline void ping(sig *s) {
+    struct ping _p = {0};
+    _p.s = s;
+    ping_rpc(&_p);
+}
+
+
+static void work_rpc(struct work *_p) {
+    /* line 31 */
+    int32_t i = 0;
+    /* line 32 */
+    for (i = 0; i < _p->rounds; i++) {
+        /* line 33 */
+        mutex_lock(&_p->c->mu);
+        /* line 34 */
+        _p->c->n = (_p->c->n + 1);
+        /* line 35 */
+        mutex_unlock(&_p->c->mu);
     }
-    return _p;
 }
 
-static void counter_init(counter *_this) {
-    /* line 18 */
-    _this->n = 100;
+static void note_rpc(struct note *_p) {
+    /* line 39 */
+    printf("detached note: tag=%d\n", _p->tag);
 }
 
-static int32_t counter_add(counter *_this, int32_t k) {
-    /* line 20 */
-    _this->n = (_this->n + k);
-    /* line 21 */
-    return _this->n;
+static void bump_rpc(struct bump *_p) {
+    /* line 45 */
+    int32_t i = 0;
+    /* line 46 */
+    for (i = 0; i < _p->rounds; i++) {
+        /* line 47 */
+        hits = (hits + 1);
+    }
+    /* line 48 */
+    if (hits == _p->rounds) {
+        /* line 49 */
+        mutex_lock(&_p->c->mu);
+        /* line 50 */
+        _p->c->n = (_p->c->n + 1);
+        /* line 51 */
+        mutex_unlock(&_p->c->mu);
+    }
 }
 
-static int32_t str_cmp(void *a, void *b) {
-    /* line 25 */
-    return strcmp(((char*)(a)), ((char*)(b)));
+static int32_t next_id(void) {
+    /* line 55 */
+    static TLS int32_t id = 100;
+    /* line 56 */
+    id++;
+    /* line 57 */
+    return id;
+}
+
+static void ping_rpc(struct ping *_p) {
+    /* line 67 */
+    mutex_lock(&_p->s->mu);
+    /* line 68 */
+    _p->s->ready = 1;
+    /* line 69 */
+    cond_one(&_p->s->cv);
+    /* line 70 */
+    mutex_unlock(&_p->s->mu);
 }
 
 int32_t main(void) {
-    /* line 29 */
-    counter c = {0};
-    counter_init(&c);
-    /* line 30 */
-    printf("counter: init=%d add(5)=%d\n", c.n, counter_add(&c, 5));
-    /* line 33 */
-    string s = {0};
-    string_init(&s);
-    /* line 34 */
-    string_append(&s, "Hello");
-    /* line 35 */
-    string_append(&s, ", sc!");
-    /* line 36 */
-    printf("s=%s len=%llu\n", string_cstr(&s), string_len(&s));
-    /* line 37 */
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(&s, "sc", 0), string_starts_with(&s, "Hello"));
-    /* line 39 */
-    string part = {0};
-    string_init(&part);
-    /* line 40 */
-    string_slice(&s, -(3), -(1), &(part));
-    /* line 41 */
-    printf("slice(-3,-1)=%s\n", string_cstr(&part));
-    /* line 42 */
-    string_upper(&s);
-    /* line 43 */
-    printf("upper=%s\n", string_cstr(&s));
-    /* line 46 */
-    list l = {0};
-    list_init(&l);
-    /* line 47 */
-    list_push(&l, "banana");
-    /* line 48 */
-    list_push(&l, "apple");
-    /* line 49 */
-    list_push(&l, "cherry");
-    /* line 50 */
-    list_sort(&l, str_cmp);
-    /* line 51 */
-    uint64_t i = 0;
-    /* line 52 */
-    for (i = 0; i < list_len(&l); i++) {
-        /* line 53 */
-        printf("list[%llu]=%s\n", i, ((char*)(list_get(&l, i))));
+    /* line 73 */
+    ctx c = {0};
+    /* line 74 */
+    c.n = 0;
+    /* line 75 */
+    mutex_init(&c.mu);
+    /* line 78 */
+    thread *t1 = NULL;
+    /* line 79 */
+    thread *t2 = NULL;
+    /* line 80 */
+    {
+        struct work _rp = {0};
+        _rp.c = &(c);
+        _rp.rounds = 10000;
+        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t1)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 56 */
-    list *lp = &(l);
-    /* line 57 */
-    list_drop(lp);
-    /* line 58 */
-    string_drop(&part);
-    /* line 59 */
-    string_drop(&s);
-    /* line 62 */
-    string *hs = string__new();
-    /* line 63 */
-    string_append(hs, "on the heap");
-    /* line 64 */
-    printf("heap: %s\n", string_cstr(hs));
-    /* line 65 */
-    string_drop(hs);
-    /* line 66 */
-    free(hs);
-    /* line 67 */
+    /* line 81 */
+    {
+        struct work _rp = {0};
+        _rp.c = &(c);
+        _rp.rounds = 10000;
+        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t2)), (uint32_t)262144u, (uint8_t)5u);
+    }
+    /* line 82 */
+    printf("t1 id set: %d\n", t1 != NULL);
+    /* line 83 */
+    thread_join(t1);
+    /* line 84 */
+    thread_join(t2);
+    /* line 85 */
+    printf("threads done: n=%d\n", c.n);
+    /* line 88 */
+    {
+        struct note _rp = {0};
+        _rp.tag = 7;
+        thread_run((void (*)(void *))note_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
+    }
+    /* line 89 */
+    P_usleep(50000);
+    /* line 92 */
+    if (mutex_try_lock(&c.mu)) {
+        /* line 93 */
+        printf("try_lock ok\n");
+        /* line 94 */
+        mutex_unlock(&c.mu);
+    }
+    /* line 97 */
+    next_id();
+    /* line 98 */
+    next_id();
+    /* line 99 */
+    printf("tls id=%d\n", next_id());
+    /* line 102 */
+    c.n = 0;
+    /* line 103 */
+    thread *b1 = NULL;
+    /* line 104 */
+    thread *b2 = NULL;
+    /* line 105 */
+    {
+        struct bump _rp = {0};
+        _rp.c = &(c);
+        _rp.rounds = 10000;
+        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b1)), (uint32_t)0u, (uint8_t)0u);
+    }
+    /* line 106 */
+    {
+        struct bump _rp = {0};
+        _rp.c = &(c);
+        _rp.rounds = 20000;
+        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)), (uint32_t)0u, (uint8_t)0u);
+    }
+    /* line 107 */
+    thread_join(b1);
+    /* line 108 */
+    thread_join(b2);
+    /* line 109 */
+    printf("tls threads ok: %d\n", c.n);
+    /* line 111 */
+    mutex_drop(&c.mu);
+    /* line 114 */
+    sig s = {0};
+    /* line 115 */
+    s.ready = 0;
+    /* line 116 */
+    mutex_init(&s.mu);
+    /* line 117 */
+    cond_init(&s.cv);
+    /* line 118 */
+    {
+        struct ping _rp = {0};
+        _rp.s = &(s);
+        thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
+    }
+    /* line 119 */
+    mutex_lock(&s.mu);
+    /* line 120 */
+    while (s.ready == 0) {
+        /* line 121 */
+        cond_wait(&(s.cv), &(s.mu), 0, 0);
+    }
+    /* line 122 */
+    mutex_unlock(&s.mu);
+    /* line 123 */
+    printf("cond wait ok: ready=%d\n", s.ready);
+    /* line 126 */
+    mutex_lock(&s.mu);
+    /* line 127 */
+    cond_wait(&(s.cv), &(s.mu), 5000000, 0);
+    /* line 128 */
+    mutex_unlock(&s.mu);
+    /* line 129 */
+    printf("cond timeout ok\n");
+    /* line 131 */
+    cond_drop(&s.cv);
+    /* line 132 */
+    mutex_drop(&s.mu);
+    /* line 135 */
+    ctx c2 = {0};
+    /* line 136 */
+    c2.n = 0;
+    /* line 137 */
+    mutex_init(&c2.mu);
+    /* line 138 */
+    pool p = {0};
+    /* line 139 */
+    pool_init(&p, 4);
+    /* line 140 */
+    int32_t k = 0;
+    /* line 141 */
+    for (k = 0; k < 8; k++) {
+        /* line 142 */
+        {
+            struct work _rp = {0};
+            _rp.c = &(c2);
+            _rp.rounds = 1000;
+            pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
+        }
+    }
+    /* line 143 */
+    pool_join(&p);
+    /* line 144 */
+    printf("pool done: n=%d\n", c2.n);
+    /* line 145 */
+    {
+        struct work _rp = {0};
+        _rp.c = &(c2);
+        _rp.rounds = 1000;
+        pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
+    }
+    /* line 146 */
+    pool_drop(&p);
+    /* line 147 */
+    printf("pool drop: n=%d\n", c2.n);
+    /* line 148 */
+    mutex_drop(&c2.mu);
+    /* line 149 */
     return 0;
 }

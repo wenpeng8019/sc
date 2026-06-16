@@ -1,291 +1,214 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/adt/adt.h"
-#include "builtins/io/io.h"
 
-typedef struct point point;
-typedef struct node node;
+typedef struct tnode tnode;
+typedef struct slist slist;
+typedef struct task task;
 
-typedef enum { /* base: int8_t */
-    Red = 0,
-    Green,
-    Blue
-} color;
+typedef struct tnode {
+    tnode *next;
+    tnode *prev;
+} tnode;
 
-typedef struct point {
-    int32_t x;
-    int32_t y;
-} point;
+typedef struct slist {
+    tnode *head;
+    tnode *tail;
+} slist;
 
-typedef struct node {
-    void *_prev;
-    void *_next;
+static void slist_init(slist *_this);
+static int32_t slist_insert(slist *_this, tnode *item, int32_t tag);
+static int32_t slist_remove(slist *_this, tnode *item);
+static int32_t slist_find(slist *_this, tnode **out, int32_t key);
+static tnode * slist_first(slist *_this);
+static tnode * slist_last(slist *_this);
+static tnode * slist_next(slist *_this, tnode *item);
+static tnode * slist_prev(slist *_this, tnode *item);
+typedef struct task {
+    tnode _adt;
     int32_t id;
-    char name[8];
-    point pos;
-    point *link;
-    int32_t *ref;
-    double score;
-    uint8_t ok;
-    char *tag;
-} node;
+} task;
 
 
-/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */
-static inline void sc__sof_i64(string *_o, long long _v) {
-    char _b[24]; snprintf(_b, sizeof(_b), "%lld", _v); string_append(_o, _b); }
-static inline void sc__sof_u64(string *_o, unsigned long long _v) {
-    char _b[24]; snprintf(_b, sizeof(_b), "%llu", _v); string_append(_o, _b); }
-static inline void sc__sof_f64(string *_o, double _v) {
-    char _b[40]; snprintf(_b, sizeof(_b), "%g", _v); string_append(_o, _b); }
-static inline void sc__sof_bool(string *_o, unsigned char _v) {
-    string_append(_o, _v ? "true" : "false"); }
-static inline void sc__sof_char(string *_o, char _v) {
-    string_append_char(_o, '\''); string_append_char(_o, _v); string_append_char(_o, '\''); }
-static inline void sc__sof_cstr(string *_o, const char *_v) {
-    if (!_v) { string_append(_o, "nil"); return; }
-    string_append_char(_o, '"'); string_append(_o, (char *)_v); string_append_char(_o, '"'); }
-static inline void sc__sof_ptr(string *_o, const void *_v) {
-    if (!_v) { string_append(_o, "nil"); return; }
-    char _b[24]; snprintf(_b, sizeof(_b), "0x%llx", (unsigned long long)(uintptr_t)_v);
-    string_append(_o, _b); }
-static inline void sc__sof_named_ptr(string *_o, const char *_tn, const void *_v) {
-    if (!_v) { string_append(_o, "nil"); return; }
-    char _b[28]; snprintf(_b, sizeof(_b), "@0x%llx", (unsigned long long)(uintptr_t)_v);
-    string_append_char(_o, '"'); string_append(_o, (char *)_tn);
-    string_append(_o, _b); string_append_char(_o, '"'); }
-static inline void sc__sof_amp_i64(string *_o, long long _v) {
-    char _b[28]; snprintf(_b, sizeof(_b), "\"&%lld\"", _v); string_append(_o, _b); }
-static inline void sc__sof_amp_u64(string *_o, unsigned long long _v) {
-    char _b[28]; snprintf(_b, sizeof(_b), "\"&%llu\"", _v); string_append(_o, _b); }
-static inline void sc__sof_amp_f64(string *_o, double _v) {
-    char _b[44]; snprintf(_b, sizeof(_b), "\"&%g\"", _v); string_append(_o, _b); }
-static inline void sc__sof_amp_bool(string *_o, unsigned char _v) {
-    string_append(_o, _v ? "\"&true\"" : "\"&false\""); }
-static inline void sc__sof_str(string *_o, string *_v) {
-    string_append_char(_o, '"');
-    if (_v->data) string_append_n(_o, _v->data, _v->size);
-    string_append_char(_o, '"'); }
-static inline void sc__sof_nl(string *_o, stringify_t _opt, int _depth) {
-    if (_opt.compact) return;
-    string_append_char(_o, '\n');
-    for (int _i = 0; _i < _depth; _i++) string_append(_o, "  "); }
-
-static void sc__sof_node(string *_o, node *_v, stringify_t _opt, int _depth);
-static void sc__sof_point(string *_o, point *_v, stringify_t _opt, int _depth);
-
-static void sc__sof_node(string *_o, node *_v, stringify_t _opt, int _depth) {
-    string_append(_o, "{");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"id\":" : "\"id\": ");
-    sc__sof_i64(_o, (long long)(_v->id));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"name\":" : "\"name\": ");
-    string_append_char(_o, '"');
-    string_append_n(_o, (char *)(_v->name), strnlen(_v->name, (size_t)(8)));
-    string_append_char(_o, '"');
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"pos\":" : "\"pos\": ");
-    sc__sof_point(_o, &(_v->pos), _opt, _depth + 1);
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"link\":" : "\"link\": ");
-    sc__sof_named_ptr(_o, "point", (const void *)(_v->link));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"ref\":" : "\"ref\": ");
-    if (!(_v->ref)) string_append(_o, "nil");
-    else sc__sof_amp_i64(_o, (long long)(*(_v->ref)));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"score\":" : "\"score\": ");
-    sc__sof_f64(_o, (double)(_v->score));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"ok\":" : "\"ok\": ");
-    sc__sof_bool(_o, (unsigned char)(_v->ok));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"tag\":" : "\"tag\": ");
-    sc__sof_cstr(_o, _v->tag);
-    sc__sof_nl(_o, _opt, _depth);
-    string_append(_o, "}");
+static void slist_init(slist *_this) {
+    /* line 35 */
+    _this->head = NULL;
+    /* line 36 */
+    _this->tail = NULL;
 }
 
-static void sc__sof_point(string *_o, point *_v, stringify_t _opt, int _depth) {
-    string_append(_o, "{");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"x\":" : "\"x\": ");
-    sc__sof_i64(_o, (long long)(_v->x));
-    string_append(_o, ",");
-    sc__sof_nl(_o, _opt, _depth + 1);
-    string_append(_o, _opt.compact ? "\"y\":" : "\"y\": ");
-    sc__sof_i64(_o, (long long)(_v->y));
-    sc__sof_nl(_o, _opt, _depth);
-    string_append(_o, "}");
-}
-
-static string stringify_color(color _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
-    sc__sof_i64(_o, (long long)(_v));
-    return _s;
-}
-
-static string stringify_i4_a4(int32_t *_v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
-    string_append_char(_o, '[');
-    for (size_t _i0 = 0; _i0 < (size_t)(4); _i0++) {
-        if (_i0) string_append(_o, ",");
-        sc__sof_nl(_o, _opt, (0) + 1);
-        sc__sof_i64(_o, (long long)(_v[_i0]));
+static int32_t slist_insert(slist *_this, tnode *item, int32_t tag) {
+    /* line 39 */
+    if (tag != 0) {
+        /* line 40 */
+        item->prev = NULL;
+        /* line 41 */
+        item->next = _this->head;
+        /* line 42 */
+        if (_this->head != NULL) {
+            /* line 43 */
+            _this->head->prev = item;
+        } else {
+            /* line 45 */
+            _this->tail = item;
+        }
+        /* line 46 */
+        _this->head = item;
+    } else {
+        /* line 48 */
+        item->prev = _this->tail;
+        /* line 49 */
+        item->next = NULL;
+        /* line 50 */
+        if (_this->tail != NULL) {
+            /* line 51 */
+            _this->tail->next = item;
+        } else {
+            /* line 53 */
+            _this->head = item;
+        }
+        /* line 54 */
+        _this->tail = item;
     }
-    if ((size_t)(4)) sc__sof_nl(_o, _opt, 0);
-    string_append_char(_o, ']');
-    return _s;
+    /* line 55 */
+    return 0;
 }
 
-static string stringify_node(node _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
-    sc__sof_node(_o, &(_v), _opt, 0);
-    return _s;
+static int32_t slist_remove(slist *_this, tnode *item) {
+    /* line 58 */
+    if (item->prev != NULL) {
+        /* line 59 */
+        item->prev->next = item->next;
+    } else {
+        /* line 61 */
+        _this->head = item->next;
+    }
+    /* line 62 */
+    if (item->next != NULL) {
+        /* line 63 */
+        item->next->prev = item->prev;
+    } else {
+        /* line 65 */
+        _this->tail = item->prev;
+    }
+    /* line 66 */
+    return 0;
 }
 
-static string stringify_node_p(node *_v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
-    if (!_v) string_append(_o, "nil");
-    else sc__sof_node(_o, _v, _opt, 0);
-    return _s;
+static int32_t slist_find(slist *_this, tnode **out, int32_t key) {
+    /* line 69 */
+    tnode *p = _this->head;
+    /* line 70 */
+    while (p != NULL) {
+        /* line 71 */
+        task *t = ((task*)(p));
+        /* line 72 */
+        if (t->id != key) {
+            /* line 73 */
+            p = p->next;
+        } else {
+            /* line 75 */
+            *(out) = p;
+            /* line 76 */
+            return 0;
+        }
+    }
+    /* line 77 */
+    return -(1);
 }
 
-static string stringify_point(point _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
-    sc__sof_point(_o, &(_v), _opt, 0);
-    return _s;
+static tnode * slist_first(slist *_this) {
+    /* line 80 */
+    return _this->head;
 }
 
-static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t _opt) {
-    if (!_buf || !_n) return _buf;
-    string _s = stringify_point(_v, _opt);
-    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;
-    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);
-    _buf[_l] = 0;
-    string_drop(&_s);
-    return _buf;
+static tnode * slist_last(slist *_this) {
+    /* line 83 */
+    return _this->tail;
+}
+
+static tnode * slist_next(slist *_this, tnode *item) {
+    /* line 86 */
+    return item->next;
+}
+
+static tnode * slist_prev(slist *_this, tnode *item) {
+    /* line 89 */
+    return item->prev;
 }
 
 int32_t main(void) {
-    /* line 36 */
-    int32_t nn = 42;
-    /* line 37 */
-    char *nm = "hello";
-    /* line 38 */
-    print((uint8_t)(0), "print 基础输出 n=%d s=%s", (int)(nn), nm);
-    /* line 39 */
-    print((uint8_t)(0), "E: 错误级别示例 code=%d", -(1));
-    /* line 40 */
-    print((uint8_t)(0), "W: 警告级别示例");
-    /* line 41 */
-    print((uint8_t)(0), "V: 详细级别（默认 SC_LOG=D 下本行不输出）");
-    /* line 42 */
-    print((uint8_t)(7), "通道 7：自定义日志通道");
-    /* line 43 */
-    double pi = 3.14159;
-    /* line 44 */
-    print((uint8_t)(0), "默认浮点=%f 定点=%.2f", (double)(pi), pi);
-    /* line 50 */
-    string s = {0};
-    string_init(&s);
-    /* line 52 */
-    point p = {0};
-    /* line 53 */
-    p.x = 3;
-    /* line 54 */
-    p.y = 4;
-    /* line 55 */
-    s = stringify_point(p, (stringify_t){ .compact = 1 });
-    /* line 56 */
-    print((uint8_t)(0), "point 值: %s", string_cstr(&s));
-    /* line 57 */
-    string_drop(&s);
-    /* line 59 */
-    node n = {0};
-    /* line 60 */
-    n.id = 1;
-    /* line 61 */
-    n.name[0] = 'A';
-    /* line 62 */
-    n.name[1] = 'B';
-    /* line 63 */
-    n.pos = p;
-    /* line 64 */
-    n.link = &(p);
-    /* line 65 */
-    n.ref = &(n.id);
-    /* line 66 */
-    n.score = 9.5;
-    /* line 67 */
-    n.ok = true;
-    /* line 68 */
-    n.tag = "hot";
-    /* line 69 */
-    s = stringify_node(n, (stringify_t){ .compact = 1 });
-    /* line 70 */
-    print((uint8_t)(0), "node 值: %s", string_cstr(&s));
-    /* line 71 */
-    string_drop(&s);
-    /* line 74 */
-    s = stringify_node(n, (stringify_t){ .compact = 0 });
-    /* line 75 */
-    print((uint8_t)(0), "node 美化:\n%s", string_cstr(&s));
-    /* line 76 */
-    string_drop(&s);
-    /* line 78 */
-    node *pn = &(n);
-    /* line 79 */
-    s = stringify_node_p(pn, (stringify_t){ .compact = 1 });
-    /* line 80 */
-    print((uint8_t)(0), "node 指针: %s", string_cstr(&s));
-    /* line 81 */
-    string_drop(&s);
-    /* line 84 */
-    int32_t arr[4];
-    /* line 85 */
-    int32_t i;
-    /* line 86 */
-    for (i = 0; i < 4; i++) {
-        /* line 87 */
-        arr[i] = ((i + 1) * 10);
-    }
-    /* line 88 */
-    s = stringify_i4_a4(arr, (stringify_t){ .compact = 1 });
-    /* line 89 */
-    print((uint8_t)(0), "一维数组: %s", string_cstr(&s));
-    /* line 90 */
-    string_drop(&s);
-    /* line 92 */
-    color c = Green;
-    /* line 93 */
-    s = stringify_color(c, (stringify_t){ .compact = 1 });
-    /* line 94 */
-    print((uint8_t)(0), "枚举: %s", string_cstr(&s));
-    /* line 95 */
-    string_drop(&s);
-    /* line 98 */
-    char buf[64];
     /* line 99 */
-    print((uint8_t)(0), "缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (stringify_t){ .compact = 1 }));
+    slist lst = {0};
+    slist_init(&lst);
+    /* line 100 */
+    task a[4] = {0};
     /* line 101 */
+    int32_t i;
+    /* line 102 */
+    for (i = 0; i < 4; i++) {
+        /* line 103 */
+        a[i].id = ((i + 1) * 10);
+    }
+    /* line 107 */
+    slist_insert(&lst, (tnode *)(&(a[0])), 0);
+    /* line 108 */
+    slist_insert(&lst, (tnode *)(&(a[1])), 0);
+    /* line 109 */
+    slist_insert(&lst, (tnode *)(&(a[2])), 0);
+    /* line 110 */
+    slist_insert(&lst, (tnode *)(&(a[3])), 1);
+    /* line 113 */
+    task *it = ((task*)(slist_first(&lst)));
+    /* line 114 */
+    printf("正向:");
+    /* line 115 */
+    while (it != NULL) {
+        /* line 116 */
+        printf(" %d", it->id);
+        /* line 117 */
+        it = ((task*)(slist_next(&lst, (tnode *)(it))));
+    }
+    /* line 118 */
+    printf("\n");
+    /* line 121 */
+    task *rit = ((task*)(slist_last(&lst)));
+    /* line 122 */
+    printf("反向:");
+    /* line 123 */
+    while (rit != NULL) {
+        /* line 124 */
+        printf(" %d", rit->id);
+        /* line 125 */
+        rit = ((task*)(slist_prev(&lst, (tnode *)(rit))));
+    }
+    /* line 126 */
+    printf("\n");
+    /* line 129 */
+    task *found = {0};
+    /* line 130 */
+    if (slist_find(&lst, (tnode * *)(&(found)), 20) == 0) {
+        /* line 131 */
+        printf("find 20 -> id=%d\n", found->id);
+    }
+    /* line 134 */
+    slist_remove(&lst, (tnode *)(&(a[1])));
+    /* line 135 */
+    task *it2 = ((task*)(slist_first(&lst)));
+    /* line 136 */
+    printf("remove 20 后:");
+    /* line 137 */
+    while (it2 != NULL) {
+        /* line 138 */
+        printf(" %d", it2->id);
+        /* line 139 */
+        it2 = ((task*)(slist_next(&lst, (tnode *)(it2))));
+    }
+    /* line 140 */
+    printf("\n");
+    /* line 143 */
+    int32_t *pid = ((int32_t*)(((void *)&((&(a[0]))->id))));
+    /* line 144 */
+    printf("base(&a[0]) -> id=%d\n", *(pid));
+    /* line 146 */
     return 0;
 }
