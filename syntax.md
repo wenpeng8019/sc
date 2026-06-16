@@ -63,13 +63,16 @@ f4  -> float
 f8  -> double
 bool -> uint8_t
 char -> char
+ret  -> int32_t
 ```
 
-此外还有字面量常量：
+其中 `ret` 是 `i4` 的语义别名，用作 ADT 接口返回码（`ok`=0 成功，非 0
+失败）。此外还有内置字面量常量：
 
 - `true`
 - `false`
 - `nil`
+- `ok`（值为 `0`）
 
 其中 `bool` 是布尔类型（u1 的语义别名），`char` 用于与 C 字符串
 字面量/接口互操作（`s: char&` 即 `char *s`，区别于 i1/u1：C 中
