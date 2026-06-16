@@ -19,7 +19,7 @@ fnc clamp: i4, v: i4, lo: i4, hi: i4
         return hi
     return v
 
-fnc area: i4, r&: rect
+fnc area: i4, r: rect&
     var w: i4 = r->rb.x - r->lt.x
     var h: i4 = r->rb.y - r->lt.y
     return w * h
@@ -40,24 +40,24 @@ fnc dec -> dec_f
 fnc add3: i4, a: i4, b: i4, c: i4
     return (a + b) + c
 
-fnc desc: i4, s&: char, pt: point
+fnc desc: i4, s: char&, pt: point
     if s == nil
         return pt.x + pt.y
     return 100
 
 def obj: {
     abc: i4
-    func1: fnc: i4, o&: obj, x: i4, y: i4
+    func1: fnc: i4, o: obj&, x: i4, y: i4
     func2: add_f
 }
 
-fnc obj_add: i4, o&: obj, x: i4, y: i4
+fnc obj_add: i4, o: obj&, x: i4, y: i4
     return (o->abc + x) + y
 
 fnc sq: i4, x: i4
     return x * x
 
-fnc my_printf: fmt&: char, ...
+fnc my_printf: fmt: char&, ...
     var ap: va_list
     va_start(ap, fmt)
     vprintf(fmt, ap)

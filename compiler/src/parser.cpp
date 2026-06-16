@@ -103,21 +103,14 @@ struct Parser {
     // 程序（定义/声明中的）实际访问和操作的目标数据对象
     //
     // sc 的类型语法有独特之处：
-    //   1. 指针标记 & 写在名字后（name& 而非 int* name）
+    //   1. 指针标记 & 写在类型后（name: type& 而非 int* name）
     //   2. 数组标记 [size] 写在名字后
     //   3. 支持内联结构/联合（直接在变量声明处定义 {}/() 类型）
     //   4. 未指定类型时由代码生成阶段推断默认类型
 
-    // 解析名字后的元类型后缀：连续的 &（多级指针）和 [size]...（多维数组）
-    // 注意：词法器按最长匹配将 && 识别为单个 token，故此处需同时接受
-    // & （一级）和 &&（两级），如 name&&: 即指针的指针
+    // 解析名字后的元类型后缀：[size]...（多维数组）
+    // 注意：指针 & 已统一移到类型侧（如 name: type&），名字侧不再接受 &
     void parseMeta(TypeRef& ty) {
-
-        for (;;) {
-            if (acceptOp("&")) ty.ptr++;            // 每个 & 增加一级指针
-            else if (acceptOp("&&")) ty.ptr += 2;   // && 为两级指针
-            else break;
-        }
 
         // 多维数组：name[x][y] 与 C 对齐，每个 [维度] 追加一维
         while (accept(Tok::LBracket)) {
@@ -131,7 +124,13 @@ struct Parser {
         }
     }
 
-    // 解析类型引用：可以是命名类型 name&&、或者是内联 {struct} 或 (union) 类型
+    // 判断冒号后是否开始一个类型：命名类型、内联 {}/()、或裸 &/&&（void* 指针）
+    bool atTypeStart() const {
+        return at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)
+            || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&"));
+    }
+
+    // 解析类型引用：可以是命名类型 type&&、内联 {struct}/(union)、或裸 &/&&（void*）
     TypeRef parseTypeRef() { TypeRef ty;
         
         // 内联结构/联合：直接以 { 或 ( 开头
@@ -172,7 +171,7 @@ struct Parser {
 
         if (!at(Tok::Ident)) err("期望字段名");  // 当前 token 必须是标识符（变量名）
         f.name = advance().text;                // 消费当前 token（作为变量名）并前进到下一个 token
-        parseMeta(f.type);                      // 先解析名字后的 & 和 [] 元类型
+        parseMeta(f.type);                      // 先解析名字后的 [] 数组元类型
         if (accept(Tok::Colon)) {               // 验证并消费 ':'，冒号后为显式类型（可选：省略时由代码生成推断默认类型，？成员字段可以吗）
 
             // 如果冒号后是 fnc
@@ -187,11 +186,10 @@ struct Parser {
                 }
                 f.type = std::move(ty);
             }
-            // 否则解析为普通类型（如 name: type）
-            else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
-                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合）
-                ty.ptr += f.type.ptr;                           // 合并指针层数
-                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并数组维度
+            // 否则解析为普通类型（如 name: type、name: type&，或裸 & 即 void*）
+            else if (atTypeStart()) {
+                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合、类型侧指针）
+                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并名字侧数组维度
                                     f.type.arrayDims.begin(), 
                                     f.type.arrayDims.end());
                 f.type = std::move(ty);
@@ -324,7 +322,7 @@ struct Parser {
         f.line = cur().line;                    // 须在（发生）报错前记录行号
         if (!at(Tok::Ident)) err("期望变量名");  // 当前 token 必须是标识符（变量名）
         f.name = advance().text;                // 消费当前 token（作为变量名）并前进到下一个 token
-        parseMeta(f.type);                      // 解析名字后的 & 和 [] 元类型（如 name&: 表示指针，name[10]: 表示数组）
+        parseMeta(f.type);                      // 解析名字后的 [] 数组元类型（name[10]: 表示数组；指针写在类型侧 name: type&）
         if (accept(Tok::Colon)) {               // 验证并消费 ':'，冒号后为显式类型（可选：省略时由代码生成推断默认类型）
 
             // 如果冒号后是 fnc
@@ -338,11 +336,10 @@ struct Parser {
                 }
                 f.type = std::move(ty);
             }
-            // 否则解析为普通类型（如 name: type）
-            else if (at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)) {
-                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合）
-                ty.ptr += f.type.ptr;                           // 合并指针层数
-                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并数组维度
+            // 否则解析为普通类型（如 name: type、name: type&，或裸 & 即 void*）
+            else if (atTypeStart()) {
+                TypeRef ty = parseTypeRef();                    // 解析冒号后的类型信息（支持内联结构/联合、类型侧指针）
+                ty.arrayDims.insert(ty.arrayDims.end(),         // 合并名字侧数组维度
                                     f.type.arrayDims.begin(),
                                     f.type.arrayDims.end());
                 f.type = std::move(ty);
@@ -486,7 +483,7 @@ struct Parser {
     // 函数签名可以单行写全部参数，也可以多行缩进（每行一个参数）。
     // 参数行与函数体之间用单独的 '-' 行分隔。
 
-    // 前瞻判断：当前 token 序列是否像参数声明（Ident + 可能的&/[] + Colon）
+    // 前瞻判断：当前 token 序列是否像参数声明（Ident + 可能的 [] + Colon）
     bool looksLikeParam() const {
 
         // 当前 token 必须是标识符（参数名）
@@ -495,8 +492,6 @@ struct Parser {
         size_t q = p + 1;
         while (q < t.size()) { const Token& tk = t[q];  // 获取下一个 token
 
-            // 如果下一个 token 是 & 或 && 元类型，则继续向前看
-            if (tk.kind == Tok::Op && (tk.text == "&" || tk.text == "&&")) { q++; continue; }
             // 如果下一个 token 是 [size] 元类型，则跳过整个 [size] 块继续向前看
             if (tk.kind == Tok::LBracket) { q++;
                 while (q < t.size() && t[q].kind != Tok::RBracket &&

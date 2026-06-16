@@ -59,16 +59,16 @@ fnc main: i4
     o.meta.tag = 10
     o.meta.flag = true
     printf("obj: id=%d meta.tag=%d meta.flag=%d\n", o.id, o.meta.tag, o.meta.flag)
-    var np&: i4 = nil
+    var np: i4& = nil
     if np == nil
         printf("np is nil\n")
-    var vp&: = nil
+    var vp: & = nil
     printf("vp=%p\n", vp)
     var pt2: point
     (pt2.x = 7) , (pt2.y = 8)
-    var px&: point = &pt2
+    var px: point& = &pt2
     printf("px->x=%d\n", px->x)
-    var pp&&: point = &px
+    var pp: point&& = &px
     printf("pp=%p\n", pp)
     var arr[3]: i4 = {10, 20, 30}
     printf("arr: %d %d %d\n", arr[0], arr[1], arr[2])
@@ -97,11 +97,11 @@ fnc main: i4
     var big2: i8 = 300
     var small: i4 = (big2: i4)
     printf("cast: %d\n", small)
-    var buf&: char = (malloc(8): char&)
+    var buf: char& = (malloc(8): char&)
     free((buf: void&))
     var f: f8 = 3.75
     printf("cast expr: %d\n", (small + f: i4))
-    var pv&: void = &tmp
+    var pv: void& = &tmp
     printf("paren cast: %d\n", (pv: point&)->x)
     printf("sizeof(point)=%lu\n", sizeof(point))
     printf("offsetof(point,y)=%lu\n", offsetof(point, y))

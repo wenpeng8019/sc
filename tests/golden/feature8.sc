@@ -11,7 +11,7 @@ def ctx: {
     n: i4
 }
 
-rpc work: c&: ctx, rounds: i4
+rpc work: c: ctx&, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         c->mu.lock()
@@ -23,7 +23,7 @@ rpc note: tag: i4
 
 tls hits: i4 = 0
 
-rpc bump: c&: ctx, rounds: i4
+rpc bump: c: ctx&, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         hits = (hits + 1)
@@ -43,7 +43,7 @@ def sig: {
     ready: i4
 }
 
-rpc ping: s&: sig
+rpc ping: s: sig&
     s->mu.lock()
     s->ready = 1
     s->cv.one()
@@ -53,8 +53,8 @@ fnc main: i4
     var c: ctx
     c.n = 0
     c.mu.init()
-    var t1&: thread = nil
-    var t2&: thread = nil
+    var t1: thread& = nil
+    var t2: thread& = nil
     run work(&c, 10000), &t1
     run work(&c, 10000), &t2
     printf("t1 id set: %d\n", t1 != nil)
@@ -70,8 +70,8 @@ fnc main: i4
     next_id()
     printf("tls id=%d\n", next_id())
     c.n = 0
-    var b1&: thread = nil
-    var b2&: thread = nil
+    var b1: thread& = nil
+    var b2: thread& = nil
     run bump(&c, 10000), &b1
     run bump(&c, 20000), &b2
     b1->join()

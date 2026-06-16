@@ -16,7 +16,7 @@
 # 内部保证 NUL 结尾，cstr() 可直接交给 C 接口
 
 @def string: {
-    data&: char     # 缓冲区（NUL 结尾；空串可为 nil）
+    data: char&     # 缓冲区（NUL 结尾；空串可为 nil）
     size: u8      # 字符数（不含 NUL）
     cap: u8       # 缓冲区容量
 
@@ -26,32 +26,32 @@
     fnc cstr:: char&                              # C 字符串视图（始终非 nil）
     fnc clear::                                    # 置空（保留容量）
     fnc reserve:: bool, n: u8                     # 预留容量
-    fnc assign:: bool, s&: char                   # 赋值为 C 字符串
-    fnc append:: bool, s&: char                   # 追加 C 字符串
-    fnc append_n:: bool, s&: char, n: u8          # 追加前 n 字节
+    fnc assign:: bool, s: char&                   # 赋值为 C 字符串
+    fnc append:: bool, s: char&                   # 追加 C 字符串
+    fnc append_n:: bool, s: char&, n: u8          # 追加前 n 字节
     fnc append_char:: bool, c: char               # 追加单字符
-    fnc insert:: bool, index: u8, s&: char        # 指定位置插入
+    fnc insert:: bool, index: u8, s: char&        # 指定位置插入
     fnc erase:: bool, index: u8, n: u8            # 删除 n 字节
     fnc at:: char, index: u8                      # 取字符（越界返回 0）
-    fnc find:: i8, sub&: char, start: u8          # 查找子串（未找到 -1）
-    fnc rfind:: i8, sub&: char                    # 反向查找（未找到 -1）
-    fnc equals:: bool, s&: char                   # 与 C 字符串比较相等
-    fnc starts_with:: bool, s&: char              # 前缀判断
-    fnc ends_with:: bool, s&: char                # 后缀判断
-    fnc slice:: bool, start: i8, stop: i8, out&: string  # 切片（负索引从尾部计）
+    fnc find:: i8, sub: char&, start: u8          # 查找子串（未找到 -1）
+    fnc rfind:: i8, sub: char&                    # 反向查找（未找到 -1）
+    fnc equals:: bool, s: char&                   # 与 C 字符串比较相等
+    fnc starts_with:: bool, s: char&              # 前缀判断
+    fnc ends_with:: bool, s: char&                # 后缀判断
+    fnc slice:: bool, start: i8, stop: i8, out: string&  # 切片（负索引从尾部计）
     fnc strip::                                    # 去除首尾空白
     fnc lower::                                    # 转小写（ASCII）
     fnc upper::                                    # 转大写（ASCII）
-    fnc clone:: bool, out&: string                # 深拷贝到 out
+    fnc clone:: bool, out: string&                # 深拷贝到 out
 }
 
 # ---------------- list：动态指针数组 ----------------
 # 元素为裸指针（&），不拥有元素：drop/clear/remove 不释放元素本身
 
-@fnc list_cmp: i4, a&:, b&:                           # sort 比较回调类型
+@fnc list_cmp: i4, a: &, b: &                           # sort 比较回调类型
 
 @def list: {
-    items&&:      # 元素数组
+    items: &&      # 元素数组
     size: u8      # 元素个数
     cap: u8       # 已分配槽位
 
@@ -60,16 +60,16 @@
     fnc len:: u8                                    # 元素个数
     fnc clear::                                      # 清空（保留容量）
     fnc reserve:: bool, n: u8                       # 预留槽位
-    fnc push:: bool, value&:                        # 尾部追加
+    fnc push:: bool, value: &                        # 尾部追加
     fnc pop:: &                                     # 弹出尾元素（空返回 nil）
     fnc get:: &, index: u8                          # 取元素（越界返回 nil）
-    fnc set:: bool, index: u8, value&:              # 改写元素
-    fnc insert:: bool, index: u8, value&:           # 指定位置插入
+    fnc set:: bool, index: u8, value: &              # 改写元素
+    fnc insert:: bool, index: u8, value: &           # 指定位置插入
     fnc remove_at:: &, index: u8                    # 删除并返回该元素
-    fnc index_of:: i8, value&:                      # 查找元素位置（未找到 -1）
+    fnc index_of:: i8, value: &                      # 查找元素位置（未找到 -1）
     fnc reverse::                                    # 原地反转
-    fnc clone:: bool, out&: list                    # 浅拷贝到 out
-    fnc sort:: cmp&: list_cmp                       # 按比较回调排序
+    fnc clone:: bool, out: list&                    # 浅拷贝到 out
+    fnc sort:: cmp: list_cmp&                       # 按比较回调排序
 }
 
 # ---------------- chain：侵入式双向链表 ----------------
@@ -80,18 +80,18 @@
 # 同一 chain 只存放同一种结构体
 
 @def chain: {
-    head&:        # 首元素（空链为 nil）
+    head: &        # 首元素（空链为 nil）
 
-    fnc append:: it&:                               # 添加到队尾
-    fnc push:: it&:                                 # 添加到队首
+    fnc append:: it: &                               # 添加到队尾
+    fnc push:: it: &                                 # 添加到队首
     fnc pop:: &                                     # 移除并返回首元素（空返回 nil）
-    fnc before:: pos&:, it&:                        # 添加 it 到 pos 之前
-    fnc after:: pos&:, it&:                         # 添加 it 到 pos 之后
-    fnc remove:: it&:                               # 移除元素（须在链中）
+    fnc before:: pos: &, it: &                        # 添加 it 到 pos 之前
+    fnc after:: pos: &, it: &                         # 添加 it 到 pos 之后
+    fnc remove:: it: &                               # 移除元素（须在链中）
     fnc first:: &                                   # 首元素（空返回 nil）
     fnc last:: &                                    # 尾元素（空返回 nil）
     fnc revert::                                     # 首尾翻转
-    fnc append_to:: dst&: chain                      # 整链接到 dst 尾部（自身清空）
-    fnc push_to:: dst&: chain                        # 整链接到 dst 头部（自身清空）
-    fnc cut:: from&:, to&:, out&: chain              # 截取 [from..to] 段为新链 out（out 被覆盖）
+    fnc append_to:: dst: chain&                      # 整链接到 dst 尾部（自身清空）
+    fnc push_to:: dst: chain&                        # 整链接到 dst 头部（自身清空）
+    fnc cut:: from: &, to: &, out: chain&              # 截取 [from..to] 段为新链 out（out 被覆盖）
 }

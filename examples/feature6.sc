@@ -28,9 +28,9 @@ def point: {
 # chain（inc adt.sc）：head 为首元素；首元素 _prev = 尾元素（rear），尾元素 _next = nil
 # 同一 chain 只放同种结构体；不拥有元素：remove/pop/cut 不释放元素本身
 
-fnc dump: tag&: char, l&: chain
+fnc dump: tag: char&, l: chain&
     printf("%s:", tag)
-    var it&: task = l->first(): task&
+    var it: task& = l->first(): task&
     while it != nil
         printf(" %d", it->id)
         it = it->next                   # 上下文关键字：等价 next(it) 内置函数
@@ -55,13 +55,13 @@ fnc main: i4
     l.after(&t[3], &t[4])
     dump("before/after", &l)           # 0 1 2 3 4
 
-    var f&: task = l.first(): task&
-    var b&: task = l.last(): task&
+    var f: task& = l.first(): task&
+    var b: task& = l.last(): task&
     # 边界安全：head 无前驱 → prev 返回 nil；尾元素（rear）经 last() 获取
     printf("first=%d last=%d head_prev_nil=%d\n", f->id, b->id, f->prev == nil)
 
     l.remove(&t[2])
-    var p&: task = l.pop(): task&
+    var p: task& = l.pop(): task&
     printf("pop=%d\n", p->id)          # 0
     dump("remove/pop", &l)             # 1 3 4
 
@@ -81,7 +81,7 @@ fnc main: i4
     dump("push_to", &l)                # 3 1 4
 
     # 堆元素同样可入链
-    var h&: task = task()
+    var h: task& = task()
     h->id = 9
     l.append(h)
     dump("heap", &l)                   # 3 1 4 9
@@ -98,7 +98,7 @@ fnc main: i4
     l2.append(&n[1])
     l2.append(&n[2])
 
-    var it&: node = l2.first(): node&
+    var it: node& = l2.first(): node&
     printf("正向:")
     while it != nil                    # 等价 it->_next != nil
         printf(" %d", it->id)
@@ -106,7 +106,7 @@ fnc main: i4
     printf("\n")
 
     # 反向遍历（prev 上下文关键字）
-    var rear&: node = l2.last(): node&
+    var rear: node& = l2.last(): node&
     printf("反向:")
     while rear != nil
         printf(" %d", rear->id)

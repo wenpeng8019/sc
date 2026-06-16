@@ -53,13 +53,13 @@ fnc main: i4
         printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
 
     # 析构：手动 drop（指针接收者用 ->）
-    var lp&: list = &l
+    var lp: list& = &l
     lp->drop()
     part.drop()
     s.drop()
 
     # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
-    var hs&: string = string()
+    var hs: string& = string()
     hs->append("on the heap")
     printf("heap: %s\n", hs->cstr())
     hs->drop()

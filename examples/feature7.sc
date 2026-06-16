@@ -18,11 +18,11 @@ def node: ~ {
     id: i4
     name[8]: char
     pos: point
-    link&: point
-    ref&: i4
+    link: point&
+    ref: i4&
     score: f8
     ok: bool
-    tag&: char
+    tag: char&
 }
 
 fnc main: i4
@@ -68,7 +68,7 @@ fnc main: i4
     print("node 美化:\n%s", s.cstr())
     s.drop()
 
-    var pn&: node = &n
+    var pn: node& = &n
     s = stringify<compact:1>(pn)       # 一级指针自动解引用
     print("node 指针: %s", s.cstr())
     s.drop()

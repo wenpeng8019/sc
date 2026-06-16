@@ -19,19 +19,19 @@ fnc main: i4
     # 2. 括号转后 -> 访问
     var b: box
     b.v = 42
-    var pv&: void = &b
+    var pv: void& = &b
     printf("deref=%d\n", (pv: box&)->v)
 
     # 3. 调用结果裸转 + 实参位置裸转
-    var raw&: void = malloc(8)
-    var pb&: box = raw: box&
+    var raw: void& = malloc(8)
+    var pb: box& = raw: box&
     pb->v = 7
     printf("heap=%d\n", pb->v)
     free(raw: void&)
 
     # 4. 多级指针转（castPtr=2）
-    var sp&: box = &b
-    var ppb&&: box = &sp
-    var qq&&: box = ppb: box&&
+    var sp: box& = &b
+    var ppb: box&& = &sp
+    var qq: box&& = ppb: box&&
     printf("pp=%d\n", qq[0]->v)
     return 0

@@ -66,14 +66,14 @@ snapshot() {
         return
     fi
     if [ ! -f "$gold" ]; then
-        echo "  ✗ $label：缺少黄金文件 ${gold#$ROOT/}（首次请运行 ./build.sh test --update）"
+        echo "  ✗ ${label}：缺少黄金文件 ${gold#$ROOT/}（首次请运行 ./build.sh test --update）"
         fail=$((fail + 1))
         return
     fi
     if printf '%s\n' "$got" | diff -u "$gold" - > "$TMP" 2>&1; then
         pass=$((pass + 1))
     else
-        echo "  ✗ $label：产物与黄金文件不一致"
+        echo "  ✗ ${label}：产物与黄金文件不一致"
         sed 's/^/      /' "$TMP"
         fail=$((fail + 1))
     fi

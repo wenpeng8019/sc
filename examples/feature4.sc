@@ -22,7 +22,7 @@ def point: {
         return this->x + this->y + dx + dy
     drop: fnc                         # 析构：手动调用 x.drop()
         printf("point(%d,%d) dropped\n", this->x, this->y)
-    op: fnc: i4, p&: point, k: i4     # 无函数体 → 普通函数指针字段
+    op: fnc: i4, p: point&, k: i4     # 无函数体 → 普通函数指针字段
 }
 
 # C 实现成员函数接口：fnc name:: 仅声明，实现在 C 侧
@@ -43,7 +43,7 @@ fnc main: i4
     printf("pt.sum(3,4) = %d\n", pt.sum(3, 4))
 
     # 指针接收者 p->m(...)
-    var pp&: point = &pt
+    var pp: point& = &pt
     printf("pp->sum(3,4) = %d\n", pp->sum(3, 4))
 
     # 无 body 的函数指针字段：默认 nil
@@ -56,7 +56,7 @@ fnc main: i4
     #-------------- 堆构造 -------------------
 
     # 堆构造：T() 伪调用 → malloc + 默认值/清零 + init
-    var hp&: point = point()
+    var hp: point& = point()
     printf("heap: sum() = %d\n", hp->sum())
     hp->drop()
     free(hp)

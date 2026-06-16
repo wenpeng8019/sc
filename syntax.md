@@ -22,7 +22,7 @@ sc 语言自身的设计理念是“程序即结构”：顶层程序由 `inc` /
 - `let`：定义常量。
 - `tls`：定义线程局部变量（static 存储期，见 9.1）。
 - `fnc`：定义函数、函数类型、方法。
-- `rpc`：定义伪形参函数（参数/返回值展开为同名结构体，见 8.7）。
+- `rpc`：定义伪形参函数（参数/返回值展开为同名结构体，见 8.8）。
 - `inc`：引入头文件或 sc 模块。
 - `@` 前缀：标记导出对象，供 `--emit-c` 生成头文件声明。
 
@@ -71,28 +71,33 @@ char -> char
 - `nil`
 
 其中 `bool` 是布尔类型（u1 的语义别名），`char` 用于与 C 字符串
-字面量/接口互操作（`s&: char` 即 `char *s`，区别于 i1/u1：C 中
+字面量/接口互操作（`s: char&` 即 `char *s`，区别于 i1/u1：C 中
 char/signed char/unsigned char 是三个不同类型），`nil` 用于空指针/空值判断。
 此外，这里没有 void 类型：函数省略返回类型即无返回值（见 §8），void 指针用
-省略类型名的裸指针表示（字段 `p&:`，返回类型裸 `&`）。
+省略类型名的裸指针表示（字段 `p: &`，返回类型裸 `&`）。
 
-## 4. 名字后的元类型
+## 4. 类型侧指针与名字侧数组
 
-sc 继承了“名字后缀”式类型修饰：
+sc 的指针标记 `&` 写在**类型一侧**（冒号之后），数组标记 `[]`
+写在**名字一侧**（冒号之前）：
 
 ```sc
-name      # 普通对象
-name&     # 指针
-name&&    # 指针的指针
-name[]    # 数组
-name[x][y] # 多维数组
+name: type      # 普通对象
+name: type&     # 指针
+name: type&&    # 指针的指针
+name: &         # 裸指针（void*，省略类型名）
+name[]: type    # 数组
+name[x][y]: type # 多维数组
 ```
 
 规则：
 
-- `&` 可以叠加，表示更高层级的指针。
-- `[]` 可以叠加，表示多维数组。
-- `name&: type` 这类写法表示“变量名 + 元类型 + 显式类型”。
+- `&` 写在类型名之后，可叠加表示更高层级的指针（`type&&` 即二级指针）。
+- 省略类型名的裸 `&` / `&&` 即 `void*` / `void**`。
+- `[]` 写在名字之后，可叠加表示多维数组。
+- `name: type&` 这类写法表示“变量名 + 显式类型 + 指针元类型”。
+- 强制类型转换的指针也写在类型侧：`(p: type&)`、`(p: type&&)`（见 §10）。
+
 
 ## 5. 导入
 
@@ -313,7 +318,7 @@ builtins/REFERENCE.md：
 var l: chain
 var t: task
 l.append(&t)                    # 编译器自动注入 _prev 偏移
-var it&: task = l->first(): task&
+var it: task& = l->first(): task&
 while it != nil
     printf("%d\n", it->id)
     it = it->next               # 尾元素 next 为 nil
@@ -351,7 +356,7 @@ fnc add -> binop_t
 
 ```sc
 fnc area: i4
-    r&: rect
+    r: rect&
     -
     var w: i4 = r->rb.x - r->lt.x
     var h: i4 = r->rb.y - r->lt.y
@@ -390,24 +395,43 @@ def obj: {
 ```sc
 var o: obj
 o.add(1, 2)     # → obj_add(&o, 1, 2)
-var p&: obj = &o
+var p: obj& = &o
 p->add(1, 2)    # → obj_add(p, 1, 2)
 ```
 
 限制：成员函数只能在顶层 `{}` 结构体内实现（联合体 `()` 括号内
 不产生缩进层级，局部 def 不支持）；不能带初值。
 
-另有 `fnc T::m` 仅声明形态（无函数体，对称于 rpc 的仅声明形态）：
-生成 extern 原型，实现由 C 侧提供，调用糖不变——这是内置 adt 的
-实现通道：
+#### `::` —— 由 C 实现的成员接口
+
+成员函数名后紧跟 `::`（无函数体）表示**该方法由 C 侧实现**：sc 只
+声明接口，生成 `extern` 原型与调用糖，函数体在配套的 C 文件里提供。
+这是内置 adt/io 等模块对接手写 C 实现的通道——结构体本身保持纯数据
+布局（`::` 方法不占字段、不进结构体内存），与函数指针字段语义不同。
 
 ```sc
-@def string: { data&: char, size: u8, cap: u8 }
-@fnc string::len: u8          # 仅声明，C 侧实现 uint64_t string_len(string*)
+@def string: {
+    data: char&                   # 纯数据字段
+    size: u8
+    cap: u8
+    fnc len:: u8                  # C 实现：uint64_t string_len(string*)
+    fnc append:: bool, s: char&   # C 实现：bool string_append(string*, char*)
+    fnc clear::                   # C 实现：无返回、无额外参数
+}
 ```
 
-注意：`fnc T::m` 后接函数体的“结构体外实现”形态已移除，成员函数
-请在结构体定义内实现。
+要点：
+
+- `::` 后直接跟签名（`::` 即分隔符），返回类型可省略（无返回值）、
+  void 指针返回写裸 `&`（如 `fnc pop:: &`）。
+- `::` 方法**不能有函数体**（有体即报错）；如需 sc 实现请用普通
+  `fnc name: 签名` + 缩进体形态。
+- 调用糖与 sc 实现成员一致：`s.len()` → `string_len(&s)`，
+  `p->append("x")` → `string_append(p, "x")`，首参自动注入接收者。
+
+历史形态 `fnc T::m`（结构体外、顶层声明）以及其“结构体外带函数体
+实现”形态均已移除，成员请在结构体定义内用 `fnc name[::]` 书写。
+
 
 #### 构造与析构：init / drop
 
@@ -433,7 +457,7 @@ fnc main: i4
 让“创建”成为语法事件：结构体类型名作无参调用 `T()`，返回 `T&`：
 
 ```sc
-var p&: string = string()   # malloc + 字段默认值/清零 + string_init(p)
+var p: string& = string()   # malloc + 字段默认值/清零 + string_init(p)
 p->append("heap")
 p->drop()                   # 手动析构
 free(p)                     # 再释放内存（drop 不含 free）
@@ -455,10 +479,34 @@ def obj: {
 ```
 
 - `cb: fnc: ...` 是普通函数指针，不隐式注入接收者；需要接收者
-  时显式声明参数（如 `cb: fnc: i4, o&: obj, x:i4`）并显式传入。
+  时显式声明参数（如 `cb: fnc: i4, o: obj&, x:i4`）并显式传入。
 - 函数指针字段默认为 nil，支持与 `nil` 比较。
 
-### 8.5 调用约定
+### 8.5 匿名函数字面量（伪闭包）
+
+可以在表达式位置写一个匿名函数，把它赋给函数指针变量/字段，或作为
+实参传入。语法是 `fnc: 返回类型, 参数...` 后接缩进函数体（与具名
+函数一样可用单独的 `-` 行分隔签名与函数体）：
+
+```sc
+var cb: fnc: i4, x: i4
+cb = fnc: i4, x: i4
+    return x * x
+printf("cb(7)=%d\n", cb(7))      # 49
+
+o.func2 = fnc: i4, a: i4, b: i4
+    return a + b
+```
+
+要点：
+
+- 这是**不捕获外层变量**的“伪闭包”：函数体内不能引用定义处的局部
+  变量（只能用参数、全局符号）。
+- 转 C 时提升为顶层 `static` 函数（生成名形如 `sc__lambda_N`），
+  字面量表达式处替换为该函数名 —— 即一个普通函数指针，零运行时开销。
+- 签名需与目标函数指针类型一致；返回类型可省略（无返回值）。
+
+### 8.6 调用约定
 
 ```sc
 o.cb(&o, 1)  # 普通函数指针调用：接收者（如需）显式传入
@@ -484,23 +532,23 @@ run work(&c)   # rpc 剩余参数清零
 
 实参个数超出形参个数仍报错（可变参数函数除外）。
 
-### 8.6 可变参数函数
+### 8.7 可变参数函数
 
 在参数列表末尾加 `...` 声明可变参数函数：
 
 ```sc
-fnc my_printf: fmt&: u1, ...
+fnc my_printf: fmt: u1&, ...
     var ap: va_list
     va_start(ap, fmt)
     vprintf(fmt, ap)
     va_end(ap)
 
 # 可变参数函数类型
-fnc printer_t: fmt&: u1, ...
+fnc printer_t: fmt: u1&, ...
 
 # 可变参数函数指针字段
 def handler: {
-    log: fnc: fmt&: u1, ...
+    log: fnc: fmt: u1&, ...
 }
 ```
 
@@ -510,7 +558,7 @@ def handler: {
 - `va_list`、`va_start`、`va_arg`、`va_end` 直接透传 C，按 C 惯用法使用。
 - `stdarg.h` 已纳入默认包含头，无需 `inc stdarg.h`。
 
-### 8.7 伪形参函数 rpc
+### 8.8 伪形参函数 rpc
 
 `rpc` 是与 `fnc` 同级的语法糖：形式与 `fnc` 完全一致，但内核（转 C）会把
 参数和返回值展开为一个**同名结构体**，实际函数则是以该结构体为唯一参数的
@@ -580,7 +628,7 @@ let b: i4 = 34
 
 ```sc
 var msg: = "hello sc"   # 由初始化值推断类型
-var p&: obj = nil        # 指针初值为空
+var p: obj& = nil        # 指针初值为空
 var count: i4            # 显式类型，无初始化
 ```
 
@@ -661,7 +709,7 @@ expr: type&     # 指针转换，等价 C 的 (type*)(expr)
 expr: type&&    # 二级指针转换
 ```
 
-指针层数沿用 “名字后缀 &” 约定，加在类型名后。
+指针层数 `&` 加在目标类型名之后，与声明中的类型侧指针写法一致（见 §4）。
 
 **仅作右值时免括号**：赋值右侧、实参、return 表达式等右值位置
 可直接写裸形态；需对强转结果继续操作（如 `->` 取成员）或处于
@@ -846,18 +894,18 @@ for i = 0; i < 10; i++
 
 ### 11.1 run 语句（多线程）
 
-`run` 以 **rpc 调用**创建线程：rpc 的参数天然可打包（见 8.7），正好作
+`run` 以 **rpc 调用**创建线程：rpc 的参数天然可打包（见 8.8），正好作
 线程上下文，无需额外定义入口函数类型。需要 `inc m.sc`（thread 类型与
 线程原语实现）。第二参数决定执行形态（按类型静态分派）：
 
 ```sc
 inc m.sc
 
-rpc work: c&: ctx, rounds: i4    # rpc 即线程体（省略返回类型）
+rpc work: c: ctx&, rounds: i4    # rpc 即线程体（省略返回类型）
     ...
 
 fnc main: i4
-    var t&: thread = nil
+    var t: thread& = nil
     run work(&c, 10000), &t    # joinable：t 接收 thread 指针
     run work(&c, 10000)        # detach：线程结束后自释放
     t->join()                  # 等待并回收（含 thread 对象），之后 t 失效
@@ -941,10 +989,10 @@ sc 的布局规则是“缩进 + 换行”为主：
 示例：
 
 ```sc
-var a:i1, b&:i1, c[32]:i1
+var a:i1, b: i1&, c[32]:i1
 
 var a:i1
-    b&:i1
+    b: i1&
     c[32]:i1
 ```
 

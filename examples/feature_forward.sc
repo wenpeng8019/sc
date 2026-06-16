@@ -3,11 +3,11 @@ inc stdio.h
 
 # 先引用后定义：node_a 里用到 node_b，node_b 在后面定义
 @def node_a: {
-    pb&: node_b
+    pb: node_b&
 }
 
 @def node_b: {
-    pa&: node_a
+    pa: node_a&
 }
 
 # 互递归函数（先声明/后定义顺序不重要）

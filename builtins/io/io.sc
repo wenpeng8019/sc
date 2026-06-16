@@ -15,7 +15,7 @@
 #                   堆构造 string()）：
 #   var s: string = stringify(x)        # 返回 adt string（JSON 文本），用完需 s.drop()
 #   var b[256]: char
-#   var p&: char = stringify(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
+#   var p: char& = stringify(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
 #                                       # 返回 char&（即缓存首址，无需 drop）
 #   选项块 stringify<key:val, ...>(...)：以 (stringify_t){...} 传入格式化器
 #     · stringify<compact:1>(x)         # 紧凑单行 {"x":3,"y":4}

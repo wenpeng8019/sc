@@ -3,7 +3,7 @@
 # > builtins/m 模块：线程/互斥锁/条件变量/线程池等基本多线程原语的实现
 #
 #   - run 语句以 rpc 调用创建线程（rpc 参数天然可打包，正好作线程上下文）：
-#       run work(&c, 10000), &t1   # joinable：t1&: thread，join 等待并回收
+#       run work(&c, 10000), &t1   # joinable：t1: thread&，join 等待并回收
 #       run note(7)                # detach：线程结束后自释放
 #   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
 #     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
@@ -27,7 +27,7 @@ def ctx: {
 }
 
 # 线程体：rpc 即线程入口，参数即线程上下文
-rpc work: c&: ctx, rounds: i4
+rpc work: c: ctx&, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         c->mu.lock()
@@ -41,7 +41,7 @@ rpc note: tag: i4
 # tls：顶层线程局部变量，每线程独立计数
 tls hits: i4 = 0
 
-rpc bump: c&: ctx, rounds: i4
+rpc bump: c: ctx&, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         hits = hits + 1
@@ -63,7 +63,7 @@ def sig: {
     ready: i4
 }
 
-rpc ping: s&: sig
+rpc ping: s: sig&
     s->mu.lock()
     s->ready = 1
     s->cv.one()
@@ -75,8 +75,8 @@ fnc main: i4
     c.mu.init()        # 嵌套字段不自动构造，手动 init
 
     # joinable：第二参数接收 thread 指针
-    var t1&: thread = nil
-    var t2&: thread = nil
+    var t1: thread& = nil
+    var t2: thread& = nil
     run work(&c, 10000), &t1
     run work(&c, 10000), &t2
     printf("t1 id set: %d\n", t1 != nil)   # run 返回即拿到 thread 对象
@@ -100,8 +100,8 @@ fnc main: i4
 
     # tls：两线程各自独立计数，互不可见
     c.n = 0
-    var b1&: thread = nil
-    var b2&: thread = nil
+    var b1: thread& = nil
+    var b2: thread& = nil
     run bump(&c, 10000), &b1
     run bump(&c, 20000), &b2
     b1->join()

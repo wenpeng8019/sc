@@ -3,11 +3,11 @@
 inc stdio.h
 
 @def node_a: {
-    pb&: node_b
+    pb: node_b&
 }
 
 @def node_b: {
-    pa&: node_a
+    pa: node_a&
 }
 
 @fnc is_even: bool, n: i4

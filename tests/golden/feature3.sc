@@ -8,7 +8,7 @@ rpc add: i4, a: i4, b: i4
 rpc greet: n: i4
     printf("hello rpc x%d\n", n)
 
-rpc strlen2: i4, s&: char
+rpc strlen2: i4, s: char&
     var n: i4 = 0
     while s[n] != 0
         n++

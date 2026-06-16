@@ -120,14 +120,18 @@ std::string inlineStr(const TypeRef& t) {
 std::string fieldDetail(const Field& f, bool withInit) {
     if (f.type.fnKind == TypeRef::FncKind::PlainPtr) return ": " + fncSigStr(f.type);
     std::string s;
-    if (!f.type.hasInline)
-        for (int i = 0; i < f.type.ptr; i++) s += "&";
+    // 数组维度 [dims] 保留在名字侧（冒号前）
     for (auto& dim : f.type.arrayDims) s += "[" + dim + "]";
     if (f.type.hasInline) {
         s += ": " + inlineStr(f.type);
     } else {
         s += ":";
         if (!f.type.name.empty()) s += " " + f.type.name;
+        // 指针 & 写在类型侧（冒号后）：i4& / &（裸 void*）
+        if (f.type.ptr > 0) {
+            s += f.type.name.empty() ? " " : "";
+            for (int i = 0; i < f.type.ptr; i++) s += "&";
+        }
     }
     if (withInit && f.init) s += " = " + exprToStr(*f.init);
     return s;

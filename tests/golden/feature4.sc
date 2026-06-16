@@ -7,7 +7,7 @@ inc stdlib.h
 def point: {
     x: i4
     y: i4
-    op: fnc: i4, p&: point, k: i4
+    op: fnc: i4, p: point&, k: i4
     init: fnc
         this->x = 1
         this->y = 2
@@ -27,12 +27,12 @@ fnc main: i4
     var pt: point
     printf("init: x=%d y=%d\n", pt.x, pt.y)
     printf("pt.sum(3,4) = %d\n", pt.sum(3, 4))
-    var pp&: point = &pt
+    var pp: point& = &pt
     printf("pp->sum(3,4) = %d\n", pp->sum(3, 4))
     var p2: point
     printf("op is nil (before bind): %d\n", p2.op == nil)
     p2.drop()
-    var hp&: point = point()
+    var hp: point& = point()
     printf("heap: sum() = %d\n", hp->sum())
     hp->drop()
     free(hp)

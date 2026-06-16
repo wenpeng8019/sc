@@ -98,22 +98,22 @@ fnc main: i4
 
     #-------------- & / &&：指针 / 多级指针 --------------------
 
-    # 指针初值为 nil（fixme: 指针变量应该是 var np: i4& = nil，var np&: i4 = nil 语法不太合理）
-    var np&: i4 = nil
+    # 指针初值为 nil（指针写在类型侧：var np: i4&）
+    var np: i4& = nil
     if np == nil
         printf("np is nil\n")
 
     # 无类型指针默认 void&
-    var vp&: = nil
+    var vp: & = nil
     printf("vp=%p\n", vp)
 
     var pt2: point
     pt2.x = 7, pt2.y = 8
-    var px&: point = &pt2
+    var px: point& = &pt2
     printf("px->x=%d\n", px->x)
 
     # 多级指针 &&
-    var pp&&: point = &px
+    var pp: point&& = &px
     printf("pp=%p\n", pp)
 
     #-------------- []：数组 / 多维数组 / 初始化列表 -----------
@@ -168,14 +168,14 @@ fnc main: i4
     printf("cast: %d\n", small)
 
     # 指针强转
-    var buf&: char = malloc(8): char&
+    var buf: char& = malloc(8): char&
     free(buf: void&)
 
     var f: f8 = 3.75
     printf("cast expr: %d\n", small + f: i4)
 
     # -> 后续操作需括号
-    var pv&: void = &tmp
+    var pv: void& = &tmp
     printf("paren cast: %d\n", (pv: point&)->x)
 
     #-------------- sizeof / offsetof -------------------------

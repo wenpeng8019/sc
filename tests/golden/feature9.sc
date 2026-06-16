@@ -39,11 +39,11 @@ fnc main: i4
     var i: u8 = 0
     for i = 0; i < l.len(); i++
         printf("list[%llu]=%s\n", i, (l.get(i): char&))
-    var lp&: list = &l
+    var lp: list& = &l
     lp->drop()
     part.drop()
     s.drop()
-    var hs&: string = string()
+    var hs: string& = string()
     hs->append("on the heap")
     printf("heap: %s\n", hs->cstr())
     hs->drop()

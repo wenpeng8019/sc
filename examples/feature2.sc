@@ -28,7 +28,7 @@ fnc clamp: i4, v: i4, lo: i4, hi: i4
     return v
 
 fnc area: i4
-    r&: rect
+    r: rect&
     -
     var w: i4 = r->rb.x - r->lt.x
     var h: i4 = r->rb.y - r->lt.y
@@ -52,7 +52,7 @@ fnc dec -> dec_f
 fnc add3: i4, a: i4, b: i4, c: i4
     return a + b + c
 
-fnc desc: i4, s&: char, pt: point
+fnc desc: i4, s: char&, pt: point
     if s == nil
         return pt.x + pt.y
     return 100
@@ -61,11 +61,11 @@ fnc desc: i4, s&: char, pt: point
 
 def obj: {
     abc: i4
-    func1: fnc: i4, o&: obj, x: i4, y: i4
+    func1: fnc: i4, o: obj&, x: i4, y: i4
     func2: add_f
 }
 
-fnc obj_add: i4, o&: obj, x: i4, y: i4
+fnc obj_add: i4, o: obj&, x: i4, y: i4
     return o->abc + x + y
 
 # 函数指针回调
@@ -80,7 +80,7 @@ fnc sq: i4, x: i4
 # ... 只能在参数列表末尾，且前面至少有一个具名参数
 # va_list/va_start/va_end 直接透传 C（stdarg.h 已默认包含）
 
-fnc my_printf: fmt&: char, ...
+fnc my_printf: fmt: char&, ...
     var ap: va_list
     va_start(ap, fmt)
     vprintf(fmt, ap)
