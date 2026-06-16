@@ -2,55 +2,110 @@
 
 inc stdio.h
 
-inc stdlib.h
+inc "platform.h"
 
-def point: {
-    x: i4
-    y: i4
-    op: fnc: i4, p&: point, k: i4
-    init: fnc
-        this->x = 1
-        this->y = 2
-    sum: fnc: i4, dx: i4, dy: i4
-        return ((this->x + this->y) + dx) + dy
+inc m.sc
+
+def ctx: {
+    mu: mutex
+    n: i4
 }
 
-fnc point_scale: i4, p&: point, k: i4
-    return (p->x + p->y) * k
+rpc work: c&: ctx, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        c->mu.lock()
+        c->n = (c->n + 1)
+        c->mu.unlock()
 
-fnc add3: i4, a: i4, b: i4, c: i4
-    return (a + b) + c
+rpc note: tag: i4
+    printf("detached note: tag=%d\n", tag)
 
-fnc desc: i4, s&: char, pt: point
-    if s == nil
-        return pt.x + pt.y
-    return 100
+tls hits: i4 = 0
 
-rpc job: i4, a: i4, b: i4
-    return a + b
+rpc bump: c&: ctx, rounds: i4
+    var i: i4 = 0
+    for i = 0; i < rounds; i++
+        hits = (hits + 1)
+    if hits == rounds
+        c->mu.lock()
+        c->n = (c->n + 1)
+        c->mu.unlock()
+
+fnc next_id: i4
+    tls id: i4 = 100
+    id++
+    return id
+
+def sig: {
+    mu: mutex
+    cv: cond
+    ready: i4
+}
+
+rpc ping: s&: sig
+    s->mu.lock()
+    s->ready = 1
+    s->cv.one()
+    s->mu.unlock()
 
 fnc main: i4
-    var big: i8 = 300
-    var small: i4 = (big: i4)
-    printf("cast assign: %d\n", small)
-    var buf&: char = (malloc(8): char&)
-    free((buf: void&))
-    var f: f8 = 3.75
-    printf("cast arg: %d\n", (small + f: i4))
-    var pt: point
-    var pv&: void = &pt
-    printf("paren cast deref: %d\n", (pv: point&)->x)
-    printf("add3(7) = %d\n", add3(7))
-    printf("add3(1,2) = %d\n", add3(1, 2))
-    printf("desc() = %d\n", desc())
-    printf("pt.sum(10) = %d\n", pt.sum(10))
-    pt.op = point_scale
-    printf("pt.op(&pt) = %d\n", pt.op(&pt))
-    printf("job(5) = %d\n", job(5))
-    printf("init: x=%d y=%d\n", pt.x, pt.y)
-    var pp&: point = &pt
-    printf("pp->sum(3,4) = %d\n", pp->sum(3, 4))
-    var hp&: point = point()
-    printf("heap: sum() = %d\n", hp->sum())
-    free((hp: void&))
+    var c: ctx
+    c.n = 0
+    c.mu.init()
+    var t1&: thread = nil
+    var t2&: thread = nil
+    run work(&c, 10000), &t1
+    run work(&c, 10000), &t2
+    printf("t1 id set: %d\n", t1 != nil)
+    t1->join()
+    t2->join()
+    printf("threads done: n=%d\n", c.n)
+    run note(7)
+    P_usleep(50000)
+    if c.mu.try_lock()
+        printf("try_lock ok\n")
+        c.mu.unlock()
+    next_id()
+    next_id()
+    printf("tls id=%d\n", next_id())
+    c.n = 0
+    var b1&: thread = nil
+    var b2&: thread = nil
+    run bump(&c, 10000), &b1
+    run bump(&c, 20000), &b2
+    b1->join()
+    b2->join()
+    printf("tls threads ok: %d\n", c.n)
+    c.mu.drop()
+    var s: sig
+    s.ready = 0
+    s.mu.init()
+    s.cv.init()
+    run ping(&s)
+    s.mu.lock()
+    while s.ready == 0
+        wait s.cv, s.mu
+    s.mu.unlock()
+    printf("cond wait ok: ready=%d\n", s.ready)
+    s.mu.lock()
+    wait s.cv, s.mu, 5000000, 0
+    s.mu.unlock()
+    printf("cond timeout ok\n")
+    s.cv.drop()
+    s.mu.drop()
+    var c2: ctx
+    c2.n = 0
+    c2.mu.init()
+    var p: pool
+    p.init(4)
+    var k: i4 = 0
+    for k = 0; k < 8; k++
+        run work(&c2, 1000), p
+    p.join()
+    printf("pool done: n=%d\n", c2.n)
+    run work(&c2, 1000), p
+    p.drop()
+    printf("pool drop: n=%d\n", c2.n)
+    c2.mu.drop()
     return 0

@@ -1,34 +1,144 @@
-# 特性 2：多维数组 / @导出 / inc 头文件
-inc string.h
+# 特性 2：函数 —— fnc
+# - 函数 / 多行参数函数
+# - 预定义类型函数
+# - 函数指针类型定义与调用
+# - 由 C 实现的接口定义（::）
+# - 可变参数函数（...）
+# - 伪闭包机制
+# - 实参默认自动补 0 机制
 
-@def Color: i1
-    Red = 0
-    Green
+inc stdio.h
 
-@def Point: {
+#-------------- 类型定义（函数依赖） -------------------------
+
+def point: {
     x: i4
     y: i4
 }
 
-@var total: i4 = 0
-let grid[2][3]: i4
+def rect: { lt: point, rb: point }
 
-@fnc add: i4, a:i4, b:i4
+#-------------- 直接定义并实现函数 ---------------------------
+
+fnc clamp: i4, v: i4, lo: i4, hi: i4
+    if v < lo
+        return lo
+    if v > hi
+        return hi
+    return v
+
+fnc area: i4
+    r&: rect
+    -
+    var w: i4 = r->rb.x - r->lt.x
+    var h: i4 = r->rb.y - r->lt.y
+    return w * h
+
+#-------------- 函数类型定义 ---------------------------------
+
+fnc add_f: i4, a: i4, b: i4
+
+fnc add1 -> add_f
     return a + b
+fnc add2 -> add_f
+    return a + 2*b
+
+fnc dec_f: v: i4
+fnc dec -> dec_f
+    --v
+
+#-------------- 默认补 0：缺参自动填零 -----------------------
+
+fnc add3: i4, a: i4, b: i4, c: i4
+    return a + b + c
+
+fnc desc: i4, s&: char, pt: point
+    if s == nil
+        return pt.x + pt.y
+    return 100
+
+#-------------- 函数指针类型（）字段 ---------------------------------
+
+def obj: {
+    abc: i4
+    func1: fnc: i4, o&: obj, x: i4, y: i4
+    func2: add_f
+}
+
+fnc obj_add: i4, o&: obj, x: i4, y: i4
+    return o->abc + x + y
+
+# 函数指针回调
+fnc sq: i4, x: i4
+    return x * x
+
+#-------------- :: C 实现接口 --------------------------------
+# fnc name:: 仅声明，无函数体 → C 侧实现，sc 侧生成 extern 原型
+
+
+#-------------- 可变参数函数（...） --------------------------
+# ... 只能在参数列表末尾，且前面至少有一个具名参数
+# va_list/va_start/va_end 直接透传 C（stdarg.h 已默认包含）
+
+fnc my_printf: fmt&: char, ...
+    var ap: va_list
+    va_start(ap, fmt)
+    vprintf(fmt, ap)
+    va_end(ap)
+
+#-------------- 主函数 ---------------------------------------
 
 fnc main: i4
-    var m[2][3]: i4
-    var i: i4 = 0, j: i4 = 0
-    for i = 0; i < 2; i++
-        for j = 0; j < 3; j++
-            m[i][j] = i * 3 + j
-    var s: i4 = 0
-    for i = 0; i < 2; i++
-        for j = 0; j < 3; j++
-            s += m[i][j]
-    printf("sum = %d\n", s)
-    var name[8][16]: char
-    strcpy(name[0], "hi")
-    printf("name0 = %s\n", name[0])
-    printf("add = %d\n", add(2, 3))
+
+    # 直接函数实现
+    printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
+
+    # 多行参数函数实现
+    var r: rect
+    r.lt.x = 0, r.lt.y = 0
+    r.rb.x = 10, r.rb.y = 5
+    printf("area = %d\n", area(&r))
+
+    # 预定义类型实现
+    printf("add1(3,4) = %d\n", add1(3, 4))
+    printf("add2(3,4) = %d\n", add2(3, 4))
+
+    #-------------- 函数指针类型 -------------------------------
+
+    # 函数内定义函数指针变量
+    var cb: fnc: i4, x: i4
+    cb = sq
+    printf("cb(7) = %d\n", cb(7))
+
+    # 函数指针字段：默认 nil，绑定后调用
+    var o: obj
+    o.abc = 10
+    if o.func1 == nil
+        printf("func1 is nil\n")
+    o.func1 = obj_add
+    printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
+    printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
+
+    # C 实现接口调用（声明在本文件，实现在 C 侧）
+
+    # 可变参数函数
+    my_printf("sc says: %s %d\n", "hello", 42)
+
+    #-------------- 伪闭包 ---------------------------------
+
+    #     o.func2 = fnc: i4, a: i4, b: i4
+    #         return a + b
+    #     printf("fnc lit: %d\n", o.func2(3, 4))
+
+    #-------------- 实参默认自动补 0：缺参自动填零 -------------
+
+    printf("add3(7) = %d\n", add3(7))            # b,c 补 0 → 7
+    printf("add3(1,2) = %d\n", add3(1, 2))       # c 补 0 → 3
+    printf("desc() = %d\n", desc())              # s 补 nil, pt 补 {0} → 0
+
+    # 函数指针变量/字段调用也自动补 0/nil
+    printf("o.func1(&o) = %d\n", o.func1(&o))    # x,y 补 0
+    printf("cb() = %d\n", cb())                  # x 补 0
+
+
     return 0

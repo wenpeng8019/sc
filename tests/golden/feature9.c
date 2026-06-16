@@ -2,118 +2,106 @@
 #include "platform.h"
 #include "builtins/adt/adt.h"
 
-typedef struct task task;
+typedef struct counter counter;
 
-typedef struct task {
-    void *_prev;
-    void *_next;
-    int32_t id;
-} task;
+typedef struct counter {
+    int32_t n;
+} counter;
 
-static void dump(char *tag, chain *l);
+static void counter_init(counter *_this);
+static int32_t counter_add(counter *_this, int32_t k);
+static int32_t str_cmp(void *a, void *b);
 
-static inline task *task__new(void) {
-    task *_p = (task *)malloc(sizeof(task));
+static inline string *string__new(void) {
+    string *_p = (string *)malloc(sizeof(string));
     if (_p) {
-        memset(_p, 0, sizeof(task));
+        memset(_p, 0, sizeof(string));
+        string_init(_p);
     }
     return _p;
 }
 
-static void dump(char *tag, chain *l) {
-    /* line 16 */
-    printf("%s:", tag);
-    /* line 17 */
-    task *it = ((task*)(chain_first(l)));
+static void counter_init(counter *_this) {
     /* line 18 */
-    while (it != NULL) {
-        /* line 19 */
-        printf(" %d", it->id);
-        /* line 20 */
-        it = ((task*)(((void *)*(void **)((char *)(it) + sizeof(void *)))));
-    }
+    _this->n = 100;
+}
+
+static int32_t counter_add(counter *_this, int32_t k) {
+    /* line 20 */
+    _this->n = (_this->n + k);
     /* line 21 */
-    printf("\n");
+    return _this->n;
+}
+
+static int32_t str_cmp(void *a, void *b) {
+    /* line 25 */
+    return strcmp(((char*)(a)), ((char*)(b)));
 }
 
 int32_t main(void) {
-    /* line 24 */
-    chain l = {0};
-    /* line 25 */
-    task t[6] = {0};
-    /* line 26 */
-    int32_t i;
-    /* line 27 */
-    for (i = 0; i < 6; i++) {
-        /* line 28 */
-        t[i].id = i;
-    }
-    /* line 31 */
-    chain_append(&l, &(t[2]));
-    /* line 32 */
-    chain_append(&l, &(t[3]));
+    /* line 29 */
+    counter c = {0};
+    counter_init(&c);
+    /* line 30 */
+    printf("counter: init=%d add(5)=%d\n", c.n, counter_add(&c, 5));
     /* line 33 */
-    chain_push(&l, &(t[1]));
+    string s = {0};
+    string_init(&s);
     /* line 34 */
-    dump("append/push", &(l));
+    s.append("Hello");
+    /* line 35 */
+    s.append(", sc!");
+    /* line 36 */
+    printf("s=%s len=%llu\n", s.cstr(), s.len());
     /* line 37 */
-    chain_before(&l, &(t[1]), &(t[0]));
-    /* line 38 */
-    chain_after(&l, &(t[3]), &(t[4]));
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", s.find("sc", 0), s.starts_with("Hello"));
     /* line 39 */
-    dump("before/after", &(l));
+    string part = {0};
+    string_init(&part);
+    /* line 40 */
+    s.slice(-(3), -(1), &(part));
+    /* line 41 */
+    printf("slice(-3,-1)=%s\n", part.cstr());
     /* line 42 */
-    task *f = ((task*)(chain_first(&l)));
+    s.upper();
     /* line 43 */
-    task *b = ((task*)(chain_last(&l)));
-    /* line 44 */
-    task *r = ((task*)(((void *)*(void **)((char *)(f) + 0))));
-    /* line 45 */
-    printf("first=%d last=%d rear=%d\n", f->id, b->id, r->id);
+    printf("upper=%s\n", s.cstr());
+    /* line 46 */
+    list l = {0};
+    list_init(&l);
+    /* line 47 */
+    l.push("banana");
     /* line 48 */
-    chain_remove(&l, &(t[2]));
+    l.push("apple");
     /* line 49 */
-    task *p = ((task*)(chain_pop(&l)));
+    l.push("cherry");
     /* line 50 */
-    printf("pop=%d\n", p->id);
+    l.sort(str_cmp);
     /* line 51 */
-    dump("remove/pop", &(l));
-    /* line 54 */
-    chain_revert(&l);
-    /* line 55 */
-    dump("revert", &(l));
+    uint64_t i = 0;
+    /* line 52 */
+    for (i = 0; i < l.len(); i++) {
+        /* line 53 */
+        printf("list[%llu]=%s\n", i, ((char*)(l.get(i))));
+    }
+    /* line 56 */
+    list *lp = &(l);
+    /* line 57 */
+    lp->drop();
     /* line 58 */
-    chain seg = {0};
+    part.drop();
     /* line 59 */
-    chain_cut(&l, &(t[3]), &(t[1]), &(seg));
-    /* line 60 */
-    dump("cut-out", &(seg));
-    /* line 61 */
-    dump("cut-rest", &(l));
+    s.drop();
+    /* line 62 */
+    string *hs = string__new();
+    /* line 63 */
+    hs->append("on the heap");
     /* line 64 */
-    chain_append_to(&seg, &(l));
+    printf("heap: %s\n", hs->cstr());
     /* line 65 */
-    dump("append_to", &(l));
+    hs->drop();
     /* line 66 */
-    printf("seg empty=%d\n", chain_first(&seg) == NULL);
+    free(hs);
     /* line 67 */
-    chain_cut(&l, &(t[3]), &(t[1]), &(seg));
-    /* line 68 */
-    chain_push_to(&seg, &(l));
-    /* line 69 */
-    dump("push_to", &(l));
-    /* line 72 */
-    task *h = task__new();
-    /* line 73 */
-    h->id = 9;
-    /* line 74 */
-    chain_append(&l, h);
-    /* line 75 */
-    dump("heap", &(l));
-    /* line 76 */
-    chain_remove(&l, h);
-    /* line 77 */
-    free(((void*)(h)));
-    /* line 78 */
     return 0;
 }

@@ -1,36 +1,35 @@
-# 特性 3：b 布尔类型 / true,false,nil 常量 / 函数指针字段
+# 特性 3：异步函数 —— rpc 
+# + 这是一个伪形参函数，本质是参数/返回值展开为同名结构体的语法糖
+# 
+# 形式与 fnc 一致；转 C 展开为三件套：
+#   struct name { ret _; ...params }   同名参数结构体（返回槽 _ 为首成员）
+#   void name_rpc(struct name *_p)     实际函数（仅声明形态由 C 侧实现）
+#   static inline ret name(...)        调用包装（装填 → 执行 → 取返回槽）
+# 调用形式与普通函数完全一致；参数天然可打包、可转发（消息派发/RPC 场景）
 inc stdio.h
 
-# 函数指针字段：无函数体的函数签名字段（默认 nil，可赋值后调用）
-def obj: {
-    abc: i4
-    func: fnc: i4, o&: obj, x:i4, y:i4
-}
+# 定义形态：函数体内参数引用自动改写为 _p->x，return e 改写为 _p->_ = e
+rpc add: i4, a: i4, b: i4
+    return a + b
 
-# 被指向的普通函数：接收者显式传入
-fnc obj_add: i4, o&: obj, x:i4, y:i4
-    return o->abc + x + y
+# 无返回值（v）：结构体不含返回槽 _
+rpc greet: n: i4
+    printf("hello rpc x%d\n", n)
+
+# 指针参数（rpc 参数不支持数组，用 & 指针代替）
+rpc strlen2: i4, s&: char
+    var n: i4 = 0
+    while s[n] != 0
+        n++
+    return n * 2
+
+# @导出：头文件中包含完整三件套，跨模块/纯 C 可直接调用
+@rpc square: i4, x: i4
+    return x * x
 
 fnc main: i4
-    # b 布尔类型与 true/false 常量
-    var ok: bool = true
-    var no: bool = false
-    printf("ok=%d no=%d\n", ok, no)
-
-    # nil 常量
-    var p&: i4 = nil
-    if p == nil
-        printf("p is nil\n")
-
-    # 函数指针字段：默认 nil，绑定后通过 obj.func() 调用
-    var o: obj
-    o.abc = 10
-    if o.func == nil
-        printf("func is nil\n")
-    o.func = obj_add
-    printf("o.func(2,3) = %d\n", o.func(&o, 2, 3))
-
-    # 指针接收者：ptr->func() 直接传指针
-    var po&: obj = &o
-    printf("po->func(4,5) = %d\n", po->func(po, 4, 5))
+    printf("add(3,4) = %d\n", add(3, 4))
+    greet(2)
+    printf("strlen2 = %d\n", strlen2("abc"))
+    printf("square(9) = %d\n", square(9))
     return 0

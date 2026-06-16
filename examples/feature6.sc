@@ -1,65 +1,117 @@
-# 特性 6：内置 ADT（builtins/adt）与方法语法
-#   - 成员函数：结构体内直接实现（签名字段 + 缩进函数体）
-#   - 方法声明：fnc T::m 仅声明形态（实现在 C 侧，见 adt.sc）
-#   - 栈构造：var x: T 声明即自动调用 T 的 init（局部、无初值、非指针）
-#   - 堆构造：T() 类型伪调用 → malloc + 字段默认值/清零 + init
-#   - drop 析构：手动调用（命名保留，未来支持自动插入）；堆对象再 free
-#   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
+# 特性 6：链表结构体（def T: ~）与 prev/next 上下文关键字
+
 inc stdio.h
 inc stdlib.h
 inc adt.sc
 
-# 成员函数：结构体内直接实现，函数体内用 this 访问接收者
-def counter: {
-    n: i4
-    init: fnc
-        this->n = 100
-    add: fnc: i4, k: i4
-        this->n = this->n + k
-        return this->n
+#-------------- def T: ~ —— 链表标记 --------------------------
+# ~ 标记使转 C 时在成员首位自动注入 void *_prev, *_next
+# 此后可通过 it->prev / it->next 上下文关键字访问前驱/后继
+
+def task: ~ {
+    id: i4
 }
 
-fnc str_cmp -> list_cmp
-    return strcmp(a: char&, b: char&)    # 裸强转：实参位置免括号
+def node: ~ {
+    id: i4
+    name[8]: char
+    pos: point
+    score: f8
+}
+
+def point: {
+    x: i4
+    y: i4
+}
+
+#-------------- chain 内置双向链表 -----------------------------
+# chain（inc adt.sc）：head 为首元素；首元素 _prev = 尾元素（rear），尾元素 _next = nil
+# 同一 chain 只放同种结构体；不拥有元素：remove/pop/cut 不释放元素本身
+
+fnc dump: tag&: char, l&: chain
+    printf("%s:", tag)
+    var it&: task = l->first(): task&
+    while it != nil
+        printf(" %d", it->id)
+        it = it->next                   # 上下文关键字：等价 next(it) 内置函数
+    printf("\n")
 
 fnc main: i4
-    # 声明即构造：自动调用 counter_init/string_init/list_init
-    var c: counter
-    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
 
-    # string：动态字符串
-    var s: string
-    s.append("Hello")
-    s.append(", sc!")
-    printf("s=%s len=%llu\n", s.cstr(), s.len())
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
-           s.find("sc", 0), s.starts_with("Hello"))
-    var part: string
-    s.slice(-3, -1, &part)              # 负索引切片
-    printf("slice(-3,-1)=%s\n", part.cstr())
-    s.upper()
-    printf("upper=%s\n", s.cstr())
+    #-------------- chain 内置操作 ----------------------------
 
-    # list：动态指针数组（元素 v&，不拥有元素）
-    var l: list
-    l.push("banana")
-    l.push("apple")
-    l.push("cherry")
-    l.sort(str_cmp)
-    var i: u8 = 0
-    for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
+    var l: chain
+    var t[6]: task
+    var i: i4
+    for i = 0; i < 6; i++
+        t[i].id = i
 
-    # 析构：手动 drop（指针接收者用 ->）
-    var lp&: list = &l
-    lp->drop()
-    part.drop()
-    s.drop()
+    l.append(&t[2])
+    l.append(&t[3])
+    l.push(&t[1])
+    dump("append/push", &l)            # 1 2 3
 
-    # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
-    var hs&: string = string()
-    hs->append("on the heap")
-    printf("heap: %s\n", hs->cstr())
-    hs->drop()
-    free(hs)
+    l.before(&t[1], &t[0])
+    l.after(&t[3], &t[4])
+    dump("before/after", &l)           # 0 1 2 3 4
+
+    var f&: task = l.first(): task&
+    var b&: task = l.last(): task&
+    # 首元素 prev 指向尾元素（rear 约定）
+    var r&: task = f->prev: task&
+    printf("first=%d last=%d rear=%d\n", f->id, b->id, r->id)
+
+    l.remove(&t[2])
+    var p&: task = l.pop(): task&
+    printf("pop=%d\n", p->id)          # 0
+    dump("remove/pop", &l)             # 1 3 4
+
+    l.revert()
+    dump("revert", &l)                 # 4 3 1
+
+    var seg: chain
+    l.cut(&t[3], &t[1], &seg)
+    dump("cut-out", &seg)              # 3 1
+    dump("cut-rest", &l)               # 4
+
+    seg.append_to(&l)
+    dump("append_to", &l)              # 4 3 1
+    printf("seg empty=%d\n", seg.first() == nil)
+    l.cut(&t[3], &t[1], &seg)
+    seg.push_to(&l)
+    dump("push_to", &l)                # 3 1 4
+
+    # 堆元素同样可入链
+    var h&: task = task()
+    h->id = 9
+    l.append(h)
+    dump("heap", &l)                   # 3 1 4 9
+    l.remove(h)
+    free(h: void&)
+
+    #-------------- prev/next 上下文关键字遍历 ----------------
+
+    var l2: chain
+    var n[3]: node
+    for i = 0; i < 3; i++
+        n[i].id = i
+    l2.append(&n[0])
+    l2.append(&n[1])
+    l2.append(&n[2])
+
+    var it&: node = l2.first(): node&
+    printf("正向:")
+    while it != nil                    # 等价 it->_next != nil
+        printf(" %d", it->id)
+        it = it->next                  # 上下文关键字：后移
+    printf("\n")
+
+    # 反向遍历（prev 上下文关键字）
+    var rear&: node = l2.last(): node&
+    printf("反向:")
+    while rear != nil
+        printf(" %d", rear->id)
+        rear = rear->prev              # 上下文关键字：前移
+    printf("\n")
+
     return 0

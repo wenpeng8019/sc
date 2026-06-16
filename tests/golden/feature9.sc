@@ -6,55 +6,46 @@ inc stdlib.h
 
 inc adt.sc
 
-def task: ~ {
-    id: i4
+def counter: {
+    n: i4
+    init: fnc
+        this->n = 100
+    add: fnc: i4, k: i4
+        this->n = (this->n + k)
+        return this->n
 }
 
-fnc dump: tag&: char, l&: chain
-    printf("%s:", tag)
-    var it&: task = (l->first(): task&)
-    while it != nil
-        printf(" %d", it->id)
-        it = (next(it): task&)
-    printf("\n")
+fnc str_cmp -> list_cmp
+    return strcmp((a: char&), (b: char&))
 
 fnc main: i4
-    var l: chain
-    var t[6]: task
-    var i: i4
-    for i = 0; i < 6; i++
-        t[i].id = i
-    l.append(&t[2])
-    l.append(&t[3])
-    l.push(&t[1])
-    dump("append/push", &l)
-    l.before(&t[1], &t[0])
-    l.after(&t[3], &t[4])
-    dump("before/after", &l)
-    var f&: task = (l.first(): task&)
-    var b&: task = (l.last(): task&)
-    var r&: task = (prev(f): task&)
-    printf("first=%d last=%d rear=%d\n", f->id, b->id, r->id)
-    l.remove(&t[2])
-    var p&: task = (l.pop(): task&)
-    printf("pop=%d\n", p->id)
-    dump("remove/pop", &l)
-    l.revert()
-    dump("revert", &l)
-    var seg: chain
-    l.cut(&t[3], &t[1], &seg)
-    dump("cut-out", &seg)
-    dump("cut-rest", &l)
-    seg.append_to(&l)
-    dump("append_to", &l)
-    printf("seg empty=%d\n", seg.first() == nil)
-    l.cut(&t[3], &t[1], &seg)
-    seg.push_to(&l)
-    dump("push_to", &l)
-    var h&: task = task()
-    h->id = 9
-    l.append(h)
-    dump("heap", &l)
-    l.remove(h)
-    free((h: void&))
+    var c: counter
+    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
+    var s: string
+    s.append("Hello")
+    s.append(", sc!")
+    printf("s=%s len=%llu\n", s.cstr(), s.len())
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", s.find("sc", 0), s.starts_with("Hello"))
+    var part: string
+    s.slice(-3, -1, &part)
+    printf("slice(-3,-1)=%s\n", part.cstr())
+    s.upper()
+    printf("upper=%s\n", s.cstr())
+    var l: list
+    l.push("banana")
+    l.push("apple")
+    l.push("cherry")
+    l.sort(str_cmp)
+    var i: u8 = 0
+    for i = 0; i < l.len(); i++
+        printf("list[%llu]=%s\n", i, (l.get(i): char&))
+    var lp&: list = &l
+    lp->drop()
+    part.drop()
+    s.drop()
+    var hs&: string = string()
+    hs->append("on the heap")
+    printf("heap: %s\n", hs->cstr())
+    hs->drop()
+    free(hs)
     return 0

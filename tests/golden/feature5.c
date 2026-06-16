@@ -1,91 +1,52 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-struct add {
-    int32_t _;
-    int32_t a;
-    int32_t b;
-};
-static void add_rpc(struct add *_p);
-static inline int32_t add(int32_t a, int32_t b) {
-    struct add _p = {0};
-    _p.a = a;
-    _p.b = b;
-    add_rpc(&_p);
-    return _p._;
-}
+typedef struct Point Point;
+typedef struct tracker tracker;
 
-struct greet {
-    int32_t n;
-};
-static void greet_rpc(struct greet *_p);
-static inline void greet(int32_t n) {
-    struct greet _p = {0};
-    _p.n = n;
-    greet_rpc(&_p);
-}
+typedef enum { /* base: int8_t */
+    Red = 0,
+    Green
+} Color;
 
-struct strlen2 {
-    int32_t _;
-    char *s;
-};
-static void strlen2_rpc(struct strlen2 *_p);
-static inline int32_t strlen2(char *s) {
-    struct strlen2 _p = {0};
-    _p.s = s;
-    strlen2_rpc(&_p);
-    return _p._;
-}
-
-struct square {
-    int32_t _;
+typedef struct Point {
     int32_t x;
-};
-void square_rpc(struct square *_p);
-static inline int32_t square(int32_t x) {
-    struct square _p = {0};
-    _p.x = x;
-    square_rpc(&_p);
-    return _p._;
-}
+    int32_t y;
+} Point;
 
+int32_t total = 0;
+int32_t add(int32_t a, int32_t b);
+typedef struct tracker {
+    int32_t val;
+    int32_t (*read)();
+} tracker;
 
-static void add_rpc(struct add *_p) {
-    /* line 11 */
-    _p->_ = _p->a + _p->b; return;
-}
+void tracker_init(tracker *_this);
+void tracker_add(tracker *_this, int32_t k);
+extern int32_t tracker_read(tracker *_this);
 
-static void greet_rpc(struct greet *_p) {
-    /* line 15 */
-    printf("hello rpc x%d\n", _p->n);
-}
-
-static void strlen2_rpc(struct strlen2 *_p) {
-    /* line 19 */
-    int32_t n = 0;
-    /* line 20 */
-    while (_p->s[n] != 0) {
-        /* line 21 */
-        n++;
-    }
+int32_t add(int32_t a, int32_t b) {
     /* line 22 */
-    _p->_ = n * 2; return;
+    return a + b;
 }
 
-void square_rpc(struct square *_p) {
-    /* line 26 */
-    _p->_ = _p->x * _p->x; return;
+void tracker_init(tracker *_this) {
+    /* line 30 */
+    _this->val = 0;
+}
+
+void tracker_add(tracker *_this, int32_t k) {
+    /* line 32 */
+    _this->val = (_this->val + k);
 }
 
 int32_t main(void) {
-    /* line 29 */
-    printf("add(3,4) = %d\n", add(3, 4));
-    /* line 30 */
-    greet(2);
-    /* line 31 */
-    printf("strlen2 = %d\n", strlen2("abc"));
-    /* line 32 */
-    printf("square(9) = %d\n", square(9));
-    /* line 33 */
+    /* line 38 */
+    printf("add = %d\n", add(2, 3));
+    /* line 39 */
+    total = add(10, 20);
+    /* line 40 */
+    printf("total = %d\n", total);
+    /* line 42 */
     return 0;
 }

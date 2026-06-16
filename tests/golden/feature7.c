@@ -1,294 +1,283 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "platform.h"
-#include "builtins/m/m.h"
+#include "builtins/adt/adt.h"
+#include "builtins/io/io.h"
 
-typedef struct ctx ctx;
-typedef struct sig sig;
+typedef struct point point;
+typedef struct node node;
 
-typedef struct thread thread;
-extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);
-typedef struct pool pool;
-extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
+extern void print(const char *, ...);
 
-typedef struct cond cond;
-typedef struct mutex mutex;
-extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);
+typedef enum { /* base: int8_t */
+    Red = 0,
+    Green,
+    Blue
+} color;
 
-typedef struct ctx {
-    mutex mu;
-    int32_t n;
-} ctx;
+typedef struct point {
+    int32_t x;
+    int32_t y;
+} point;
 
-struct work {
-    ctx *c;
-    int32_t rounds;
-};
-static void work_rpc(struct work *_p);
-static inline void work(ctx *c, int32_t rounds) {
-    struct work _p = {0};
-    _p.c = c;
-    _p.rounds = rounds;
-    work_rpc(&_p);
+typedef struct node {
+    void *_prev;
+    void *_next;
+    int32_t id;
+    char name[8];
+    point pos;
+    point *link;
+    int32_t *ref;
+    double score;
+    uint8_t ok;
+    char *tag;
+} node;
+
+
+/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */
+static inline void sc__sof_i64(string *_o, long long _v) {
+    char _b[24]; snprintf(_b, sizeof(_b), "%lld", _v); string_append(_o, _b); }
+static inline void sc__sof_u64(string *_o, unsigned long long _v) {
+    char _b[24]; snprintf(_b, sizeof(_b), "%llu", _v); string_append(_o, _b); }
+static inline void sc__sof_f64(string *_o, double _v) {
+    char _b[40]; snprintf(_b, sizeof(_b), "%g", _v); string_append(_o, _b); }
+static inline void sc__sof_bool(string *_o, unsigned char _v) {
+    string_append(_o, _v ? "true" : "false"); }
+static inline void sc__sof_char(string *_o, char _v) {
+    string_append_char(_o, '\''); string_append_char(_o, _v); string_append_char(_o, '\''); }
+static inline void sc__sof_cstr(string *_o, const char *_v) {
+    if (!_v) { string_append(_o, "nil"); return; }
+    string_append_char(_o, '"'); string_append(_o, (char *)_v); string_append_char(_o, '"'); }
+static inline void sc__sof_ptr(string *_o, const void *_v) {
+    if (!_v) { string_append(_o, "nil"); return; }
+    char _b[24]; snprintf(_b, sizeof(_b), "0x%llx", (unsigned long long)(uintptr_t)_v);
+    string_append(_o, _b); }
+static inline void sc__sof_named_ptr(string *_o, const char *_tn, const void *_v) {
+    if (!_v) { string_append(_o, "nil"); return; }
+    char _b[28]; snprintf(_b, sizeof(_b), "@0x%llx", (unsigned long long)(uintptr_t)_v);
+    string_append_char(_o, '"'); string_append(_o, (char *)_tn);
+    string_append(_o, _b); string_append_char(_o, '"'); }
+static inline void sc__sof_amp_i64(string *_o, long long _v) {
+    char _b[28]; snprintf(_b, sizeof(_b), "\"&%lld\"", _v); string_append(_o, _b); }
+static inline void sc__sof_amp_u64(string *_o, unsigned long long _v) {
+    char _b[28]; snprintf(_b, sizeof(_b), "\"&%llu\"", _v); string_append(_o, _b); }
+static inline void sc__sof_amp_f64(string *_o, double _v) {
+    char _b[44]; snprintf(_b, sizeof(_b), "\"&%g\"", _v); string_append(_o, _b); }
+static inline void sc__sof_amp_bool(string *_o, unsigned char _v) {
+    string_append(_o, _v ? "\"&true\"" : "\"&false\""); }
+static inline void sc__sof_str(string *_o, string *_v) {
+    string_append_char(_o, '"');
+    if (_v->data) string_append_n(_o, _v->data, _v->size);
+    string_append_char(_o, '"'); }
+static inline void sc__sof_nl(string *_o, stringify_t _opt, int _depth) {
+    if (_opt.compact) return;
+    string_append_char(_o, '\n');
+    for (int _i = 0; _i < _depth; _i++) string_append(_o, "  "); }
+
+static void sc__sof_node(string *_o, node *_v, stringify_t _opt, int _depth);
+static void sc__sof_point(string *_o, point *_v, stringify_t _opt, int _depth);
+
+static void sc__sof_node(string *_o, node *_v, stringify_t _opt, int _depth) {
+    string_append(_o, "{");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"id\":" : "\"id\": ");
+    sc__sof_i64(_o, (long long)(_v->id));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"name\":" : "\"name\": ");
+    string_append_char(_o, '"');
+    string_append_n(_o, (char *)(_v->name), strnlen(_v->name, (size_t)(8)));
+    string_append_char(_o, '"');
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"pos\":" : "\"pos\": ");
+    sc__sof_point(_o, &(_v->pos), _opt, _depth + 1);
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"link\":" : "\"link\": ");
+    sc__sof_named_ptr(_o, "point", (const void *)(_v->link));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"ref\":" : "\"ref\": ");
+    if (!(_v->ref)) string_append(_o, "nil");
+    else sc__sof_amp_i64(_o, (long long)(*(_v->ref)));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"score\":" : "\"score\": ");
+    sc__sof_f64(_o, (double)(_v->score));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"ok\":" : "\"ok\": ");
+    sc__sof_bool(_o, (unsigned char)(_v->ok));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"tag\":" : "\"tag\": ");
+    sc__sof_cstr(_o, _v->tag);
+    sc__sof_nl(_o, _opt, _depth);
+    string_append(_o, "}");
 }
 
-struct note {
-    int32_t tag;
-};
-static void note_rpc(struct note *_p);
-static inline void note(int32_t tag) {
-    struct note _p = {0};
-    _p.tag = tag;
-    note_rpc(&_p);
+static void sc__sof_point(string *_o, point *_v, stringify_t _opt, int _depth) {
+    string_append(_o, "{");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"x\":" : "\"x\": ");
+    sc__sof_i64(_o, (long long)(_v->x));
+    string_append(_o, ",");
+    sc__sof_nl(_o, _opt, _depth + 1);
+    string_append(_o, _opt.compact ? "\"y\":" : "\"y\": ");
+    sc__sof_i64(_o, (long long)(_v->y));
+    sc__sof_nl(_o, _opt, _depth);
+    string_append(_o, "}");
 }
 
-static TLS int32_t hits = 0;
-struct bump {
-    ctx *c;
-    int32_t rounds;
-};
-static void bump_rpc(struct bump *_p);
-static inline void bump(ctx *c, int32_t rounds) {
-    struct bump _p = {0};
-    _p.c = c;
-    _p.rounds = rounds;
-    bump_rpc(&_p);
+static string stringify_color(color _v, stringify_t _opt) {
+    string _s;
+    string_init(&_s);
+    string *_o = &_s;
+    sc__sof_i64(_o, (long long)(_v));
+    return _s;
 }
 
-static int32_t next_id(void);
-typedef struct sig {
-    mutex mu;
-    cond cv;
-    int32_t ready;
-} sig;
-
-struct ping {
-    sig *s;
-};
-static void ping_rpc(struct ping *_p);
-static inline void ping(sig *s) {
-    struct ping _p = {0};
-    _p.s = s;
-    ping_rpc(&_p);
-}
-
-
-static void work_rpc(struct work *_p) {
-    /* line 25 */
-    int32_t i = 0;
-    /* line 26 */
-    for (i = 0; i < _p->rounds; i++) {
-        /* line 27 */
-        mutex_lock(&_p->c->mu);
-        /* line 28 */
-        _p->c->n = (_p->c->n + 1);
-        /* line 29 */
-        mutex_unlock(&_p->c->mu);
+static string stringify_i4_a4(int32_t *_v, stringify_t _opt) {
+    string _s;
+    string_init(&_s);
+    string *_o = &_s;
+    string_append_char(_o, '[');
+    for (size_t _i0 = 0; _i0 < (size_t)(4); _i0++) {
+        if (_i0) string_append(_o, ",");
+        sc__sof_nl(_o, _opt, (0) + 1);
+        sc__sof_i64(_o, (long long)(_v[_i0]));
     }
+    if ((size_t)(4)) sc__sof_nl(_o, _opt, 0);
+    string_append_char(_o, ']');
+    return _s;
 }
 
-static void note_rpc(struct note *_p) {
-    /* line 33 */
-    printf("detached note: tag=%d\n", _p->tag);
+static string stringify_node(node _v, stringify_t _opt) {
+    string _s;
+    string_init(&_s);
+    string *_o = &_s;
+    sc__sof_node(_o, &(_v), _opt, 0);
+    return _s;
 }
 
-static void bump_rpc(struct bump *_p) {
-    /* line 39 */
-    int32_t i = 0;
-    /* line 40 */
-    for (i = 0; i < _p->rounds; i++) {
-        /* line 41 */
-        hits = (hits + 1);
-    }
-    /* line 42 */
-    if (hits == _p->rounds) {
-        /* line 43 */
-        mutex_lock(&_p->c->mu);
-        /* line 44 */
-        _p->c->n = (_p->c->n + 1);
-        /* line 45 */
-        mutex_unlock(&_p->c->mu);
-    }
+static string stringify_node_p(node *_v, stringify_t _opt) {
+    string _s;
+    string_init(&_s);
+    string *_o = &_s;
+    if (!_v) string_append(_o, "nil");
+    else sc__sof_node(_o, _v, _opt, 0);
+    return _s;
 }
 
-static int32_t next_id(void) {
-    /* line 49 */
-    static TLS int32_t id = 100;
-    /* line 50 */
-    id++;
-    /* line 51 */
-    return id;
+static string stringify_point(point _v, stringify_t _opt) {
+    string _s;
+    string_init(&_s);
+    string *_o = &_s;
+    sc__sof_point(_o, &(_v), _opt, 0);
+    return _s;
 }
 
-static void ping_rpc(struct ping *_p) {
-    /* line 61 */
-    mutex_lock(&_p->s->mu);
-    /* line 62 */
-    _p->s->ready = 1;
-    /* line 63 */
-    cond_one(&_p->s->cv);
-    /* line 64 */
-    mutex_unlock(&_p->s->mu);
+static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t _opt) {
+    if (!_buf || !_n) return _buf;
+    string _s = stringify_point(_v, _opt);
+    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;
+    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);
+    _buf[_l] = 0;
+    string_drop(&_s);
+    return _buf;
 }
 
 int32_t main(void) {
+    /* line 34 */
+    print("print 基础输出 n=%d s=%s", 42, "hello");
+    /* line 35 */
+    print("E: 错误级别示例 code=%d", -(1));
+    /* line 36 */
+    print("W: 警告级别示例");
+    /* line 37 */
+    print("V: 详细级别（默认 SC_LOG=D 下本行不输出）");
+    /* line 43 */
+    string s = {0};
+    string_init(&s);
+    /* line 45 */
+    point p = {0};
+    /* line 46 */
+    p.x = 3;
+    /* line 47 */
+    p.y = 4;
+    /* line 48 */
+    s = stringify_point(p, (stringify_t){ .compact = 1 });
+    /* line 49 */
+    print("point 值: %s", s.cstr());
+    /* line 50 */
+    s.drop();
+    /* line 52 */
+    node n = {0};
+    /* line 53 */
+    n.id = 1;
+    /* line 54 */
+    n.name[0] = 'A';
+    /* line 55 */
+    n.name[1] = 'B';
+    /* line 56 */
+    n.pos = p;
+    /* line 57 */
+    n.link = &(p);
+    /* line 58 */
+    n.ref = &(n.id);
+    /* line 59 */
+    n.score = 9.5;
+    /* line 60 */
+    n.ok = true;
+    /* line 61 */
+    n.tag = "hot";
+    /* line 62 */
+    s = stringify_node(n, (stringify_t){ .compact = 1 });
+    /* line 63 */
+    print("node 值: %s", s.cstr());
+    /* line 64 */
+    s.drop();
     /* line 67 */
-    ctx c = {0};
+    s = stringify_node(n, (stringify_t){ .compact = 0 });
     /* line 68 */
-    c.n = 0;
+    print("node 美化:\n%s", s.cstr());
     /* line 69 */
-    mutex_init(&c.mu);
+    s.drop();
+    /* line 71 */
+    node *pn = &(n);
     /* line 72 */
-    thread *t1 = NULL;
+    s = stringify_node_p(pn, (stringify_t){ .compact = 1 });
     /* line 73 */
-    thread *t2 = NULL;
+    print("node 指针: %s", s.cstr());
     /* line 74 */
-    {
-        struct work _rp = {0};
-        _rp.c = &(c);
-        _rp.rounds = 10000;
-        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t1)));
-    }
-    /* line 75 */
-    {
-        struct work _rp = {0};
-        _rp.c = &(c);
-        _rp.rounds = 10000;
-        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t2)));
-    }
-    /* line 76 */
-    printf("t1 id set: %d\n", t1 != NULL);
+    s.drop();
     /* line 77 */
-    thread_join(t1);
+    int32_t arr[4];
     /* line 78 */
-    thread_join(t2);
+    int32_t i;
     /* line 79 */
-    printf("threads done: n=%d\n", c.n);
+    for (i = 0; i < 4; i++) {
+        /* line 80 */
+        arr[i] = ((i + 1) * 10);
+    }
+    /* line 81 */
+    s = stringify_i4_a4(arr, (stringify_t){ .compact = 1 });
     /* line 82 */
-    {
-        struct note _rp = {0};
-        _rp.tag = 7;
-        thread_run((void (*)(void *))note_rpc, &_rp, sizeof(_rp), NULL);
-    }
+    print("一维数组: %s", s.cstr());
     /* line 83 */
-    P_usleep(50000);
+    s.drop();
+    /* line 85 */
+    color c = Green;
     /* line 86 */
-    if (mutex_try_lock(&c.mu)) {
-        /* line 87 */
-        printf("try_lock ok\n");
-        /* line 88 */
-        mutex_unlock(&c.mu);
-    }
+    s = stringify_color(c, (stringify_t){ .compact = 1 });
+    /* line 87 */
+    print("枚举: %s", s.cstr());
+    /* line 88 */
+    s.drop();
     /* line 91 */
-    next_id();
+    char buf[64];
     /* line 92 */
-    next_id();
-    /* line 93 */
-    printf("tls id=%d\n", next_id());
-    /* line 96 */
-    c.n = 0;
-    /* line 97 */
-    thread *b1 = NULL;
-    /* line 98 */
-    thread *b2 = NULL;
-    /* line 99 */
-    {
-        struct bump _rp = {0};
-        _rp.c = &(c);
-        _rp.rounds = 10000;
-        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b1)));
-    }
-    /* line 100 */
-    {
-        struct bump _rp = {0};
-        _rp.c = &(c);
-        _rp.rounds = 20000;
-        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)));
-    }
-    /* line 101 */
-    thread_join(b1);
-    /* line 102 */
-    thread_join(b2);
-    /* line 103 */
-    printf("tls threads ok: %d\n", c.n);
-    /* line 105 */
-    mutex_drop(&c.mu);
-    /* line 108 */
-    sig s = {0};
-    /* line 109 */
-    s.ready = 0;
-    /* line 110 */
-    mutex_init(&s.mu);
-    /* line 111 */
-    cond_init(&s.cv);
-    /* line 112 */
-    {
-        struct ping _rp = {0};
-        _rp.s = &(s);
-        thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL);
-    }
-    /* line 113 */
-    mutex_lock(&s.mu);
-    /* line 114 */
-    while (s.ready == 0) {
-        /* line 115 */
-        cond_wait(&(s.cv), &(s.mu), 0, 0);
-    }
-    /* line 116 */
-    mutex_unlock(&s.mu);
-    /* line 117 */
-    printf("cond wait ok: ready=%d\n", s.ready);
-    /* line 120 */
-    mutex_lock(&s.mu);
-    /* line 121 */
-    cond_wait(&(s.cv), &(s.mu), 5000000, 0);
-    /* line 122 */
-    mutex_unlock(&s.mu);
-    /* line 123 */
-    printf("cond timeout ok\n");
-    /* line 125 */
-    cond_drop(&s.cv);
-    /* line 126 */
-    mutex_drop(&s.mu);
-    /* line 129 */
-    ctx c2 = {0};
-    /* line 130 */
-    c2.n = 0;
-    /* line 131 */
-    mutex_init(&c2.mu);
-    /* line 132 */
-    pool p = {0};
-    /* line 133 */
-    pool_init(&p, 4);
-    /* line 134 */
-    int32_t k = 0;
-    /* line 135 */
-    for (k = 0; k < 8; k++) {
-        /* line 136 */
-        {
-            struct work _rp = {0};
-            _rp.c = &(c2);
-            _rp.rounds = 1000;
-            pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
-        }
-    }
-    /* line 137 */
-    pool_join(&p);
-    /* line 138 */
-    printf("pool done: n=%d\n", c2.n);
-    /* line 139 */
-    {
-        struct work _rp = {0};
-        _rp.c = &(c2);
-        _rp.rounds = 1000;
-        pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
-    }
-    /* line 140 */
-    pool_drop(&p);
-    /* line 141 */
-    printf("pool drop: n=%d\n", c2.n);
-    /* line 142 */
-    mutex_drop(&c2.mu);
-    /* line 143 */
+    print("缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (stringify_t){ .compact = 1 }));
+    /* line 94 */
     return 0;
 }

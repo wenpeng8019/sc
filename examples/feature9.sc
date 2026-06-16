@@ -1,78 +1,67 @@
-# 特性 9：链表结构体（def T: ~）与内置 chain 双向链表
-#   - def T: ~ {}：链表标记，转 C 在成员首位注入 void *_prev, *_next
-#   - chain（inc adt.sc）：head 为首元素；首元素 _prev = 尾元素（rear），尾元素 _next = nil
-#   - base(o)、prev(o)、next(o)：内置导航函数，返回 void*；支持强制类型转换获得类型化结果
-#   - 不拥有元素：remove/pop/cut 不释放元素本身
+# 特性 9：内置 ADT
+# > builtins/adt 模块：实现
+#
+#   - 成员函数：结构体内直接实现（签名字段 + 缩进函数体）
+#   - 方法声明：fnc T::m 仅声明形态（实现在 C 侧，见 adt.sc）
+#   - 栈构造：var x: T 声明即自动调用 T 的 init（局部、无初值、非指针）
+#   - 堆构造：T() 类型伪调用 → malloc + 字段默认值/清零 + init
+#   - drop 析构：手动调用（命名保留，未来支持自动插入）；堆对象再 free
+#   - 调用糖：值接收者 o.m(...) / 指针接收者 p->m(...)
 inc stdio.h
 inc stdlib.h
 inc adt.sc
 
-def task: ~ {
-    id: i4
+# 成员函数：结构体内直接实现，函数体内用 this 访问接收者
+def counter: {
+    n: i4
+    init: fnc
+        this->n = 100
+    add: fnc: i4, k: i4
+        this->n = this->n + k
+        return this->n
 }
 
-# 顺序打印整条链（正向遍历：尾元素 next() 为 nil）
-fnc dump: tag&: char, l&: chain
-    printf("%s:", tag)
-    var it&: task = l->first(): task&
-    while it != nil
-        printf(" %d", it->id)
-        it = (next(it): task&)
-    printf("\n")
+fnc str_cmp -> list_cmp
+    return strcmp(a: char&, b: char&)    # 裸强转：实参位置免括号
 
 fnc main: i4
-    var l: chain
-    var t[6]: task
-    var i: i4
-    for i = 0; i < 6; i++
-        t[i].id = i
+    # 声明即构造：自动调用 counter_init/string_init/list_init
+    var c: counter
+    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
 
-    # append 队尾 / push 队首
-    l.append(&t[2])
-    l.append(&t[3])
-    l.push(&t[1])
-    dump("append/push", &l)            # 1 2 3
+    # string：动态字符串
+    var s: string
+    s.append("Hello")
+    s.append(", sc!")
+    printf("s=%s len=%llu\n", s.cstr(), s.len())
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
+           s.find("sc", 0), s.starts_with("Hello"))
+    var part: string
+    s.slice(-3, -1, &part)              # 负索引切片
+    printf("slice(-3,-1)=%s\n", part.cstr())
+    s.upper()
+    printf("upper=%s\n", s.cstr())
 
-    # before / after 定点插入
-    l.before(&t[1], &t[0])
-    l.after(&t[3], &t[4])
-    dump("before/after", &l)           # 0 1 2 3 4
+    # list：动态指针数组（元素 v&，不拥有元素）
+    var l: list
+    l.push("banana")
+    l.push("apple")
+    l.push("cherry")
+    l.sort(str_cmp)
+    var i: u8 = 0
+    for i = 0; i < l.len(); i++
+        printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
 
-    # first / last（首元素 prev() 即 rear）
-    var f&: task = l.first(): task&
-    var b&: task = l.last(): task&
-    var r&: task = (prev(f): task&)
-    printf("first=%d last=%d rear=%d\n", f->id, b->id, r->id)
+    # 析构：手动 drop（指针接收者用 ->）
+    var lp&: list = &l
+    lp->drop()
+    part.drop()
+    s.drop()
 
-    # remove 中间元素 / pop 队首
-    l.remove(&t[2])
-    var p&: task = l.pop(): task&
-    printf("pop=%d\n", p->id)          # 0
-    dump("remove/pop", &l)             # 1 3 4
-
-    # revert 首尾翻转
-    l.revert()
-    dump("revert", &l)                 # 4 3 1
-
-    # cut 截取 [3..1] 段为新链
-    var seg: chain
-    l.cut(&t[3], &t[1], &seg)
-    dump("cut-out", &seg)              # 3 1
-    dump("cut-rest", &l)               # 4
-
-    # append_to / push_to 整链拼接（自身清空）
-    seg.append_to(&l)
-    dump("append_to", &l)              # 4 3 1
-    printf("seg empty=%d\n", seg.first() == nil)
-    l.cut(&t[3], &t[1], &seg)
-    seg.push_to(&l)
-    dump("push_to", &l)                # 3 1 4
-
-    # 堆元素同样可入链
-    var h&: task = task()
-    h->id = 9
-    l.append(h)
-    dump("heap", &l)                   # 3 1 4 9
-    l.remove(h)
-    free(h: void&)
+    # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
+    var hs&: string = string()
+    hs->append("on the heap")
+    printf("heap: %s\n", hs->cstr())
+    hs->drop()
+    free(hs)
     return 0

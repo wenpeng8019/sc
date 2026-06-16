@@ -2,24 +2,32 @@
 
 inc stdio.h
 
-rpc add: i4, a: i4, b: i4
+@def Color: i1
+    Red = 0
+    Green
+
+@def Point: {
+    x: i4
+    y: i4
+}
+
+@var total: i4 = 0
+
+@fnc add: i4, a: i4, b: i4
     return a + b
 
-rpc greet: n: i4
-    printf("hello rpc x%d\n", n)
-
-rpc strlen2: i4, s&: char
-    var n: i4 = 0
-    while s[n] != 0
-        n++
-    return n * 2
-
-@rpc square: i4, x: i4
-    return x * x
+@def tracker: {
+    val: i4
+    read: fnc: i4
+    init: fnc
+        this->val = 0
+    add: fnc: k: i4
+        this->val = (this->val + k)
+    fnc read::: i4
+}
 
 fnc main: i4
-    printf("add(3,4) = %d\n", add(3, 4))
-    greet(2)
-    printf("strlen2 = %d\n", strlen2("abc"))
-    printf("square(9) = %d\n", square(9))
+    printf("add = %d\n", add(2, 3))
+    total = add(10, 20)
+    printf("total = %d\n", total)
     return 0
