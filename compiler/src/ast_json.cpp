@@ -196,8 +196,11 @@ std::string declNode(const Decl& d) {
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
+            std::string sd = X;
+            if (d.linked) sd += "~";
+            else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
-                           d.name, X, d.line, d.external, d.origin, d.used, c);
+                           d.name, sd, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::AliasD:
             return nodeExt("alias", d.name, X + "-> " + typeToStr(d.structCommon.type), d.line,

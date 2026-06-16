@@ -196,8 +196,10 @@ struct SGen {
             case Decl::UnionD: {
                 const char* open = d.kind == Decl::StructD ? "{" : "(";
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
+                std::string mark = d.linked ? "~ "
+                    : (!d.adtItem.empty() ? ("<" + d.adtColl + ", " + d.adtItem + "> ") : "");
                 ind(); out << X << "def " << d.name << ": "
-                           << (d.linked ? "~ " : "") << open << "\n";
+                           << mark << open << "\n";
                 depth++;
                 for (auto& f : d.structCommon.fields) {
                     if (f.synthetic) continue;  // 链表注入成员由 ~ 标记再生

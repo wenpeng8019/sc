@@ -1,4 +1,4 @@
-# 特性 10：io 子模块 —— print / stringify(...) 关键字
+# 特性 8：io 子模块 —— print / stringify(...) 关键字
 
 inc stdio.h
 inc adt.sc

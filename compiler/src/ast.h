@@ -307,6 +307,9 @@ struct Decl {
     bool exported = false;          // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
     bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
+    std::string adtColl;            // ADT 容器结构体 def T: <C, I> {}：C=容器类型名
+    std::string adtItem;            // 同上：I=元素节点类型名（注入为 T 首个 synthetic 成员 _adt）
+
     std::vector<StmtPtr> body;      // FuncD: 函数体的语句列表
                                     // + FuncTypeD 的 body 为空，只有签名无实现
 

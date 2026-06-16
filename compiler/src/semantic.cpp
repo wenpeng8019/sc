@@ -208,6 +208,9 @@ struct Checker {
             case Expr::Ident: {
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
                 if (e.text == "true" || e.text == "false") return Ty{"bool", 0, 0, true, false};
+                if (e.text == "ok" && locals.find("ok") == locals.end()
+                    && globals.find("ok") == globals.end())
+                    return Ty{"ret", 0, 0, true, false};  // ADT 接口成功返回码（= 0）
                 auto it = locals.find(e.text);
                 if (it != locals.end()) return it->second;
                 it = globals.find(e.text);

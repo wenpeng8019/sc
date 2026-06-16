@@ -30,6 +30,7 @@ std::string mapBase(const std::string& n) {
         {"f4", "float"},   {"f8", "double"},
         {"bool", "uint8_t"},  // 布尔：u1 的语义别名（true/false 即 1/0）
         {"char", "char"},     // 字符：与 C 字符串字面量/接口互操作用（区别于 i1/u1）
+        {"ret", "int32_t"},   // ADT 接口返回码：i4 的语义别名（ok=0 表成功，非 0 表失败）
         {"va_list", "va_list"},  // 透传：可变参数列表类型
     };
     auto it = m.find(n);
@@ -98,7 +99,6 @@ struct CGen {
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
     int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + print 原型）
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见）
-    bool usesLPrev = false;     // 出现 prev 链表导航：需输出边界安全前驱 helper sc__lprev
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -222,6 +222,15 @@ struct CGen {
         return nullptr;
     }
 
+    // prev 边界安全前驱依赖内置 chain（adt.sc 提供 chain_prev 契约）。
+    // 仅在实际为「链表结构体」生成 chain_prev 调用处校验，避免与同名 ADT 成员函数 prev 冲突。
+    void requireChain(int line) const {
+        if (aggrOf("chain")) return;
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::IncD && endsWith(d->name, "adt.sc")) return;
+        throw CompileError{"prev 边界安全前驱依赖内置 chain，请先 inc adt.sc", line};
+    }
+
     // ---- T() 伪调用预扫描：收集需要生成 T__new 辅助函数的类型 ----
     std::set<std::string> heapNews;
 
@@ -231,11 +240,7 @@ struct CGen {
         // print / stringify 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
-            // prev(o) 导航函数形式：边界安全前驱 helper
-            if (e.a->text == "prev" && e.args.size() == 1) usesLPrev = true;
         }
-        // it->prev 成员形式：链表前驱导航（边界安全 helper sc__lprev）
-        if (e.kind == Expr::Member && e.text == "prev") usesLPrev = true;
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
         if (e.c) scanExprForNew(*e.c);
@@ -317,7 +322,7 @@ struct CGen {
     char scalarClass(const std::string& rawName) const {
         std::string n = resolveAliasName(rawName);
         if (enums.count(n)) return 'i';
-        if (n == "i1" || n == "i2" || n == "i4" || n == "i8") return 'i';
+        if (n == "i1" || n == "i2" || n == "i4" || n == "i8" || n == "ret") return 'i';
         if (n == "u1" || n == "u2" || n == "u4" || n == "u8") return 'u';
         if (n == "f4" || n == "f8") return 'f';
         if (n == "bool") return 'b';
@@ -776,7 +781,29 @@ struct CGen {
         out << "0";
     }
 
-    // 查询被调目标的形参表（用于缺参补全）：
+    // 方法实参：ADT 容器接口 T&⟷I& 零偏移自动重解释。
+    // 形参声明为 I&（或 I&&）、实参为 <*, I> 容器元素 T&（或 T&&）时，
+    // 把实参指针重解释为 I*（I 注入在 T 首位，offset 0 无需调整）。
+    void emitMethodArg(const Expr& arg, const Field* param) {
+        if (param && param->type.arrayDims.empty() && param->type.ptr > 0) {
+            VType at;
+            if (exprVType(arg, at) && (at.ptr > 0 || at.arr > 0)) {
+                const Decl* ad = aggrOf(at.name);
+                std::string pbase = resolveAliasName(param->type.name);
+                if (ad && !ad->adtItem.empty() && !pbase.empty()
+                    && pbase == resolveAliasName(ad->adtItem)) {
+                    out << "(" << mapBase(pbase);
+                    for (int i = 0; i < param->type.ptr; i++) out << " *";
+                    out << ")(";
+                    emitExpr(arg, true);
+                    out << ")";
+                    return;
+                }
+            }
+        }
+        emitExpr(arg, true);
+    }
+
     //   函数指针变量/参数（内联签名或命名函数类型）→ 顶层 fnc → rpc 包装
     const std::vector<Field>* calleeParams(const std::string& n) const {
         // 变量（含参数）优先：遮蔽同名函数
@@ -822,6 +849,8 @@ struct CGen {
             case Expr::Ident:
                 if (e.text == "this") out << "_this";      // 方法内接收者
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
+                else if (e.text == "ok" && !localsT.count("ok") && !globalsT.count("ok"))
+                    out << "0";                            // ADT 接口成功返回码（类型 ret）
                 else if (curRpc && rpcParams.count(e.text))
                     out << "_p->" << e.text;               // rpc 实际函数内：参数即结构体成员
                 else out << e.text;                        // true/false 由 stdbool.h 提供
@@ -885,7 +914,7 @@ struct CGen {
 
                         if (kw == "base") {
                             if (typed) { emitBaseCast(*e.args[0]); break; }
-                            if (hasVt && sd && sd->linked) {
+                            if (hasVt && sd && (sd->linked || !sd->adtItem.empty())) {
                                 const Field* rf = firstRealField(sd);
                                 if (rf) {
                                     if (vt.ptr > 0 || vt.arr > 0) {
@@ -911,6 +940,7 @@ struct CGen {
                             const char* off = kw == "prev" ? "0" : "sizeof(void *)";
                             // prev：边界安全前驱（head→NULL），经 adt 契约 chain_prev
                             if (kw == "prev") {
+                                requireChain(e.line);
                                 if (typed) {
                                     const Expr& c = *e.args[0];
                                     out << "((" << mapBase(c.text);
@@ -975,9 +1005,11 @@ struct CGen {
                             out << md->name << "(";   // 修饰名 T_m
                             if (e.a->op == ".") out << "&";
                             emitExpr(*e.a->a);
-                            for (auto& a : e.args) {
+                            for (size_t i = 0; i < e.args.size(); i++) {
                                 out << ", ";
-                                emitExpr(*a, true);
+                                const Field* pf = i < md->structCommon.fields.size()
+                                                ? &md->structCommon.fields[i] : nullptr;
+                                emitMethodArg(*e.args[i], pf);
                             }
                             // 缺参 0 补全（接收者已占首参，后续皆需逗号）
                             for (size_t i = e.args.size(); i < md->structCommon.fields.size(); i++) {
@@ -1022,6 +1054,7 @@ struct CGen {
                     if (exprVType(*e.a, base)) {
                         const Decl* sd = aggrOf(base.name);
                         if (sd && sd->linked) {
+                            requireChain(e.line);
                             out << "((void *)chain_prev(";
                             if (e.op == "->") emitExpr(*e.a);
                             else { out << "&("; emitExpr(*e.a, true); out << ")"; }
@@ -1970,14 +2003,24 @@ struct CGen {
                 << "typedef struct mutex mutex;\n"
                 << "extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);\n\n";
 
-        // prev 链表导航：边界安全前驱由 adt 的 C 契约 chain_prev 提供（rear 约定属 chain 概念）。
-        // head 无前驱 → NULL（rear 仅经 last() 获取）。codegen 只生成调用，要求先 inc adt.sc。
-        if (usesLPrev && !aggrOf("chain")) {
-            bool hasAdt = false;
-            for (auto& d : prog.decls)
-                if (d->kind == Decl::IncD && endsWith(d->name, "adt.sc")) hasAdt = true;
-            if (!hasAdt)
-                throw CompileError{"prev 边界安全前驱依赖内置 chain，请先 inc adt.sc", 0};
+        // ADT 容器（def T: <C, I> {}）接口完备性校验：
+        // 容器 C 与元素节点 I 必须已定义，且 C 具备必备成员函数 insert/remove/find/first/next
+        // （last/prev 可选）。导航语义经容器方法实现，元素 T 在 C 视角下零偏移重解释为 I。
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::StructD || d->adtItem.empty()) continue;
+            const std::string sig = " <" + d->adtColl + ", " + d->adtItem + ">";
+            const Decl* coll = aggrOf(d->adtColl);
+            if (!coll)
+                throw CompileError{"ADT 容器类型 " + d->adtColl + " 未定义（def "
+                                   + d->name + ":" + sig + "）", d->line};
+            if (!aggrOf(d->adtItem))
+                throw CompileError{"ADT 元素节点类型 " + d->adtItem + " 未定义（def "
+                                   + d->name + ":" + sig + "）", d->line};
+            for (const char* req : {"insert", "remove", "find", "first", "next"})
+                if (!findMethod(coll->name, req))
+                    throw CompileError{"ADT 容器 " + d->adtColl + " 缺少必备成员函数 "
+                                       + req + "（def " + d->name + ":" + sig
+                                       + " 要求 insert/remove/find/first/next）", d->line};
         }
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）

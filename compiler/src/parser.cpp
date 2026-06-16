@@ -398,6 +398,21 @@ struct Parser {
         // ~：链表标记（仅结构体）—— 转 C 时在成员前面注入 _prev/_next 自链指针
         bool linked = acceptOp("~");
 
+        // <C, I>：ADT 容器标记（仅结构体）—— C=自定义容器类型，I=元素节点类型；
+        // 转 C 时把 I 整体注入为 T 的首个 synthetic 成员（offset 0），从而 T& 与 I& 可零偏移互转
+        std::string adtColl, adtItem;
+        bool isAdt = false;
+        if (!linked && atOp("<")) {
+            isAdt = true;
+            advance();                                  // '<'
+            if (!at(Tok::Ident)) err("期望容器类型名");
+            adtColl = advance().text;
+            expect(Tok::Comma, "','");
+            if (!at(Tok::Ident)) err("期望元素节点类型名");
+            adtItem = advance().text;
+            if (!acceptOp(">")) err("'>'");
+        }
+
         // 2. 对于 { ... } 结构体
         if (at(Tok::LBrace)) {
 
@@ -430,12 +445,28 @@ struct Parser {
                                  std::make_move_iterator(injected.end()));
             }
 
+            // ADT 容器：把 I 整体注入为首个 synthetic 成员 _adt
+            d->adtColl = adtColl;
+            d->adtItem = adtItem;
+            if (isAdt) {
+                for (auto& f : d->structCommon.fields)
+                    if (f.name == "_adt")
+                        err("_adt 为 ADT 容器结构体内置成员，不可显式定义");
+                Field f;
+                f.name = "_adt";
+                f.type.name = adtItem;
+                f.synthetic = true;
+                f.line = d->line;
+                d->structCommon.fields.insert(d->structCommon.fields.begin(), std::move(f));
+            }
+
             expect(Tok::Newline, "换行");
             return d;
         }
 
         // 只有结构体支持链表标记 '~'
         if (linked) err("'~' 链表标记仅支持结构体 {}");
+        if (isAdt) err("'<C, I>' ADT 容器标记仅支持结构体 {}");
 
         // 3. 对于 ( ... ) 联合体
         if (at(Tok::LParen)) {

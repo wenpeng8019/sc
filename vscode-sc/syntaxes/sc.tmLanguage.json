@@ -96,7 +96,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.sc",
-                    "match": "\\b(sizeof|offsetof)\\b"
+                    "match": "\\b(sizeof|offsetof|base)\\b"
                 },
                 {
                     "name": "variable.language.linked.sc",
@@ -108,7 +108,7 @@
             "patterns": [
                 {
                     "name": "constant.language.sc",
-                    "match": "\\b(true|false|nil)\\b"
+                    "match": "\\b(true|false|nil|ok)\\b"
                 }
             ]
         },
@@ -116,7 +116,7 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8)\\b"
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret)\\b"
                 },
                 {
                     "name": "entity.name.type.library.sc",
@@ -124,7 +124,7 @@
                 },
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8)\\b(?!\\s*[:(])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret)\\b(?!\\s*[:(])"
                 },
                 {
                     "name": "entity.name.type.library.sc",
