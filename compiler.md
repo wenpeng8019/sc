@@ -48,6 +48,8 @@ scc <input.sc | -> [选项] [-- 程序参数...]
 | `--emit-c` | 转译为 C 源码 |
 | `--ast` | 输出 AST JSON |
 | `--emit-sc` | 再生规范化 sc 源码 |
+| `--clang [lib]` | 用 libclang 解析 C 头 `inc` 的外部描述符（仅 `--ast`，见 §8.3）；`lib` 可省略，省略时自动检测平台默认 libclang；也可用 `SCC_CLANG` 指定 |
+| `--from <path>` | stdin 输入时提供「虚拟源文件路径」，作为 `inc` 相对路径解析与外部描述符采集的基准目录（插件实时编辑场景用） |
 | `--` | 其后所有参数透传给被执行的程序（仅运行模式） |
 | `-h` / `--help` | 帮助 |
 
@@ -364,16 +366,117 @@ feature1.sc:31: 错误: 期望 ':'，得到 ''
 
 ## 8. AST JSON（--ast）
 
-节点格式：`{"k":kind, "n":name, "d":detail, "l":line, "c":[children]}`，
-扩展字段：`"x":1` 表示外部模块符号，`"o"` 为来源模块路径，根节点 `"e"` 为外部符号表。
+### 8.1 节点格式
+
+节点格式：`{"k":kind, "n":name, "d":detail, "l":line, "c":[children]}`，外部描述符
+相关扩展字段：
+
+| 字段 | 位置 | 含义 |
+|---|---|---|
+| `"x":1` | 节点 | 该符号来自外部（其它 `.sc` 模块或 C 头），不参与本单元代码生成 |
+| `"o":"..."` | 节点 | 来源（`.sc` 模块路径，或 C 头裸名如 `stdio.h`） |
+| `"u":1/0` | 外部节点 | 该外部符号是否被本单元引用（`1` 已用 / `0` 仅导入未用） |
+| `"t":N` | 外部 `inc` 节点 | 来源声明总数（`-1` = 未知，退化文本匹配无法枚举时） |
+| `"e":[...]` | 根节点 | 外部符号表（合并自依赖模块导出 + C 头描述符） |
+| `"w":[{"m","l"}]` | 根节点 | 使用分析警告（如「导入但未使用」），`m` 消息、`l` 行号 |
 
 是 VSCode 两个插件的数据源：
 
 - **sc-lang**（vscode-sc）：作用域感知自动完成、实时诊断、悬停、跳转定义、
   文档符号、格式化（基于 `--emit-sc`）。
-- **sc-ast-view**（vscode-sc-ast）：AST 树视图与树结构源码对照。
+- **sc-ast-view**（vscode-sc-ast）：AST 树视图与树结构源码对照（按 `"e"`/`"u"`/`"t"`
+  渲染「外部描述符」分组与「已用 N / 共 M」统计）。
 
 插件通过 `scc - --ast`（stdin）调用，按文档版本缓存。
+
+### 8.2 外部描述符与使用分析
+
+`inc` 依赖引入的对外符号统称**外部描述符**，采集后做使用分析，供插件展示与诊断：
+
+- **`.sc` 模块**：§3.2 解析依赖图时把直接依赖的 `@` 导出声明合并进导入方 AST
+  并标记 `external`，来源 `origin` 为解析到的模块绝对路径，声明总数已知
+  （`externDeclared` = 导出符号数，`externAnalyzed` = true）。
+- **C 头**（非 `.sc`，见 §8.3）：由 `gatherCHeaderDescriptors` 单独采集。
+- **使用分析**（`analyzeExternalUsage`）：扫描本单元引用集合（`collectExternalRefs`），
+  逐个外部描述符标记 `used`；当某来源「声明集合完整可知」（`externAnalyzed`）且
+  「总数非 0」却「无任何引用」时，产出一条「导入但未使用」警告（进根节点 `"w"`）。
+  这是 lenient（仅警告、不报错）策略，避免误伤条件包含等场景。
+
+### 8.3 C 头解析（--clang 与 libclang）
+
+sc 与 C 共生（§总览），`inc stdio.h` / `inc "my.h"` 这类 **C 头依赖**同样可被采集为
+外部描述符，与 `.sc` 模块走同一套使用分析与插件展示。该采集**仅在 `--ast` 模式**
+触发（编译/运行不受影响，避免每次都去解析系统头），有两条精度不同的路径：
+
+**1. libclang 精确枚举（指定 `--clang`）**
+
+- libclang 通过 `dlopen` 在**运行时按需加载**——编译期不依赖 clang-c，二进制不增加
+  任何链接依赖；只内联声明用到的最小 ABI（`clang_parseTranslationUnit` 等十余个
+  符号 + 几个 `CXCursorKind` 稳定枚举值）。
+- 对每个 C 头单独构造 `#include <X>` 翻译单元，解析后遍历顶层游标，按类别映射为
+  `Decl::Kind`：函数→`fnctype`（仅签名）、`typedef`→`alias`、`struct`/`union`/`enum`
+  原样、变量→`var`、宏→`let`（当常量展示）。聚合头（递归包含大量子头，如
+  `windows.h`）也能枚举到真实符号。
+- 解析选项 `DetailedPreprocessingRecord`（取得宏）`| SkipFunctionBodies`（提速）。
+- **预定义符号过滤**：编译器内建宏 / 命令行定义的 presumed 文件名为空或形如
+  `<built-in>`，不属于任何真实头文件，统计会严重失真，故按来源位置剔除。
+- **macOS 自动 sysroot**：未显式给出目标三元组/sysroot 时，自动 `xcrun --show-sdk-path`
+  注入 `-isysroot`，否则 libclang 只能枚举到预定义宏而找不到系统头。
+
+**2. 退化文本匹配（不带 `--clang`）**
+
+无 libclang 时，在能定位到的头文件文本里查本单元引用集合中的标识符是否出现——
+只能识别「已被引用」的符号，**无法枚举未使用符号**（此时 `externDeclared` 记为 `-1`，
+插件不显示「共 M」）。无需任何外部依赖，是默认兜底行为。
+
+**降噪**：总是合成 `used` 符号；`unused` 符号仅当该头声明总数 ≤ 阈值（64）时才逐个
+灌入 AST，否则只在 `inc` 节点记录总数 `externDeclared`，供插件显示「已用 N / 共 M」，
+避免 `windows.h` 这类聚合头产出数千节点撑爆树视图。
+
+**libclang 路径解析优先级**（`--clang` 出现时）：
+
+```
+--clang <path>  >  SCC_CLANG 环境变量  >  detectLibclang() 平台默认位置自动检测
+```
+
+- `--clang` 后**省略路径**：自动检测平台默认 libclang（macOS：Xcode /
+  CommandLineTools / Homebrew；Linux：常见库目录与 `llvm-*` 工具链；Windows：LLVM
+  安装目录；以及交由动态链接器搜索的 soname），检测失败**报错退出**。
+- `--clang <path>` 给出**显式路径**但无法 `dlopen` 加载 → **报错退出**。
+- **完全不带 `--clang`** → 退化为文本匹配（不报错）。
+
+**交叉编译 / 目标配置**：`--clang` 解析 C 头时复用与编译/链接相同的工具链配置
+（§4，按 `环境变量 > .sc 配置` 取值），翻译为 libclang 参数，使其按**目标平台**解析头：
+
+| 配置键（env / `.sc`） | 传给 libclang |
+|---|---|
+| `SCC_TARGET_TRIPLE` / `triple` | `-target <triple>` |
+| `SCC_SYSROOT` / `sysroot` | `--sysroot=<path>` |
+| `SCC_TARGET_FLAGS` / `target_flags` | 原样附加 |
+| `SCC_INC` / `inc` | 逐项 `-I` |
+| `SCC_CFLAGS` / `cflags` | 原样附加 |
+| `SCC_FREESTANDING` / `freestanding` | `-ffreestanding`（值为 `1`/`true`/`yes`） |
+| `SCC_CLANG_ARGS` | 原样附加，**最高优先**（直接透传任意 clang 参数） |
+
+显式给出目标三元组/sysroot 时不再自动注入本机 macOS SDK，避免污染目标平台头解析。
+
+**用法示例**：
+
+```sh
+scc app.sc --ast --clang                       # 自动检测平台默认 libclang，精确枚举 C 头
+scc app.sc --ast --clang /opt/homebrew/opt/llvm/lib/libclang.dylib   # 指定动态库
+SCC_CLANG=/usr/lib/llvm-18/lib/libclang.so.1 scc app.sc --ast --clang # 环境变量指定
+scc app.sc --ast                               # 不带 --clang：退化文本匹配
+# 交叉编译目标（按目标平台头解析）：
+SCC_TARGET_TRIPLE=x86_64-linux-gnu SCC_SYSROOT=/path/to/sysroot \
+  scc app.sc --ast --clang
+# stdin（插件实时编辑场景）：--from 提供基准目录
+echo '...' | scc - --ast --from /abs/path/app.sc --clang
+```
+
+> 注：`--clang` 采用类似 `-o` 的取值启发——仅当紧跟的下一个 token 不以 `-` 开头时
+> 才当作 `lib` 路径吞掉；故 `scc app.sc --ast --clang` 安全（末尾裸 `--clang`），
+> 而 `scc --clang app.sc --ast` 会把 `app.sc` 误当 lib。建议把裸 `--clang` 放在参数末尾。
 
 ## 9. 源码再生（--emit-sc）
 
@@ -424,6 +527,7 @@ cmake --build build
 | `compiler/src/codegen_c.cpp` | C 后端（含头文件生成 `emitCHeader`） |
 | `compiler/src/codegen_sc.cpp` | sc 源码再生后端 |
 | `compiler/src/ast_json.cpp` | AST JSON 后端 |
+| `compiler/src/cheaders.cpp` | C 头外部描述符采集（dlopen libclang 枚举 / 退化文本匹配，见 §8.3） |
 | `compiler/src/ast_print.cpp` | 表达式/类型/字段文本序列化（sc 后端与 JSON 后端共用） |
 | `compiler/src/main.cpp` | 入口：参数解析、配置加载、模块图、编译+执行、错误格式化 |
 

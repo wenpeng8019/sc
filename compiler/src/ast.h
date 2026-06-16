@@ -273,6 +273,12 @@ struct Decl {
 
     std::string origin;          // 外部符号来源（导入文件路径或 builtin 名称）
     bool external = false;       // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
+    bool used = false;           // external 描述符是否被当前单元引用（仅对 external 有意义；
+                                 // 由 analyzeExternalUsage 统计，供插件区分"已引用/仅导入未用"）
+    int  externDeclared = -1;    // 仅 external IncD：该来源(模块/头文件)声明的描述符总数；
+                                 // -1=未知（C 头退化文本匹配模式无法枚举全集）。供插件显示"已用 N / 共 M"
+    bool externAnalyzed = false; // 仅 external IncD：是否已确定该来源的符号全集
+                                 //（.sc 合并 / libclang 解析 / 退化读到头文件）→ 允许"导入未使用"警告
     bool exported = false;       // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
     bool linked = false;         // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
@@ -303,4 +309,12 @@ struct Decl {
 struct Program {
     std::vector<DeclPtr> decls;             // 顶层声明列表，按源码中的书写顺序排列
     std::vector<std::string> externSymbols; // 当前单元引用到的外部符号（模块/头文件导入后汇总）
+};
+
+// ---------- 诊断信息 ----------
+// 非致命的提示/警告（区别于 CompileError 的致命错误）。
+// 目前用于外部描述符分析：导入但未被引用的模块等。供 --ast JSON 携带给插件展示。
+struct Diagnostic {
+    std::string msg;   // 提示文本
+    int line = 0;      // 关联源码行（0=无）
 };

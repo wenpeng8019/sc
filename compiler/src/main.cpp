@@ -25,6 +25,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "semantic.h"
+#include "cheaders.h"
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -76,6 +77,12 @@ static void usage() {
               << "  --emit-c   转译为 C 源码（配合 -o 输出到文件，缺省 stdout；\n"
               << "             存在 @导出对象且指定 -o 时，额外生成同名 .h 头文件；不受以上编译配置影响）\n"
               << "  --ast      输出 AST JSON 树\n"
+              << "  --from <path>  stdin（'-'）输入时指定源文件路径，作为 inc 解析的基准目录\n"
+              << "             （供编辑器实时分析未保存内容时仍能合并外部描述符）\n"
+              << "  --clang [lib]  解析 C 头 inc 的外部描述符（仅 --ast）；省略 lib 时自动检测\n"
+              << "             平台默认位置的 libclang，检测失败报错；亦可用 SCC_CLANG 指定。\n"
+              << "             目标平台头解析复用交叉编译配置（triple/sysroot/inc/cflags）；\n"
+              << "             完全不带 --clang 则退化为头文件文本匹配\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
               << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
@@ -1029,6 +1036,9 @@ int main(int argc, char** argv) {
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
     std::vector<std::string> cmdLibs;         // -l 指定的链接库名
     std::string adtOpt;                       // --adt 指定的 adt 自定义实现
+    std::string fromPath;                     // --from 源文件路径（stdin 输入时供 inc 解析基准目录）
+    std::string clangLib;                     // --clang 指定的 libclang 路径（空 + clangRequested = 自动检测）
+    bool clangRequested = false;              // 是否出现 --clang（决定检测/加载失败是否报错）
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -1048,6 +1058,12 @@ int main(int argc, char** argv) {
         else if (a == "--target" && i + 1 < argc) loadProfile(argv[++i]);  // 交叉编译目标档
         else if (a == "--builtins" && i + 1 < argc)                 // 目标适配 builtins 目录
             g_builtinsOverride = argv[++i];
+        else if (a == "--from" && i + 1 < argc) fromPath = argv[++i];  // stdin 输入的源路径（inc 解析基准）
+        else if (a == "--clang") {                                  // libclang 路径；缺省值则自动检测平台默认位置
+            clangRequested = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-' && std::string(argv[i + 1]) != "--")
+                clangLib = argv[++i];
+        }
         else if (a.size() > 2 && a.compare(0, 2, "-l") == 0)
             cmdLibs.push_back(a.substr(2));                  // -lm 写法
         else if (a == "--build") mode = "build";             // 构建产物模式
@@ -1095,13 +1111,67 @@ int main(int argc, char** argv) {
     try {
 
         auto prog = parse(lex(src));                                // 词法分析(源码 → token 流) -> 语法分析(token 流 → AST 程序树)
-        if (input != "-")                                           // 对于目标工程文件输入
-            resolveUnitDeps(prog, std::filesystem::path(input));    // + 记录当前单元的模块依赖信息（不展开源码，合并依赖导出声明）
+        std::filesystem::path unitPath;                             // 当前单元源路径（文件输入 / stdin 的 --from）
+        if (input != "-") unitPath = std::filesystem::path(input);  // 对于目标工程文件输入
+        else if (!fromPath.empty()) unitPath = std::filesystem::path(fromPath);  // stdin + --from
+        if (!unitPath.empty())                                      // 解析 inc 依赖（不展开源码，合并 .sc 依赖导出声明）
+            resolveUnitDeps(prog, unitPath);                        //   使插件实时编辑场景也能合并外部描述符
+
+        if (mode == "ast") {                                        // 仅 AST 模式采集 C 头外部描述符
+            ClangOptions copt;                                      //   （避免编译/run 每次都解析系统头；保持其它模式行为不变）
+
+            // libclang 路径：--clang <path> > SCC_CLANG 环境变量 > （有请求时）自动检测
+            std::string lib = clangLib;
+            bool explicitLib = !lib.empty();
+            if (lib.empty())
+                if (const char* e = std::getenv("SCC_CLANG")) { lib = e; explicitLib = !lib.empty(); }
+            const bool wantClang = clangRequested || !lib.empty();
+            if (wantClang) {
+                if (lib.empty()) lib = detectLibclang();           // 裸 --clang：自动检测平台默认位置
+                if (lib.empty()) {                                  // 检测失败 → 报错
+                    std::cerr << "错误: 未能在平台默认位置检测到 libclang；"
+                                 "请用 --clang <path> 指定动态库，"
+                                 "或省略 --clang 退化为头文件文本匹配\n";
+                    return 1;
+                }
+                if (explicitLib && !tryLoadLibclang(lib)) {         // 显式路径但无法加载 → 报错
+                    std::cerr << "错误: 无法加载 libclang: " << lib << "\n";
+                    return 1;
+                }
+                copt.libPath = lib;
+
+                // 交叉编译/目标配置 → 传给 libclang，使其按目标平台解析 C 头
+                //（与编译/链接共用同一套 triple/sysroot/inc/cflags 配置）
+                auto addWords = [&](const std::string& s) {
+                    std::istringstream is(s);
+                    for (std::string t; is >> t;) copt.args.push_back(t);
+                };
+                const std::string triple = configValue("SCC_TARGET_TRIPLE", "triple");
+                if (!triple.empty()) { copt.args.push_back("-target"); copt.args.push_back(triple); }
+                const std::string sysroot = configValue("SCC_SYSROOT", "sysroot");
+                if (!sysroot.empty()) copt.args.push_back("--sysroot=" + sysroot);
+                addWords(configValue("SCC_TARGET_FLAGS", "target_flags"));
+                for (auto& p : splitBy(configValue("SCC_INC", "inc"), ":")) {
+                    copt.args.push_back("-I"); copt.args.push_back(p);
+                }
+                addWords(configValue("SCC_CFLAGS", "cflags"));
+                const std::string fst = configValue("SCC_FREESTANDING", "freestanding");
+                if (fst == "1" || fst == "true" || fst == "yes") copt.args.push_back("-ffreestanding");
+            }
+            if (const char* ea = std::getenv("SCC_CLANG_ARGS")) {   // 透传 clang 额外参数（最高优先），空白分隔
+                std::istringstream as(ea);
+                for (std::string t; as >> t;) copt.args.push_back(t);
+            }
+            const auto baseDir = unitPath.has_parent_path() ? unitPath.parent_path()
+                                                            : std::filesystem::current_path();
+            gatherCHeaderDescriptors(prog, baseDir, copt, collectExternalRefs(prog));
+        }
+        auto warnings = analyzeExternalUsage(prog);                 // 外部描述符使用统计（标记 used）+ 导入未使用警告
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
-        auto c = mode == "ast" ? emitAstJson(prog)                  // AST→JSON
+        auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
                : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h
                      ? emitC(prog, "", "stringify.h", &sofHeaderSrc)

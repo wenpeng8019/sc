@@ -50,12 +50,15 @@ std::string node(const std::string& k, const std::string& n, const std::string& 
 }
 
 std::string nodeExt(const std::string& k, const std::string& n, const std::string& d,
-                    int line, bool external, const std::string& origin,
+                    int line, bool external, const std::string& origin, bool used,
                     const std::vector<std::string>& children = {}) {
     std::string s = node(k, n, d, line, children);
     if (!external && origin.empty()) return s;
     if (!s.empty() && s.back() == '}') s.pop_back();
-    if (external) s += ",\"x\":1";
+    if (external) {
+        s += ",\"x\":1";
+        s += used ? ",\"u\":1" : ",\"u\":0";  // 已引用 / 仅导入未用
+    }
     if (!origin.empty()) s += ",\"o\":\"" + jesc(origin) + "\"";
     s += "}";
     return s;
@@ -153,14 +156,22 @@ std::string declNode(const Decl& d) {
     const std::string X = d.exported ? "@ " : "";
     switch (d.kind) {
         case Decl::IncD:
-            return nodeExt("inc", d.name, "", d.line, d.external, d.origin);
+            if (d.external) {
+                // 外部 inc：附加来源声明描述符总数 t（-1=未知/退化无法枚举），
+                // 供插件显示"已用 N / 共 M"
+                std::string s = nodeExt("inc", d.name, "", d.line, true, d.origin, d.used);
+                s.pop_back();  // 去掉结尾 '}'
+                s += ",\"t\":" + std::to_string(d.externDeclared) + "}";
+                return s;
+            }
+            return nodeExt("inc", d.name, "", d.line, d.external, d.origin, d.used);
         case Decl::EnumD: {
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("item", f.name,
                                  f.init ? "= " + exprToStr(*f.init) : "", f.line));
             return nodeExt("enum", d.name, X + ": " + typeToStr(d.structCommon.type), d.line,
-                           d.external, d.origin, c);
+                           d.external, d.origin, d.used, c);
         }
         case Decl::StructD:
         case Decl::UnionD: {
@@ -168,11 +179,11 @@ std::string declNode(const Decl& d) {
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
-                           d.name, X, d.line, d.external, d.origin, c);
+                           d.name, X, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::AliasD:
             return nodeExt("alias", d.name, X + "-> " + typeToStr(d.structCommon.type), d.line,
-                           d.external, d.origin);
+                           d.external, d.origin, d.used);
         case Decl::FuncTypeD: {
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
@@ -183,7 +194,7 @@ std::string declNode(const Decl& d) {
                 ? d.methodOwner + "::" + d.methodName : d.name;
             return nodeExt(d.isRpc ? "rpc" : "fnctype", ftName,
                            ret.empty() ? X : X + ": " + ret,
-                           d.line, d.external, d.origin, c);
+                           d.line, d.external, d.origin, d.used, c);
         }
         case Decl::FuncD: {
             std::vector<std::string> c;
@@ -200,7 +211,7 @@ std::string declNode(const Decl& d) {
             const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
             const std::string dtail = d.methodOwner.empty() ? (X + detail)
                                                            : (X + d.methodOwner + "::" + detail);
-            return nodeExt(d.isRpc ? "rpc" : "fnc", n, dtail, d.line, d.external, d.origin, c);
+            return nodeExt(d.isRpc ? "rpc" : "fnc", n, dtail, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::VarD:
         case Decl::LetD:
@@ -210,7 +221,7 @@ std::string declNode(const Decl& d) {
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
             return nodeExt(d.kind == Decl::VarD ? "var"
                          : d.kind == Decl::LetD ? "let" : "tls", "", X, d.line,
-                           d.external, d.origin, c);
+                           d.external, d.origin, d.used, c);
         }
     }
     return "{}";
@@ -218,7 +229,7 @@ std::string declNode(const Decl& d) {
 
 } // namespace
 
-std::string emitAstJson(const Program& prog) {
+std::string emitAstJson(const Program& prog, const std::vector<Diagnostic>& warnings) {
     std::vector<std::string> c;
     for (auto& d : prog.decls) c.push_back(declNode(*d));
     std::string s = node("program", "", "", 0, c);
@@ -228,6 +239,18 @@ std::string emitAstJson(const Program& prog) {
         for (size_t i = 0; i < prog.externSymbols.size(); i++) {
             if (i) s += ",";
             s += "\"" + jesc(prog.externSymbols[i]) + "\"";
+        }
+        s += "]}";
+    }
+    // 外部描述符分析的非致命警告（导入未使用等）：供插件渲染
+    if (!warnings.empty()) {
+        if (!s.empty() && s.back() == '}') s.pop_back();
+        s += ",\"w\":[";
+        for (size_t i = 0; i < warnings.size(); i++) {
+            if (i) s += ",";
+            s += "{\"m\":\"" + jesc(warnings[i].msg) + "\"";
+            if (warnings[i].line) s += ",\"l\":" + std::to_string(warnings[i].line);
+            s += "}";
         }
         s += "]}";
     }

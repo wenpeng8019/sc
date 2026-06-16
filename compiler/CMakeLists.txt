@@ -13,9 +13,13 @@ add_executable(scc
     src/codegen_c.cpp
     src/codegen_sc.cpp
     src/semantic.cpp
+    src/cheaders.cpp
 )
 
 target_compile_options(scc PRIVATE -Wall -Wextra)
+
+# 运行时 dlopen libclang（解析 C 头外部描述符）：链接 dl（Linux 需 -ldl，macOS 在 libSystem 内）
+target_link_libraries(scc PRIVATE ${CMAKE_DL_LIBS})
 
 # ------------------------------------------------------------
 # 发行版变体：-DSCC_EMBED_BUILTINS=ON

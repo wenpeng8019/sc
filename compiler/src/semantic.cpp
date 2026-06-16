@@ -20,6 +20,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -567,6 +568,7 @@ struct Checker {
 
     // ---- 顶层遍历：收集符号 + 检查全局变量初值 -------------------------------
     void collectTop() {
+
         // 第一遍：登记函数类型、结构体、别名到符号表
         for (auto& d : prog.decls) {
             if (d->kind == Decl::FuncTypeD && !d->isRpc && d->methodOwner.empty())
@@ -578,10 +580,12 @@ struct Checker {
         }
 
         // 第二遍：检查全局 var/let/tls 声明
-        for (auto& d : prog.decls) {
+        for (auto& d : prog.decls) {            
             if (d->kind != Decl::VarD && d->kind != Decl::LetD && d->kind != Decl::TlsD)
                 continue;
+
             for (auto& f : d->structCommon.fields) {
+
                 // 优先使用显式声明的类型，否则从初值推导或默认 char*
                 Ty lhs = fromTypeRef(f.type);
                 if (!lhs.valid || (lhs.name.empty() && lhs.ptr == 0 && lhs.arr == 0)) {
@@ -599,6 +603,7 @@ struct Checker {
 
     // ---- 遍历所有函数体 ---------------------------------
     void checkFunctions() {
+
         for (auto& d : prog.decls) {
             if (d->kind != Decl::FuncD) continue;
 
@@ -635,4 +640,124 @@ struct Checker {
 void semanticCheck(const Program& prog) {
     Checker c(prog);
     c.run();
+}
+
+// ============================================================
+// 外部描述符使用分析
+// ============================================================
+// 思路：先扫描"本单元自身代码"（非 external 声明）引用到的所有名字（标识符、
+// 类型名、成员名），汇成引用集；再据此判定每个 external 描述符是否被用到，
+// 最后对"贡献了描述符却整体未被引用"的 .sc 模块给出导入未使用警告。
+//
+// 采集采取"宁多勿少"策略（连同表达式 text/op 一并收集）——过度收集只会让更多
+// 描述符被判为已用、从而少报警告，方向偏宽松，避免误报，符合半宽松检查诉求。
+namespace {
+
+void usageType(const TypeRef& t, std::unordered_set<std::string>& refs);
+void usageExpr(const Expr& e, std::unordered_set<std::string>& refs);
+void usageStmt(const Stmt& s, std::unordered_set<std::string>& refs);
+
+void usageFields(const std::vector<Field>& fs, std::unordered_set<std::string>& refs) {
+    for (auto& f : fs) {
+        usageType(f.type, refs);
+        if (f.init) usageExpr(*f.init, refs);
+    }
+}
+
+// 收集类型名（含内联结构/联合成员、内联函数指针的参数与返回类型）
+void usageType(const TypeRef& t, std::unordered_set<std::string>& refs) {
+    if (!t.name.empty()) refs.insert(t.name);
+    usageFields(t.structCommon.fields, refs);
+    if (t.structCommon.type) usageType(*t.structCommon.type, refs);
+}
+
+// 收集表达式涉及的名字：Ident 名、成员名（Member.text）、强转/offsetof 类型名等
+void usageExpr(const Expr& e, std::unordered_set<std::string>& refs) {
+    if (!e.text.empty()) refs.insert(e.text);
+    if (!e.op.empty()) refs.insert(e.op);
+    if (e.a) usageExpr(*e.a, refs);
+    if (e.b) usageExpr(*e.b, refs);
+    if (e.c) usageExpr(*e.c, refs);
+    for (auto& a : e.args) if (a) usageExpr(*a, refs);
+}
+
+void usageStmt(const Stmt& s, std::unordered_set<std::string>& refs) {
+    if (s.expr) usageExpr(*s.expr, refs);
+    if (s.forInit) usageExpr(*s.forInit, refs);
+    if (s.forCond) usageExpr(*s.forCond, refs);
+    if (s.forStep) usageExpr(*s.forStep, refs);
+    usageFields(s.decls, refs);
+    for (auto& b : s.body) usageStmt(*b, refs);
+    for (auto& b : s.elseBody) usageStmt(*b, refs);
+    for (auto& arm : s.caseArms) {
+        for (auto& l : arm.labels) if (l) usageExpr(*l, refs);
+        for (auto& b : arm.body) usageStmt(*b, refs);
+    }
+    if (s.decl) {                                   // 函数体内内嵌 def
+        usageFields(s.decl->structCommon.fields, refs);
+        if (s.decl->structCommon.type) usageType(*s.decl->structCommon.type, refs);
+        for (auto& b : s.decl->body) usageStmt(*b, refs);
+    }
+}
+
+} // namespace
+
+// 采集本单元自身代码（非 external 声明）引用到的所有名字
+std::unordered_set<std::string> collectExternalRefs(const Program& prog) {
+    std::unordered_set<std::string> refs;
+    for (auto& d : prog.decls) {
+        if (d->external) continue;                  // 只看本单元自己写的代码
+        usageFields(d->structCommon.fields, refs);  // 签名/字段/参数类型
+        if (d->structCommon.type) usageType(*d->structCommon.type, refs);  // 返回/别名/枚举基类型
+        for (auto& s : d->body) usageStmt(*s, refs);  // 函数体
+    }
+    return refs;
+}
+
+std::vector<Diagnostic> analyzeExternalUsage(Program& prog) {
+
+    // 1. 采集本单元自身代码引用到的名字
+    std::unordered_set<std::string> refs = collectExternalRefs(prog);
+
+    // 2. 标记每个 external 描述符的 used 状态
+    //    方法：以方法名是否被调用（成员访问名进入 refs）判定；
+    //    其余（类型/函数/全局量）：以其名字是否被引用判定。
+    for (auto& d : prog.decls) {
+        if (!d->external || d->kind == Decl::IncD) continue;
+        d->used = !d->methodOwner.empty() ? refs.count(d->methodName) > 0
+                                          : refs.count(d->name) > 0;
+    }
+
+    // 3. 按来源汇总；对"声明了描述符却整体未被引用"的来源给出导入未使用警告。
+    //    来源总数优先取 Decl::externDeclared（C 头由 libclang 给出真实总数，可能
+    //    因降噪阈值未逐个合成 Decl）；.sc / 退化模式回退为已合成描述符计数。
+    std::unordered_map<std::string, int> originCount;  // 来源 → 已合成描述符数
+    std::unordered_map<std::string, int> originUsed;   // 来源 → 其中已用数
+    for (auto& d : prog.decls) {
+        if (!d->external || d->kind == Decl::IncD) continue;
+        originCount[d->origin]++;
+        if (d->used) originUsed[d->origin]++;
+    }
+    std::vector<Diagnostic> warns;
+    for (auto& d : prog.decls) {
+        if (d->kind != Decl::IncD || !d->external) continue;
+        const int used = originUsed.count(d->origin) ? originUsed[d->origin] : 0;
+        const bool isSc = d->name.size() >= 3 &&
+                          d->name.compare(d->name.size() - 3, 3, ".sc") == 0;
+        if (isSc) {
+            // .sc 模块：合并的导出声明即其符号全集，按已合成描述符计数填充统计字段
+            d->externDeclared = originCount.count(d->origin) ? originCount[d->origin] : 0;
+            d->externAnalyzed = true;
+        }
+        // 已确定符号全集、来源确有描述符、且无一被引用 → 警告
+        if (d->externAnalyzed && d->externDeclared != 0 && used == 0) {
+            std::string disp = d->name;  // 去掉 C 头两侧的 <>/"" 修饰，避免重复引号
+            if (disp.size() >= 2 &&
+                ((disp.front() == '<' && disp.back() == '>') ||
+                 (disp.front() == '"' && disp.back() == '"')))
+                disp = disp.substr(1, disp.size() - 2);
+            warns.push_back({"外部来源 \"" + disp + "\" 已导入，但其描述符均未被引用", d->line});
+        }
+    }
+    return warns;
 }

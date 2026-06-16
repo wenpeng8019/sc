@@ -52,6 +52,11 @@
                     "type": "string",
                     "default": "",
                     "description": "scc 编译器路径；留空时依次查找工作区 compiler/build/scc 与 PATH 中的 scc"
+                },
+                "scAst.clangLibPath": {
+                    "type": "string",
+                    "default": "",
+                    "markdownDescription": "解析 inc 引入的 C 头文件描述符的方式：\n\n- 留空：退化为头文件文本匹配（仅能识别已用符号）\n- `auto`：自动检测本地平台默认位置的 libclang（Xcode/CommandLineTools/Homebrew/LLVM）\n- 路径：指定 libclang 动态库（如 `/Library/Developer/CommandLineTools/usr/lib/libclang.dylib` 或 `.so`/`.dll`）\n\n启用 libclang 后可枚举 C 头全部描述符并统计使用/未用；目标平台头解析复用交叉编译配置（triple/sysroot/inc/cflags）。"
                 }
             }
         }
