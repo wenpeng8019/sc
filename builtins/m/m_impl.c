@@ -55,7 +55,8 @@ static void *thd_entry(void *p) {
     return 0;
 }
 
-uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out) {
+uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out,
+                   uint32_t stack, uint8_t prio) {
     if (out) *out = NULL;
     if (!fn) return 0;
     thread *t = (thread *)malloc(sizeof(thread) + psize + sizeof(thd_impl));
@@ -67,21 +68,44 @@ uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread 
     im->fn = fn;
     im->joinable = out ? 1 : 0;
 #if P_WIN
-    HANDLE h = CreateThread(NULL, 0, thd_entry, t, 0, NULL);
+    /* stack=0 → 默认栈；非 0 作为初始提交栈字节数 */
+    HANDLE h = CreateThread(NULL, (SIZE_T)stack, thd_entry, t, 0, NULL);
     if (!h) { free(t); return 0; }
+    /* prio：最佳努力映射到 Windows 线程优先级（0=默认不调整） */
+    if (prio) {
+        int wp = prio < 64 ? THREAD_PRIORITY_BELOW_NORMAL
+               : prio < 128 ? THREAD_PRIORITY_NORMAL
+               : prio < 192 ? THREAD_PRIORITY_ABOVE_NORMAL
+                            : THREAD_PRIORITY_HIGHEST;
+        SetThreadPriority(h, wp);
+    }
     if (out) { im->t = h; *out = t; }
     else CloseHandle(h);                /* detach：关闭句柄，线程自释放 */
 #else
     pthread_t h;
-    pthread_attr_t attr, *pattr = NULL;
-    if (!out) {                         /* detach：创建即分离，入口结束自释放 */
-        pthread_attr_init(&attr);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    if (!out)                           /* detach：创建即分离，入口结束自释放 */
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-        pattr = &attr;
+    if (stack) {                        /* 设定栈大小（不低于平台下限） */
+#ifdef PTHREAD_STACK_MIN
+        size_t sz = stack < (uint32_t)PTHREAD_STACK_MIN
+                    ? (size_t)PTHREAD_STACK_MIN : (size_t)stack;
+#else
+        size_t sz = (size_t)stack;
+#endif
+        pthread_attr_setstacksize(&attr, sz);
     }
-    int err = pthread_create(&h, pattr, thd_entry, t);
-    if (pattr) pthread_attr_destroy(pattr);
+    int err = pthread_create(&h, &attr, thd_entry, t);
+    pthread_attr_destroy(&attr);
     if (err) { free(t); return 0; }
+    /* prio：最佳努力（多数平台 SCHED_OTHER 不支持线程优先级，失败即忽略） */
+    if (prio) {
+        struct sched_param sp;
+        memset(&sp, 0, sizeof(sp));
+        sp.sched_priority = (int)prio;
+        pthread_setschedparam(h, SCHED_RR, &sp);
+    }
     if (out) { im->t = h; *out = t; }   /* 仅 joinable 记录句柄（入口不读它） */
 #endif
     return 1;

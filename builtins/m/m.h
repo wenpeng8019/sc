@@ -32,8 +32,10 @@ typedef struct thread {
 
 /* run 语句原语：fn 为 rpc 实际函数（void name_rpc(struct name*)），
  * params/psize 为装填好的参数结构体；out 为空即 detach 自释放。
+ * stack 为栈字节数（0=平台默认），prio 为优先级（0=默认，1..255 最佳努力映射）。
  * 返回 1 成功 / 0 失败（失败时 *out 置 NULL） */
-uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out);
+uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out,
+                   uint32_t stack, uint8_t prio);
 
 void    thread_join(thread *_this);   /* 等待结束并回收（含 thread 对象本身） */
 

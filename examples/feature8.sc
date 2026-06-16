@@ -13,8 +13,8 @@
 #   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
 #     run work(...), p —— 与独立线程同一个动词，按类型静态分派
 #   - tls：线程局部变量（static 存储期，每线程独立实例，可顶层/函数内）
-#
-#  todo run 支持 <> 语法，设置线程属性（如栈大小、调度优先级等）
+#   - run<stack:N, prio:M> 选项块：设置线程属性（栈字节数 u4 / 优先级 u1），
+#     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
 #
 inc stdio.h
 inc "platform.h"
@@ -78,7 +78,7 @@ fnc main: i4
     var t1: thread& = nil
     var t2: thread& = nil
     run work(&c, 10000), &t1
-    run work(&c, 10000), &t2
+    run<stack:262144, prio:5> work(&c, 10000), &t2   # 选项块：自定义栈/优先级
     printf("t1 id set: %d\n", t1 != nil)   # run 返回即拿到 thread 对象
     t1->join()         # 等待并回收（含 thread 对象本身）
     t2->join()

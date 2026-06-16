@@ -117,7 +117,16 @@ struct SGen {
                 break;
             case Stmt::RunS:
                 ind();
-                out << "run " << exprToStr(*s.expr);
+                out << "run";
+                if (!s.runOpts.empty()) {
+                    out << "<";
+                    for (size_t i = 0; i < s.runOpts.size(); i++) {
+                        if (i) out << ", ";
+                        out << s.runOpts[i].first << ":" << s.runOpts[i].second;
+                    }
+                    out << ">";
+                }
+                out << " " << exprToStr(*s.expr);
                 if (s.forInit) out << ", " << exprToStr(*s.forInit);
                 out << "\n";
                 break;

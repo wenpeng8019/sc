@@ -1252,11 +1252,35 @@ struct Parser {
             case Tok::KwThrough:
                 err("through 只能出现在 case 分支末尾");
 
-            // run 线程语句：run rpc调用 [, &thread指针]
+            // run 线程语句：run[<opt:v, ...>] rpc调用 [, &thread指针]
             //   有出参 → joinable（join 等待并回收）；无 → detach 自释放
+            //   可选 <stack:N, prio:M> 选项块：线程属性透传给 C（值限非负整数字面量）
             case Tok::KwRun: {
                 auto s = mkStmt(Stmt::RunS);
                 advance();
+                // run<key:val, ...> 选项块：紧跟 run 后的 '<' 触发（run 目标为
+                // + 标识符调用，'<' 不会是其合法起始，故无歧义）。键校验延后到 codegen。
+                if (atOp("<")) {
+                    advance();  // 消费 '<'
+                    skipNlInBracket();
+                    if (!atOp(">")) {
+                        for (;;) {
+                            skipNlInBracket();
+                            if (!at(Tok::Ident)) err("run 选项期望键名");
+                            std::string key = advance().text;
+                            expect(Tok::Colon, "':'");
+                            skipNlInBracket();
+                            acceptOp("+");
+                            if (!at(Tok::Int))
+                                err("run 选项 '" + key + "' 的值需为非负整数字面量");
+                            long long v = std::strtoll(advance().text.c_str(), nullptr, 0);
+                            s->runOpts.push_back({key, v});
+                            skipNlInBracket();
+                            if (!accept(Tok::Comma)) break;
+                        }
+                    }
+                    if (!acceptOp(">")) err("run 选项块期望 '>'");
+                }
                 s->expr = parseExpr();
                 if (!s->expr || s->expr->kind != Expr::Call ||
                     !s->expr->a || s->expr->a->kind != Expr::Ident)

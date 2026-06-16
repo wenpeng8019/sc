@@ -56,7 +56,7 @@ fnc main: i4
     var t1: thread& = nil
     var t2: thread& = nil
     run work(&c, 10000), &t1
-    run work(&c, 10000), &t2
+    run<stack:262144, prio:5> work(&c, 10000), &t2
     printf("t1 id set: %d\n", t1 != nil)
     t1->join()
     t2->join()

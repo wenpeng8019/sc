@@ -1286,6 +1286,24 @@ struct CGen {
                                std::to_string(r->structCommon.fields.size()) + " 个", s.line};
         if (!aggrOf("thread"))
             throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
+        // run<stack:N, prio:M> 选项：透传给 C（stack=u4 栈字节数，prio=u1 优先级；
+        //   0 表示由 C 取默认）。键在此校验，值越界（u4/u1）报错。
+        long long optStack = 0, optPrio = 0;
+        bool hasOpts = !s.runOpts.empty();
+        for (auto& o : s.runOpts) {
+            if (o.first == "stack") {
+                if (o.second < 0 || o.second > 0xFFFFFFFFLL)
+                    throw CompileError{"run 选项 stack 超出 u4 范围", s.line};
+                optStack = o.second;
+            } else if (o.first == "prio") {
+                if (o.second < 0 || o.second > 0xFF)
+                    throw CompileError{"run 选项 prio 超出 u1 范围", s.line};
+                optPrio = o.second;
+            } else {
+                throw CompileError{"run 选项未知键：'" + o.first +
+                                   "'（当前仅支持 stack、prio）", s.line};
+            }
+        }
         // 第二参类型分派：pool（对象/指针）→ 入池；其余 → thread 出参
         bool toPool = false;
         if (s.forInit) {
@@ -1295,6 +1313,9 @@ struct CGen {
                 if (sd && sd->name == "pool") toPool = true;
             }
         }
+        // pool 工作线程为预创建，逐任务的 stack/prio 不适用 → 显式报错
+        if (toPool && hasOpts)
+            throw CompileError{"run 选项（stack/prio）不适用于 pool 目标", s.line};
         indent(); out << "{\n";
         depth++;
         indent(); out << "struct " << r->name << " _rp = {0};\n";
@@ -1316,7 +1337,7 @@ struct CGen {
                 emitExpr(*s.forInit, true);
                 out << ")";
             } else out << "NULL";
-            out << ");\n";
+            out << ", (uint32_t)" << optStack << "u, (uint8_t)" << optPrio << "u);\n";
         }
         depth--;
         indent(); out << "}\n";
@@ -1802,7 +1823,7 @@ struct CGen {
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
         if (usesRun) {
             out << "typedef struct thread thread;\n"
-                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **);\n";
+                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **, uint32_t, uint8_t);\n";
             // 第二参可能是 pool：pool 类型可见即一并输出 pool_run 原型
             if (aggrOf("pool"))
                 out << "typedef struct pool pool;\n"

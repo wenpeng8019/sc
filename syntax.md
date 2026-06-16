@@ -979,9 +979,34 @@ fnc main: i4
 - 语法层面能拿到的 thread 必为 joinable，所以 thread 成员很简洁：
   `id`（跨平台统一线程 id）与 `join` 方法。不可手工构造。
 - 转 C：装填 rpc 参数结构体后按第二参类型改发线程原语——独立线程
-  `thread_run(入口, &参数, sizeof(参数), 出参|NULL)`，入池
+  `thread_run(入口, &参数, sizeof(参数), 出参|NULL, stack, prio)`，入池
   `pool_run(&池, 入口, &参数, sizeof(参数))`（均 m_impl 提供，
   POSIX pthread / Windows 线程；C 侧是两个普通函数，无运行时多态）。
+
+#### 线程属性选项 `run<...>`
+
+`run` 关键字后可紧跟 `<key:val, ...>` 选项块，设置线程属性，透传给 C 由
+m 模块的 `thread_run` 具体实现（语法与 `stringify<...>` 一致，值限非负整数
+字面量）。当前支持两个键（均可选、顺序无关）：
+
+| 键 | 类型 | 含义 | 取 0 / 省略 |
+|---|---|---|---|
+| `stack` | u4 | 线程栈字节数 | 平台默认栈 |
+| `prio` | u1 | 调度优先级（1..255 最佳努力映射） | 平台默认优先级 |
+
+```sc
+run<stack:262144> work(&c, 10000), &t          # 仅设栈大小（256 KiB）
+run<stack:131072, prio:10> work(&c, 10000), &t # 栈 + 优先级
+run<prio:5> note(7)                            # 仅设优先级（detach 线程）
+```
+
+- 选项仅适用于**独立线程**（joinable/detach）；用于 pool 目标会报错
+  （池工作线程已预创建，逐任务的栈/优先级无意义）。
+- 优先级为最佳努力：多数平台默认调度策略（SCHED_OTHER）不支持线程优先级，
+  设置失败即忽略；需要实时优先级通常要相应权限。
+- 转 C：选项作为末两个实参传入
+  `thread_run(..., (uint32_t)stack, (uint8_t)prio)`，省略的键传 0
+  （表示由 C 取平台默认）。
 
 ### 11.2 wait 语句（条件变量等待）
 

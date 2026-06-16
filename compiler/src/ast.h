@@ -209,10 +209,11 @@ struct Stmt {
         LabelS,     // 标签定义
 
         DeclS,      // 内嵌类型声明     函数体内用 def 定义局部类型（不常见但允许）
-        RunS,       // run 线程语句    run rpc调用 [, thread出参地址]
+        RunS,       // run 线程语句    run[<opt:v,...>] rpc调用 [, thread出参地址]
                     //                > expr=rpc 调用（Expr::Call）
                     //                > forInit=可选出参（&t，t 为 thread&）
                     //                  + 有出参 → joinable（join 等待并回收）；无 → detach 自释放
+                    //                > runOpts=可选线程属性（stack:u4 栈大小, prio:u1 优先级），透传给 C
         WaitS,      // wait 条件等待   wait cond, mutex [, nsec [, sec]]
                     //                > expr=cond，
                     //                > forInit=mutex，forCond=可选纳秒，forStep=可选秒
@@ -230,6 +231,8 @@ struct Stmt {
     std::vector<StmtPtr> elseBody;      // IfS: else 分支（可能为空、单条 else if、或多条语句块）
 
     ExprPtr forInit, forCond, forStep;  // ForS: for (init; cond; step) 三段表达式
+
+    std::vector<std::pair<std::string, long long>> runOpts;  // RunS: run<stack:N, prio:M> 线程属性（键:整数值），透传给 C
 
     struct CaseArm {
         std::vector<ExprPtr> labels;    // 空=default 分支

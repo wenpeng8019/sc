@@ -140,9 +140,16 @@ std::string stmtNode(const Stmt& s) {
         }
         case Stmt::DeclS:
             return declNode(*s.decl);
-        case Stmt::RunS:
-            return node("run", "", exprToStr(*s.expr) +
+        case Stmt::RunS: {
+            std::string opts;
+            for (size_t i = 0; i < s.runOpts.size(); i++) {
+                if (i) opts += ", ";
+                opts += s.runOpts[i].first + ":" + std::to_string(s.runOpts[i].second);
+            }
+            return node("run", opts.empty() ? "" : "<" + opts + ">",
+                        exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
+        }
         case Stmt::WaitS:
             return node("wait", "", exprToStr(*s.expr) + ", " + exprToStr(*s.forInit) +
                         (s.forCond ? ", " + exprToStr(*s.forCond) : "") +
