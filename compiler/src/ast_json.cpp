@@ -165,6 +165,8 @@ std::string declNode(const Decl& d) {
                 return s;
             }
             return nodeExt("inc", d.name, "", d.line, d.external, d.origin, d.used);
+        case Decl::AddD:
+            return nodeExt("add", d.name, "", d.line, false, d.origin, false);
         case Decl::EnumD: {
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)

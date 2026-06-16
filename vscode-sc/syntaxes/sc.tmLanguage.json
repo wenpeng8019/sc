@@ -5,6 +5,7 @@
     "patterns": [
         { "include": "#comment" },
         { "include": "#inc-decl" },
+        { "include": "#add-decl" },
         { "include": "#export-prefix" },
         { "include": "#def-decl" },
         { "include": "#fnc-decl" },
@@ -28,6 +29,13 @@
         },
         "inc-decl": {
             "match": "^\\s*(inc)\\s+(\\S+)",
+            "captures": {
+                "1": { "name": "keyword.control.import.sc" },
+                "2": { "name": "string.unquoted.include.sc" }
+            }
+        },
+        "add-decl": {
+            "match": "^\\s*(add)\\s+(\\S+)",
             "captures": {
                 "1": { "name": "keyword.control.import.sc" },
                 "2": { "name": "string.unquoted.include.sc" }
@@ -76,7 +84,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|tls|inc)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|tls|inc|add)\\b"
                 },
                 {
                     "name": "variable.language.this.sc",

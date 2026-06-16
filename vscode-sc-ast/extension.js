@@ -36,6 +36,7 @@ function runScc(args, input) {
 // ---------------- AST 树视图 ----------------
 const ICONS = {
     inc: 'package',
+    add: 'file-binary',
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
     alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', rpc: 'symbol-event',
     var: 'symbol-variable', let: 'symbol-constant', tls: 'symbol-variable',

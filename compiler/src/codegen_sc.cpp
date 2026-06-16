@@ -150,6 +150,9 @@ struct SGen {
             case Decl::IncD:
                 ind(); out << (d.exported ? "@inc " : "inc ") << d.name << "\n";
                 break;
+            case Decl::AddD:
+                ind(); out << "add " << d.name << "\n";
+                break;
             case Decl::EnumD:
                 ind(); out << X << "def " << d.name << ": " << typeToStr(d.structCommon.type) << "\n";
                 depth++;

@@ -1864,6 +1864,7 @@ struct CGen {
                     }
                     break;
                 case Decl::IncD: break;  // 已在顶部输出
+                case Decl::AddD: break;  // 构建指令，不产生 C 输出
             }
         }
         out << "\n";
@@ -1932,6 +1933,7 @@ struct CGen {
                 case Decl::IncD:
                     emitInclude(*d);
                     break;
+                case Decl::AddD: break;  // 构建指令，不产生 C 输出
             }
         }
         out << "\n#endif /* " << guard << " */\n";

@@ -37,7 +37,8 @@ enum class Tok {
     KwVar,      // var  — 定义变量
     KwLet,      // let  — 定义常量
     KwTls,      // tls  — 定义线程局部变量（static 存储期，每线程独立实例）
-    KwInc,      // inc  — 引入头文件（对齐 C 的 #include，后跟行尾文本）
+    KwInc,      // inc  — 引入头文件/模块（对齐 C 的 #include，后跟行尾文本）
+    KwAdd,      // add  — 添加实现/库文件到工程（.c/.o/.a/.so...，后跟行尾文本）
     KwReturn,   // return
     KwIf,       // if
     KwElse,     // else

@@ -273,6 +273,11 @@ struct Decl {
         // -- inc 头文件引入 --
         IncD,       // 引入头文件  inc stdio.h → #include <stdio.h>
                     //              inc "my.h"  → #include "my.h"
+
+        // -- add 实现/库文件添加 --
+        AddD,       // 添加实现/库文件到工程  add impl.c → 编译并链接
+                    //              add libfoo.a / libfoo.so → 直接链接
+                    //              纯构建指令，不产生 C 输出，name 为文件文本
     } kind;
 
     std::string name;               // 类型名 / 函数名；IncD 时为头文件文本

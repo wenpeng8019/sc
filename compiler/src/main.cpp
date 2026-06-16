@@ -904,6 +904,64 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             objects.push_back(impl);  // .o/.a 直接参与链接
         }
     }
+
+    // 第四阶段：模块内 add 指令声明的实现/库文件参与编译与链接
+    //   add impl.c/.cpp/.cc/.cxx → 现场编译为 .o 并链接（解决「由 C 实现的接口」
+    //     无机制并入工程的问题：声明 :: 接口的模块自带 add 即可拉入实现）。
+    //   add libfoo.a/.so/.dylib/.o → 直接参与链接（替代构建脚本里手写 -l/路径，
+    //     主要面向自定义库；跨平台系统库仍走编译选项机制）。
+    //   路径相对该模块 .sc 所在目录解析；按规范化路径去重（被多模块/多次 add 安全）。
+    {
+        std::unordered_set<std::string> seenAdd;  // 已处理的源/库规范化路径
+        int addSeq = 0;
+        for (auto& kv : units) {
+            const std::filesystem::path srcDir =
+                std::filesystem::path(kv.first).parent_path();
+            for (auto& d : kv.second.prog.decls) {
+                if (d->kind != Decl::AddD) continue;
+
+                // 解析路径：绝对路径直接用，否则相对模块 .sc 目录
+                std::filesystem::path target(d->name);
+                if (!target.is_absolute()) target = srcDir / target;
+                std::error_code ec;
+                const std::filesystem::path canonT =
+                    std::filesystem::weakly_canonical(target, ec);
+                const std::filesystem::path resolved = ec ? target : canonT;
+
+                if (!std::filesystem::exists(resolved)) {
+                    std::cerr << "错误: add 文件不存在: " << d->name
+                              << "（模块 " << kv.first << "）\n";
+                    return 1;
+                }
+                if (!seenAdd.insert(resolved.string()).second) continue;  // 去重
+
+                const std::string ext = resolved.extension().string();
+                if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx") {
+                    // 现场编译为 .o（序号避免不同目录同名文件冲突）
+                    const std::filesystem::path obj =
+                        tmpDir / ("add_" + std::to_string(addSeq++) + "_"
+                                  + resolved.stem().string() + ".o");
+                    std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
+                        + extraCFlags
+                        + " -I " + srcDir.string()
+                        + " -I " + tmpDir.string()
+                        + " -c " + resolved.string() + " -o " + obj.string();
+                    if (std::system(ccCmd.c_str()) != 0) {
+                        std::cerr << "错误: add 实现编译失败（" << ccCmd << "）\n";
+                        return 1;
+                    }
+                    objects.push_back(obj);
+                } else if (ext == ".o" || ext == ".a" || ext == ".so"
+                           || ext == ".dylib") {
+                    objects.push_back(resolved);  // 库/对象文件直接链接
+                } else {
+                    std::cerr << "错误: add 不支持的文件类型: " << d->name
+                              << "（仅 .c/.cpp/.cc/.cxx/.o/.a/.so/.dylib）\n";
+                    return 1;
+                }
+            }
+        }
+    }
     return 0;
 }
 

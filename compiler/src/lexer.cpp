@@ -31,6 +31,7 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"var", Tok::KwVar},   {"let", Tok::KwLet},
     {"tls", Tok::KwTls},
     {"inc", Tok::KwInc},
+    {"add", Tok::KwAdd},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},
     {"else", Tok::KwElse}, {"while", Tok::KwWhile},
     {"do", Tok::KwDo},
@@ -156,18 +157,34 @@ struct Lexer {
         // 查关键字表：命中则产生对应关键字 token，否则为普通标识符 token
         auto it = kKeywords.find(v);
         if (it != kKeywords.end()) {                    // 命中关键字
+            // inc/add 是上下文关键字：仅在「顶层行首」（缩进级别 0 且为本行第一个
+            // + 词法单元，允许前置 @ 导出符）才作为引入/添加指令；其余位置（嵌套作用域、
+            //   或作为 rpc/fnc 名等）退化为普通标识符，避免与 add 等常见命名冲突
+            if (it->second == Tok::KwInc || it->second == Tok::KwAdd) {
+                const bool atTop = indents.back() == 0;
+                const bool lineStart = out.empty()
+                    || out.back().kind == Tok::Newline
+                    || out.back().kind == Tok::Dedent
+                    || (out.back().kind == Tok::Op && out.back().text == "@");
+                if (!(atTop && lineStart)) {
+                    push(Tok::Ident, v);
+                    return;
+                }
+            }
             push(it->second, v);
 
-            // inc 特殊处理：头文件名（如 stdio.h、"my.h"）不是常规 token，
-            // + 直接捕获其后到行尾/注释前的原始文本作为一个 Str token
-            if (it->second == Tok::KwInc) {
+            // inc/add 特殊处理：头文件/实现文件名（如 stdio.h、"my.h"、impl.c）
+            // + 不是常规 token，直接捕获其后到行尾/注释前的原始文本作为一个 Str token
+            if (it->second == Tok::KwInc || it->second == Tok::KwAdd) {
                 while (peek() == ' ' || peek() == '\t') get();
                 std::string h;
                 while (peek() && peek() != '\n' && peek() != '#') h += get();
                 while (!h.empty() && (h.back() == ' ' || 
                                       h.back() == '\t' ||
                                       h.back() == '\r')) h.pop_back();
-                if (h.empty()) err("inc 后期望头文件名");
+                if (h.empty())
+                    err(it->second == Tok::KwInc ? "inc 后期望头文件名"
+                                                 : "add 后期望实现/库文件名");
                 push(Tok::Str, h);
             }
         }

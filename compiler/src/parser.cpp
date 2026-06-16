@@ -1341,6 +1341,23 @@ struct Parser {
                     break;
                 }
 
+                // add 实现/库文件添加：lexer 已将文件名捕获为 Str token
+                // + 纯构建指令（编译/链接 .c/.o/.a/.so），不产生 C 输出、不导出
+                case Tok::KwAdd: {
+
+                    if (exported) err("add 不支持 @ 导出");
+                    auto d = std::make_unique<Decl>();
+                    d->line = cur().line;
+                    d->kind = Decl::AddD;
+                    advance();                                      // 跳过 add 关键字
+                    if (!at(Tok::Str)) err("add 后期望实现/库文件名");
+
+                    d->name = advance().text;
+                    expect(Tok::Newline, "换行");
+                    prog.decls.push_back(std::move(d));
+                    break;
+                }
+
                 // 类型定义
                 case Tok::KwDef:
                     prog.decls.push_back(parseDef());   
