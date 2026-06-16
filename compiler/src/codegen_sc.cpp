@@ -137,6 +137,25 @@ struct SGen {
                 if (s.forStep) out << ", " << exprToStr(*s.forStep);
                 out << "\n";
                 break;
+            case Stmt::PrintS:
+                ind();
+                out << "print";
+                if (s.printChn != "0") out << "<" << s.printChn << ">";
+                if (s.printCompat) {
+                    out << "(";
+                    for (size_t i = 0; i < s.printArgs.size(); i++) {
+                        if (i) out << ", ";
+                        out << exprToStr(*s.printArgs[i]);
+                    }
+                    out << ")";
+                } else {
+                    for (size_t i = 0; i < s.printArgs.size(); i++) {
+                        out << (i ? ", " : " ");
+                        out << exprToStr(*s.printArgs[i]);
+                    }
+                }
+                out << "\n";
+                break;
         }
     }
 

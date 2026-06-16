@@ -1,8 +1,9 @@
 /* io.h —— sc 输入输出模块的 C ABI 契约（与 builtins/io/io.sc 同步维护）
  *
- * print 语言关键字 → 编译器生成 print 调用：
+ * print 语言关键字 → 编译器生成 print 调用（首参为 u1 通道 chn，默认 0）：
+ *   - chn：日志通道（透传），chn==0 为默认通道；F/E/W/I/D/V 级别与通道正交
  *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定日志级别，无前缀默认 D（调试）
- *   - 输出 stdout：HH:MM:SS.mmm L| 文本（自动补换行）
+ *   - 输出 stdout：HH:MM:SS.mmm L| 文本（chn!=0 时加 通道标记；自动补换行）
  *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取
  *
  * stringify<选项>(值[, 缓存, 大小]) JSON 格式化关键字由编译器按静态类型生成
@@ -21,8 +22,8 @@
 extern "C" {
 #endif
 
-/* print 关键字原语：C printf 风格 + "X:" 级别前缀 */
-void print(const char *fmt, ...);
+/* print 关键字原语：u1 通道 chn + C printf 风格 + "X:" 级别前缀 */
+void print(uint8_t chn, const char *fmt, ...);
 
 /* stringify<...> 选项块：编译器据此构造 (stringify_t){...} 传入格式化器 */
 typedef struct stringify {

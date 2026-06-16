@@ -52,6 +52,7 @@ enum class Tok {
     KwContinue, // continue
     KwRun,      // run  — 以 rpc 调用创建线程（多线程语言特性，依赖 m 模块）
     KwWait,     // wait — 条件变量等待（多线程语言特性，依赖 m 模块）
+    KwPrint,    // print — 日志输出关键字（拼接糖 + <chn> 通道，依赖 io 模块）
     KwSizeof,   // sizeof
     KwOffsetof, // offsetof
 

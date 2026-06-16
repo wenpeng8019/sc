@@ -541,7 +541,9 @@ struct Parser {
         d->isRpc = isRpc;
 
         advance();                                  // 跳过 fnc/rpc 关键字
-        if (!at(Tok::Ident)) err(isRpc ? "期望 rpc 名" : "期望函数名");
+        // 允许上下文关键字 print 作为 C 接口函数名（io.sc 以 :: 声明 print 原语接口）
+        if (!at(Tok::Ident) && !(!isRpc && at(Tok::KwPrint)))
+            err(isRpc ? "期望 rpc 名" : "期望函数名");
 
         d->name = advance().text;                   // 函数名（rpc 时为接口名，后续会在函数名前加上 rpc_ 前缀）
 
@@ -726,6 +728,19 @@ struct Parser {
             skipNlInBracket();              // 跳过括号内的换行和缩进（允许括号内跨行书写）
             if (accept(Tok::Colon)) {       // 如果冒号存在，则解析为强制类型转换表达式
                 skipNlInBracket();
+                // print 格式覆盖：(expr: "%fmt")——冒号后为字符串字面量时，
+                // op 存格式串（含引号）而非类型名，仅 print 实参位置有意义。
+                if (at(Tok::Str)) {
+                    auto c = mk(Expr::Cast);
+                    c->castIsFmt = true;
+                    c->op = advance().text;
+                    c->a = std::move(e);
+                    e = std::move(c);
+                    skipNlInBracket();
+                    expect(Tok::RParen, "')'");
+                    exprBracket--;
+                    return e;
+                }
                 if (!at(Tok::Ident)) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
@@ -942,6 +957,17 @@ struct Parser {
             c->a = std::move(lhs);
             lhs = std::move(c);
         }
+        // 裸右值 print 格式覆盖：expr: "%fmt"（与 (expr: "%fmt") 等价，免括号）。
+        else if (at(Tok::Colon) && peek().kind == Tok::Str &&
+                 lhs->kind != Expr::Ternary &&
+                 (ternDepth.empty() || exprBracket > ternDepth.back())) {
+            advance();  // ':'
+            auto c = mk(Expr::Cast);
+            c->castIsFmt = true;
+            c->op = advance().text;     // 格式串字面量（含引号）
+            c->a = std::move(lhs);
+            lhs = std::move(c);
+        }
 
         // 赋值运算符：右结合（递归调用 parseExpr 而非 parseTernary）
         if (cur().kind == Tok::Op && isAssignOp(cur().text)) {
@@ -1140,6 +1166,37 @@ struct Parser {
         return s;
     }
 
+    // 解析 print 语句：print[<chn>] arg, arg, ...
+    //   <chn>：可选通道（整数字面量或宏/常量标识符），默认 "0"，透传给 C print。
+    //   括号可省：print a, b 与 print(a, b) 等价（括号内允许跨行）。
+    //   实参逐项 parseExpr：字符串字面量→纯文本；其余→按类型自动补说明符；
+    //   (expr: "%fmt") / expr: "%fmt"（Cast.castIsFmt）→显式格式（在表达式层解析）。
+    StmtPtr parsePrintStmt() {
+        auto s = mkStmt(Stmt::PrintS);
+        advance();                          // 跳过 print 关键字
+        s->printChn = "0";
+        if (atOp("<")) {                    // <chn> 通道块
+            advance();
+            if (at(Tok::Int) || at(Tok::Ident)) s->printChn = advance().text;
+            else err("print 通道 <chn> 需为整数字面量或宏/常量名");
+            if (!acceptOp(">")) err("print 通道块期望 '>'");
+        }
+        bool wrapped = false;
+        if (at(Tok::LParen)) { advance(); exprBracket++; skipNlInBracket(); wrapped = true; }
+        s->printCompat = wrapped;           // 括号形式 = C printf 兼容模式
+        if (!(wrapped ? at(Tok::RParen) : at(Tok::Newline))) {
+            for (;;) {
+                s->printArgs.push_back(parseExpr());
+                if (wrapped) skipNlInBracket();
+                if (!accept(Tok::Comma)) break;
+                if (wrapped) skipNlInBracket();
+            }
+        }
+        if (wrapped) { expect(Tok::RParen, "')'"); exprBracket--; }
+        expect(Tok::Newline, "换行");
+        return s;
+    }
+
     // 解析标签语句：
     // label:       
     //     body...  
@@ -1306,6 +1363,13 @@ struct Parser {
                 expect(Tok::Newline, "换行");
                 return s;
             }
+
+            // print 日志输出语句：print[<chn>] arg, arg, ...（括号可省）
+            //   <chn> = u1 通道（整数字面量或宏/常量名），默认 0，透传给 C print。
+            //   实参为 python 风格拼接：字符串字面量=纯文本；其余表达式按静态类型
+            //   自动补 printf 说明符；(expr: "%fmt") 可显式指定该实参格式。
+            case Tok::KwPrint:
+                return parsePrintStmt();
 
             // 默认：表达式语句（赋值、函数调用等）
             default: {

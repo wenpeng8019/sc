@@ -230,7 +230,6 @@ struct CGen {
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
         // print / stringify 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
-            if (e.a->text == "print" && !usesPrint) usesPrint = e.line;
             if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
             // prev(o) 导航函数形式：边界安全前驱 helper
             if (e.a->text == "prev" && e.args.size() == 1) usesLPrev = true;
@@ -246,6 +245,10 @@ struct CGen {
     void scanStmtForNew(const Stmt& s) {
         if (s.kind == Stmt::RunS) usesRun = true;
         if (s.kind == Stmt::WaitS) usesWait = true;
+        if (s.kind == Stmt::PrintS) {
+            if (!usesPrint) usesPrint = s.line;
+            for (auto& a : s.printArgs) scanExprForNew(*a);
+        }
         if (s.expr) scanExprForNew(*s.expr);
         for (auto& f : s.decls) if (f.init) scanExprForNew(*f.init);
         if (s.forInit) scanExprForNew(*s.forInit);
@@ -689,7 +692,12 @@ struct CGen {
                     vt.ptr++;
                     return true;
                 }
-                return false;
+                // 算术/逻辑前缀（-x, +x, ~x, !x, ++x, --x）结果类型 ≈ 操作数类型
+                return exprVType(*e.a, vt);
+            case Expr::IntLit:   vt = {"i4", 0, 0}; return true;
+            case Expr::FloatLit: vt = {"f8", 0, 0}; return true;
+            case Expr::CharLit:  vt = {"char", 0, 0}; return true;
+            case Expr::StrLit:   vt = {"char", 1, 0}; return true;
             case Expr::Cast:
                 vt = {e.op, e.castPtr, 0};
                 return true;
@@ -697,6 +705,10 @@ struct CGen {
                 // 赋值表达式的结果类型 = 左操作数类型（支持 (p = T())->m() 等）
                 if (!e.op.empty() && e.op.back() == '='
                     && e.op != "==" && e.op != "!=" && e.op != "<=" && e.op != ">=")
+                    return exprVType(*e.a, vt);
+                // 算术/位运算结果类型 ≈ 左操作数类型（供 print 推断说明符）
+                if (e.op == "+" || e.op == "-" || e.op == "*" || e.op == "/" || e.op == "%"
+                    || e.op == "&" || e.op == "|" || e.op == "^" || e.op == "<<" || e.op == ">>")
                     return exprVType(*e.a, vt);
                 return false;
             case Expr::Call:
@@ -711,6 +723,26 @@ struct CGen {
                     if (e.args.size() == 3) vt = {"char", 1, 0};
                     else vt = {"string", 0, 0};
                     return true;
+                }
+                // stringify(值[, 缓存, 大小]) 结果类型：char*（缓存形态）/ string（使 print 可推断）
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "stringify" && !e.args.empty()
+                    && !localsT.count("stringify") && !globalsT.count("stringify")) {
+                    if (e.args.size() == 3) vt = {"char", 1, 0};
+                    else vt = {"string", 0, 0};
+                    return true;
+                }
+                // 方法调用 o.m(...) / p->m(...) → 方法返回类型（使 print 等可推断）
+                if (e.a && e.a->kind == Expr::Member && !callableField(*e.a)) {
+                    VType base;
+                    if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
+                        if (const Decl* md = findMethod(base.name, e.a->text)) {
+                            const auto& rt = md->structCommon.type;
+                            if (rt && !(rt->name.empty() && rt->ptr == 0)) {
+                                vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                                return true;
+                            }
+                        }
+                    }
                 }
                 return false;
             default: return false;
@@ -1028,6 +1060,10 @@ struct CGen {
                 out << "offsetof(" << e.text << ", " << e.op << ")";
                 break;
             case Expr::Cast: {
+                // print 格式覆盖 (expr: "%fmt") 仅能出现在 print 实参（在 emitPrintStmt
+                // 中被拆解）；出现在其他表达式位置则是误用。
+                if (e.castIsFmt)
+                    throw CompileError{"格式说明符 (expr: \"%fmt\") 只能用于 print 实参", e.line};
                 // (expr: type&) → ((T*)(expr))
                 out << "((" << mapBase(e.op);
                 for (int i = 0; i < e.castPtr; i++) out << "*";
@@ -1257,6 +1293,9 @@ struct CGen {
             case Stmt::WaitS:
                 emitWaitStmt(s);
                 break;
+            case Stmt::PrintS:
+                emitPrintStmt(s);
+                break;
         }
     }
 
@@ -1359,6 +1398,100 @@ struct CGen {
         if (s.forCond) emitExpr(*s.forCond, true); else out << "0";
         out << ", ";
         if (s.forStep) emitExpr(*s.forStep, true); else out << "0";
+        out << ");\n";
+    }
+
+    // print 语句 → print(chn, fmt, args...)
+    //   python 风格拼接：字符串字面量→格式串纯文本（% 转义为 %%）；其余实参按静态
+    //   类型自动补 printf 说明符并作可变参数（必要的 64 位说明符经 inttypes 宏跨平台）；
+    //   (expr: "%fmt") 显式格式覆盖（值原样传入，不再自动加 cast）。
+    //   <chn> 通道 u1 透传给 C print 首参（默认 0）。
+    void emitPrintStmt(const Stmt& s) {
+        // 括号形式 print(...) = C printf 兼容模式：实参原样传递（首参为格式串）
+        if (s.printCompat) {
+            indent();
+            out << "print((uint8_t)(" << s.printChn << ")";
+            for (auto& argp : s.printArgs) {
+                out << ", ";
+                emitExpr(*argp, true);
+            }
+            out << ");\n";
+            return;
+        }
+        std::string fmtExpr;   // 相邻 C 串字面量/宏拼成的格式实参
+        std::string lit;       // 当前累积的串字面量内文（已转义）
+        auto flush = [&]() {
+            if (!fmtExpr.empty()) fmtExpr += " ";
+            fmtExpr += "\"" + lit + "\"";
+            lit.clear();
+        };
+        struct PV { const Expr* e; std::string pre, post; };
+        std::vector<PV> pvs;
+
+        for (auto& argp : s.printArgs) {
+            const Expr& arg = *argp;
+            // 字符串字面量 → 纯文本（% 转义）
+            if (arg.kind == Expr::StrLit) {
+                std::string inner = arg.text.size() >= 2
+                    ? arg.text.substr(1, arg.text.size() - 2) : std::string();
+                for (char ch : inner) { if (ch == '%') lit += "%%"; else lit += ch; }
+                continue;
+            }
+            // 显式格式覆盖 (expr: "%fmt") → 格式串原样追加，值原样传入
+            if (arg.kind == Expr::Cast && arg.castIsFmt) {
+                std::string inner = arg.op.size() >= 2
+                    ? arg.op.substr(1, arg.op.size() - 2) : std::string();
+                lit += inner;
+                pvs.push_back({arg.a.get(), "", ""});
+                continue;
+            }
+            // 其余 → 按静态类型自动选择说明符
+            VType vt;
+            if (!exprVType(arg, vt))
+                throw CompileError{"print 无法推断实参类型，请用 (expr: \"%fmt\") 指定格式", s.line};
+            std::string nm = resolveAliasName(vt.name);
+            char cls = scalarClass(vt.name);
+            std::string pre, post, spec, macro;
+            if (vt.arr == 0 && vt.ptr == 0 && nm == "string" && aggrOf("string")) {
+                spec = "s"; pre = "string_cstr(&("; post = "))";      // adt string 值
+            } else if (vt.arr == 0 && vt.ptr == 1 && nm == "string" && aggrOf("string")) {
+                spec = "s"; pre = "string_cstr("; post = ")";          // adt string 指针
+            } else if (cls == 'c' && (vt.ptr >= 1 || vt.arr >= 1)) {
+                spec = "s";                                            // char& / char[] 字符串
+            } else if (vt.ptr >= 1 || vt.arr >= 1) {
+                spec = "p"; pre = "(void *)("; post = ")";             // 其余指针/数组
+            } else {
+                switch (cls) {
+                    case 'i':
+                        if (nm == "i8") { macro = "PRId64"; pre = "(int64_t)("; post = ")"; }
+                        else { spec = "d"; pre = "(int)("; post = ")"; }
+                        break;
+                    case 'u':
+                        if (nm == "u8") { macro = "PRIu64"; pre = "(uint64_t)("; post = ")"; }
+                        else { spec = "u"; pre = "(unsigned)("; post = ")"; }
+                        break;
+                    case 'f': spec = "f"; pre = "(double)("; post = ")"; break;
+                    case 'b': spec = "d"; pre = "(int)("; post = ")"; break;
+                    case 'c': spec = "c"; pre = "(int)("; post = ")"; break;
+                    default:
+                        throw CompileError{"print 无法为类型 '" +
+                            (vt.name.empty() ? std::string("(无类型)") : vt.name) +
+                            "' 自动选择格式，请用 (expr: \"%fmt\") 指定", s.line};
+                }
+            }
+            if (!macro.empty()) { lit += "%"; flush(); fmtExpr += " " + macro; }
+            else lit += "%" + spec;
+            pvs.push_back({&arg, pre, post});
+        }
+        if (!lit.empty() || fmtExpr.empty()) flush();
+
+        indent();
+        out << "print((uint8_t)(" << s.printChn << "), " << fmtExpr;
+        for (auto& pv : pvs) {
+            out << ", " << pv.pre;
+            emitExpr(*pv.e, true);
+            out << pv.post;
+        }
         out << ");\n";
     }
 
@@ -1800,14 +1933,14 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
 
-        // print 关键字：需 io 模块实现 print（inc io.sc 参与链接）
+        // print 关键字：需 io 模块（inc io.sc → #include io.h 提供 print 原型 + 参与链接）
         if (usesPrint && !funcs.count("print")) {
             bool hasIo = false;
             for (auto& d : prog.decls)
                 if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
             if (!hasIo)
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
-            out << "extern void print(const char *, ...);\n\n";
+            // 原型由 io.sc 的 @fnc print:: 接口（→ #include io.h）提供，无需在此重复声明
         }
         // stringify 格式化关键字：依赖 adt string 与 io 的 stringify_t 选项类型
         if (usesStrof && !funcs.count("stringify")) {

@@ -174,6 +174,8 @@ struct Expr {
 
     std::string op;             // 针对目标项的运算和操作（Cast 时为目标类型名）
     int castPtr = 0;            // Cast: 目标类型的指针层数
+    bool castIsFmt = false;     // Cast: op 为 printf 格式串字面量（含引号）而非类型名
+                                // —— print 实参的格式覆盖 (expr: "%.5d")，仅 print 语境有意义
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
@@ -218,6 +220,11 @@ struct Stmt {
                     //                > expr=cond，
                     //                > forInit=mutex，forCond=可选纳秒，forStep=可选秒
                     //                  + nsec/sec 全 0 或省略 → 无限等待；调用前须已持有(lock) mutex
+        PrintS,     // print 日志输出   print[<chn>] arg, arg, ...（括号可省）
+                    //                > printChn=通道 u1 的 C 表达式文本（默认 "0"），透传给 C print
+                    //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
+                    //                  false 时为拼接糖：字符串字面量=纯文本；其余=按静态类型自动
+                    //                  补说明符的变量；Cast(castIsFmt)=显式格式覆盖 (expr: "%fmt")
     } kind;
 
     ExprPtr expr;                       // ExprS: 表达式的值
@@ -233,6 +240,10 @@ struct Stmt {
     ExprPtr forInit, forCond, forStep;  // ForS: for (init; cond; step) 三段表达式
 
     std::vector<std::pair<std::string, long long>> runOpts;  // RunS: run<stack:N, prio:M> 线程属性（键:整数值），透传给 C
+
+    std::string printChn;               // PrintS: <chn> 通道的 C 表达式文本（默认 "0"）
+    std::vector<ExprPtr> printArgs;     // PrintS: 拼接实参列表（顺序）
+    bool printCompat = false;           // PrintS: 括号形式 print(...) → C printf 兼容模式（实参原样传递）
 
     struct CaseArm {
         std::vector<ExprPtr> labels;    // 空=default 分支

@@ -154,6 +154,15 @@ std::string stmtNode(const Stmt& s) {
             return node("wait", "", exprToStr(*s.expr) + ", " + exprToStr(*s.forInit) +
                         (s.forCond ? ", " + exprToStr(*s.forCond) : "") +
                         (s.forStep ? ", " + exprToStr(*s.forStep) : ""), s.line);
+        case Stmt::PrintS: {
+            std::string d;
+            for (size_t i = 0; i < s.printArgs.size(); i++) {
+                if (i) d += ", ";
+                d += exprToStr(*s.printArgs[i]);
+            }
+            if (s.printCompat) d = "(" + d + ")";
+            return node("print", s.printChn != "0" ? "<" + s.printChn + ">" : "", d, s.line);
+        }
     }
     return "{}";
 }

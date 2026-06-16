@@ -793,18 +793,35 @@ var tab[2][3]: i4 = {
 
 ### 10.3 print 与 stringify(...) 格式化（io 内置关键字）
 
-`print` 是 C 风格日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）：
+`print` 是日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）。它有两种写法：
+**无括号拼接糖**与**有括号 C printf 兼容模式**：
 
 ```sc
 inc io.sc
 
+# 拼接糖（无括号）：字符串字面量=纯文本，非字面量按静态类型自动补说明符
+var n: i4 = 42
+var s: char& = "hello"
+print "n=", n, " s=", s             # → n=42 s=hello（i4→%d, char&→%s）
+print "默认浮点=", pi, " 定点=", (pi: "%.2f")   # (expr: "%fmt") 显式格式覆盖
+print<7> "通道 7 日志"               # <chn> 指定 u1 日志通道（默认 0），透传给 C print
+
+# C printf 兼容模式（有括号）：首参为格式串，实参原样传递
 print("n=%d s=%s", 42, "hello")     # 默认 D 级别
 print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
 ```
 
-- 格式串与 printf 一致；前缀 `F:`/`E:`/`W:`/`I:`/`D:`/`V:` 设日志级别
- （致命/错误/警告/信息/调试/详细），无前缀默认 `D`。
-- 输出格式 `HH:MM:SS.mmm L| 文本`，自动换行，单次 fprintf 保证多线程不串行。
+- **拼接糖**：字符串字面量直接作为文本（`%` 自动转义）；其余实参按静态类型自动选择
+  printf 说明符并追加到可变参数。类型→说明符映射：
+  `i1/i2/i4`→`%d`、`i8`→`%`PRId64、`u1/u2/u4`→`%u`、`u8`→`%`PRIu64、
+  `f4/f8`→`%f`、`char`→`%c`、`bool`→`%d`、`char&`/`char[]`→`%s`、
+  `string` 值/指针→`%s`（经 `string_cstr`）、枚举→`%d`、其余指针/数组→`%p`。
+  无法推断时用 `(expr: "%fmt")` 显式指定该实参格式。
+- **兼容模式**：等价于直接调用 C `print`，格式串与实参原样传递（沿用旧的 printf 用法）。
+- 两种写法均支持 `<chn>` 通道块与文本前缀 `F:`/`E:`/`W:`/`I:`/`D:`/`V:` 设日志级别
+  （致命/错误/警告/信息/调试/详细），无前缀默认 `D`。
+- 输出格式 `HH:MM:SS.mmm L| 文本`（`chn!=0` 时加通道标记），自动换行，单次 fprintf
+  保证多线程不串行。
 - 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
 
 `stringify(值)` 是 JSON 字符串格式化关键字（区别于类型 `string` 与堆构造
@@ -815,11 +832,11 @@ print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
 
 ```sc
 var s: string = stringify(t)        # 默认多行美化（2 空格逐层缩进）
-print("t=%s", s.cstr())
+print "t=", s.cstr()                # 拼接糖：s.cstr() 返回 char& → %s
 s.drop()
 
 var b[256]: char
-print("t=%s", stringify<compact:1>(t, b, 256))   # 缓存 + 紧凑：{"id":1,"name":"AB"}
+print "t=", stringify<compact:1>(t, b, 256)   # 缓存 + 紧凑：{"id":1,"name":"AB"}
 ```
 
 选项块 `stringify<key:val, ...>(值)`：以 `(stringify_t){...}` 传入格式化器，键值限整数

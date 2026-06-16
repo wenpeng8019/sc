@@ -564,6 +564,13 @@ struct Checker {
                 if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line); // 纳秒
                 if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line); // 秒
                 break;
+            // -- print：逐项检查实参表达式（格式覆盖 Cast 解包到被格式化的子表达式）
+            case Stmt::PrintS:
+                for (auto& a : s.printArgs) {
+                    const Expr* v = (a->kind == Expr::Cast && a->castIsFmt) ? a->a.get() : a.get();
+                    (void)inferExpr(*v, locals, s.line);
+                }
+                break;
         }
     }
 

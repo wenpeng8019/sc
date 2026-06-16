@@ -1,5 +1,6 @@
 /* io_impl.c —— sc io 模块默认实现（契约见 io.h）
  * print：C printf 风格日志输出（stdc print 的简化移植）
+ *   - 首参 chn：u1 日志通道（透传），chn!=0 时在行首附加通道标记
  *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定级别，无前缀默认 D
  *   - 输出 stdout：HH:MM:SS.mmm L| 文本（自动补换行）
  *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取
@@ -24,7 +25,7 @@ static int sc_log_level(void) {
     return s_level;
 }
 
-void print(const char *fmt, ...) {
+void print(uint8_t chn, const char *fmt, ...) {
     if (!fmt) return;
 
     /* "X:" 级别前缀 */
@@ -64,6 +65,9 @@ void print(const char *fmt, ...) {
     if (n >= (int)sizeof(line)) n = (int)sizeof(line) - 1;
 
     /* 单次 fprintf 输出整行（多线程下行内不撕裂），自动补换行 */
-    fprintf(stdout, "%s %c| %s%s", ts, SC_LV_CHARS[lv - 1], line,
-            (n > 0 && line[n - 1] == '\n') ? "" : "\n");
+    const char *nl = (n > 0 && line[n - 1] == '\n') ? "" : "\n";
+    if (chn)
+        fprintf(stdout, "%s %c|%u| %s%s", ts, SC_LV_CHARS[lv - 1], (unsigned)chn, line, nl);
+    else
+        fprintf(stdout, "%s %c| %s%s", ts, SC_LV_CHARS[lv - 1], line, nl);
 }
