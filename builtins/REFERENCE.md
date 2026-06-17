@@ -10,6 +10,7 @@
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
 | m | `inc m.sc` | 多线程语言支持标准：run/wait 语句、thread、mutex、cond、pool（线程池） |
+| op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）；platform.h 的 sc 侧入口 |
 
 另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
 
@@ -149,16 +150,59 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 | clone | `bool, out&: list` | 浅拷贝到 out |
 | sort | `cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&:, b&:` |
 
+### 使用示例
+
+完整示例见 `examples/feature6.sc`：
+
+```sc
+inc stdio.h
+inc adt.sc
+
+fnc main: i4
+    var s: string              # 声明即构造
+    s.append("hello")
+    printf("%s len=%llu\n", s.cstr(), s.len())
+    s.drop()                   # 手动析构
+    return 0
+```
+
+## op —— 语法机制模块（默认导入）
+
+`builtins/op.sc` 与 `platform.h` 一样属**默认导入**，无需 `inc`。它汇集编译器
+需要感知的「语言底层（语法层面）机制」声明，据此识别方法调用糖、字段访问、
+链表注入等语法糖。其 C 运行时随每个工程自动编译并链接（无需 inc）：
+
+| 文件 | 角色 |
+|------|------|
+| op.sc | sc 侧机制声明（operand、chain；后续切片/容器/COM 等） |
+| op.h | C ABI 契约（chain 结构体/原型），随 `platform.h` 默认带入每个生成单元 |
+| op_impl.c | 机制运行时默认实现，编译器对每个工程自动编译并链接 |
+
+### operand —— 设备操作数通用指令
+
+`operand` 伪结构体的每个成员函数声明一条作用于**基础/任意类型操作数**的通用
+指令。语法上对基础类型（`i4`、`type&` 等）扩展 `.` 操作调用：`v.get()` /
+`p->set(x)`。scc 不生成 `operand_xxx`，而是透传为 `platform.h` 的同名
+`sc_<op>` 宏（接收者以指针传入，值接收者自动取址）；指令类型无关
+（C 侧 `__typeof__` 推导）。新增指令时在 op.sc 加一行 `fnc`、并在 platform.h
+加同名 `sc_<op>` 宏即可。
+
+| 指令 | 调用 | 透传 | 说明 |
+|------|------|------|------|
+| get | `v.get()` | `sc_get(&v)` | 原子读（relaxed） |
+| set | `v.set(x)` | `sc_set(&v, x)` | 原子写（relaxed） |
+| get_acq | `v.get_acq()` | `sc_get_acq(&v)` | 原子读（acquire） |
+| set_rel | `v.set_rel(x)` | `sc_set_rel(&v, x)` | 原子写（release） |
+
 ### chain —— 侵入式双向链表
 
-配合链表结构体 `def T: ~ {}` 使用（编译器在 T 成员末尾注入 `T *_prev` /
-`T *_next`）。机制约定：
+配合链表结构体 `def T: ~ {}` 使用（编译器在 T 成员首位注入 `void *_prev` /
+`void *_next`）。`chain` 为 op.sc 默认导入机制，**无需 `inc`**；C 结构体与运行时
+由 `op.h` / `op_impl.c` 自动提供。机制约定：
 
 - `head` 指向首元素；首元素的 `_prev` 指向尾元素（即 rear），尾元素的
   `_next` 为 `nil`——取队尾 O(1)，正向遍历以 `nil` 结尾。
-- 同一 `chain` 只能存放**同一种**结构体：`_off` 记录 `_prev` 在元素内的
-  字节偏移，由编译器在 `append`/`push` 调用处自动注入
-  `offsetof(T, _prev)`，对用户透明。
+- 同一 `chain` 只能存放**同一种**结构体；`_prev`/`_next` 固定在元素首部。
 - **不拥有元素**：pop/remove/cut 只摘除链接，不释放元素内存。
 - 元素入链前无需初始化 `_prev`/`_next`；同一元素不可同时挂在两条链上。
 
@@ -180,7 +224,7 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 ```sc
 def task: ~ { id: i4 }
 
-var l: chain
+var l: chain                  # chain 默认可用，无需 inc
 var t[3]: task
 l.append(&t[0])
 l.append(&t[1])
@@ -191,21 +235,7 @@ while it != nil
     it = it->_next
 ```
 
-### 使用示例
-
-完整示例见 `examples/feature6.sc`：
-
-```sc
-inc stdio.h
-inc adt.sc
-
-fnc main: i4
-    var s: string              # 声明即构造
-    s.append("hello")
-    printf("%s len=%llu\n", s.cstr(), s.len())
-    s.drop()                   # 手动析构
-    return 0
-```
+完整示例见 `examples/feature6.sc`。
 
 ## m —— 多线程语言支持标准
 

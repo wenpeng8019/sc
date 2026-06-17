@@ -1020,6 +1020,23 @@ struct CGen {
                             break;
                         }
                     }
+                    // operand 透传（platform.h 的 sc 侧）：接收者无同名方法时，把基础/任意
+                    // 类型上的 . 操作透传为设备操作数通用指令 sc_<op>(&recv/recv, args...)。
+                    // op.sc 的 operand 伪结构体登记可用指令集；C 侧 platform.h 提供同名
+                    // sc_<op> 宏（类型无关，忽略入参/返回值类型）。
+                    if (findMethod("operand", e.a->text)) {
+                        out << "sc_" << e.a->text << "(";
+                        if (e.a->op == ".") out << "&";   // 值接收者取址（透传指针，契合原子等指令）
+                        out << "(";
+                        emitExpr(*e.a->a, true);
+                        out << ")";
+                        for (auto& a : e.args) {
+                            out << ", ";
+                            emitExpr(*a, true);
+                        }
+                        out << ")";
+                        break;
+                    }
                 }
                 // 函数指针字段/变量/顶层函数调用（含缺参 0 补全）
                 const Field* mf = callableField(*e.a);
@@ -1392,10 +1409,17 @@ struct CGen {
         depth++;
         indent(); out << "struct " << r->name << " _rp = {0};\n";
         for (size_t i = 0; i < call.args.size(); i++) {
+            const Field& f = r->structCommon.fields[i];
             indent();
-            out << "_rp." << r->structCommon.fields[i].name << " = ";
+            out << "_rp." << f.name << " = ";
             emitExpr(*call.args[i], true);
             out << ";\n";
+            if (!f.type.arrayDims.empty()) {       // 数组实参：额外装填 size（字节数）
+                indent();
+                out << "_rp." << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f);
+                out << ";\n";
+            }
         }
         indent();
         if (toPool) {
@@ -1785,6 +1809,39 @@ struct CGen {
         return rt && (!rt->name.empty() || rt->ptr > 0);
     }
 
+    // rpc 数组形参 → 结构体两字段：指针（数组退化）+ size（字节数）。
+    // 名为 a 的数组形参映射为 `T (*a)[剩余维]` 与 `size_t a_size`，
+    // 装填时传数组地址与其 sizeof，便于 C 传输层据 size 序列化数组。
+    // 数组形参的伴生 size 字段名。
+    static std::string rpcArraySizeName(const Field& f) { return f.name + "_size"; }
+
+    // 数组形参在结构体内的指针字段声明：首维退化为指针，保留其余维度，
+    // 使 worker 体内 a[i][j] 正常索引。1 维 → `T *name`；多维 → `T (*name)[d2]...`。
+    void emitRpcArrayPtr(const Field& f) {
+        std::string base; int ptr;
+        resolveType(f.type, base, ptr);
+        const auto& dims = f.type.arrayDims;
+        const std::string nm = (f.name == "this" ? "_this" : f.name);
+        out << base << " ";
+        for (int i = 0; i < ptr; i++) out << "*";
+        if (dims.size() <= 1) {                    // 1 维：普通指针
+            out << "*" << nm;
+        } else {                                   // 多维：指向数组的指针
+            out << "(*" << nm << ")";
+            for (size_t i = 1; i < dims.size(); i++) out << "[" << dims[i] << "]";
+        }
+    }
+
+    // 数组形参完整类型的 sizeof：`sizeof(T [*..][d1][d2]...)`（按声明静态求值）。
+    void emitRpcArraySizeof(const Field& f) {
+        std::string base; int ptr;
+        resolveType(f.type, base, ptr);
+        out << "sizeof(" << base;
+        for (int i = 0; i < ptr; i++) out << " *";
+        for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
+        out << ")";
+    }
+
     // 同名参数结构体：返回槽 _ 为首个默认成员（C 侧可用 _ 访问）
     void emitRpcStruct(const Decl& d) {
         out << "struct " << d.name << " {\n";
@@ -1798,6 +1855,11 @@ struct CGen {
             out << "char _;\n";  // C 不允许空结构体：占位
         }
         for (auto& f : d.structCommon.fields) {
+            if (!f.type.arrayDims.empty()) {       // 数组形参 → <T*, size> 两字段
+                indent(); emitRpcArrayPtr(f); out << ";\n";
+                indent(); out << "size_t " << rpcArraySizeName(f) << ";\n";
+                continue;
+            }
             indent();
             emitDeclarator(f);
             out << ";\n";
@@ -1821,9 +1883,15 @@ struct CGen {
         depth++;
         indent(); out << "struct " << d.name << " _p = {0};\n";
         for (auto& f : d.structCommon.fields) {
+            const std::string arg = (f.name == "this" ? "_this" : f.name);
             indent();
-            out << "_p." << f.name << " = "
-                << (f.name == "this" ? "_this" : f.name) << ";\n";
+            out << "_p." << f.name << " = " << arg << ";\n";
+            if (!f.type.arrayDims.empty()) {       // 数组：额外装填 size（字节数）
+                indent();
+                out << "_p." << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f);
+                out << ";\n";
+            }
         }
         indent(); out << d.name << "_rpc(&_p);\n";
         if (rpcHasRet(d)) { indent(); out << "return _p._;\n"; }

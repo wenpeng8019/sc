@@ -1,6 +1,5 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/adt/adt.h"
 
 typedef struct task task;
 typedef struct node node;

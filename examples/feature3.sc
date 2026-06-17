@@ -16,12 +16,22 @@ rpc add: i4, a: i4, b: i4
 rpc greet: n: i4
     printf("hello rpc x%d\n", n)
 
-# 指针参数（rpc 参数不支持数组，用 & 指针代替）
+# 指针参数：标量地址用 & 指针
 rpc strlen2: i4, s: char&
     var n: i4 = 0
     while s[n] != 0
         n++
     return n * 2
+
+# 数组参数：映射为结构体内 <T*, size> 两字段（指针 + 字节数）。
+# 装填时自动传数组地址与其 sizeof，便于 C 传输层据 size 序列化数组。
+# 体内按声明维度正常索引（多维亦可）。
+rpc dot: i4, a[3]: i4, b[3]: i4
+    var s: i4 = 0
+    var i: i4 = 0
+    for i = 0; i < 3; i++
+        s = s + a[i] * b[i]
+    return s
 
 # @导出：头文件中包含完整三件套，跨模块/纯 C 可直接调用
 @rpc square: i4, x: i4
@@ -31,5 +41,8 @@ fnc main: i4
     printf("add(3,4) = %d\n", add(3, 4))
     greet(2)
     printf("strlen2 = %d\n", strlen2("abc"))
+    var u[3]: i4 = {1, 2, 3}
+    var v[3]: i4 = {4, 5, 6}
+    printf("dot = %d\n", dot(u, v))
     printf("square(9) = %d\n", square(9))
     return 0

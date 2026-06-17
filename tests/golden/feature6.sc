@@ -4,8 +4,6 @@ inc stdio.h
 
 inc stdlib.h
 
-inc adt.sc
-
 def task: ~ {
     id: i4
 }

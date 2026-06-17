@@ -670,11 +670,9 @@ struct Parser {
         else d->kind = Decl::FuncTypeD;
         accept(Tok::Dedent);
 
-        // rpc 参数将成为结构体字段：所以不支持变参与数组参数
+        // rpc 参数将成为结构体字段：不支持变参（数组参数支持，映射为 <T*, size> 两字段）
         if (d->isRpc) {
             if (d->structCommon.variadic) err("rpc 不支持可变参数 '...'");
-            for (auto& f : d->structCommon.fields)
-                if (!f.type.arrayDims.empty()) err("rpc 参数不支持数组，请改用指针（&）");
         }
 
         return d;

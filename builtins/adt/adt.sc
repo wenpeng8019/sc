@@ -72,26 +72,3 @@
     fnc sort:: cmp: list_cmp&                       # 按比较回调排序
 }
 
-# ---------------- chain：侵入式双向链表 ----------------
-# 任何链表结构体（def T: ~ {}，首位自动注入 void* _prev/_next）皆可入链
-# 机制：首元素 _prev 指向尾元素（即 rear），尾元素 _next 为 nil
-# 导航：base(o) 得到首个真实成员地址，prev(o) 得到前驱节点 void*，next(o) 得到后继节点 void*
-# 不拥有元素：remove/pop/cut 不释放元素本身
-# 同一 chain 只存放同一种结构体
-
-@def chain: {
-    head: &        # 首元素（空链为 nil）
-
-    fnc append:: it: &                               # 添加到队尾
-    fnc push:: it: &                                 # 添加到队首
-    fnc pop:: &                                     # 移除并返回首元素（空返回 nil）
-    fnc before:: pos: &, it: &                        # 添加 it 到 pos 之前
-    fnc after:: pos: &, it: &                         # 添加 it 到 pos 之后
-    fnc remove:: it: &                               # 移除元素（须在链中）
-    fnc first:: &                                   # 首元素（空返回 nil）
-    fnc last:: &                                    # 尾元素（空返回 nil）
-    fnc revert::                                     # 首尾翻转
-    fnc append_to:: dst: chain&                      # 整链接到 dst 尾部（自身清空）
-    fnc push_to:: dst: chain&                        # 整链接到 dst 头部（自身清空）
-    fnc cut:: from: &, to: &, out: chain&              # 截取 [from..to] 段为新链 out（out 被覆盖）
-}

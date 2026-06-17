@@ -757,6 +757,50 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
     return deps;
 }
 
+// 默认导入 builtins/op.sc —— 语言底层（语法层面）机制的 sc 侧声明模块。
+// 与 platform.h 一样属"默认导入"，无需显式 inc。op.sc 汇集编译器需要感知的
+// 语法机制类型与接口声明：operand（设备操作数 . 透传）、chain（侵入式双向链表）、
+// 切片/容器/COM 等。编译器据此识别方法调用糖、字段访问、链表/容器注入等语法糖。
+// 所有声明以 external 并入当前程序：不生成代码、不参与链接——其 C 结构体/原型/
+// 实现由各自的 C ABI 头与运行时提供：chain 由 builtins/op.h 与 op_impl.c
+// （随 platform.h 默认带入 + 编译器自动链接）提供。
+static void mergeOpModule(Program& prog, const std::filesystem::path& srcPath) {
+    const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path()
+                                                   : std::filesystem::current_path();
+    const auto modPath = resolveModulePath("op.sc", baseDir);
+    if (modPath.empty()) return;
+    // 正在编译 op.sc 自身：不自合并
+    if (!srcPath.empty() && std::filesystem::weakly_canonical(srcPath) == modPath)
+        return;
+    // 已合并过（任一 decl 来源标记为 op.sc）：避免重复合并；同时收集本单元已有名字
+    const std::string origin = modPath.string();
+    std::unordered_set<std::string> present;
+    for (auto& d : prog.decls) {
+        if (d->origin == origin) return;
+        present.insert(d->name);
+    }
+    const std::string text = readWholeFile(modPath);
+    if (text.empty()) return;
+    try {
+        Program mp = parse(lex(text));
+        for (auto& md : mp.decls) {
+            // 仅并入类型/接口声明（机制语法所需）：类型定义与函数类型 / cImpl 方法。
+            // 排除 inc/add（链接依赖）、全局变量、含函数体的实现。
+            const bool mech =
+                md->kind == Decl::EnumD   || md->kind == Decl::StructD ||
+                md->kind == Decl::UnionD  || md->kind == Decl::AliasD  ||
+                md->kind == Decl::FuncTypeD;
+            if (!mech) continue;
+            if (present.count(md->name)) continue;  // 与本单元同名声明冲突：保留本单元
+            md->external = true;
+            md->origin = origin;
+            prog.decls.push_back(std::move(md));
+        }
+    } catch (...) {
+        // op.sc 解析失败：忽略（不影响主程序编译）
+    }
+}
+
 // 从项目入口文件加载模块图，递归解析依赖，检查语义；成功返回 true，失败返回 false 和错误信息
 static bool loadUnitGraph(const std::filesystem::path& srcPath,
                           std::unordered_map<std::string, UnitInfo>& units,
@@ -790,6 +834,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     u.path = canon;
     u.prog = parse(lex(src));                   // 解析源代码为 AST
     u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
+    mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
     semanticCheck(u.prog);                      // 再检查：导入类型/方法可见
 
     // 递归加载依赖模块
@@ -902,6 +947,29 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             objects.push_back(obj);
         } else {
             objects.push_back(impl);  // .o/.a 直接参与链接
+        }
+    }
+
+    // 第三阶段·补：op.sc 机制运行时（builtins/op_impl.c）无条件参与链接。
+    //   op.sc 为默认导入模块（chain 等语法机制），其 C 运行时随每个工程自动编译
+    //   并链接，无需 inc。与 platform.h 的「默认带入」对应。
+    if (!units.empty()) {
+        const std::filesystem::path anyDir =
+            std::filesystem::path(units.begin()->first).parent_path();
+        const auto opPath = resolveModulePath("op.sc", anyDir);
+        if (!opPath.empty()) {
+            const std::filesystem::path opImpl = opPath.parent_path() / "op_impl.c";
+            if (std::filesystem::exists(opImpl)) {
+                const std::filesystem::path obj = tmpDir / "op_impl.o";
+                std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
+                    + " -I " + opPath.parent_path().string()
+                    + " -c " + opImpl.string() + " -o " + obj.string();
+                if (std::system(ccCmd.c_str()) != 0) {
+                    std::cerr << "错误: op 运行时编译失败（" << ccCmd << "）\n";
+                    return 1;
+                }
+                objects.push_back(obj);
+            }
         }
     }
 
@@ -1180,6 +1248,7 @@ int main(int argc, char** argv) {
         else if (!fromPath.empty()) unitPath = std::filesystem::path(fromPath);  // stdin + --from
         if (!unitPath.empty())                                      // 解析 inc 依赖（不展开源码，合并 .sc 依赖导出声明）
             resolveUnitDeps(prog, unitPath);                        //   使插件实时编辑场景也能合并外部描述符
+        mergeOpModule(prog, unitPath);                              // 默认导入 op.sc 语法机制声明（operand/chain 等）
 
         if (mode == "ast") {                                        // 仅 AST 模式采集 C 头外部描述符
             ClangOptions copt;                                      //   （避免编译/run 每次都解析系统头；保持其它模式行为不变）

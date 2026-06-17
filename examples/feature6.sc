@@ -2,7 +2,7 @@
 
 inc stdio.h
 inc stdlib.h
-inc adt.sc
+# chain 为 op.sc 默认导入机制，无需 inc 即可使用
 
 #-------------- def T: ~ —— 链表标记 --------------------------
 # ~ 标记使转 C 时在成员首位自动注入 void *_prev, *_next

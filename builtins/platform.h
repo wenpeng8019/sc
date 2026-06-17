@@ -508,4 +508,20 @@ static inline bool P_test_and_set_impl(volatile LONG* pVar, LONG* pTestVar, LONG
 #error "Unsupported platform"
 #endif
 
+//------------------  operand 指令透传（sc_*）  -------------------------------
+// op.sc 的 operand 伪结构体在 sc 侧声明设备操作数通用指令；scc 把基础/任意类型
+// 上的 . 操作（如 v.get() / p->set(x)）透传为下面的同名 sc_<op> 宏。接收者一律以
+// 指针传入（值接收者 v.op() 自动取址 &v），故各 sc_<op> 首参均为指针 pVar。
+// 这些宏类型无关（__typeof__ 推导），新增 operand 操作时在 op.sc 与此处成对添加。
+//-----------------------------------------------------------------------------
+#define sc_get(pVar)        P_get(pVar)          /* 原子读（relaxed） */
+#define sc_set(pVar, v)     P_set(pVar, v)       /* 原子写（relaxed） */
+#define sc_get_acq(pVar)    P_get_acq(pVar)      /* 原子读（acquire） */
+#define sc_set_rel(pVar, v) P_set_rel(pVar, v)   /* 原子写（release） */
+
+//------------------  op.sc 机制运行时（默认带入）  ----------------------
+// op.sc 为默认导入的语法机制声明模块；op.h 是其 C 侧伴随头（chain 等
+// 机制的结构体与运行时原型）。随 platform.h 一同进入每个生成的 C 单元。
+#include "op.h"
+
 #endif /* SC_PLATFORM_H */
