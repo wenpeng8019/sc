@@ -139,28 +139,37 @@ def operand: {
     _frame: &           # 等待者状态机帧（await 点登记）
     _resume: &          # 等待者恢复入口
     _next: &            # 就绪队列链接（运行时内部）
+    _id: i4             # future<ID> 事件 id（>=0=可派发；-1=无标签）
+    _ctx: &             # future<ID>(ctx) 用户上下文：发起时挂、派发时 f->ctx() 取回
 
     fnc init::          # future()：伪类构造，登记到当前事件循环（未就绪）
     fnc ready:: bool    # f.ready()：是否已就绪
     fnc get:: &         # f.get()：取结果（调用点用 : T& 强转还原类型）
+    fnc ctx:: &         # f.ctx()：取发起时挂载的用户上下文（无则 nil）
 }
 
 # ---------------- 事件循环生命周期 ----------------
 @fnc async_init::           # 建立当前线程事件循环
-@fnc async_loop::           # 驱动事件循环至全部异步完成
+@fnc async_loop:: proc: &   # 驱动事件循环至全部异步完成；proc=按 id 派发回调
+                            #   fnc async_proc: i4, id: future_id, f: future&（返回<0 停循环），
+                            #   nil=纯协程驱动（无 future<ID> 派发）
 @fnc async_final::          # 销毁当前线程事件循环
 
 # com 通讯机制
 # ----------------------------------------------------------------------------- 
 # 语言层面提供设备通讯的基础能力
 # 语法：
-# << 操作符: send buf 字节流到 COM（发）
-# >> 操作符: 从 COM recv 字节流到 buf（收）
+# << 操作符: send 字节流到 COM（发）
+# >> 操作符: 从 COM recv 字节流（收）
 # 链式左结合：com << a << b、com >> x >> y，最左操作数须为 com 基类型，逐个执行。
 #
 # ============================ 实际操作完整流程 ============================
-# 编译器按「所在函数是否异步」与「右操作数形态」选择展开，分四类。base 表示 com
-# 端点（值接收者自动取址 &com，指针接收者直接传 com）。
+# 编译器按「所在函数是否异步」与「右操作数形态」选择展开。右操作数有三种形态：
+#   ① 普通变量 v        —— 直接收发 sizeof(v) 字节
+#   ② com[...] 句柄 s   —— 有界读视图，走框架确定读流程（仅 >>）
+#   ③ rpc 调用/名      —— 把 rpc 参数序列化收发（同步形态：见【C】）
+# 同步（fnc 内）= 【A】【B】【C】；异步（rpc 内含 await）= 【D】【E】【F】。
+# base 表示 com 端点（值接收者自动取址 &com，指针接收者直接传 com）。
 #
 # 【A】同步 · 普通变量（fnc 内，目标为 lvalue v）—— codegen emitComChain
 #   com << v   展开为：  _scsz = sizeof(v); base.write(&base, &v, &_scsz);
@@ -186,7 +195,27 @@ def operand: {
 #   · 截止策略全在用户的 data()/ending 里，框架只跑这套不变的循环（最小内核）；
 #   · 句柄是「有界读视图」，仅用于 >> 读流程；com << s（句柄写）不支持，直接编译报错。
 #
-# 【C】异步 · 普通变量（rpc 内，含 await 机制）—— codegen emitComAwait
+# 【C】同步 · rpc 序列化收发（fnc 内）—— emitComRpcSend / emitComRpcRecv
+#   把 rpc 的「参数」当作一组待收发的值，按声明顺序逐字段过 com（跳过返回槽 _）。
+#   发收两端形态对称、字段顺序一致，构成一对「序列化协议」。
+#
+#   ·发· com << rpc(实参...)   目标为 rpc 调用（带括号实参）
+#     展开为：填 rpc 参数结构体 _rp（与本地调用同样装填）→ 逐字段 write：
+#       标量/指针 f：  _scsz = sizeof(_rp.f);     base.write(&base, &_rp.f, &_scsz);
+#       数组     f：  _scsz = _rp.f_size;         base.write(&base, _rp.f,  &_scsz);
+#     · 仅写参数字节，不触发本地 rpc 调用（纯发送方）；
+#     · com[...] 句柄参数不可序列化 → 编译报错（须由裸字节流另行承载）。
+#
+#   ·收· com >> rpc            目标为裸 rpc 名（无实参）
+#     展开为：逐字段从 com read 进参数结构体 _rp → 触发 worker rpc_rpc(&_rp)：
+#       标量/指针 f：  _scsz = sizeof(_rp.f);     base.read(&base, &_rp.f, &_scsz);
+#       数组     f：  栈上开等长后备缓冲 _rp_f，_rp.f 指向它，再 read 进缓冲；
+#       句柄     f：  com[...] 参数以「本 com」为本体绑定句柄（alloc + _self 回指），
+#                     走【B】的框架读流程 limit_read 从同一 com 读入（其余字段照常）；
+#     · 读毕调用 rpc_rpc(&_rp) 触发本地处理；不取返回值（仅触发，无回执）。
+#   · 约束：异步 rpc、可变参数 rpc 暂不支持 → 编译报错。
+#
+# 【D】异步 · 普通变量（rpc 内，含 await 机制）—— codegen emitComAwait
 #   rpc 内出现 << / >> 即标记该 rpc 为异步（hasAwait），编译为状态机。每个收发点
 #   是一个 await 切点，展开为：
 #     com >> v   →  _p->_fut = com_read_async (&base, &v, sizeof(v));
@@ -198,13 +227,18 @@ def operand: {
 #     无需把字节回写 future；
 #   · 让出后由事件循环在 io 完成时经就绪队列 resume 状态机，从 _s<k> 继续。
 #
-# 【D】异步 · com[...] 句柄（rpc 内）—— 规划中
+# 【E】异步 · com[...] 句柄（rpc 内）—— 规划中
 #   语义：limit_read 的循环若遇 com.read 返回 again，则挂起 await、待设备就绪
 #   （ioq 读队列回调兑现 future）后恢复续读，直至 ending/定长命中。当前未实现
 #   （同步 limit_read 遇 again 即报错信号），留作 ioq 异步驱动落地时打通。
 #
+# 【F】异步 · rpc 序列化收发（rpc 内）—— 规划中
+#   语义：把【C】的逐字段 write/read 替换为 com_write_async/com_read_async 的 await
+#   切点（每字段一个让出点），收端读齐参数后再触发处理。当前未实现，待异步收发
+#   原语真正落地（非"立即完成"桥）后与【D】统一展开。
+#
 # ---------------------- com_read_async / com_write_async ----------------------
-# 二者是【C】异步收发点的「桥接原语」（C ABI 见 op.h，默认实现在 builtins/async/
+# 二者是【D】异步收发点的「桥接原语」（C ABI 见 op.h，默认实现在 builtins/async/
 # async_impl.c，仅 inc async 时链接）。目的：把一次 com 设备 io 封装成可被 await
 # 的 future，使 rpc 状态机能以统一的 await 协议挂起/恢复。
 #   com_read_async (&com, data, size) → future&   # 发起异步读，io 完成时 future_done 兑现
@@ -217,15 +251,15 @@ def operand: {
 #   · 二者依赖 future_*，故与 future/await 同约束：未 inc async 用到即链接缺失。
 # =========================================================================
 # 示例：
-# rpc do_some: a:i4: a:i4: a:i4
-#     return
-# rpc on_some: a:i4: a:i4: a:i4
-#     return
-# fnc call: com&
-#     com << val1 << val2
-#     com << do_some(a, b, c)
-#     com >> res
-#     com >> on_some(a, b, c)
+# rpc do_some: i4, a: i4, b: i4         # 序列化收发的一对 rpc（参数即协议字段）
+#     return 0
+# rpc on_some: i4, a: i4, b: i4
+#     return 0
+# fnc call: com&                        # 同步：【A】普通值 + 【C】rpc 序列化
+#     com << val1 << val2               # 【A】发两个值
+#     com << do_some(a, b)              # 【C】发 do_some 的参数（不触发本地调用）
+#     com >> res                        # 【A】收一个值
+#     com >> on_some                    # 【C】收参数并触发 on_some_rpc
 #     return
 
 # fnc init::                          # 初始化 limit（如填充边界数据）                                

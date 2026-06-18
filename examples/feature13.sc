@@ -189,20 +189,20 @@ fnc main: i4
     var fb: future& = async greet("B", 30)
 
     # ── async_loop：驱动事件循环，推进所有挂起 rpc 直到完成 ───────────────────
-    async_loop()
+    async_loop(nil)
 
-    # ── future.get：取结果（此时已就绪，类型擦除用 : char& 强转）──────────────
+    # ── future.get：取结果（此时已就绪，类型擦除用 : char& 强转）──────
     printf("fa = %s\n", fa->get(): char&)  # A
     printf("fb = %s\n", fb->get(): char&)  # B
 
-    # ── 级联：both 内部 await 两个 greet rpc ────────────────────────────────
+    # ── 级联：both 内部 await 两个 greet rpc ───────────────────────
     var fc: future& = async both("X", "Y")
-    async_loop()
+    async_loop(nil)
     printf("both ret = %d\n", fc->get(): i4)   # 0
 
     # ── 自定义原语：await compute(内部 await bg_square，线程桁接、不依赖 libuv)──
     var fd: future& = async compute(3)
-    async_loop()
+    async_loop(nil)
     printf("compute ret = %d\n", fd->get(): i4)  # 81  (3²=9, 9²=81)
 
     async_final()                         # ③ 销毁事件循环

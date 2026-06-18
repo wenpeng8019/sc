@@ -43,3 +43,8 @@ std::string emitC(const Program& prog, const std::string& srcFile,
 // 程序中没有任何 @导出对象时返回空字符串。
 // guardName: include guard 宏名（由调用方从输出文件名推导）
 std::string emitCHeader(const Program& prog, const std::string& guardName);
+
+// 生成 future<ID> 聚合枚举头 type.h 内容：typedef enum { ... } future_id;（含 include guard）。
+//   ids 为去重后的事件 ID 列表（默认值 0,1,2...，各单元按名引用即一致）。
+//   ids 为空时返回空字符串。由转译/构建管线在工程输出同级落盘，各 .c #include "type.h"。
+std::string emitFutureIdHeader(const std::vector<std::string>& ids);

@@ -103,7 +103,7 @@ int32_t main(void) {
     /* line 59 */
     future *f = handler__async(&(c));
     /* line 60 */
-    async_loop();
+    async_loop(NULL);
     /* line 62 */
     printf("done\n");
     /* line 63 */

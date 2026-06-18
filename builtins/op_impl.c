@@ -160,40 +160,6 @@ void chain_cut(chain *_this, void *from, void *to, chain *out) {
     LNEXT(to) = NULL;
 }
 
-/* ---------------- limit：com 一次有界读视图（框架确定的读流程）---------------- */
-/* limit 的 data/ending 由用户实现，size/len 为属性。框架只负责确定不变的读循环，
- * 驱动 com >> s（s 为 com[...] 句柄）：反复用 com 的 read 读入 data()+len，按 size
- * 与 ending 判截止，回写 len。缓存/边界策略全在用户的 data/ending 里，框架不写死。
- *   ending==NULL：定长，读满 size 即 IO_EOF；
- *   ending!=NULL：每次最多读 size 字节后回调 ending，>=0 命中（保留其值为 len）。
- * 返回 IO_EOF（读完）/ 负数（不可恢复，中断）/ IO_AGAIN（同步上下文无事件循环，报错信号）。*/
-int32_t limit_read(com *c, limit *s) {
-    if (!c || !s || !c->read) return -1;
-    char *base = (char *)(s->data ? s->data(s) : NULL);
-    if (!base) return -1;
-    for (;;) {
-        uint32_t chunk;
-        if (s->ending) {
-            chunk = s->size;                       /* 动态：每次最多读 size */
-        } else {
-            if (s->len >= s->size) return IO_EOF;  /* 定长：读满即完成 */
-            chunk = s->size - s->len;
-        }
-        if (chunk == 0) return IO_EOF;
-        int32_t r = c->read(c, base + s->len, &chunk);
-        if (r < 0) return r;                       /* 不可恢复，中断 */
-        if (r == IO_AGAIN) return IO_AGAIN;        /* 异步挂起：同步上下文由调用方报错 */
-        s->len += chunk;
-        if (s->ending) {                           /* 动态截止：回调判定（每对象方法指针） */
-            int32_t m = s->ending(s);
-            if (m >= 0) { s->len = (uint32_t)m; return IO_EOF; }
-        } else if (s->len >= s->size) {
-            return IO_EOF;                         /* 定长读满 */
-        }
-        if (r == IO_EOF || chunk == 0) return IO_EOF;  /* 设备已无更多数据 */
-    }
-}
-
 /* ---------------- ioq：com 读写缓存队列（自膨胀循环缓冲）---------------- */
 /* 槽统一为 void*（size 以 (void*)(uintptr_t) 编码）。_head/_tail 为单调递增的
  * 逻辑槽计数，物理下标取 % _cap。每项变长，靠首槽 tag/size 自身区分：
@@ -256,3 +222,38 @@ void *ioq_pull(ioq *_this) {
     if (cb) ((void (*)(void *))cb)(data);
     return NULL;
 }
+
+/* ---------------- limit：com 一次有界读视图（框架确定的读流程）---------------- */
+/* limit 的 data/ending 由用户实现，size/len 为属性。框架只负责确定不变的读循环，
+ * 驱动 com >> s（s 为 com[...] 句柄）：反复用 com 的 read 读入 data()+len，按 size
+ * 与 ending 判截止，回写 len。缓存/边界策略全在用户的 data/ending 里，框架不写死。
+ *   ending==NULL：定长，读满 size 即 IO_EOF；
+ *   ending!=NULL：每次最多读 size 字节后回调 ending，>=0 命中（保留其值为 len）。
+ * 返回 IO_EOF（读完）/ 负数（不可恢复，中断）/ IO_AGAIN（同步上下文无事件循环，报错信号）。*/
+int32_t limit_read(com *c, limit *s) {
+    if (!c || !s || !c->read) return -1;
+    char *base = (char *)(s->data ? s->data(s) : NULL);
+    if (!base) return -1;
+    for (;;) {
+        uint32_t chunk;
+        if (s->ending) {
+            chunk = s->size;                       /* 动态：每次最多读 size */
+        } else {
+            if (s->len >= s->size) return IO_EOF;  /* 定长：读满即完成 */
+            chunk = s->size - s->len;
+        }
+        if (chunk == 0) return IO_EOF;
+        int32_t r = c->read(c, base + s->len, &chunk);
+        if (r < 0) return r;                       /* 不可恢复，中断 */
+        if (r == IO_AGAIN) return IO_AGAIN;        /* 异步挂起：同步上下文由调用方报错 */
+        s->len += chunk;
+        if (s->ending) {                           /* 动态截止：回调判定（每对象方法指针） */
+            int32_t m = s->ending(s);
+            if (m >= 0) { s->len = (uint32_t)m; return IO_EOF; }
+        } else if (s->len >= s->size) {
+            return IO_EOF;                         /* 定长读满 */
+        }
+        if (r == IO_EOF || chunk == 0) return IO_EOF;  /* 设备已无更多数据 */
+    }
+}
+

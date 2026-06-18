@@ -25,6 +25,11 @@ static future    *g_ready_tail;   /* 就绪队列尾 */
 static long       g_pending;      /* 已创建但尚未完成的 future 数（含 _ret 与叶子） */
 static int        g_inited;
 
+/* 语言自有的 id 派发回调（async_loop 传入）：完成的「带 id 且无协程等待者」future
+ * 由循环线程交给它处理，像消息队列。返回<0 请求停循环。NULL=不派发（纯协程驱动）。 */
+typedef int (*async_proc_t)(int id, future *f);
+static async_proc_t g_proc;
+
 /* 就绪队列（调用方持 g_mu） */
 static void push_ready(future *f) {
     f->next = NULL;
@@ -42,7 +47,7 @@ static future *pop_ready(void) {
     return f;
 }
 
-/* g_wake 回调：循环线程排空就绪队列，逐个 resume；全部完成则停循环。 */
+/* g_wake 回调：循环线程排空就绪队列；有协程等待者则 resume，否则按 id 派发。 */
 static void drain_cb(uv_async_t *h) {
     (void)h;
     for (;;) {
@@ -53,7 +58,15 @@ static void drain_cb(uv_async_t *h) {
         uv_mutex_unlock(&g_mu);
 
         if (f) {
-            if (f->frame && f->resume) f->resume(f->frame);  /* 恢复等待者状态机 */
+            if (f->frame && f->resume) {
+                f->resume(f->frame);             /* 协程路径：恢复等待者状态机 */
+            } else if (f->id >= 0 && g_proc) {
+                int rc = g_proc(f->id, f);       /* 消息路径：按 id 派发处理 */
+                free(f);                         /* 派发型 future 即消息，处理后回收 */
+                if (rc < 0) { uv_stop(&g_loop); break; }
+            } else if (f->id >= 0) {
+                free(f);                         /* 有 id 但未设派发器：丢弃该消息 */
+            }
             continue;
         }
         if (pend == 0 && empty) uv_stop(&g_loop);  /* 无未决且队列空 → 退出 uv_run */
@@ -68,15 +81,17 @@ void async_init(void) {
     uv_mutex_init(&g_mu);
     g_ready_head = g_ready_tail = NULL;
     g_pending = 0;
+    g_proc = NULL;
     g_inited = 1;
 }
 
-void async_loop(void) {
+void async_loop(void *proc) {
     if (!g_inited) return;
+    g_proc = (async_proc_t)proc;   /* 按 id 派发回调（NULL=纯协程驱动） */
     uv_mutex_lock(&g_mu);
-    long pend = g_pending;
+    int idle = (g_pending == 0 && g_ready_head == NULL);
     uv_mutex_unlock(&g_mu);
-    if (pend == 0) return;   /* 无未决 future：避免空转阻塞（g_wake 常驻 ref） */
+    if (idle) return;        /* 无未决且无待派发消息：避免空转阻塞（g_wake 常驻 ref） */
     uv_run(&g_loop, UV_RUN_DEFAULT);
 }
 
@@ -101,6 +116,8 @@ future *future_new(void) {
  * 由编译器为 future() 生成的 future__new 调用（malloc + memset 之后），以及内部
  * future_new 共用。要求 async_init 已建立 g_mu（future() 只在异步上下文中使用）。 */
 void future_init(future *_this) {
+    _this->id = -1;          /* 默认无标签：仅协程 await 用（0 是合法 id，不能作哨兵） */
+    _this->ctx = NULL;       /* 默认无上下文；future<ID>(ctx) 由构造辅助回填 */
     uv_mutex_lock(&g_mu);
     g_pending++;
     uv_mutex_unlock(&g_mu);
@@ -111,22 +128,24 @@ void future_init(future *_this) {
  *   - done 先于 await：ready=1 但 frame==NULL，不入队；await 后续见 ready 直接续跑。
  *   - await 先于 done：frame 已设，done 见 frame!=NULL → 入队 + 唤醒。 */
 void future_done(future *f, void *result) {
-    int  has_waiter;
+    int  enqueue;
     long remaining;
     uv_mutex_lock(&g_mu);
     f->result = result;
     f->ready  = 1;
-    has_waiter = (f->frame != NULL);
-    if (has_waiter) push_ready(f);
+    /* 协程等待者 → 入队待 resume；或带 id 的无等待者 → 入队待 id 派发。 */
+    enqueue = (f->frame != NULL) || (f->id >= 0);
+    if (enqueue) push_ready(f);
     g_pending--;
     remaining = g_pending;
     uv_mutex_unlock(&g_mu);
-    /* 有等待者 → 唤醒去 resume；或全部完成 → 唤醒去 uv_stop。 */
-    if (has_waiter || remaining == 0) uv_async_send(&g_wake);
+    /* 有待处理项 → 唤醒去 resume/派发；或全部完成 → 唤醒去 uv_stop。 */
+    if (enqueue || remaining == 0) uv_async_send(&g_wake);
 }
 
 uint8_t future_ready(future *_this) { return (uint8_t)(_this ? _this->ready : 0); }
 void   *future_get(future *_this)   { return _this ? _this->result : NULL; }
+void   *future_ctx(future *_this)   { return _this ? _this->ctx : NULL; }
 
 /* await 握手（循环线程，由生成的状态机调用）：在 g_mu 下登记本帧为 waiter，
  * 并原子读取就绪位。返回 1=已就绪（生成码不让出、直接续跑）；0=未就绪（让出）。

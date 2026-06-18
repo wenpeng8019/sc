@@ -22,6 +22,7 @@
 // ============================================================
 #include "parser.h"
 #include "error.h"
+#include <algorithm>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -70,6 +71,9 @@ struct Parser {
 
     // 当前正在解析函数体的 Decl（供 await 回写 hasAwait 标记其所在 rpc）
     Decl* curParseFn = nullptr;
+
+    // future<ID>() 构造点收集的 ID（去重、首见序）：parseProgram 末尾合成 future_id 枚举
+    std::vector<std::string> futureIds;
 
     explicit Parser(const std::vector<Token>& toks) : t(toks) {}
 
@@ -920,12 +924,30 @@ struct Parser {
             if (!acceptOp(">")) err("stringify 选项块期望 '>'");
             hasSofOpts = true;
         }
+
+        // future<ID>(...) 构造点：仅 future 关键字后紧跟 '<' 时触发。
+        // ID 为单个标识符（future_id 枚举常量名）；解析后随调用链附到对应 Call 节点。
+        std::string pendingFutureId;
+        bool hasFutureId = false;
+        if (e->kind == Expr::Ident && e->text == "future" && atOp("<")) {
+            advance();  // 消费 '<'
+            skipNlInBracket();
+            if (!at(Tok::Ident)) err("future<ID> 期望事件 ID 标识符");
+            pendingFutureId = advance().text;
+            skipNlInBracket();
+            if (!acceptOp(">")) err("future<ID> 期望 '>'");
+            hasFutureId = true;
+            // 收集 ID（去重、首见序）：parseProgram 合成 future_id 枚举
+            if (std::find(futureIds.begin(), futureIds.end(), pendingFutureId) == futureIds.end())
+                futureIds.push_back(pendingFutureId);
+        }
         for (;;) {
             if (accept(Tok::LParen)) { // 函数调用：expr(args)
                 exprBracket++;
                 auto call = mk(Expr::Call);
                 call->a = std::move(e);  // a = 被调函数表达式
                 if (hasSofOpts) { call->sofOpts = std::move(pendingSofOpts); hasSofOpts = false; }
+                if (hasFutureId) { call->futureId = std::move(pendingFutureId); hasFutureId = false; }
                 skipNlInBracket();
                 if (!at(Tok::RParen)) {
                     for (;;) {
@@ -962,6 +984,7 @@ struct Parser {
             } else break;  // 无更多后缀操作，退出循环
         }
         if (hasSofOpts) err("stringify<...> 选项块后须紧跟调用 '(...)'");
+        if (hasFutureId) err("future<ID> 后须紧跟构造调用 '()'");
         return e;
     }
 
@@ -1635,6 +1658,25 @@ struct Parser {
                     dS->structCommon.fields[pos].name == "_next"))
                 pos++;
             dS->structCommon.fields.insert(dS->structCommon.fields.begin() + pos, std::move(f));
+        }
+
+        // ── future<ID> 聚合 pass：把各构造点收集的事件 ID 合成一个 future_id 枚举，
+        //    插入 decls 首部（无依赖）。转译工程下写入 type.h（各 .c #include）；
+        //    stdout/内联模式则就地内联进 .c。供 async_loop(async_proc) 按 id 派发。
+        if (!futureIds.empty()) {
+            auto e = std::make_unique<Decl>();
+            e->kind = Decl::EnumD;
+            e->name = "future_id";
+            e->genTypeHeader = true;
+            e->structCommon.type = std::make_shared<TypeRef>();
+            e->structCommon.type->name = "i4";
+            for (auto& id : futureIds) {
+                Field f;
+                f.name = id;
+                e->structCommon.fields.push_back(std::move(f));
+            }
+            prog.decls.insert(prog.decls.begin(), std::move(e));
+            prog.futureIds = futureIds;
         }
 
         return prog;

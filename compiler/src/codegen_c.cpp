@@ -258,6 +258,10 @@ struct CGen {
     void scanExprForNew(const Expr& e) {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
+        if (!e.futureId.empty()) {
+            usesFutureId = true;  // future<ID>(ctx?) → 需 future__new_tagged
+            if (const Decl* fd = aggrOf("future")) heapNews.insert(fd->name);  // 保证 future__new 生成
+        }
         // print / stringify 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
@@ -306,6 +310,13 @@ struct CGen {
                 out << "        " << im->name << "(_p);\n";
             out << "    }\n    return _p;\n}\n\n";
         }
+        // future<ID>(ctx?) 构造：在 future__new 基础上打 id 标签 + 可选用户上下文 ctx
+        if (usesFutureId) {
+            out << "static inline future *future__new_tagged(int _id, void *_ctx) {\n"
+                << "    future *_p = future__new();\n"
+                << "    if (_p) { _p->id = _id; _p->ctx = _ctx; }\n"
+                << "    return _p;\n}\n\n";
+        }
     }
 
     // ---------------- stringify 格式化关键字：按静态类型生成格式化器 ----------------
@@ -328,6 +339,11 @@ struct CGen {
     // 空时回退为内联进 .c（--emit-c 输出到 stdout 时保持单文件自包含）。
     std::string sofHeaderName;
     std::string sofHeaderOut;           // 头文件模式下回填生成的头文件全文
+
+    // future<ID> 聚合枚举 future_id 的承载头：非空=头文件模式（.c 顶部 #include 它，
+    //   枚举写入独立 type.h 由 main 落盘）；空=内联模式（枚举就地写进 .c，自包含）。
+    std::string typeHeaderName;
+    bool usesFutureId = false;          // 出现 future<ID>() 构造：需生成 future__new_tagged 辅助
 
     // 穿透别名得到最终类型名（最多 8 层防环）
     std::string resolveAliasName(std::string n) const {
@@ -669,7 +685,9 @@ struct CGen {
     // T() 类型伪调用：被调对象是聚合类型名（无参、未被变量遮蔽）
     // → 堆构造糖，返回解析后的聚合类型 Decl（否则 nullptr）
     const Decl* typeCallee(const Expr& call) const {
-        if (!call.a || call.a->kind != Expr::Ident || !call.args.empty()) return nullptr;
+        if (!call.a || call.a->kind != Expr::Ident) return nullptr;
+        // 普通 T() 须无参；future<ID>(ctx) 允许一个 ctx 实参
+        if (!call.args.empty() && call.futureId.empty()) return nullptr;
         const std::string& n = call.a->text;
         if (localsT.count(n) || globalsT.count(n)) return nullptr;
         return aggrOf(n);
@@ -1016,7 +1034,13 @@ struct CGen {
                 }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
                 if (const Decl* td = typeCallee(e)) {
-                    out << td->name << "__new()";
+                    if (!e.futureId.empty()) {  // future<ID>(ctx?) → 打 id 标签 + 可选 ctx
+                        out << td->name << "__new_tagged(" << e.futureId << ", ";
+                        if (e.args.empty()) out << "(void *)0";
+                        else emitExpr(*e.args[0], true);
+                        out << ")";
+                    } else
+                        out << td->name << "__new()";
                     break;
                 }
                 // print 关键字：C 风格日志输出（io 子项目 print，未被同名定义遮蔽时）
@@ -2700,6 +2724,11 @@ struct CGen {
         out << "/* 由 scc 生成，请勿手工修改 */\n"
             << "#include \"platform.h\"\n";
 
+        // future<ID> 聚合枚举 future_id：头文件模式下由独立 type.h 提供，.c 在此 #include
+        //（无依赖，置于最前）。内联模式则随 decls 就地输出，无需此包含。
+        if (!typeHeaderName.empty() && !prog.futureIds.empty())
+            out << "#include \"" << typeHeaderName << "\"\n";
+
         // 用户 inc 引入的头文件
         for (auto& d : prog.decls)
             if (d->kind == Decl::IncD) emitInclude(*d);
@@ -2809,6 +2838,8 @@ struct CGen {
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
+            // future_id 聚合枚举：头文件模式下由 type.h 提供（已 #include），不再内联
+            if (d->genTypeHeader && !typeHeaderName.empty()) continue;
             if (d->external && d->kind != Decl::IncD) {
                 // 外部 @def 结构体由模块头提供；但其分身句柄 T__project 仍需本工程生成。
                 if (d->kind == Decl::StructD && !d->projectSelf.empty())
@@ -2950,6 +2981,7 @@ std::string emitC(const Program& prog, const std::string& srcFile,
     CGen g(prog);
     g.srcFile = srcFile;
     g.sofHeaderName = stringifyHeaderName;
+    if (!prog.futureIds.empty()) g.typeHeaderName = "type.h";  // 文件模式：.c #include "type.h"
     std::string c = g.run();
     if (stringifyHeaderOut) *stringifyHeaderOut = g.sofHeaderOut;
     return c;
@@ -2958,4 +2990,19 @@ std::string emitC(const Program& prog, const std::string& srcFile,
 std::string emitCHeader(const Program& prog, const std::string& guardName) {
     CGen g(prog);
     return g.runHeader(guardName);
+}
+
+// future<ID> 聚合枚举头 type.h：转译/构建管线在工程输出同级落盘，各 .c #include 它。
+std::string emitFutureIdHeader(const std::vector<std::string>& ids) {
+    if (ids.empty()) return "";
+    std::string s = "/* 由 scc 生成：future<ID> 聚合事件枚举，请勿手工修改 */\n"
+                    "#ifndef SCC_TYPE_H\n#define SCC_TYPE_H\n\n"
+                    "typedef enum { /* base: int32_t */\n";
+    for (size_t i = 0; i < ids.size(); i++) {
+        s += "    " + ids[i];
+        if (i + 1 < ids.size()) s += ",";
+        s += "\n";
+    }
+    s += "} future_id;\n\n#endif\n";
+    return s;
 }

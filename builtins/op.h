@@ -62,16 +62,20 @@ typedef struct future {
     void  *frame;            /* 等待者状态机帧（NULL=无人等待） */
     void (*resume)(void *);  /* 等待者恢复入口（状态机函数） */
     void  *next;             /* 就绪队列链接（运行时内部） */
+    int    id;               /* future<ID> 事件 id（>=0=可派发；-1=无标签，仅协程 await 用） */
+    void  *ctx;              /* future<ID>(ctx) 用户上下文：发起时挂、派发时经 future_ctx 取回 */
 } future;
 
 /* future 方法（op.sc 内 @def future 的成员函数，C 侧实现） */
 void     future_init(future *_this);    /* future()：登记到当前事件循环（pending +1） */
 uint8_t  future_ready(future *_this);   /* f.ready()：是否已就绪 */
 void    *future_get(future *_this);     /* f.get()：取结果（调用点 : T& 强转还原） */
+void    *future_ctx(future *_this);     /* f.ctx()：取发起时挂载的用户上下文（无则 NULL） */
 
 /* 当前线程事件循环生命周期 */
 void     async_init(void);              /* 建立事件循环 */
-void     async_loop(void);              /* 驱动事件循环至全部异步完成 */
+void     async_loop(void *proc);        /* 驱动事件循环至全部异步完成；proc=按 id 派发回调
+                                         * （int (*)(int id, future *f)，返回<0 停循环），NULL=纯协程驱动 */
 void     async_final(void);             /* 销毁事件循环 */
 
 /* 运行时内部原语（编译器生成码与可 await 契约使用） */

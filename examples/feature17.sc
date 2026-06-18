@@ -57,7 +57,7 @@ fnc main: i4
     c.write = dev_write
 
     var f: future& = async handler(&c)   # 挂起式启动 rpc，立即返回 future
-    async_loop()                   # 驱动事件循环，推进 rpc 直到完成
+    async_loop(nil)                # 驱动事件循环，推进 rpc 直到完成
 
     printf("done\n")
     async_final()                  # 销毁事件循环

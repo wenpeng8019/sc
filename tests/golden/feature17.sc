@@ -40,7 +40,7 @@ fnc main: i4
     c.read = dev_read
     c.write = dev_write
     var f: future& = async handler(&c)
-    async_loop()
+    async_loop(nil)
     printf("done\n")
     async_final()
     return 0

@@ -200,6 +200,11 @@ struct Expr {
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
     std::vector<std::pair<std::string, long long>> sofOpts;
 
+    // future<ID>() 构造标记（仅 Call 且 callee 为 future 伪构造时有效）；
+    // + ID 为 future_id 枚举常量名，编译期聚合成 future_id 枚举（type.h），
+    //   codegen 生成 future__new_tagged(ID) 为该 future 设 id，供 async_loop 按 id 派发。
+    std::string futureId;
+
     int line = 0;               // 表达式起始行号（用于错误报告）
 
     // 匿名函数字面量（FncLit）专用
@@ -327,6 +332,8 @@ struct Decl {
     bool externAnalyzed = false;    // 仅 external IncD：是否已确定该来源的符号全集
                                     //（.sc 合并 / libclang 解析 / 退化读到头文件）→ 允许"导入未使用"警告
     bool exported = false;          // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
+    bool genTypeHeader = false;     // 编译器合成的 future_id 枚举：转译工程下写入 type.h（各 .c #include），
+                                    //   emit-sc 不输出；stdout/内联模式则就地内联进 .c（自包含）
     bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
     std::string adtColl;            // ADT 容器结构体 def T: <C, I> {}：C=容器类型名
@@ -367,6 +374,8 @@ struct Decl {
 struct Program {
     std::vector<DeclPtr> decls;             // 顶层声明列表，按源码中的书写顺序排列
     std::vector<std::string> externSymbols; // 当前单元引用到的外部符号（模块/头文件导入后汇总）
+    std::vector<std::string> futureIds;     // future<ID>() 构造点收集的 ID（去重、首见序）；
+                                            // 非空时由解析器合成 future_id 枚举插入 decls 首部，转译工程写出 type.h。
 };
 
 // ---------- 诊断信息 ----------

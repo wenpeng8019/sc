@@ -186,7 +186,7 @@ int32_t main(void) {
     /* line 189 */
     future *fb = greet__async("B", 30);
     /* line 192 */
-    async_loop();
+    async_loop(NULL);
     /* line 195 */
     printf("fa = %s\n", ((char*)(future_get(fa))));
     /* line 196 */
@@ -194,13 +194,13 @@ int32_t main(void) {
     /* line 199 */
     future *fc = both__async("X", "Y");
     /* line 200 */
-    async_loop();
+    async_loop(NULL);
     /* line 201 */
     printf("both ret = %d\n", ((int32_t)(future_get(fc))));
     /* line 204 */
     future *fd = compute__async(3);
     /* line 205 */
-    async_loop();
+    async_loop(NULL);
     /* line 206 */
     printf("compute ret = %d\n", ((int32_t)(future_get(fd))));
     /* line 208 */

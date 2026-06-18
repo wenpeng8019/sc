@@ -26,6 +26,7 @@
 #include "parser.h"
 #include "semantic.h"
 #include "cheaders.h"
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -894,6 +895,18 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         arts.push_back({cpath, hpath, opath, kv.second.path.parent_path()});
     }
 
+    // future<ID> 聚合枚举：跨所有单元取 ID 并集（去重、首见序），写出工程级 type.h，
+    //   各含 future<ID>/future_id 的单元 .c 已 #include "type.h"（-I tmpDir 可见）。
+    {
+        std::vector<std::string> allIds;
+        for (auto& kv : units)
+            for (auto& id : kv.second.prog.futureIds)
+                if (std::find(allIds.begin(), allIds.end(), id) == allIds.end())
+                    allIds.push_back(id);
+        const std::string th = emitFutureIdHeader(allIds);
+        if (!th.empty() && !writeTextFile(tmpDir / "type.h", th)) return 1;
+    }
+
     // 第二阶段：统一编译所有 .c -> .o
     for (auto& a : arts) {
         // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到
@@ -1411,6 +1424,15 @@ int main(int argc, char** argv) {
             std::filesystem::path sofPath =
                 std::filesystem::path(output).parent_path() / "stringify.h";
             if (!writeTextFile(sofPath, sofHeaderSrc)) return 1;
+        }
+
+        // 3f''-future. --emit-c 到文件且程序含 future<ID>：在同目录写出 type.h（聚合
+        //   future_id 枚举，由 .c #include）。转译工程自包含所需。
+        if (mode == "c" && !output.empty() && !prog.futureIds.empty()) {
+            const std::string th = emitFutureIdHeader(prog.futureIds);
+            std::filesystem::path thPath =
+                std::filesystem::path(output).parent_path() / "type.h";
+            if (!th.empty() && !writeTextFile(thPath, th)) return 1;
         }
 
         // 3f''. --emit-c 到文件：为每个用户 .sc 模块依赖生成同级 scm_<token>.h，
