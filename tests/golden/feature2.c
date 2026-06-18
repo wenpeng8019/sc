@@ -30,135 +30,155 @@ typedef struct obj {
     int32_t abc;
     int32_t (*func1)(obj *o, int32_t x, int32_t y);
     add_f func2;
+    int32_t (*scale)(struct obj *, int32_t k);
 } obj;
 
 static int32_t obj_add(obj *o, int32_t x, int32_t y);
+static int32_t obj_scale(obj *_this, int32_t k);
 static int32_t sq(int32_t x);
 static void my_printf(char *fmt, ...);
 
 static int32_t clamp(int32_t v, int32_t lo, int32_t hi) {
-    /* line 24 */
+    /* line 25 */
     if (v < lo) {
-        /* line 25 */
+        /* line 26 */
         return lo;
     }
-    /* line 26 */
+    /* line 27 */
     if (v > hi) {
-        /* line 27 */
+        /* line 28 */
         return hi;
     }
-    /* line 28 */
+    /* line 29 */
     return v;
 }
 
 static int32_t area(rect *r) {
-    /* line 33 */
-    int32_t w = r->rb.x - r->lt.x;
     /* line 34 */
-    int32_t h = r->rb.y - r->lt.y;
+    int32_t w = r->rb.x - r->lt.x;
     /* line 35 */
+    int32_t h = r->rb.y - r->lt.y;
+    /* line 36 */
     return w * h;
 }
 
 static int32_t add1(int32_t a, int32_t b) {
-    /* line 42 */
+    /* line 43 */
     return a + b;
 }
 
 static int32_t add2(int32_t a, int32_t b) {
-    /* line 44 */
+    /* line 45 */
     return a + (2 * b);
 }
 
 static void dec(int32_t v) {
-    /* line 48 */
+    /* line 49 */
     --(v);
 }
 
 static int32_t add3(int32_t a, int32_t b, int32_t c) {
-    /* line 53 */
+    /* line 54 */
     return (a + b) + c;
 }
 
 static int32_t desc(char *s, point pt) {
-    /* line 56 */
+    /* line 57 */
     if (s == NULL) {
-        /* line 57 */
+        /* line 58 */
         return pt.x + pt.y;
     }
-    /* line 58 */
+    /* line 59 */
     return 100;
 }
 
 static int32_t obj_add(obj *o, int32_t x, int32_t y) {
-    /* line 69 */
+    /* line 71 */
     return (o->abc + x) + y;
 }
 
+static int32_t obj_scale(obj *_this, int32_t k) {
+    /* line 75 */
+    return _this->abc * k;
+}
+
 static int32_t sq(int32_t x) {
-    /* line 73 */
+    /* line 79 */
     return x * x;
 }
 
 static void my_printf(char *fmt, ...) {
-    /* line 84 */
+    /* line 90 */
     va_list ap;
-    /* line 85 */
+    /* line 91 */
     va_start(ap, fmt);
-    /* line 86 */
+    /* line 92 */
     vprintf(fmt, ap);
-    /* line 87 */
+    /* line 93 */
     va_end(ap);
 }
 
 int32_t main(void) {
-    /* line 94 */
-    printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10));
-    /* line 97 */
-    rect r = {0};
-    /* line 98 */
-    (r.lt.x = 0) , (r.lt.y = 0);
-    /* line 99 */
-    (r.rb.x = 10) , (r.rb.y = 5);
     /* line 100 */
-    printf("area = %d\n", area(&(r)));
+    printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10));
     /* line 103 */
-    printf("add1(3,4) = %d\n", add1(3, 4));
+    rect r = {0};
     /* line 104 */
-    printf("add2(3,4) = %d\n", add2(3, 4));
+    (r.lt.x = 0) , (r.lt.y = 0);
+    /* line 105 */
+    (r.rb.x = 10) , (r.rb.y = 5);
+    /* line 106 */
+    printf("area = %d\n", area(&(r)));
     /* line 109 */
-    int32_t (*cb)(int32_t x);
+    printf("add1(3,4) = %d\n", add1(3, 4));
     /* line 110 */
-    cb = sq;
-    /* line 111 */
-    printf("cb(7) = %d\n", cb(7));
-    /* line 114 */
-    obj o = {0};
+    printf("add2(3,4) = %d\n", add2(3, 4));
     /* line 115 */
-    o.abc = 10;
+    int32_t (*cb)(int32_t x);
     /* line 116 */
+    cb = sq;
+    /* line 117 */
+    printf("cb(7) = %d\n", cb(7));
+    /* line 120 */
+    obj o = {0};
+    /* line 121 */
+    o.abc = 10;
+    /* line 122 */
     if (o.func1 == NULL) {
-        /* line 117 */
+        /* line 123 */
         printf("func1 is nil\n");
     }
-    /* line 118 */
+    /* line 124 */
     o.func1 = obj_add;
-    /* line 119 */
-    printf("o.func1(2,3) = %d\n", o.func1(&(o), 2, 3));
-    /* line 120 */
-    printf("po->func1(4,5) = %d\n", o.func1(&(o), 4, 5));
     /* line 125 */
-    my_printf("sc says: %s %d\n", "hello", 42);
+    printf("o.func1(2,3) = %d\n", o.func1(&(o), 2, 3));
+    /* line 126 */
+    printf("po->func1(4,5) = %d\n", o.func1(&(o), 4, 5));
+    /* line 132 */
+    if (o.scale == NULL) {
+        /* line 133 */
+        printf("scale is nil\n");
+    }
+    /* line 134 */
+    o.scale = obj_scale;
     /* line 135 */
-    printf("add3(7) = %d\n", add3(7, 0, 0));
+    printf("o.scale(3) = %d\n", o.scale(&o, 3));
     /* line 136 */
-    printf("add3(1,2) = %d\n", add3(1, 2, 0));
+    obj *po = &(o);
     /* line 137 */
+    printf("po->scale(4) = %d\n", po->scale(po, 4));
+    /* line 142 */
+    my_printf("sc says: %s %d\n", "hello", 42);
+    /* line 152 */
+    printf("add3(7) = %d\n", add3(7, 0, 0));
+    /* line 153 */
+    printf("add3(1,2) = %d\n", add3(1, 2, 0));
+    /* line 154 */
     printf("desc() = %d\n", desc(NULL, (point){0}));
-    /* line 140 */
+    /* line 157 */
     printf("o.func1(&o) = %d\n", o.func1(&(o), 0, 0));
-    /* line 141 */
+    /* line 158 */
     printf("cb() = %d\n", cb(0));
-    /* line 144 */
+    /* line 161 */
     return 0;
 }

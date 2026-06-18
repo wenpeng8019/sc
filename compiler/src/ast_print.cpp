@@ -134,6 +134,12 @@ std::string inlineStr(const TypeRef& t) {
 
 std::string fieldDetail(const Field& f, bool withInit) {
     if (f.type.fnKind == TypeRef::FncKind::PlainPtr) return ": " + fncSigStr(f.type);
+    if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
+        // 每对象方法指针字段细节：`fnc: ret, params`（接收者隐藏；调试/JSON 用）
+        std::string s = ": " + fncSigStr(f.type);
+        if (withInit && f.init) s += " = " + exprToStr(*f.init);
+        return s;
+    }
     std::string s;
     // 数组维度 [dims] 保留在名字侧（冒号前）
     for (auto& dim : f.type.arrayDims) s += "[" + dim + "]";
@@ -163,5 +169,11 @@ std::string fieldDetail(const Field& f, bool withInit) {
 
 std::string fieldToStr(const Field& f, bool withInit) {
     if (f.name.empty() && f.type.hasInline) return inlineStr(f.type); // 匿名成员
+    if (f.type.fnKind == TypeRef::FncKind::MethodPtr) {
+        // 每对象方法指针字段回写为 `fnc name: sig`（fnc 前置、无函数体）
+        std::string suffix = fncSigStr(f.type).substr(3);  // 去前缀 "fnc"，留 ": ret, params"
+        if (suffix.empty()) suffix = ":";
+        return "fnc " + f.name + suffix;
+    }
     return f.name + fieldDetail(f, withInit);
 }

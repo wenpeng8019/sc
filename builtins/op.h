@@ -81,6 +81,58 @@ void     future_done(future *f, void *result);  /* done 关键字：置就绪 + 
  * 1=已就绪（不让出、直接续跑）；0=未就绪（保存状态后让出）。 */
 uint8_t  future_await(future *f, void *frame, void (*resume)(void *));
 
+/* ---------------- com / limit / ioq：设备通讯机制 ----------------
+ * com 是机制框架：具体 io 依赖设备，由 com 的 read/write/error 每对象方法指针
+ * （MethodPtr，C 侧为结构体函数指针字段）实现——非成员函数（伪类无派生）。
+ * limit 是 com 的分身/切片，充当一次 read 的截止边界视图（com 默认 endless io）。
+ * ioq 是读写缓存队列（自动膨胀的循环缓冲），com 提供 rq/wq（非 NULL）即支持异步 io。
+ *
+ * 声明在 op.sc（默认导入）；本头提供 C ABI 结构体与方法原型。limit、ioq 的方法
+ * （limit_xxx、ioq_xxx）与通用收发框架的运行时实现属后续阶段（op_impl.c，不依赖 libuv）；
+ * 具体设备 io 实现属可选模块（inc com.sc）。未调用即不链接。 */
+
+typedef struct com   com;
+typedef struct limit limit;
+typedef struct ioq   ioq;
+
+/* limit：com 读截止边界（com 的分身/切片；首位为分身回指 _self，与注入对齐） */
+struct limit {
+    struct com *_self;       /* 分身回指本体 com（分身机制注入） */
+    void *_data;             /* 边界数据起始（运行时填充；limit_data 返回） */
+    uint32_t _len;           /* 边界数据长度（运行时填充；limit_len 返回） */
+};
+
+void    *limit_data(limit *_this);   /* limit.data()：数据起始地址 */
+uint32_t limit_len(limit *_this);    /* limit.len()：数据长度（不含边界本身） */
+
+/* ioq：com 读写缓存队列（循环缓冲）
+ * item 为连续一组值，依首值判类型：[size, buf] size≠0=io 缓冲（pull 执行 io）；
+ *                                  [0, callback] size=0=io 完成回调地址。 */
+struct ioq {
+    struct com *com;         /* 所属 com */
+    void   **_buf;           /* 循环缓冲存储（运行时分配，自动膨胀） */
+    uint32_t _cap;           /* 容量（槽数） */
+    uint32_t _head;          /* 队首索引 */
+    uint32_t _tail;          /* 队尾索引 */
+};
+
+void  ioq_push(ioq *_this, void *buf, int32_t size);        /* 入队一段 io 缓冲 */
+void  ioq_notify(ioq *_this, void *cb, void *data);         /* 入队一个完成回调（cb 为函数地址） */
+void *ioq_pull(ioq *_this);                                 /* 取队首并执行 io（空则阻塞） */
+
+/* com：设备通讯端点。字段顺序与 op.sc 的 @def com 一致。
+ * alloc/free/read/write/error 为每对象方法指针（首参为隐藏接收者 com*）。 */
+struct com {
+    void    *dev;            /* 设备句柄（设备相关） */
+    struct ioq *rq;          /* 读队列（NULL=不支持异步读） */
+    struct ioq *wq;          /* 写队列（NULL=不支持异步写） */
+    struct limit *(*alloc)(struct com *_this);                              /* 分身构造 → limit& */
+    void   (*free)(struct com *_this, struct limit *s);                     /* 分身析构 */
+    int32_t (*read)(struct com *_this, void *data, uint32_t *size);         /* 设备读 */
+    int32_t (*write)(struct com *_this, void *buf, uint32_t *size);         /* 设备写 */
+    int32_t (*error)(struct com *_this);                                    /* 错误回调 */
+};
+
 #ifdef __cplusplus
 }
 #endif

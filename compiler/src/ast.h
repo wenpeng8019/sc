@@ -81,7 +81,12 @@ struct TypeRef {
 
     enum class FncKind {
         None,
-        PlainPtr,                       // 普通函数指针：fnc: ret, params...
+        PlainPtr,                       // 普通函数指针：fnc: ret, params...（名字在前，不注入接收者）
+        MethodPtr,                      // 每对象方法指针：fnc name: ret, params...（fnc 在前，无函数体）
+                                        //   按成员函数约定调用（自动注入 &o/p 为首参接收者），
+                                        //   但每个对象各自持有指针（占存储、默认 nil），用于伪类无派生下的
+                                        //   "每对象虚方法/接口"。C 字段为 ret (*name)(T*, ...)。
+                                        //   赋值的函数(普通 fnc/lambda)须显式声明接收者 T& 为首参。
     };
 
     // 对于内联函数指针 —— 特指结构体成员的类型为函数签名（且无函数体）：

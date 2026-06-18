@@ -176,32 +176,47 @@ def operand: {
 #     return
 
 # fnc init::                          # 初始化 limit（如填充边界数据）                                
-@def limit: { 
-    fnc data:: &                      # 返回 limit 数据起始地址
-    fnc len:: u4                      # 返回 limit 数据长度（不含边界本身）
+# —— com/limit/ioq 定稿声明（默认导入；C ABI 见 op.h，通用运行时见 op_impl.c/未来）——
+# 分层（Q4）：声明在此默认导入；通用运行时（ioq 循环缓冲、com 收发框架）→ op_impl.c（不依赖 libuv）；
+#           具体设备 io（read/write 实现、异步驱动）→ 可选模块（inc com.sc）。
+
+# ---------------- limit：com 读截止边界（com 的分身/切片）----------------
+# com 默认是 endless io；limit 借分身机制充当一次 read 的截止边界视图。
+# data()/len() 由运行时按边界规格（见 com.alloc）填充，C 侧实现。
+@def limit: {
+    fnc data:: &                      # limit 数据起始地址（C 侧实现）
+    fnc len:: u4                      # limit 数据长度（不含边界本身）
 }
 
-# @def com: <limit> {
-#     dev: &
-#     rq: ioq&
-#     wq: ioq&
+# ---------------- ioq：com 读写缓存队列（异步 io 的载体）----------------
+# 本质是可自动膨胀的循环缓冲队列。item 为连续一组值，依其首值判类型：
+#   [size, buf]       size≠0 → io 缓冲，pull 执行 io 操作
+#   [0,    callback]  size=0 → io 完成回调地址
+# com 是否提供 rq/wq（非 nil）决定其是否支持异步 io。
+@def ioq: {
+    com: com&                         # 所属 com（前向引用，指针）
+    fnc push:: buf: &, size: i4       # 入队一段 io 缓冲
+    fnc notify:: cb: &, data: &       # 入队一个 io 完成回调（cb 为函数地址；done 为关键字故名 notify）
+    fnc pull:: &                      # 取队首并执行 io（空则阻塞等待，区别于 pop）
+}
 
-    # n: u1  >0: 由后续 limit 个字节序列作为结束边界（最大序列长度 255）
-    # 0: 固定长度边界;
-    #    > 如果后续 2 字节小于 0xFFFF，则作为 u2 长度边界（最大序列长度 65534）
-    #    > 如果后续 2 字节等于 0xFFFF，则作为 u4 长度边界（最大序列长度 4294967295）
-#     alloc: fnc: limit&, 
-#     free: fnc: s: limit&
+# ---------------- com：设备通讯端点（机制框架）----------------
+# 具体 io 依赖设备，由 read/write/error「每对象方法指针」（MethodPtr，fnc 前置、无函数体）实现
+# ——非成员函数：伪类无派生，故以每对象指针充当接口。alloc/free 为分身构造/析构。
+# 关键语法糖 >> <<（类似 c++）：见 op.sc 顶部 com 机制说明与后续阶段实现。
+@def com: <limit> {
+    dev: &                            # 设备句柄（设备相关）
+    rq: ioq&                          # 读队列（nil=不支持异步读）
+    wq: ioq&                          # 写队列（nil=不支持异步写）
 
-#     read: fnc: com&, data: &, size: u4&
-#     write: fnc: com&, buf: &, size: u4&
-#     error: fnc: ret
-# }
+    # 边界规格（P3，由 alloc 依此构造 limit）：
+    #   n: u1  >0: 由后续 n 个字节序列作为结束边界（最大序列长度 255）
+    #          0 : 固定长度边界；后续 2 字节 < 0xFFFF → u2 长度；== 0xFFFF → 继 u4 长度
+    fnc alloc: limit&                 # 分身构造：隐藏接收者 com&，返回 limit&（截止边界视图）
+    fnc free: s: limit&               # 分身析构
 
-# @def ioq: {
-#     com: com&
-#     fnc push:: buf: &, size:i4
-#     fnc done:: cb: fnc:, data: &
-#     fnc pull:: &                                    # 空队列返回 nil，区别于 pop 的是 pull 会阻塞等待直到有元素可用
-# }
+    fnc read: ret, data: &, size: u4&     # 设备读（每对象 io 实现，隐藏接收者 com&）
+    fnc write: ret, buf: &, size: u4&     # 设备写（每对象 io 实现）
+    fnc error: ret                        # 错误回调（每对象）
+}
 

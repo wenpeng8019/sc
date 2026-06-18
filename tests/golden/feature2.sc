@@ -49,10 +49,14 @@ def obj: {
     abc: i4
     func1: fnc: i4, o: obj&, x: i4, y: i4
     func2: add_f
+    fnc scale: i4, k: i4
 }
 
 fnc obj_add: i4, o: obj&, x: i4, y: i4
     return (o->abc + x) + y
+
+fnc obj_scale: i4, _this: obj&, k: i4
+    return _this->abc * k
 
 fnc sq: i4, x: i4
     return x * x
@@ -81,6 +85,12 @@ fnc main: i4
     o.func1 = obj_add
     printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
     printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
+    if o.scale == nil
+        printf("scale is nil\n")
+    o.scale = obj_scale
+    printf("o.scale(3) = %d\n", o.scale(3))
+    var po: obj& = &o
+    printf("po->scale(4) = %d\n", po->scale(4))
     my_printf("sc says: %s %d\n", "hello", 42)
     printf("add3(7) = %d\n", add3(7))
     printf("add3(1,2) = %d\n", add3(1, 2))

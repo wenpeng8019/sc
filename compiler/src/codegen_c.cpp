@@ -92,6 +92,8 @@ struct CGen {
     const Program& prog;
     std::ostringstream out;     // 输出流
     int depth = 0;              // 当前缩进深度（每级4空格）
+    std::string structOwnerTag; // 正在 emit 字段的属主聚合标签（如 "struct com"）：
+                                //   供 MethodPtr 字段前置隐式接收者 T* 之用
     std::string srcFile;        // 非空时输出 #line 指令，调试器映射回 .sc 源码
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
@@ -171,11 +173,18 @@ struct CGen {
                 for (int i = 0; i < ptr; i++) out << "*";
             } else out << "void ";  // 省略返回类型 = void
             out << "(*" << f.name << ")(";
+            bool firstParam = true;
+            if (f.type.fnKind == TypeRef::FncKind::MethodPtr && !structOwnerTag.empty()) {
+                // 每对象方法指针：C 类型隐式前置接收者 T*（声明/调用端隐藏接收者）
+                out << structOwnerTag << " *";
+                firstParam = false;
+            }
             for (size_t i = 0; i < f.type.structCommon.fields.size(); i++) {
-                if (i) out << ", ";
+                if (!firstParam) out << ", ";
+                firstParam = false;
                 emitDeclarator(f.type.structCommon.fields[i]);
             }
-            if (f.type.structCommon.variadic) out << (f.type.structCommon.fields.empty() ? "..." : ", ...");
+            if (f.type.structCommon.variadic) out << (firstParam ? "..." : ", ...");
             out << ")";
             return;
         }
@@ -768,6 +777,16 @@ struct CGen {
                         }
                     }
                 }
+                // 函数指针字段调用（含每对象方法指针）→ 该函数类型的返回类型
+                if (e.a && e.a->kind == Expr::Member) {
+                    if (const Field* cf = callableField(*e.a)) {
+                        const auto& rt = cf->type.structCommon.type;
+                        if (rt && !(rt->name.empty() && rt->ptr == 0)) {
+                            vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                            return true;
+                        }
+                    }
+                }
                 return false;
             default: return false;
         }
@@ -867,7 +886,9 @@ struct CGen {
                 break;
             case Expr::Ident:
                 if (e.text == "this") out << "_this";      // 方法内接收者
-                else if (e.text == "self") out << "(_this->_self)";  // 分身/切片内：回指本体实体
+                else if (e.text == "self" && !localsT.count("self") && !globalsT.count("self"))
+                    out << "(_this->_self)";  // 分身/切片内上下文关键字：回指本体实体
+                                              // （无同名局部时；MethodPtr 实现可用 self 作接收者参数名）
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
                 else if (e.text == "ok" && !localsT.count("ok") && !globalsT.count("ok"))
                     out << "0";                            // ADT 接口成功返回码（类型 ret）
@@ -1066,13 +1087,23 @@ struct CGen {
                     params = calleeParams(e.a->text);
                 emitExpr(*e.a);
                 out << "(";
+                bool firstArg = true;
+                // 每对象方法指针：按成员函数约定自动注入接收者为首参（. 取址 / -> 直传）
+                if (mf && mf->type.fnKind == TypeRef::FncKind::MethodPtr
+                    && e.a->kind == Expr::Member) {
+                    if (e.a->op == ".") out << "&";
+                    emitExpr(*e.a->a);
+                    firstArg = false;
+                }
                 for (size_t i = 0; i < e.args.size(); i++) {
-                    if (i) out << ", ";
+                    if (!firstArg) out << ", ";
+                    firstArg = false;
                     emitExpr(*e.args[i], true);
                 }
                 if (params)
                     for (size_t i = e.args.size(); i < params->size(); i++) {
-                        if (i) out << ", ";
+                        if (!firstArg) out << ", ";
+                        firstArg = false;
                         emitDefaultArg((*params)[i]);
                     }
                 out << ")";
@@ -1272,25 +1303,43 @@ struct CGen {
         return it != projVarsG.end() ? it->second : std::string{};
     }
 
+    // 实体类型 ent 上名为 name 的「每对象方法指针」字段（MethodPtr）。
+    // 分身 alloc/free 既可是类方法（findMethod），也可是 MethodPtr 字段（com 等设备相关每对象实现）。
+    const Field* methodPtrField(const std::string& ent, const std::string& name) const {
+        const Decl* sd = aggrOf(ent);
+        if (!sd) return nullptr;
+        for (auto& f : sd->structCommon.fields)
+            if (f.name == name && f.type.fnKind == TypeRef::FncKind::MethodPtr) return &f;
+        return nullptr;
+    }
+
     // 分身/切片句柄赋值语法糖：
     //   s = nil  →  if (s._) { T_free(s._->_self, s._); s._ = NULL; }
     //   s = 本体 →  s._ = T_alloc(&本体, s.p1, s.p2, ...); s._->_self = &本体;
+    // alloc/free 可为类方法（T_xxx(&recv,...)）或 MethodPtr 字段（recv.xxx(&recv,...)）。
     void emitProjectAssign(const std::string& s, const std::string& ent, const Expr& rhs) {
         const bool isNil = rhs.kind == Expr::Ident && rhs.text == "nil";
         const Decl* fr = findMethod(ent, "free");
         const Decl* al = findMethod(ent, "alloc");
+        const Field* frF = fr ? nullptr : methodPtrField(ent, "free");
+        const Field* alF = al ? nullptr : methodPtrField(ent, "alloc");
         if (isNil) {
             indent(); out << "if (" << s << "._) { ";
+            // free 接收者 = 本体 = s._->_self
             if (fr) out << fr->name << "(" << s << "._->_self, " << s << "._); ";
+            else if (frF) out << s << "._->_self->free(" << s << "._->_self, " << s << "._); ";
             out << s << "._ = NULL; }\n";
             return;
         }
         indent();
         out << s << "._ = ";
-        if (al) out << al->name;
-        out << "(&";
+        const std::vector<Field>* alParams = al ? &al->structCommon.fields
+                                          : (alF ? &alF->type.structCommon.fields : nullptr);
+        if (al) out << al->name << "(&";           // 类方法：T_alloc(&本体, ...)
+        else if (alF) { emitExpr(rhs, true); out << ".alloc(&"; }  // 字段：本体.alloc(&本体, ...)
+        else out << "(&";
         emitExpr(rhs, true);
-        if (al) for (auto& p : al->structCommon.fields) out << ", " << s << "." << p.name;
+        if (alParams) for (auto& p : *alParams) out << ", " << s << "." << p.name;
         out << ");\n";
         indent();
         out << s << "._->_self = &";
@@ -1754,7 +1803,9 @@ struct CGen {
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
                     << " " << d.name << " {\n";
+                structOwnerTag = (d.kind == Decl::UnionD ? "union " : "struct ") + d.name;
                 emitFieldList(d.structCommon.fields);
+                structOwnerTag.clear();
                 indent();
                 out << "} " << d.name << ";\n\n";
                 if (d.kind == Decl::StructD && hasFieldDefaults(&d)) {
@@ -1778,11 +1829,14 @@ struct CGen {
                 //      + S* _（指向当前分身实例，nil=未绑定）。
                 if (d.kind == Decl::StructD && !d.projectSelf.empty()) {
                     const Decl* al = findMethod(d.name, "alloc");
+                    const Field* alF = al ? nullptr : methodPtrField(d.name, "alloc");
+                    const std::vector<Field>* alParams = al ? &al->structCommon.fields
+                                              : (alF ? &alF->type.structCommon.fields : nullptr);
                     if (const Decl* sDecl = aggrOf(d.projectSelf)) emitAggrWithDeps(*sDecl);
                     indent();
                     out << "typedef struct " << d.name << "__project {\n";
                     depth++;
-                    if (al) for (auto& p : al->structCommon.fields) {
+                    if (alParams) for (auto& p : *alParams) {
                         indent(); emitDeclarator(p); out << ";\n";
                     }
                     indent(); out << d.projectSelf << " *_;\n";
@@ -2455,7 +2509,7 @@ struct CGen {
                 throw CompileError{"分身/切片类型 " + d->projectSelf + " 未定义（def "
                                    + d->name + ":" + sig + "）", d->line};
             for (const char* req : {"alloc", "free"})
-                if (!findMethod(d->name, req))
+                if (!findMethod(d->name, req) && !methodPtrField(d->name, req))
                     throw CompileError{"分身/切片实体 " + d->name + " 缺少必备成员函数 "
                                        + req + "（def " + d->name + ":" + sig
                                        + " 要求 alloc/free）", d->line};

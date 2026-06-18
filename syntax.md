@@ -870,6 +870,7 @@ fnc next_id: i4
 - 二元运算：算术、比较、逻辑、位运算、赋值和复合赋值
 - 三元条件：`cond ? a : b`
 - 括号分组：`(expr)`
+- 异步前缀：`async rpc(...)`（登记到事件循环，返回 `future&`）、`await expr`（挂起待 future 就绪，见 11.4）
 - 强制类型转换：`expr: type`、`(expr: type&)`（右值位置免括号，见 10.1）
 - 初始化列表：`{1, 2, 3}`，可嵌套（见 10.2）
 - `sizeof(expr)` 或 `sizeof(type)`：返回字节大小（映射到 C `sizeof`）
@@ -944,8 +945,9 @@ var tab[2][3]: i4 = {
 - 标签语句（`label:`）
 - `break`
 - `continue`
-- `run`（以 rpc 调用创建线程，见 11.1）
-- `wait`（条件变量等待，见 11.2）
+- `run`（以 rpc 调用创建线程，见 11.2）
+- `wait`（条件变量等待，见 11.3）
+- `done`（标记 future 就绪并唤醒等待者，见 11.4）
 - 变量/常量声明
 - 表达式语句
 
@@ -1197,6 +1199,91 @@ mu.unlock()
 - 转 C：生成条件等待原语 `cond_wait(&cond, &mutex, 纳秒, 秒)`
   （m_impl 提供；Windows 下超时精度为毫秒，纳秒向上取整）。
 
+### 11.4 异步（async / await / done / future）
+
+与 `run`（抢占式、多线程）相对的**第二套并发模型**：单线程协作式异步——
+一个事件循环 + 把含 `await` 的 `rpc` 编译为状态机（stackless coroutine）。
+三个语言关键字 + 一个内置类型 `future`，均属 **op.sc 默认导入机制**（无需
+`inc`，C ABI 见 builtins/op.h，默认带入每个 C 单元）；其默认运行时实现
+（libuv）在 async 模块，须 `inc async.sc` 触发链接（含叶子原语 `delay`）。
+
+```sc
+inc async.sc                 # 链接 libuv 运行时 + 引入叶子原语 delay
+
+rpc greet: char&, name: char&, ms: u4
+    await delay(ms)          # 挂起 ms 毫秒（不占线程），就绪后恢复
+    return name
+
+fnc main: i4
+    async_init()                          # 建立当前线程事件循环
+    var fa: future& = async greet("A", 80)  # 发起但不等待，立即得 future&
+    var fb: future& = async greet("B", 30)
+    async_loop()                          # 驱动事件循环至全部完成
+    printf("%s %s\n", fa->get(): char&, fb->get(): char&)  # A B
+    async_final()                         # 销毁事件循环
+    return 0
+```
+
+**`future`（内置类型）**：异步结果句柄（类型擦除，`result` 为 `void*`）。
+
+| 用法 | 含义 |
+|---|---|
+| `future()` | 伪类构造（见 8.3）：造一个未就绪 future，登记到当前事件循环 |
+| `f.ready()` | 是否已就绪（`bool`） |
+| `f.get(): T&` | 取结果（须已就绪；类型擦除，调用点用 `: T&` 强转还原） |
+
+注意 `async` 返回的是 `future&`（指针），其方法调用用 `->`（如 `fa->get()`）。
+
+**三个关键字：**
+
+- `await E`（**仅 rpc 体内**）：`E` 是产生 `future` 的表达式（叶子异步原语
+  调用，或对另一个 rpc 的调用）。`await` 挂起当前 rpc，待 `E` 就绪后恢复，
+  整个 `await` 表达式求值为 `E` 的结果（类型 = 被调 rpc 的返回类型）。含
+  `await` 的 rpc 被编译为状态机：跨 await 存活的局部/参数/返回槽提升到帧，
+  函数体按 await 切段，运行时按状态 `goto` 恢复。
+- `async E`（任意 fnc/rpc 体内）：把 rpc 调用 `E` 登记进当前线程事件循环，
+  **立即返回 `future&`**（不阻塞），即"发起但不等待"。
+- `done future [, result]`（语句）：标记 `future` 就绪并唤醒其等待者，等价
+  运行时 `future_done`。`result` 可省略（默认空）；给定时**自动类型擦除**
+  为 `void*`（指针类直转，标量经 `intptr_t` 往返，与 `f.get(): T&` 还原对应），
+  无需手写 `: void&` 强转。
+
+**事件循环生命周期**（op.sc 声明，async 模块 libuv 实现）：
+
+```sc
+async_init()       # 建立当前线程事件循环
+async_loop()       # 驱动事件循环，推进所有挂起 rpc 直到全部完成
+async_final()      # 销毁事件循环
+```
+
+**可 await 契约**：`await` 只认 `future`，libuv 只是默认实现（可替换/自定义）。
+任何异步源（线程回调、硬件中断、外部库）只要在"完成时"用 `done` 兑现，即可
+接入 `await`。下例把后台线程（`run`）桥接进事件循环，证明 `delay` 并非特例：
+
+```sc
+inc m.sc                                 # 后台线程（run）
+inc async.sc
+
+rpc square_worker: f: future&, n: i4
+    done f, n * n                        # 跨线程兑现：置就绪 + 唤醒 waiter（自动擦除）
+
+fnc bg_square: future&, n: i4
+    var f: future& = future()            # 造未就绪 future（伪类构造）
+    run square_worker(f, n)              # 后台线程去算（detach）
+    return f                             # 立即返回 future&，可被 await
+
+rpc compute: i4, n: i4
+    var a: i4 = await bg_square(n)        # 真异步：让出，待线程算完才恢复
+    return await bg_square(a)             # 串联依赖
+```
+
+**线程安全**：`done`（`future_done`）可被任意线程调用（如后台 `run` 线程）。
+运行时在锁内置位并把唤醒投递回事件循环线程，所有状态机 `resume` 只在循环线程
+串行发生，故编译器生成的状态机代码天然单线程、无需加锁。
+
+说明：用到 `async`/`await`/`done`/`future`/`async_init` 等却未 `inc async.sc`
+会在链接期报错（异步运行时是可选模块，按需引入）。
+
 ## 12. 布局规则
 
 sc 的布局规则是“缩进 + 换行”为主：
@@ -1253,6 +1340,7 @@ var a:i1
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
 - 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）；`chain` 属 op.sc 默认导入机制，无需 inc；成员访问位提供 `prev`/`next` 上下文关键字
 - io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`stringify(值[, 缓存, 大小])` 按静态类型 JSON 格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`，转 C 时生成独立 `stringify.h`）
+- 异步机制（op.sc 默认导入，async 运行时需 `inc async.sc`）：内置类型 `future` + 关键字 `async`（发起返回 future&）/`await`（rpc 内挂起，编译为状态机）/`done`（标记就绪并唤醒，跨线程安全）；`async_init`/`async_loop`/`async_final` 事件循环生命周期；libuv 默认实现含叶子原语 `delay`，可 await 契约支持自定义异步源
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
 

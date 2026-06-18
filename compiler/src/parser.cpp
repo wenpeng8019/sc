@@ -293,11 +293,13 @@ struct Parser {
                         err("成员函数只能在顶层 def 结构体内实现");
                     methodsOut->push_back(std::move(m));
                 } else {
-                    // 无 body 非 :: → 普通函数指针字段
+                    // 无 body 非 :: 的 fnc name: → 每对象方法指针字段（MethodPtr）
+                    // 与 `name: fnc:`（PlainPtr，名字在前、不注入接收者）区分：
+                    // MethodPtr 按成员函数约定调用（自动注入接收者），但每对象各持指针。
                     Field f;
                     f.line = m->line;
                     f.name = m->methodName;
-                    f.type.fnKind = TypeRef::FncKind::PlainPtr;
+                    f.type.fnKind = TypeRef::FncKind::MethodPtr;
                     f.type.structCommon = std::move(m->structCommon);
                     out.push_back(std::move(f));
                 }
