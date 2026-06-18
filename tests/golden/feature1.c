@@ -40,6 +40,12 @@ typedef uint8_t byte;
 static const int32_t MAX = 100;
 static int32_t counter = 0;
 static const int32_t grid[2][3];
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 int32_t main(void) {
     /* line 59 */

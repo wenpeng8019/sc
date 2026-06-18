@@ -7,6 +7,12 @@ typedef struct box {
     int32_t v;
 } box;
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 int32_t main(void) {
     /* line 15 */

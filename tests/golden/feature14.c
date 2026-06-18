@@ -10,6 +10,12 @@ typedef struct handler {
 
 static int32_t dbl(handler *_this, int32_t x);
 static int32_t neg(handler *_this, int32_t x);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static int32_t dbl(handler *_this, int32_t x) {
     /* line 19 */

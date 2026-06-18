@@ -30,6 +30,12 @@ typedef struct node {
     char *tag;
 } node;
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 /* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */
 static inline void sc__sof_i64(string *_o, long long _v) {

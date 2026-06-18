@@ -57,6 +57,9 @@ Ty fromTypeRef(const TypeRef& t) {
     ty.arr = (int)t.arrayDims.size();
     ty.valid = true;
     ty.project = t.project;
+    // 函数指针字段（普通函数指针 / 每对象方法指针）作为值即一个指针：
+    // 视为指针类，使其能与通用指针 & 互相赋值（如把 alloc 透传的 & 存入 MethodPtr 字段）。
+    if (t.fnKind != TypeRef::FncKind::None && ty.ptr == 0) ty.ptr = 1;
     return ty;
 }
 

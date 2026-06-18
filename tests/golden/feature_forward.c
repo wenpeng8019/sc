@@ -14,6 +14,12 @@ typedef struct node_b {
 
 uint8_t is_even(int32_t n);
 uint8_t is_odd(int32_t n);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 uint8_t is_even(int32_t n) {
     /* line 15 */

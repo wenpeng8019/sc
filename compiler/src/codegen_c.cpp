@@ -137,6 +137,7 @@ struct CGen {
     // 按值包含要求被包含者「完整类型」先于包含者出现（前置声明仅满足指针引用）。
     // 第一遍输出 struct/union 时惰性前移其按值依赖，使源码定义顺序无关（见 doc §5.3）。
     std::unordered_set<const Decl*> emittedAggr;        // 已输出完整定义的聚合体
+    std::unordered_set<const Decl*> emittedProject;     // 已输出的分身句柄 T__project
 
     explicit CGen(const Program& p) : prog(p) {}
 
@@ -1290,6 +1291,9 @@ struct CGen {
         // 函数指针变量：额外记录内联签名（缺参补全查询用）
         if (f.type.fnKind != TypeRef::FncKind::None)
             (inFunc ? fnVarsL : fnVarsG)[f.name] = &f.type;
+        // 分身/切片句柄参数/变量 T[...]：登记实体名，使 s._ 等句柄成员可解析
+        if (f.type.project)
+            (inFunc ? projVarsL : projVarsG)[f.name] = f.type.name;
     }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
@@ -1334,9 +1338,11 @@ struct CGen {
         return cur;
     }
 
-    // 发出 com 通讯链（同步形态）：每个 op 直接调用 com 的 write/read 每对象方法指针。
-    //   com << v  →  _scsz = sizeof(v); com.write(&com, &v, &_scsz);
-    //   com >> v  →  _scsz = sizeof(v); com.read (&com, &v, &_scsz);
+    // 发出 com 通讯链（同步形态）：
+    //   · 目标为 com[...] 句柄（limit 分身）：com >> s → 框架读流程 limit_read(&com, s._)；
+    //   · 目标为普通变量 v：com << v / com >> v → 直接调 com 的 write/read 每对象方法指针。
+    //       com << v  →  _scsz = sizeof(v); com.write(&com, &v, &_scsz);
+    //       com >> v  →  _scsz = sizeof(v); com.read (&com, &v, &_scsz);
     // 接收者按值/指针自动取址注入（与 MethodPtr 调用约定一致）。size 为收发字节数（in/out）。
     void emitComChain(const Expr& base, const std::vector<ComOp>& ops) {
         VType vt;
@@ -1344,10 +1350,34 @@ struct CGen {
         const bool isPtr = vt.ptr >= 1;
         indent(); out << "{\n";
         depth++;
-        indent(); out << "uint32_t _scsz;\n";
+        bool declaredSz = false;
         for (auto& o : ops) {
+            // rpc 形态：发（<<）目标为 rpc 调用 rpc(args)；收（>>）目标为裸 rpc 名 rpc。
+            if (const Decl* r = comRpcTarget(o.target, o.send)) {
+                if (o.send) emitComRpcSend(base, isPtr, *r, o.target->args);
+                else        emitComRpcRecv(base, isPtr, *r);
+                continue;
+            }
+            // 误用诊断：rpc 名/调用方向不符
+            if (const Decl* r = comRpcTarget(o.target, !o.send)) {
+                (void)r;
+                if (o.send) throw CompileError{"com << rpc 发送需带参数：com << rpc(参数...)", o.target->line};
+                else        throw CompileError{"com >> rpc 收端不接受实参，请写 com >> rpc", o.target->line};
+            }
             if (o.target->kind == Expr::Call)
-                throw CompileError{"com 通讯的回调/rpc 形态（<< / >> 接 rpc 调用）暂未实现", o.target->line};
+                throw CompileError{"com 通讯的回调形态（<< / >> 接非 rpc 调用）暂未实现", o.target->line};
+            // 目标为 com[...] 句柄（limit 分身）→ 框架读流程驱动
+            if (o.target->kind == Expr::Ident && projEntityOf(o.target->text) == "com") {
+                if (o.send)
+                    throw CompileError{"com[...] 句柄仅用于 >> 读流程，不支持 << 写", o.target->line};
+                indent(); out << "limit_read(";
+                if (isPtr) emitExpr(base, true);
+                else { out << "&("; emitExpr(base, true); out << ")"; }
+                out << ", " << o.target->text << "._);\n";
+                continue;
+            }
+            // 普通变量：直接 write/read（同步收发 sizeof 字节）
+            if (!declaredSz) { indent(); out << "uint32_t _scsz;\n"; declaredSz = true; }
             const char* method = o.send ? "write" : "read";
             indent();
             out << "_scsz = sizeof(";
@@ -1364,6 +1394,158 @@ struct CGen {
         depth--;
         indent(); out << "}\n";
     }
+
+    // com 收发的 rpc 形态识别：
+    //   发（send=true）：target 为 rpc 调用 `rpc(args)`（Call，callee 为 rpc 名）；
+    //   收（send=false）：target 为裸 rpc 名 `rpc`（Ident，名为 rpc）。
+    // 返回对应 rpc Decl，否则 nullptr。
+    const Decl* comRpcTarget(const Expr* t, bool send) const {
+        std::string nm;
+        if (send) {
+            if (t->kind == Expr::Call && t->a && t->a->kind == Expr::Ident) nm = t->a->text;
+        } else {
+            if (t->kind == Expr::Ident) nm = t->text;
+        }
+        if (nm.empty()) return nullptr;
+        auto it = rpcs.find(nm);
+        return it != rpcs.end() ? it->second : nullptr;
+    }
+
+    // 发出「接收者地址」实参（com*）：指针直接传，值取址。
+    void emitComBasePtr(const Expr& base, bool isPtr) {
+        if (isPtr) emitExpr(base, true);
+        else { out << "&("; emitExpr(base, true); out << ")"; }
+    }
+
+    // com << rpc(args)（发）：装填 rpc 参数结构体（跳过返回槽 _），逐参数字段序列化 write。
+    //   普通标量/指针：write(&_rp.f, sizeof)；数组：write(_rp.f, f_size)；
+    //   com[...] 参数：句柄无法序列化 → 报错。
+    void emitComRpcSend(const Expr& base, bool isPtr, const Decl& r,
+                        const std::vector<ExprPtr>& args) {
+        if (r.hasAwait)
+            throw CompileError{"com 收发暂不支持异步 rpc：" + r.name, r.line};
+        if (r.structCommon.variadic)
+            throw CompileError{"com << rpc 暂不支持可变参数 rpc：" + r.name, r.line};
+        if (args.size() > r.structCommon.fields.size())
+            throw CompileError{"rpc 实参数量超出：" + r.name, r.line};
+        indent(); out << "{\n"; depth++;
+        indent(); out << "struct " << r.name << " _rp = {0};\n";
+        // 装填实参（与 run 一致；数组额外填 size）
+        for (size_t i = 0; i < args.size(); i++) {
+            const Field& f = r.structCommon.fields[i];
+            if (f.type.project)
+                throw CompileError{"com << rpc 的 com[...] 参数不支持序列化发送：" + f.name, r.line};
+            indent(); out << "_rp." << f.name << " = "; emitExpr(*args[i], true); out << ";\n";
+            if (!f.type.arrayDims.empty()) {
+                indent(); out << "_rp." << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f); out << ";\n";
+            }
+        }
+        indent(); out << "uint32_t _scsz;\n";
+        // 逐参数字段 write（声明顺序，与收端对称）
+        for (auto& f : r.structCommon.fields) {
+            if (f.type.project)
+                throw CompileError{"com << rpc 的 com[...] 参数不支持序列化发送：" + f.name, r.line};
+            indent();
+            if (!f.type.arrayDims.empty()) {
+                out << "_scsz = (uint32_t)_rp." << rpcArraySizeName(f) << "; ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "write(";
+                emitComBasePtr(base, isPtr);
+                out << ", (void *)(_rp." << f.name << "), &_scsz);\n";
+            } else {
+                out << "_scsz = sizeof(_rp." << f.name << "); ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "write(";
+                emitComBasePtr(base, isPtr);
+                out << ", (void *)&(_rp." << f.name << "), &_scsz);\n";
+            }
+        }
+        depth--; indent(); out << "}\n";
+    }
+
+    // com >> rpc（收）：从 com 逐参数字段读入 rpc 参数结构体（跳过返回槽 _），然后触发 rpc。
+    //   普通标量/指针：read(&_rp.f, sizeof)；
+    //   数组：栈上开等长后备缓冲、_rp.f 指向它，read 进缓冲；
+    //   com[...] 参数：以本 com 为本体绑定句柄（alloc + _self），走框架读流程 limit_read。
+    // 读毕调用 worker `rpc_rpc(&_rp)`（不取返回值）。
+    void emitComRpcRecv(const Expr& base, bool isPtr, const Decl& r) {
+        if (r.hasAwait)
+            throw CompileError{"com 收发暂不支持异步 rpc：" + r.name, r.line};
+        if (r.structCommon.variadic)
+            throw CompileError{"com >> rpc 暂不支持可变参数 rpc：" + r.name, r.line};
+        indent(); out << "{\n"; depth++;
+        indent(); out << "struct " << r.name << " _rp = {0};\n";
+        // 数组后备缓冲 + com[...] 句柄上下文初始化
+        for (auto& f : r.structCommon.fields) {
+            if (!f.type.arrayDims.empty()) {
+                const std::string bk = "_rp_" + f.name;
+                indent(); emitArrayBacking(f, bk); out << ";\n";
+                indent(); out << "_rp." << f.name << " = " << bk << ";\n";
+                indent(); out << "_rp." << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f); out << ";\n";
+            } else if (f.type.project) {
+                // 句柄上下文（alloc 参数）从 projectArgs 初始化
+                const std::vector<Field>* alParams = projectAllocParams(f.type.name);
+                if (f.type.projectArgs && alParams) {
+                    size_t n = std::min(f.type.projectArgs->size(), alParams->size());
+                    for (size_t i = 0; i < n; i++) {
+                        indent(); out << "_rp." << f.name << "." << (*alParams)[i].name << " = ";
+                        emitExpr(*(*f.type.projectArgs)[i], true); out << ";\n";
+                    }
+                }
+            }
+        }
+        indent(); out << "uint32_t _scsz;\n";
+        // 逐参数字段 read
+        for (auto& f : r.structCommon.fields) {
+            if (!f.type.arrayDims.empty()) {
+                indent();
+                out << "_scsz = (uint32_t)_rp." << rpcArraySizeName(f) << "; ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "read(";
+                emitComBasePtr(base, isPtr);
+                out << ", (void *)(_rp." << f.name << "), &_scsz);\n";
+            } else if (f.type.project) {
+                // 绑定句柄到本 com（alloc + _self 回指）+ 框架读流程
+                const std::vector<Field>* alParams = projectAllocParams(f.type.name);
+                indent(); out << "_rp." << f.name << "._ = ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "alloc(";
+                emitComBasePtr(base, isPtr);
+                if (alParams) for (auto& p : *alParams)
+                    out << ", _rp." << f.name << "." << p.name;
+                out << ");\n";
+                indent(); out << "_rp." << f.name << "._->_self = ";
+                emitComBasePtr(base, isPtr); out << ";\n";
+                indent(); out << "limit_read(";
+                emitComBasePtr(base, isPtr);
+                out << ", _rp." << f.name << "._);\n";
+            } else {
+                indent();
+                out << "_scsz = sizeof(_rp." << f.name << "); ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "read(";
+                emitComBasePtr(base, isPtr);
+                out << ", (void *)&(_rp." << f.name << "), &_scsz);\n";
+            }
+        }
+        indent(); out << r.name << "_rpc(&_rp);\n";
+        depth--; indent(); out << "}\n";
+    }
+
+    // 分身实体 ent 的 alloc 参数列表（句柄上下文字段，= alloc 去隐式 this 后的形参）。
+    const std::vector<Field>* projectAllocParams(const std::string& ent) const {
+        const Decl* al = findMethod(ent, "alloc");
+        if (al) return &al->structCommon.fields;
+        const Field* alF = methodPtrField(ent, "alloc");
+        return alF ? &alF->type.structCommon.fields : nullptr;
+    }
+
+    // rpc 数组形参的栈上后备缓冲声明：`T nm[d1][d2]...`（按声明的完整数组类型）。
+    void emitArrayBacking(const Field& f, const std::string& nm) {
+        std::string base; int ptr; resolveType(f.type, base, ptr);
+        out << base << " ";
+        for (int i = 0; i < ptr; i++) out << "*";
+        out << nm;
+        for (auto& d : f.type.arrayDims) out << "[" << d << "]";
+    }
+
 
     // 分身/切片句柄赋值语法糖：
     //   s = nil  →  if (s._) { T_free(s._->_self, s._); s._ = NULL; }
@@ -1839,6 +2021,30 @@ struct CGen {
         emitTypeDecl(d);
     }
 
+    // 分身/切片句柄结构体 T__project：def T: <S> {} 的 T[...] 类型展开。
+    // 字段 = T.alloc 去掉隐式 this 后的形参（句柄上下文，存切片参数初值）+ S* _（nil=未绑定）。
+    // 实体 T 可为外部 @def（结构体来自模块头）；此时 T__project 仍由本工程生成，
+    // 但不重复发出外部的 S 定义（S 同样由其模块头提供）。
+    void emitProjectTypedef(const Decl& d) {
+        if (!emittedProject.insert(&d).second) return;
+        const Decl* al = findMethod(d.name, "alloc");
+        const Field* alF = al ? nullptr : methodPtrField(d.name, "alloc");
+        const std::vector<Field>* alParams = al ? &al->structCommon.fields
+                                  : (alF ? &alF->type.structCommon.fields : nullptr);
+        if (const Decl* sDecl = aggrOf(d.projectSelf))
+            if (!sDecl->external) emitAggrWithDeps(*sDecl);
+        indent();
+        out << "typedef struct " << d.name << "__project {\n";
+        depth++;
+        if (alParams) for (auto& p : *alParams) {
+            indent(); emitDeclarator(p); out << ";\n";
+        }
+        indent(); out << d.projectSelf << " *_;\n";
+        depth--;
+        indent();
+        out << "} " << d.name << "__project;\n\n";
+    }
+
     void emitTypeDecl(const Decl& d) {
         switch (d.kind) {
             case Decl::EnumD:
@@ -1886,25 +2092,8 @@ struct CGen {
                     indent(); out << "}\n\n";
                 }
                 // 分身/切片句柄结构体 T__project：def T: <S> {} 的 T[...] 类型展开。
-                // 字段 = T.alloc 去掉隐式 this 后的形参（句柄上下文，存切片参数初值）
-                //      + S* _（指向当前分身实例，nil=未绑定）。
-                if (d.kind == Decl::StructD && !d.projectSelf.empty()) {
-                    const Decl* al = findMethod(d.name, "alloc");
-                    const Field* alF = al ? nullptr : methodPtrField(d.name, "alloc");
-                    const std::vector<Field>* alParams = al ? &al->structCommon.fields
-                                              : (alF ? &alF->type.structCommon.fields : nullptr);
-                    if (const Decl* sDecl = aggrOf(d.projectSelf)) emitAggrWithDeps(*sDecl);
-                    indent();
-                    out << "typedef struct " << d.name << "__project {\n";
-                    depth++;
-                    if (alParams) for (auto& p : *alParams) {
-                        indent(); emitDeclarator(p); out << ";\n";
-                    }
-                    indent(); out << d.projectSelf << " *_;\n";
-                    depth--;
-                    indent();
-                    out << "} " << d.name << "__project;\n\n";
-                }
+                if (d.kind == Decl::StructD && !d.projectSelf.empty())
+                    emitProjectTypedef(d);
                 break;
             case Decl::AliasD: {
                 std::string base; int ptr;
@@ -1987,6 +2176,7 @@ struct CGen {
         localsT.clear();
         fnVarsL.clear();
         varDimsL.clear();
+        projVarsL.clear();
         inFunc = true;
         const Decl* sig = &d;
         if (!d.funcTypeName.empty()) {
@@ -2014,7 +2204,7 @@ struct CGen {
         out = std::ostringstream();
 
         // 干净的函数作用域
-        localsT.clear(); fnVarsL.clear(); varDimsL.clear();
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
         inFunc = true;
         depth = 0;
 
@@ -2160,6 +2350,11 @@ struct CGen {
     // rpc 接口三件套：结构体 + 实际函数原型 + 调用包装
     // workerStatic：本模块定义且未导出时 static；仅声明/导出时 extern
     void emitRpcInterface(const Decl& d, bool workerStatic) {
+        // com[...] 句柄参数 → 先保证其 T__project typedef 已发出（结构体按值内含）。
+        for (auto& f : d.structCommon.fields)
+            if (f.type.project)
+                if (const Decl* ent = aggrOf(f.type.name))
+                    if (!ent->projectSelf.empty()) emitProjectTypedef(*ent);
         emitRpcStruct(d);
         if (workerStatic) out << "static ";
         emitRpcWorkerSig(d);
@@ -2183,6 +2378,7 @@ struct CGen {
         localsT.clear();
         fnVarsL.clear();
         varDimsL.clear();
+        projVarsL.clear();
         inFunc = true;
         for (auto& p : d.structCommon.fields) regVar(p);
         curRpc = &d;
@@ -2613,7 +2809,12 @@ struct CGen {
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
-            if (d->external && d->kind != Decl::IncD) continue;
+            if (d->external && d->kind != Decl::IncD) {
+                // 外部 @def 结构体由模块头提供；但其分身句柄 T__project 仍需本工程生成。
+                if (d->kind == Decl::StructD && !d->projectSelf.empty())
+                    emitProjectTypedef(*d);
+                continue;
+            }
             switch (d->kind) {
                 case Decl::EnumD: case Decl::AliasD:
                     emitTypeDecl(*d);

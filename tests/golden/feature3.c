@@ -67,6 +67,12 @@ static inline int32_t square(int32_t x) {
     return _p._;
 }
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static void add_rpc(struct add *_p) {
     /* line 13 */

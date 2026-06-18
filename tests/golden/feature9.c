@@ -72,6 +72,12 @@ static inline void ping(sig *s) {
     ping_rpc(&_p);
 }
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static void work_rpc(struct work *_p) {
     /* line 31 */

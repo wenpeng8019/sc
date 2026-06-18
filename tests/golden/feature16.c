@@ -3,6 +3,12 @@
 
 static int32_t dev_read(com *_this, void *data, uint32_t *size);
 static int32_t dev_write(com *_this, void *buf, uint32_t *size);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static int32_t dev_read(com *_this, void *data, uint32_t *size) {
     /* line 15 */

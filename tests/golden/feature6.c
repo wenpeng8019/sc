@@ -26,6 +26,12 @@ typedef struct node {
 } node;
 
 static void dump(char *tag, chain *l);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static inline task *task__new(void) {
     task *_p = (task *)malloc(sizeof(task));

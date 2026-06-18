@@ -37,6 +37,12 @@ static int32_t obj_add(obj *o, int32_t x, int32_t y);
 static int32_t obj_scale(obj *_this, int32_t k);
 static int32_t sq(int32_t x);
 static void my_printf(char *fmt, ...);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static int32_t clamp(int32_t v, int32_t lo, int32_t hi) {
     /* line 25 */

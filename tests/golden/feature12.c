@@ -23,6 +23,12 @@ typedef struct buffer__project {
 
 static view * buffer_alloc(buffer *_this, int32_t off, int32_t len);
 static void buffer_free(buffer *_this, view *v);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static int32_t view_capacity(view *_this) {
     /* line 28 */

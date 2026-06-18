@@ -8,6 +8,12 @@ typedef struct pair {
     int32_t b;
 } pair;
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 int32_t main(void) {
     /* line 10 */

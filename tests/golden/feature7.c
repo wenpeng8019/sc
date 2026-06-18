@@ -28,6 +28,12 @@ typedef struct task {
     int32_t id;
 } task;
 
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static void slist_init(slist *_this) {
     /* line 35 */

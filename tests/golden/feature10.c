@@ -11,6 +11,12 @@ typedef struct counter {
 static void counter_init(counter *_this);
 static int32_t counter_add(counter *_this, int32_t k);
 static int32_t str_cmp(void *a, void *b);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static inline string *string__new(void) {
     string *_p = (string *)malloc(sizeof(string));

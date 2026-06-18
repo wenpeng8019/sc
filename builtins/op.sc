@@ -154,15 +154,68 @@ def operand: {
 # ----------------------------------------------------------------------------- 
 # 语言层面提供设备通讯的基础能力
 # 语法：
-# << 操作符: send buf 字节流到 COM
-# >> 操作符: 从 COM recv 字节流到 buf
-# 机制：
-#   - 支持通过 ioq 来实现异步通讯机制
-#     即如果 com 的 rq/wq 不为 nil，则说明提供并支持了异步 io 的能力
-#   - 支持对 rpc 机制在语法层面的打通
-#     对于异步 io 通讯，则 << 和 >> 操作只能在 rpc 中使用
-#     此时会自动利用 rpc 的 await 机制来实现异步访问
-#     也就是编译器会把 << 和 >> 操作转移为特定 await 机制相关的语句
+# << 操作符: send buf 字节流到 COM（发）
+# >> 操作符: 从 COM recv 字节流到 buf（收）
+# 链式左结合：com << a << b、com >> x >> y，最左操作数须为 com 基类型，逐个执行。
+#
+# ============================ 实际操作完整流程 ============================
+# 编译器按「所在函数是否异步」与「右操作数形态」选择展开，分四类。base 表示 com
+# 端点（值接收者自动取址 &com，指针接收者直接传 com）。
+#
+# 【A】同步 · 普通变量（fnc 内，目标为 lvalue v）—— codegen emitComChain
+#   com << v   展开为：  _scsz = sizeof(v); base.write(&base, &v, &_scsz);
+#   com >> v   展开为：  _scsz = sizeof(v); base.read (&base, &v, &_scsz);
+#   · 直接调用 com 的每对象方法指针 read/write，一次收发 sizeof(v) 字节；
+#   · size 为 in/out：传入期望字节数，回写实际收发字节数；
+#   · 返回码（见下 io 枚举）由调用方按需检查，框架不介入。
+#
+# 【B】同步 · com[...] 句柄（fnc 内，目标 s 为分身/切片句柄）—— emitComChain
+#   com >> s   展开为：  limit_read(&base, s._);
+#   · s 由 `var s: com[size, ending]` + `s = com` 构造（见分身机制：调 com.alloc，
+#     把 size/ending 透传写入 limit，回写 _self 回指本体）；
+#   · limit_read 是「框架确定读流程」（op_impl.c，纯逻辑、不依赖任何设备/库）：
+#       base = s.data()                     # 用户实现：缓冲基址
+#       循环:
+#         chunk = ending?size:(size-len)    # 动态:每次最多 size；定长:剩余空间
+#         r = com.read(&com, base+len, &chunk)  # 设备读到 base+len，回写实读 chunk
+#         若 r<0 → 中断返回；  若 r==again → 返回 again（同步上下文应视为错误）
+#         len += chunk
+#         若 ending: m = ending(s); 若 m>=0 → len=m, 返回 eof（命中截止）
+#         否则定长: 若 len>=size → 返回 eof（读满）
+#         若 r==eof → 返回 eof（设备无更多数据）
+#   · 截止策略全在用户的 data()/ending 里，框架只跑这套不变的循环（最小内核）；
+#   · 句柄是「有界读视图」，仅用于 >> 读流程；com << s（句柄写）不支持，直接编译报错。
+#
+# 【C】异步 · 普通变量（rpc 内，含 await 机制）—— codegen emitComAwait
+#   rpc 内出现 << / >> 即标记该 rpc 为异步（hasAwait），编译为状态机。每个收发点
+#   是一个 await 切点，展开为：
+#     com >> v   →  _p->_fut = com_read_async (&base, &v, sizeof(v));
+#                   if (future_await(_p->_fut, _p, rpc_resume)) goto _s<k>;  # 已就绪→续跑
+#                   _p->_state = <k>; return;                               # 未就绪→让出
+#                   _s<k>: ;                                                # 恢复点
+#     com << v   →  对称，调 com_write_async。
+#   · io 直接填充/读取 v 本身（结果即数据），await 的 future 兑现仅作"完成信号"，
+#     无需把字节回写 future；
+#   · 让出后由事件循环在 io 完成时经就绪队列 resume 状态机，从 _s<k> 继续。
+#
+# 【D】异步 · com[...] 句柄（rpc 内）—— 规划中
+#   语义：limit_read 的循环若遇 com.read 返回 again，则挂起 await、待设备就绪
+#   （ioq 读队列回调兑现 future）后恢复续读，直至 ending/定长命中。当前未实现
+#   （同步 limit_read 遇 again 即报错信号），留作 ioq 异步驱动落地时打通。
+#
+# ---------------------- com_read_async / com_write_async ----------------------
+# 二者是【C】异步收发点的「桥接原语」（C ABI 见 op.h，默认实现在 builtins/async/
+# async_impl.c，仅 inc async 时链接）。目的：把一次 com 设备 io 封装成可被 await
+# 的 future，使 rpc 状态机能以统一的 await 协议挂起/恢复。
+#   com_read_async (&com, data, size) → future&   # 发起异步读，io 完成时 future_done 兑现
+#   com_write_async(&com, buf,  size) → future&   # 发起异步写，对称
+#   · 编译器只生成对它们的调用 + future_await 握手，不关心其内部如何驱动 io；
+#   · 当前默认实现是「立即完成」桥：同步调一次 com.read/write 后立刻 future_done，
+#     先打通 rpc↔await 的端到端链路；
+#   · 真实异步驱动应改为：把请求入 com 的 rq/wq（ioq 循环缓冲），在设备 io 完成
+#     回调里 future_done 延迟兑现（不阻塞循环线程）。接口契约不变，仅换实现。
+#   · 二者依赖 future_*，故与 future/await 同约束：未 inc async 用到即链接缺失。
+# =========================================================================
 # 示例：
 # rpc do_some: a:i4: a:i4: a:i4
 #     return
@@ -192,12 +245,32 @@ def operand: {
     fnc pull:: &                        # 取队首并执行 io（空则阻塞等待，区别于 pop）
 }
 
-# ---------------- limit：com 读截止边界（com 的分身/切片）----------------
-# com 默认是 endless io；limit 借分身机制充当一次 read 的截止边界视图。
-# data()/len() 由运行时按边界规格（见 com.alloc）填充，C 侧实现。
+# ---------------- io：read/write 返回码规范 ----------------
+# 框架读写流程据此驱动 >> / <<：
+#   <0      —— 不可恢复错误，中断（停止继续读写）
+#    0      —— 成功，可继续读写
+#    again  —— 异步挂起等待（仅 rpc 内合法；同步 fnc 内遇到 → 报错）
+#    eof    —— 数据全部读完，此后续读目标按空（零字节）完成
+def io: i4
+    again = 1
+    eof   = 2
+
+# ---------------- limit：com 一次有界读视图（com 的分身/切片）----------------
+# 最小内核：框架只驱动确定的读流程，所有缓存/边界策略都在用户实现里。limit 仅暴露
+# 两个每对象方法接口 + 两个属性字段：
+#   size    —— ending 为 nil：固定数据大小；否则每次最多读取的 chunk（读满 size 触发 ending）
+#   len     —— 框架回写：已累计读取的字节计数
+#   data()  —— MethodPtr（用户实现）：返回缓冲基址；框架每次以 data()+len 为写入起点
+#   ending  —— 每对象方法指针 MethodPtr（用户实现，默认 nil）：动态截止判定。框架每读一段
+#              后以本 limit 为接收者回调（实现里 _this: limit&，经 self.data()/self.len 自取
+#              基址与已读长度）；返回 >=0 命中（值=应保留的数据长度，读循环停止）/
+#              <0 未到结尾（继续读）。
+#              例：HTTP 以 \r\n 截止，由用户在 ending 里扫描判定；框架不写死边界规格。
 @def limit: {
-    fnc data:: &                        # limit 数据起始地址（C 侧实现）
-    fnc len:: u4                        # limit 数据长度（不含边界本身）
+    size: u4                            # ending=nil:定长大小；否则每次最大 chunk
+    len:  u4                            # 框架回写：累计读取计数
+    fnc data: &                         # 每对象 MethodPtr：返回缓冲基址（用户实现）
+    fnc ending: ret                     # 每对象 MethodPtr：动态截止（用户实现，默认 nil）
 }
 
 # ---------------- com：设备通讯端点（机制框架）----------------
@@ -208,11 +281,10 @@ def operand: {
     rq: ioq&                            # 读队列（nil=不支持异步读）
     wq: ioq&                            # 写队列（nil=不支持异步写）
 
-    # 边界规格（P3，由 alloc 依此构造 limit）：
-    #   n: u1  >0: 由后续 n 个字节序列作为结束边界（最大序列长度 255）
-    #          0 : 固定长度边界；后续 2 字节 < 0xFFFF → u2 长度；== 0xFFFF → 继 u4 长度
-    fnc alloc: limit&                   # 分身构造：隐藏接收者 com&，返回 limit&（截止边界视图）
-    fnc free: s: limit&                 # 分身析构
+    # alloc 参数即 com[...] 句柄上下文：var s: com[size, ending]。
+    # size/ending 透传构造 limit；缓冲分配等策略由用户 alloc 实现自定。
+    fnc alloc: limit&, size: u4, ending: &   # 分身构造：隐藏接收者 com&，返回 limit&
+    fnc free: s: limit&                      # 分身析构
 
     fnc read: ret, data: &, size: u4&   # 设备读（每对象 io 实现，隐藏接收者 com&）
     fnc write: ret, buf: &, size: u4&   # 设备写（每对象 io 实现）

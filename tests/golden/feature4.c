@@ -19,6 +19,12 @@ typedef struct obj {
 
 extern void obj_dump(obj *_this);
 extern int32_t obj_calc(obj *_this, int32_t a, int32_t b);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static inline point *point__new(void) {
     point *_p = (point *)malloc(sizeof(point));

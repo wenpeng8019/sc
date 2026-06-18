@@ -54,6 +54,12 @@ struct compute {
 };
 static void compute_rpc(struct compute *_p);
 static future *compute__async(int32_t n);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static inline future *future__new(void) {
     future *_p = (future *)malloc(sizeof(future));

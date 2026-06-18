@@ -15,6 +15,12 @@ struct handler {
 };
 static void handler_rpc(struct handler *_p);
 static future *handler__async(com *c);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static int32_t dev_read(com *_this, void *data, uint32_t *size) {
     /* line 20 */

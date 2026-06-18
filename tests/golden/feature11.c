@@ -3,6 +3,12 @@
 
 static void demo_scalar(void);
 static void bump(int32_t *p);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 static void demo_scalar(void) {
     /* line 13 */

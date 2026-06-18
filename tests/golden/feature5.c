@@ -23,6 +23,12 @@ typedef struct tracker {
 void tracker_init(tracker *_this);
 void tracker_add(tracker *_this, int32_t k);
 extern int32_t tracker_read(tracker *_this);
+typedef struct com__project {
+    uint32_t size;
+    void *ending;
+    limit *_;
+} com__project;
+
 
 int32_t add(int32_t a, int32_t b) {
     /* line 22 */
