@@ -1313,6 +1313,58 @@ struct CGen {
         return nullptr;
     }
 
+    // ---- com 通讯链（<< 发 / >> 收，同步形态）----
+    // 一次 com io 操作：target=数据目标（lvalue），send=true 为 <<（write 发），否则 >>（read 收）。
+    struct ComOp { const Expr* target; bool send; };
+
+    // 若 e 是以 com（设备通讯端点）为最左操作数的 << / >> 链，返回 com 基址表达式，
+    // 并按从左到右顺序填充 ops；否则返回 nullptr（让 << / >> 退化为普通位移）。
+    // 形如 ((com >> a) << b) >> c：左结合，自顶向下剥离，最左操作数须为 com 基类型。
+    const Expr* comChain(const Expr& e, std::vector<ComOp>& ops) const {
+        if (e.kind != Expr::Binary || (e.op != "<<" && e.op != ">>")) return nullptr;
+        std::vector<ComOp> rev;
+        const Expr* cur = &e;
+        while (cur->kind == Expr::Binary && (cur->op == "<<" || cur->op == ">>")) {
+            rev.push_back({cur->b.get(), cur->op == "<<"});
+            cur = cur->a.get();
+        }
+        VType vt;
+        if (!exprVType(*cur, vt) || vt.name != "com" || !aggrOf("com")) return nullptr;
+        ops.assign(rev.rbegin(), rev.rend());
+        return cur;
+    }
+
+    // 发出 com 通讯链（同步形态）：每个 op 直接调用 com 的 write/read 每对象方法指针。
+    //   com << v  →  _scsz = sizeof(v); com.write(&com, &v, &_scsz);
+    //   com >> v  →  _scsz = sizeof(v); com.read (&com, &v, &_scsz);
+    // 接收者按值/指针自动取址注入（与 MethodPtr 调用约定一致）。size 为收发字节数（in/out）。
+    void emitComChain(const Expr& base, const std::vector<ComOp>& ops) {
+        VType vt;
+        exprVType(base, vt);
+        const bool isPtr = vt.ptr >= 1;
+        indent(); out << "{\n";
+        depth++;
+        indent(); out << "uint32_t _scsz;\n";
+        for (auto& o : ops) {
+            if (o.target->kind == Expr::Call)
+                throw CompileError{"com 通讯的回调/rpc 形态（<< / >> 接 rpc 调用）暂未实现", o.target->line};
+            const char* method = o.send ? "write" : "read";
+            indent();
+            out << "_scsz = sizeof(";
+            emitExpr(*o.target, true);
+            out << "); ";
+            emitExpr(base, true);
+            out << (isPtr ? "->" : ".") << method << "(";
+            if (isPtr) emitExpr(base, true);
+            else { out << "&("; emitExpr(base, true); out << ")"; }
+            out << ", (void *)&(";
+            emitExpr(*o.target, true);
+            out << "), &_scsz);\n";
+        }
+        depth--;
+        indent(); out << "}\n";
+    }
+
     // 分身/切片句柄赋值语法糖：
     //   s = nil  →  if (s._) { T_free(s._->_self, s._); s._ = NULL; }
     //   s = 本体 →  s._ = T_alloc(&本体, s.p1, s.p2, ...); s._->_self = &本体;
@@ -1361,6 +1413,15 @@ struct CGen {
         
         switch (s.kind) {
             case Stmt::ExprS:
+                // com 通讯链（同步形态）：com << v（发）/ com >> v（收）→ 直接 write/read
+                if (s.expr && s.expr->kind == Expr::Binary &&
+                    (s.expr->op == "<<" || s.expr->op == ">>")) {
+                    std::vector<ComOp> ops;
+                    if (const Expr* base = comChain(*s.expr, ops)) {
+                        emitComChain(*base, ops);
+                        break;
+                    }
+                }
                 // 分身/切片句柄赋值语法糖：s = 本体 / s = nil
                 if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
                     s.expr->a && s.expr->a->kind == Expr::Ident) {
