@@ -2226,6 +2226,11 @@ struct CGen {
                 if (s->expr->kind == Expr::Await) n++;
                 else if (s->expr->kind == Expr::Binary && s->expr->op == "=" &&
                          s->expr->b && s->expr->b->kind == Expr::Await) n++;
+                else if (s->expr->kind == Expr::Binary &&
+                         (s->expr->op == "<<" || s->expr->op == ">>")) {
+                    std::vector<ComOp> ops;            // com 收发链：每个 op 一个 await 点
+                    if (comChain(*s->expr, ops)) n += (int)ops.size();
+                }
             }
         }
         return n;
@@ -2281,6 +2286,28 @@ struct CGen {
         }
     }
 
+    // 异步 com 收发的一个 await 点：发起 com_read_async/com_write_async（产出 future），
+    // 登记本帧为 waiter，已就绪则续跑、否则让出。io 直接填充/读取 target，无需回写结果。
+    //   com >> v  →  _p->_fut = com_read_async (&com, &v, sizeof v); await
+    //   com << v  →  _p->_fut = com_write_async(&com, &v, sizeof v); await
+    void emitComAwait(const Expr& base, const ComOp& o, const Decl& d) {
+        if (o.target->kind == Expr::Call)
+            throw CompileError{"com 通讯的回调/rpc 形态（<< / >> 接 rpc 调用）暂未实现", o.target->line};
+        int st = ++asyncState;
+        VType vt; exprVType(base, vt);
+        const bool isPtr = vt.ptr >= 1;
+        const char* fn = o.send ? "com_write_async" : "com_read_async";
+        indent(); out << "_p->_fut = " << fn << "(";
+        if (isPtr) emitExpr(base, true);
+        else { out << "&("; emitExpr(base, true); out << ")"; }
+        out << ", (void *)&("; emitExpr(*o.target, true); out << "), sizeof(";
+        emitExpr(*o.target, true); out << "));\n";
+        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
+                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "_p->_state = " << st << "; return;\n";
+        indent(); out << "_s" << st << ": ;\n";
+    }
+
     // 完成：写返回槽 → 释放帧 → future_done 唤醒上游（return）。
     void emitAsyncComplete(const Stmt& ret, const Decl& d) {
         const bool hasRet = rpcHasRet(d);
@@ -2316,6 +2343,14 @@ struct CGen {
                     }
                     break;
                 case Stmt::ExprS:
+                    if (s.expr && s.expr->kind == Expr::Binary &&
+                        (s.expr->op == "<<" || s.expr->op == ">>")) {  // com 收发（异步形态）
+                        std::vector<ComOp> ops;
+                        if (const Expr* base = comChain(*s.expr, ops)) {
+                            for (auto& o : ops) emitComAwait(*base, o, d);
+                            break;
+                        }
+                    }
                     if (s.expr && s.expr->kind == Expr::Await) {     // 独立 await E
                         emitAwaitPoint(*s.expr->a, nullptr, "", 0, d);
                     } else if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&

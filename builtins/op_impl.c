@@ -5,6 +5,7 @@
  */
 #include "op.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
+#include <stdlib.h>     /* ioq 循环缓冲：malloc/free */
 
 /* ---------------- chain：侵入式双向链表 ---------------- */
 /* 元素首部内嵌 _prev/_next（sc 编译器注入），偏移固定在结构体最前面。
@@ -157,4 +158,72 @@ void chain_cut(chain *_this, void *from, void *to, chain *out) {
     out->head = from;
     LPREV(from) = to;
     LNEXT(to) = NULL;
+}
+
+/* ---------------- limit：com 读截止边界（com 的分身/切片）---------------- */
+/* _data/_len 由运行时按边界规格填充（P3）；此处提供访问器（cImpl 类方法）。 */
+void    *limit_data(limit *_this) { return _this ? _this->_data : NULL; }
+uint32_t limit_len (limit *_this) { return _this ? _this->_len  : 0;    }
+
+/* ---------------- ioq：com 读写缓存队列（自膨胀循环缓冲）---------------- */
+/* 槽统一为 void*（size 以 (void*)(uintptr_t) 编码）。_head/_tail 为单调递增的
+ * 逻辑槽计数，物理下标取 % _cap。每项变长，靠首槽 tag/size 自身区分：
+ *   io 缓冲项 : [size(!=0), buf]      —— 2 槽，pull 时执行 io（按 rq/wq 方向 read/write）
+ *   完成回调项: [0, cb, data]         —— 3 槽，pull 时回调 ((void(*)(void*))cb)(data)
+ * （无 libuv：pull 同步执行 io、空队列返回 NULL 不阻塞；真实异步驱动应自行延迟兑现。）*/
+
+/* 确保至少 need 个空闲槽，不足则倍增扩容并把现存项搬到新缓冲首部。 */
+static void ioq_ensure(ioq *q, uint32_t need) {
+    uint32_t used = q->_tail - q->_head;
+    if (q->_cap && q->_cap - used >= need) return;
+    uint32_t ncap = q->_cap ? q->_cap : 8;
+    while (ncap - used < need) ncap *= 2;
+    void **nb = (void **)malloc((size_t)ncap * sizeof(void *));
+    for (uint32_t i = 0; i < used; i++) nb[i] = q->_buf[(q->_head + i) % q->_cap];
+    free(q->_buf);
+    q->_buf  = nb;
+    q->_cap  = ncap;
+    q->_head = 0;
+    q->_tail = used;
+}
+
+/* 入队一段 io 缓冲项 [size, buf]（size 须 != 0）。 */
+void ioq_push(ioq *_this, void *buf, int32_t size) {
+    ioq_ensure(_this, 2);
+    _this->_buf[ _this->_tail      % _this->_cap] = (void *)(uintptr_t)(uint32_t)size;
+    _this->_buf[(_this->_tail + 1) % _this->_cap] = buf;
+    _this->_tail += 2;
+}
+
+/* 入队一个完成回调项 [0, cb, data]。 */
+void ioq_notify(ioq *_this, void *cb, void *data) {
+    ioq_ensure(_this, 3);
+    _this->_buf[ _this->_tail      % _this->_cap] = (void *)(uintptr_t)0;
+    _this->_buf[(_this->_tail + 1) % _this->_cap] = cb;
+    _this->_buf[(_this->_tail + 2) % _this->_cap] = data;
+    _this->_tail += 3;
+}
+
+/* 取队首并执行 io：缓冲项按 rq/wq 方向调 com 的 read/write 并返回 buf；
+ * 回调项调用 cb(data) 返回 NULL；空队列返回 NULL（无 libuv 不阻塞）。 */
+void *ioq_pull(ioq *_this) {
+    if (_this->_head == _this->_tail) return NULL;       /* 空 */
+    uintptr_t tag = (uintptr_t)_this->_buf[_this->_head % _this->_cap];
+    if (tag != 0) {                                      /* io 缓冲项 [size, buf] */
+        void *buf = _this->_buf[(_this->_head + 1) % _this->_cap];
+        _this->_head += 2;
+        com *c = _this->com;
+        uint32_t n = (uint32_t)tag;
+        if (c) {
+            if (c->rq == _this) { if (c->read)  c->read (c, buf, &n); }
+            else                { if (c->write) c->write(c, buf, &n); }
+        }
+        return buf;
+    }
+    /* 完成回调项 [0, cb, data] */
+    void *cb   = _this->_buf[(_this->_head + 1) % _this->_cap];
+    void *data = _this->_buf[(_this->_head + 2) % _this->_cap];
+    _this->_head += 3;
+    if (cb) ((void (*)(void *))cb)(data);
+    return NULL;
 }

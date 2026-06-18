@@ -166,3 +166,23 @@ future *delay(uint32_t ms) {
     uv_timer_start(&r->timer, delay_on_timer, ms, 0);
     return r->fut;
 }
+
+/* ---------------- com 异步收发桥接（临时立即完成驱动） ----------------
+ * 把一次同步 io 包装为「已就绪」future，使 rpc 内 com >> v / com << v 的 await
+ * 整合可端到端验证。真实异步驱动应改为：入队 rq/wq、io 完成回调里 future_done
+ * 延迟兑现（见 op_impl.c 的 ioq 循环缓冲）。当前实现立即调用 read/write 并兑现。 */
+future *com_read_async(com *c, void *data, uint32_t size) {
+    future  *f = future_new();
+    uint32_t n = size;
+    if (c && c->read) c->read(c, data, &n);
+    future_done(f, (void *)(intptr_t)n);            /* 立即兑现，结果=收发字节数 */
+    return f;
+}
+
+future *com_write_async(com *c, void *buf, uint32_t size) {
+    future  *f = future_new();
+    uint32_t n = size;
+    if (c && c->write) c->write(c, buf, &n);
+    future_done(f, (void *)(intptr_t)n);
+    return f;
+}

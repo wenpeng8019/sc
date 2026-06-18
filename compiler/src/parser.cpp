@@ -706,6 +706,17 @@ struct Parser {
             curParseFn = d.get();
             parseStmts(d->body);
             curParseFn = savedFn;
+            // rpc 内顶层 com 收发语句（com << v / com >> v）走异步形态：自动套用 rpc 的
+            // await 状态机（类型在 codegen 期判定；此处以"顶层 << / >> 语句表达式"为信号）。
+            // fnc 内的 << / >> 仍是同步形态（不置 hasAwait）。
+            if (d->isRpc && !d->hasAwait)
+                for (auto& s : d->body)
+                    if (s->kind == Stmt::ExprS && s->expr &&
+                        s->expr->kind == Expr::Binary &&
+                        (s->expr->op == "<<" || s->expr->op == ">>")) {
+                        d->hasAwait = true;
+                        break;
+                    }
         }
         // 只有参数，无函数体：函数类型（rpc 时为声明）
         else d->kind = Decl::FuncTypeD;

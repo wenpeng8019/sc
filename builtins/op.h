@@ -133,6 +133,12 @@ struct com {
     int32_t (*error)(struct com *_this);                                    /* 错误回调 */
 };
 
+/* com 异步收发桥接：rpc 体内 com >> v / com << v 由编译器整合 await 时生成对其的调用，
+ * 各产出一个 future（io 完成时兑现）。其默认实现在异步运行时（builtins/async）：
+ * 依赖 future_*，故未 inc async 时链接缺失（与 future/await 同约束）。 */
+future *com_read_async (struct com *_this, void *data, uint32_t size);   /* 异步读 → future */
+future *com_write_async(struct com *_this, void *buf,  uint32_t size);   /* 异步写 → future */
+
 #ifdef __cplusplus
 }
 #endif
