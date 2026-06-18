@@ -160,7 +160,7 @@ def operand: {
 #   - 支持通过 ioq 来实现异步通讯机制
 #     即如果 com 的 rq/wq 不为 nil，则说明提供并支持了异步 io 的能力
 #   - 支持对 rpc 机制在语法层面的打通
-#     对于异步 io 通讯，则 << 和 >> 操作只能在 rpc 中 使用
+#     对于异步 io 通讯，则 << 和 >> 操作只能在 rpc 中使用
 #     此时会自动利用 rpc 的 await 机制来实现异步访问
 #     也就是编译器会把 << 和 >> 操作转移为特定 await 机制相关的语句
 # 示例：
@@ -180,14 +180,6 @@ def operand: {
 # 分层（Q4）：声明在此默认导入；通用运行时（ioq 循环缓冲、com 收发框架）→ op_impl.c（不依赖 libuv）；
 #           具体设备 io（read/write 实现、异步驱动）→ 可选模块（inc com.sc）。
 
-# ---------------- limit：com 读截止边界（com 的分身/切片）----------------
-# com 默认是 endless io；limit 借分身机制充当一次 read 的截止边界视图。
-# data()/len() 由运行时按边界规格（见 com.alloc）填充，C 侧实现。
-@def limit: {
-    fnc data:: &                      # limit 数据起始地址（C 侧实现）
-    fnc len:: u4                      # limit 数据长度（不含边界本身）
-}
-
 # ---------------- ioq：com 读写缓存队列（异步 io 的载体）----------------
 # 本质是可自动膨胀的循环缓冲队列。item 为连续一组值，依其首值判类型：
 #   [size, buf]       size≠0 → io 缓冲，pull 执行 io 操作
@@ -198,6 +190,14 @@ def operand: {
     fnc push:: buf: &, size: i4       # 入队一段 io 缓冲
     fnc notify:: cb: &, data: &       # 入队一个 io 完成回调（cb 为函数地址；done 为关键字故名 notify）
     fnc pull:: &                      # 取队首并执行 io（空则阻塞等待，区别于 pop）
+}
+
+# ---------------- limit：com 读截止边界（com 的分身/切片）----------------
+# com 默认是 endless io；limit 借分身机制充当一次 read 的截止边界视图。
+# data()/len() 由运行时按边界规格（见 com.alloc）填充，C 侧实现。
+@def limit: {
+    fnc data:: &                      # limit 数据起始地址（C 侧实现）
+    fnc len:: u4                      # limit 数据长度（不含边界本身）
 }
 
 # ---------------- com：设备通讯端点（机制框架）----------------

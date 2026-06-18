@@ -646,6 +646,21 @@ struct Checker {
             }
             for (auto& p : sig->structCommon.fields)
                 locals[p.name] = fromTypeRef(p.type);
+
+            // com 通道末参校验（Q5）：rpc 的 com& 参数（设备通讯端点）必须位于参数表末位，
+            // 以便后续 << / >> 通讯语法糖将 com 通道隐式补足为最末实参。
+            // 仅约束 rpc：MethodPtr 实现（read/write/error）是 fnc，其 _this: com& 为首参接收者，不在此列。
+            if (d->isRpc) {
+                const auto& ps = sig->structCommon.fields;
+                for (size_t i = 0; i + 1 < ps.size(); i++) {
+                    if (ps[i].type.fnKind == TypeRef::FncKind::None &&
+                        ps[i].type.ptr >= 1 &&
+                        resolveAliasToName(ps[i].type.name) == "com")
+                        err(ps[i].line ? ps[i].line : d->line,
+                            "com& 通讯通道参数 '" + ps[i].name +
+                            "' 必须位于 rpc '" + d->name + "' 的参数表末位");
+                }
+            }
             // 方法：隐式 this 参数
             if (!d->methodOwner.empty()) {
                 locals["this"] = Ty{d->methodOwner, 1, 0, true, false};
