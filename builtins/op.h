@@ -146,7 +146,7 @@ enum { IO_AGAIN = 1, IO_EOF = 2 };
 
 /* 框架同步读流程：用 com 的 read 接口反复读入 limit 缓冲，按 size/ending 判截止，
  * 回写 limit.len。返回 IO_EOF（读完）/ 负数（不可恢复）/ IO_AGAIN（同步上下文报错信号）。
- * 驱动 com >> s（s 为 com[...] 句柄）；异步形态见 builtins/async 的 limit_read_async。 */
+ * 驱动 com >> s（s 为 com[...] 句柄）；异步形态见下方 com_limit_read_async。 */
 int32_t limit_read(struct com *_this, struct limit *s);
 
 /* com：设备通讯端点。字段顺序与 op.sc 的 @def com 一致。
@@ -162,6 +162,7 @@ struct com {
     int32_t (*error)(struct com *_this);                                    /* 错误回调 */
     int32_t (*readable)(struct com *_this, void **id);  /* 读就绪查询：*id=可监听句柄（nil=不支持多路复用，转看返回值） */
     int32_t (*writable)(struct com *_this, void **id);  /* 写就绪查询（语义对称，见 op.sc 契约） */
+    int32_t (*close)(struct com *_this);                /* 关闭设备：释放底层资源（nil=无需关闭，OS 回收） */
 };
 
 /* com 异步收发桥接：rpc 体内 com >> v / com << v 由编译器整合 await 时生成对其的调用，
@@ -170,10 +171,25 @@ struct com {
 future *com_read_async (struct com *_this, void *data, uint32_t size);   /* 异步读 → future */
 future *com_write_async(struct com *_this, void *buf,  uint32_t size);   /* 异步写 → future */
 
+/* com[...] 句柄异步有界读（【E】）：以 limit_read 的框架确定读循环驱动 com >> s，遇
+ * IO_AGAIN 挂起、待设备就绪后续读，直至 ending/定长命中再 future_done 兑现（结果=
+ * limit.len；出错则为负返回码）。实现属语言自有异步内核（op_impl.c，始终链接）。 */
+future *com_limit_read_async(struct com *_this, struct limit *s);
+
 /* com 设备 io 就绪事件循环（与 async_loop 正交）：据 com.readable/writable 探测就绪
  * （多路复用句柄 → poll；否则轮询返回值），就绪后执行 io 并 future_done 兑现。
  * 多路复用后端为语言自有 POSIX poll 实现（op_impl.c，不依赖 libuv）。详见 op.sc。 */
 void     async_io(void);
+
+/* ---------------- stringify：JSON 格式化关键字选项 ----------------
+ * stringify<选项>(值[, 缓存, 大小]) 由编译器按静态类型生成格式化器（写入独立
+ * stringify.h，依赖 adt string）。生成的格式化器签名携带 stringify_t 选项参数，
+ * 调用点据 stringify<key:val> 构造之。
+ *   - compact:1 → 紧凑单行 {"x":3,"y":4}
+ *   - 默认（compact:0）→ 多行美化（2 空格逐层缩进） */
+typedef struct stringify {
+    uint8_t compact;                /* 1 → 紧凑单行；0 → 多行美化（默认） */
+} stringify_t;
 
 #ifdef __cplusplus
 }

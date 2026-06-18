@@ -490,6 +490,48 @@ static future *uv_com_io(com *c, int dir, void *buf, uint32_t size) {
 future *com_read_async(com *c, void *data, uint32_t size) { return uv_com_io(c, 0, data, size); }
 future *com_write_async(com *c, void *buf,  uint32_t size) { return uv_com_io(c, 1, buf,  size); }
 
+/* 【E】com[...] 句柄异步有界读（uv 后端）：可多路复用 → uv_poll，回调里跑 limit_read，
+ * 遇 IO_AGAIN 继续 poll、命中/出错则兑现；非多路复用 → 即时跑完。 */
+typedef struct uv_limit_req {
+    uv_poll_t poll;
+    com      *c;
+    limit    *lim;
+    future   *fut;
+} uv_limit_req;
+
+static void uv_limit_done(uv_limit_req *r, int32_t rc) {
+    int32_t res = (rc < 0) ? rc : (int32_t)r->lim->len;
+    future_done(r->fut, (void *)(intptr_t)res);
+}
+static void uv_limit_closed(uv_handle_t *h) { free(h->data); }
+static void uv_limit_cb(uv_poll_t *p, int st, int ev) {
+    (void)st; (void)ev;
+    uv_limit_req *r = (uv_limit_req *)p->data;
+    int32_t rc = limit_read(r->c, r->lim);
+    if (rc == IO_AGAIN) return;                 /* 未满：继续等待下次就绪 */
+    uv_poll_stop(p);
+    uv_limit_done(r, rc);
+    uv_close((uv_handle_t *)p, uv_limit_closed);
+}
+
+future *com_limit_read_async(com *c, limit *s) {
+    future *f = future_new();
+    void   *id = NULL;
+    if (c->readable) c->readable(c, &id);
+    if (c->readable && id != NULL) {            /* 多路复用句柄 → uv_poll 驱动 */
+        uv_limit_req *r = (uv_limit_req *)calloc(1, sizeof(uv_limit_req));
+        r->c = c; r->lim = s; r->fut = f;
+        uv_poll_init(&g_loop, &r->poll, (int)(intptr_t)id);
+        r->poll.data = r;
+        uv_poll_start(&r->poll, UV_READABLE, uv_limit_cb);
+        return f;
+    }
+    int32_t rc = limit_read(c, s);              /* 非多路复用：即时跑完 */
+    int32_t res = (rc < 0) ? rc : (int32_t)s->len;
+    future_done(f, (void *)(intptr_t)res);
+    return f;
+}
+
 #else
 /* ===================== 后端 A：语言自有 O(1) 多路复用内核 =====================
  * 平台后端：Linux=epoll / macOS·BSD=kqueue / Windows=IOCP / 其它 POSIX=poll。
@@ -573,6 +615,7 @@ typedef struct io_req {
     int            dir;        /* 0=读 1=写 */
     void          *buf;
     uint32_t       size;
+    limit         *lim;        /* 非 NULL=【E】com[...] 句柄有界读（框架读循环） */
     future        *fut;
     SC_FD          fd;         /* 多路复用句柄（SC_FD_NONE=未取得/不支持） */
     int            registered; /* 已注册进 mux（句柄常驻监听） */
@@ -929,6 +972,18 @@ static void execute_ready(void) {
         io_req *r = *pp;
         if (r->armed) {
             if (r->registered && r->fd != SC_FD_NONE) { mux_disarm(r->fd, r->dir); r->registered = 0; }
+            if (r->lim) {
+                /* 【E】框架确定读循环：遇 again 重置等待（process_new_reqs 重探/重注册），
+                 * 命中 ending/定长或出错才兑现（结果=limit.len，错误为负码）。 */
+                int32_t rc = limit_read(r->c, r->lim);
+                if (rc == IO_AGAIN) { r->armed = 0; pp = &r->next; continue; }
+                *pp = r->next;
+                future *f = r->fut;
+                int32_t res = (rc < 0) ? rc : (int32_t)r->lim->len;
+                free(r);
+                future_done(f, (void *)(intptr_t)res);
+                continue;
+            }
             uint32_t n = r->size;
             if (r->dir == 0) { if (r->c->read)  r->c->read(r->c, r->buf, &n); }
             else             { if (r->c->write) r->c->write(r->c, r->buf, &n); }
@@ -1010,6 +1065,17 @@ future *com_write_async(com *c, void *buf, uint32_t size) {
     future *f = future_new();
     io_req *r = (io_req *)calloc(1, sizeof(io_req));
     r->c = c; r->dir = 1; r->buf = buf; r->size = size; r->fut = f; r->fd = SC_FD_NONE;
+    r->next = g_io_reqs;
+    g_io_reqs = r;
+    wake();
+    return f;
+}
+
+/* 【E】com[...] 句柄异步有界读：登记 lim 请求，循环就绪后跑框架读流程 limit_read。 */
+future *com_limit_read_async(com *c, limit *s) {
+    future *f = future_new();
+    io_req *r = (io_req *)calloc(1, sizeof(io_req));
+    r->c = c; r->dir = 0; r->lim = s; r->fut = f; r->fd = SC_FD_NONE;
     r->next = g_io_reqs;
     g_io_reqs = r;
     wake();

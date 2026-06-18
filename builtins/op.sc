@@ -66,8 +66,8 @@ def operand: {
 #     的回指指针成员 _self: T&，使分身能反查到它所属的实体 T（free 时据此定位本体）。
 #     在 S 的成员函数内可用上下文关键字 self（等价 _this->_self）访问本体实体 T。
 #   - 这里 T 为 S 的实体类型，但必须具备以下必备成员函数：
-#     alloc: fnc: S&, ...   # 分身构造器：隐式 this=T&，余参=切片参数，返回 S&
-#     free: fnc: S&         # 分身析构器
+#     fnc alloc: S&, ...    # 分身构造器：隐式 this=T&，余参=切片参数，返回 S&
+#     fnc free: s: S&       # 分身析构器
 # 机制：
 # 语法糖：
 #   - var s: T[...]
@@ -95,13 +95,13 @@ def operand: {
 #   - 这里 I 为注入到 T 首位的容器 Item 节点类型
 #     @def I: { }
 #     @def I: ~ { }      -> 支持链表注入（I 也可作为链表元素类型）
-#   - 这里 C 为自定义容器类型，但必须具备必备以下成员函数：
-#       insert: ret, item: I&, tag: ...   # 插入
-#       remove: ret, item: I&             # 移除
-#       find:   ret, out: I&&, ...        # 查找（出参回填）
-#       first:  I&                        # 首元素
-#       next:   I&, item: I&              # 后继
-#     可选：last: I&   prev: I&, item: I&  # 反向导航
+#   - 这里 C 为自定义容器类型，但必须具备以下必备成员函数：
+#       fnc insert: ret, item: I&, tag: ...   # 插入
+#       fnc remove: ret, item: I&             # 移除
+#       fnc find:   ret, out: I&&, ...        # 查找（出参回填）
+#       fnc first:  I&                        # 首元素
+#       fnc next:   I&, item: I&              # 后继
+#     可选：fnc last: I&   fnc prev: I&, item: I&  # 反向导航
 # 机制：
 #   - T 构成容器的元素类型（如 treeNode）；I 是容器节点类型（如 node），被注入到 T 首位，
 #     因此 T& 与 I& 可零偏移互相强转（编译器在方法实参处自动 treeNode& ⟷ node&）。
@@ -128,8 +128,10 @@ def operand: {
 #
 # 分工：future 类型 + async_init/loop/final 是语言底层机制，声明在此（默认导入）；
 #       C 结构体/原型见 op.h（默认带入每个 C 单元）。运行时实现亦属语言自有异步
-#       内核——见 builtins/op_impl.c（始终随工程编译链接，POSIX poll + 自管道 +
-#       pthread，不依赖 libuv）。delay 等叶子原语属"异步功能库"，其声明保留在 async
+#       内核——见 builtins/op_impl.c（始终随工程编译链接；多路复用后端按平台选
+#       epoll(Linux)/kqueue(macOS·BSD)/IOCP(Windows)/poll(其它 POSIX 兜底)，均 O(1) 就绪
+#       通知 + 自管道唤醒 + pthread，不依赖 libuv；可选 SCC_WITH_UV 构建开关换成 libuv
+#       后端）。delay 等叶子原语属"异步功能库"，其声明保留在 async
 #       模块（inc async.sc），实现同在 op_impl.c。
 
 # ---------------- future：异步结果句柄（类型擦除） ----------------
@@ -228,15 +230,27 @@ def operand: {
 #     无需把字节回写 future；
 #   · 让出后由事件循环在 io 完成时经就绪队列 resume 状态机，从 _s<k> 继续。
 #
-# 【E】异步 · com[...] 句柄（rpc 内）—— 规划中
-#   语义：limit_read 的循环若遇 com.read 返回 again，则挂起 await、待设备就绪
-#   （ioq 读队列回调兑现 future）后恢复续读，直至 ending/定长命中。当前未实现
-#   （同步 limit_read 遇 again 即报错信号），留作 ioq 异步驱动落地时打通。
+# 【E】异步 · com[...] 句柄（rpc 内）—— codegen emitComAwait + 运行时 com_limit_read_async
+#   语义：limit_read 的框架读循环若遇 com.read 返回 again，则挂起 await、待设备
+#   就绪后恢复续读，直至 ending/定长命中。展开为单个 await 切点：
+#     com >> s   →  _p->_fut = com_limit_read_async(&base, s._);
+#                   if (future_await(_p->_fut, _p, rpc_resume)) goto _s<k>;
+#                   _p->_state = <k>; return;  _s<k>: ;
+#   · 句柄仍是「有界读视图」，仅用于 >>；future 兑现值为 limit.len（<0 为错码）。
+#   · 运行时 com_limit_read_async（op_impl.c，两后端均实现）：把该有界读登记为
+#     事件循环活动请求（io_req.lim≠nil 标记限读模式），每次就绪驱动一轮 limit_read，
+#     遇 again 重新挂回等待、直至读满或 ending 命中再 future_done 兑现。
 #
-# 【F】异步 · rpc 序列化收发（rpc 内）—— 规划中
+# 【F】异步 · rpc 序列化收发（rpc 内）—— codegen emitComRpcSendAsync / emitComRpcRecvAsync
 #   语义：把【C】的逐字段 write/read 替换为 com_write_async/com_read_async 的 await
-#   切点（每字段一个让出点），收端读齐参数后再触发处理。当前未实现，待异步收发
-#   原语真正落地（非"立即完成"桥）后与【D】统一展开。
+#   切点（每字段一个让出点），收端读齐参数后再触发处理。
+#   ·发· com << rpc(实参...)  →  堆上分配参数帧 _crpc<n> 装填实参（不让出）→ 逐字段
+#                                com_write_async await 写出 → 释放帧。
+#   ·收· com >> rpc           →  堆上分配 _crpc<n> + 数组后备/句柄上下文（不让出）→ 逐
+#                                字段 com_read_async await 读入（句柄字段走【E】的
+#                                com_limit_read_async）→ 读齐后触发 worker rpc_rpc → 释放。
+#   · 帧字段以堆指针 struct R *_crpc<n> 注入 rpc 状态机（避免结构体定序问题）；
+#   · 约束同【C】：可变参数 rpc、参数含 await 暂不支持 → 编译报错。
 #
 # ---------------------- com_read_async / com_write_async ----------------------
 # 二者是【D】异步收发点的「桥接原语」（C ABI 见 op.h，实现在语言自有异步内核
@@ -245,10 +259,14 @@ def operand: {
 #   com_read_async (&com, data, size) → future&   # 发起异步读，io 完成时 future_done 兑现
 #   com_write_async(&com, buf,  size) → future&   # 发起异步写，对称
 #   · 编译器只生成对它们的调用 + future_await 握手，不关心其内部如何驱动 io；
-#   · 当前默认实现是「立即完成」桥：同步调一次 com.read/write 后立刻 future_done，
-#     先打通 rpc↔await 的端到端链路；
-#   · 真实异步驱动应改为：把请求入 com 的 rq/wq（ioq 循环缓冲），在设备 io 完成
-#     回调里 future_done 延迟兑现（不阻塞循环线程）。接口契约不变，仅换实现。
+#   · 当前实现：把一次 com io 登记为事件循环的活动请求（io_req）并唤醒循环，随即
+#     返回；循环以 readable/writable 探测该 com 的就绪能力：
+#       - 给出可监听句柄(*id≠nil) → 常驻注册进多路复用后端(epoll/kqueue/IOCP/poll)，
+#                              由其 O(1) 就绪通知唤醒；
+#       - 无句柄(*id=nil) 或未提供 readable/writable → 按返回值轮询(1=就绪/0=again/<0=错)；
+#     就绪后调一次 com.read/write 实行收发，再 future_done 兑现（不阻塞循环线程）；
+#   · 请求现走内部活动表 io_req（非 com.rq/wq）；ioq 循环缓冲作为更重的批量 io 载体
+#     仍可在其上演进，接口契约不变；
 #   · 二者依赖 future_*，故与 future/await 同约束：未 inc async 用到即链接缺失。
 # =========================================================================
 # 示例：
@@ -313,13 +331,13 @@ def io: i4
 # 关键语法糖 >> <<（类似 c++）：见 op.sc 顶部 com 机制说明与后续阶段实现。
 #
 # ===== 多路复用就绪查询：readable / writable（设备能力，框架据此驱动 io 就绪）=====
-# 两种设备能力（可被 select/poll/epoll 监听 vs. 只能轮询）统一为一个接口：
+# 两种设备能力（可被 epoll/kqueue/IOCP/poll 监听 vs. 只能轮询）统一为一个接口：
 #   fnc readable: ret, id: &&     # 查询读就绪；id 出参=设备 id/句柄的返回地址
 #   fnc writable: ret, id: &&     # 查询写就绪（语义对称）
 # 语义（以 readable 为例）：
-#   · 出参 id：用户回填本设备可交给多路复用器（select/poll/epoll）监听的 id/句柄。
-#     - *id 非 nil（fd/句柄）→ 设备「支持多路复用」：框架把 *id 注册进多路复用器，
-#                            由 select/poll/epoll 统一等待就绪；此时 readable 返回值忽略。
+#   · 出参 id：用户回填本设备可交给多路复用后端（epoll/kqueue/IOCP/poll）监听的 id/句柄。
+#     - *id 非 nil（fd/句柄）→ 设备「支持多路复用」：框架把 *id 注册进多路复用后端，
+#                            由 epoll/kqueue/IOCP/poll 统一等待就绪（O(1) 通知）；此时 readable 返回值忽略。
 #     - *id 为 nil          → 设备「不支持多路复用」：框架转而直接看 readable 返回值判就绪：
 #         <0   出错（中断该 io）
 #          0   pending/again（未就绪，框架稍后轮询重试）
@@ -340,6 +358,7 @@ def io: i4
     fnc error: ret                      # 错误回调（每对象）
     fnc readable: ret, id: &&           # 读就绪查询（多路复用探测，见上契约）
     fnc writable: ret, id: &&           # 写就绪查询（语义对称）
+    fnc close: ret                      # 关闭设备：释放底层资源（nil=无需关闭，OS 回收）
 }
 
 # ---------------- async_io：com 设备 io 的就绪事件循环 ----------------
@@ -348,12 +367,35 @@ def io: i4
 # 驱动流程（每个登记了待办 io 的 com）：
 #   1. 取该 com 待办方向（rq 非空→读 / wq 非空→写）；
 #   2. 调 readable/writable(id) 探测就绪：
-#        - 给出可监听句柄(*id≠nil) → 注册进多路复用器(select/poll/epoll)，等待其就绪；
+#        - 给出可监听句柄(*id≠nil) → 注册进多路复用后端(epoll/kqueue/IOCP/poll)，等其就绪；
 #        - 否则按返回值：1=就绪、0=again（继续轮询）、<0=出错（结束该 io）；
 #   3. 就绪后 ioq.pull 取队首 io 缓冲，调 com.read/write 执行实际收发；
 #   4. 收发完成 → future_done 兑现对应 future（接回 await 状态机 / 派发）；
 #   5. 队列排空且无登记 com → 退出循环。
-# 分层：多路复用后端（poll）属语言自有异步内核，由 op_impl.c 的 POSIX poll 提供；
+# 分层：多路复用后端属语言自有异步内核，由 op_impl.c 按平台选 epoll(Linux)/
+#       kqueue(macOS·BSD)/IOCP(Windows)/poll(其它 POSIX 兜底) 提供，均 O(1) 就绪通知；
 #       就绪→执行 io→兑现这套「机制」语言自有（op_impl.c）。
 @fnc async_io::             # 驱动 com 设备 io 就绪循环至全部待办 io 完成
+
+# ---------------- stringify(...)：JSON 字符串格式化（语言关键字）----------------
+# 语言底层机制（默认导入，无需 inc）：编译器按实参静态类型生成格式化器（写入独立
+# stringify.h 由生成的 .c include），区别于类型 string 与堆构造 string()。选项类型
+# stringify_t 的 C ABI 见 op.h；格式化器返回 adt string，故仍依赖 inc adt.sc。
+#   var s: string = stringify(x)        # 返回 adt string（JSON 文本），用完需 s.drop()
+#   var b[256]: char
+#   var p: char& = stringify(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
+#                                       # 返回 char&（即缓存首址，无需 drop）
+#   选项块 stringify<key:val, ...>(...)：以 (stringify_t){...} 传入格式化器
+#     · stringify<compact:1>(x)         # 紧凑单行 {"x":3,"y":4}
+#     · 默认（无选项 / compact:0）       # 多行美化（2 空格逐层缩进）
+#   - 标量 → 数字；bool → true/false；char → 'a'
+#   - char& / char 数组 → "文本"；adt string → "内容"
+#   - 结构体/联合体 → {"字段": 值, ...} JSON 对象（链表 _prev/_next 不展开）
+#     · 子成员为结构体（值）→ 递归展开
+#     · 成员为结构体指针 → "类型名@0x地址"（不深递归）
+#     · 成员为标量指针 → "&值"（nil → nil）
+#     · 其它指针（void&/多级）→ "0x地址"（nil → nil）
+#   - 一维数组 → [v, v, ...]
+#   - 结构体一级指针（顶层实参）→ 解引用展开内容（nil → "nil"）
+#   依赖 adt string（inc adt.sc），暂不支持多维数组
 

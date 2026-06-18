@@ -10,7 +10,7 @@
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
 | m | `inc m.sc` | 多线程语言支持标准：run/wait 语句、thread、mutex、cond、pool（线程池） |
-| op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）；platform.h 的 sc 侧入口 |
+| op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）、stringify（类型 JSON 格式化关键字，选项类型 `stringify_t` 见 `op.h`）；platform.h 的 sc 侧入口 |
 
 另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
 
@@ -237,6 +237,47 @@ while it != nil
 
 完整示例见 `examples/feature6.sc`。
 
+### stringify(...) —— 类型 JSON 格式化（关键字）
+
+`stringify` 是 JSON 格式化关键字（区别于类型 `string` 与堆构造
+`string()`）：编译器按实参的静态类型合成格式化函数。选项类型 `stringify_t`
+属语言底层机制（默认导入，C ABI 见 `op.h`，无需 `inc`）；格式化器返回
+`string`，故仍需 `inc adt.sc`。转 C 时按类型生成的
+静态内联格式化器写入独立的 `stringify.h`，由生成的 `.c` 在类型定义之后 `#include`。
+两种形态按实参个数静态派发：
+
+```sc
+var s: string = stringify(t)       # 默认多行美化，返回 string，调用方负责 drop
+print("t=%s", s.cstr())
+s.drop()
+
+var b[256]: char
+print("t=%s", stringify<compact:1>(t, b, 256)) # 紧凑 + 缓存：截断保证 NUL 结尾，
+                                   # 返回 char&（即缓存首址），无需 drop
+```
+
+选项块 `stringify<key:val, ...>(值)`：编译器据此构造 `(stringify_t){...}` 传入格式化器，
+值限整数字面量。当前支持 `compact`：`compact:1` 紧凑单行 `{"x":3,"y":4}`；默认
+（无选项 / `compact:0`）多行美化，对象/数组逐层 2 空格缩进、嵌套换行。
+
+格式化规则（输出合法 JSON，对象键加双引号）：
+
+| 实参类型 | 输出 |
+| --- | --- |
+| 整数 / 浮点 / 枚举 | 数字（`%g` 浮点） |
+| bool | `true` / `false` |
+| char | `'a'` |
+| char&（C 字符串）/ char 一维数组 | `"文本"`，nil → `nil` |
+| 结构体指针（成员） | `"类型名@0x地址"`（不深递归），nil → `nil` |
+| 标量指针（成员） | `"&值"`（取值输出），nil → `nil` |
+| 其他指针（`void&` / 多级） | `"0x` 十六进制地址"，nil → `nil` |
+| 结构体 / 联合体（值） | `{"字段": 值, ...}` JSON 对象；子成员为结构体（值）递归展开；函数指针字段与合成字段（`_prev` 等）跳过 |
+| 结构体 / 联合体一级指针（顶层实参） | 自动解引用展开，nil → `"nil"` |
+| 一维数组 | `[v, v, ...]` |
+| string | `"内容"` |
+
+限制：暂不支持多维数组（编译报错）；联合体按全部字段展开（按值语义读取）。
+
 ## m —— 多线程语言支持标准
 
 多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；后续按
@@ -390,46 +431,6 @@ print("E: 错误 code=%d", -1)        # 前缀 "X:" 设级别
   未 `inc io.sc` 而使用会编译报错。
 - 相比 stdc 完整日志系统，省略了 tag/UDP 上报/缓冲模式等机制，保留接口
   风格以便后续扩展。
-
-### stringify(...) —— 类型 JSON 格式化（关键字）
-
-`stringify` 是 JSON 格式化关键字（区别于类型 `string` 与堆构造
-`string()`）：编译器按实参的静态类型合成格式化函数（需 `inc adt.sc`
-提供 `string`、`inc io.sc` 提供选项类型 `stringify_t`）。转 C 时按类型生成的
-静态内联格式化器写入独立的 `stringify.h`，由生成的 `.c` 在类型定义之后 `#include`。
-两种形态按实参个数静态派发：
-
-```sc
-var s: string = stringify(t)       # 默认多行美化，返回 string，调用方负责 drop
-print("t=%s", s.cstr())
-s.drop()
-
-var b[256]: char
-print("t=%s", stringify<compact:1>(t, b, 256)) # 紧凑 + 缓存：截断保证 NUL 结尾，
-                                   # 返回 char&（即缓存首址），无需 drop
-```
-
-选项块 `stringify<key:val, ...>(值)`：编译器据此构造 `(stringify_t){...}` 传入格式化器，
-值限整数字面量。当前支持 `compact`：`compact:1` 紧凑单行 `{"x":3,"y":4}`；默认
-（无选项 / `compact:0`）多行美化，对象/数组逐层 2 空格缩进、嵌套换行。
-
-格式化规则（输出合法 JSON，对象键加双引号）：
-
-| 实参类型 | 输出 |
-| --- | --- |
-| 整数 / 浮点 / 枚举 | 数字（`%g` 浮点） |
-| bool | `true` / `false` |
-| char | `'a'` |
-| char&（C 字符串）/ char 一维数组 | `"文本"`，nil → `nil` |
-| 结构体指针（成员） | `"类型名@0x地址"`（不深递归），nil → `nil` |
-| 标量指针（成员） | `"&值"`（取值输出），nil → `nil` |
-| 其他指针（`void&` / 多级） | `"0x` 十六进制地址"，nil → `nil` |
-| 结构体 / 联合体（值） | `{"字段": 值, ...}` JSON 对象；子成员为结构体（值）递归展开；函数指针字段与合成字段（`_prev` 等）跳过 |
-| 结构体 / 联合体一级指针（顶层实参） | 自动解引用展开，nil → `"nil"` |
-| 一维数组 | `[v, v, ...]` |
-| string | `"内容"` |
-
-限制：暂不支持多维数组（编译报错）；联合体按全部字段展开（按值语义读取）。
 
 ## platform.h —— 跨平台基础头
 

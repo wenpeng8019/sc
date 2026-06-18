@@ -100,7 +100,7 @@ struct CGen {
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
     int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + print 原型）
-    int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见）
+    int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见；stringify_t 在 op.h 默认带入）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -126,6 +126,7 @@ struct CGen {
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
     std::unordered_set<std::string> rpcParams;  // 当前 rpc 的参数名集合
     int asyncState = 0;                         // 异步 rpc 状态机：当前 await 段编号
+    int comRpcIdx = 0;                           // 异步 com<<>>rpc 序列化：帧 _crpcN 计数
 
     // ---- 匿名函数字面量（FncLit）支撑 ----
     // 不捕获外层变量的「伪闭包」：提升为顶层 static 函数，表达式处替换为函数名。
@@ -606,7 +607,7 @@ struct CGen {
                 ? (char)std::toupper((unsigned char)c) : '_';
             out << "#ifndef " << guard << "\n#define " << guard << "\n"
                 << "/* 由 scc 生成：stringify 关键字按类型生成的 JSON 格式化器。\n"
-                   "   需在 string 类型、io 的 stringify_t 与各结构体 typedef 之后 #include\n"
+                   "   需在 string 类型、op 的 stringify_t（op.h）与各结构体 typedef 之后 #include\n"
                    "   （由生成的 .c 自动完成）。 */\n";
         }
         out << "/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */\n"
@@ -2335,6 +2336,11 @@ struct CGen {
             for (auto& f : collectAsyncLocals(d)) {
                 indent(); emitDeclarator(*f); out << ";\n";
             }
+            // 【F】com<<>>rpc 序列化：每个 op 一个堆 rpc 参数槽（跨 await 存活）
+            std::vector<const Decl*> crpcs = collectComRpcStmts(d);
+            for (size_t i = 0; i < crpcs.size(); i++) {
+                indent(); out << "struct " << crpcs[i]->name << " *_crpc" << i << ";\n";
+            }
         }
         depth--;
         out << "};\n";
@@ -2448,12 +2454,50 @@ struct CGen {
                          s->expr->b && s->expr->b->kind == Expr::Await) n++;
                 else if (s->expr->kind == Expr::Binary &&
                          (s->expr->op == "<<" || s->expr->op == ">>")) {
-                    std::vector<ComOp> ops;            // com 收发链：每个 op 一个 await 点
-                    if (comChain(*s->expr, ops)) n += (int)ops.size();
+                    std::vector<ComOp> ops;            // com 收发链：每个 op 至少一个 await 点
+                    if (comChain(*s->expr, ops)) {
+                        for (auto& o : ops) {
+                            // 【F】rpc 序列化：每参数字段一个让出点；【D】/【E】各一个
+                            if (const Decl* r = comRpcTarget(o.target, o.send))
+                                n += (int)r->structCommon.fields.size();
+                            else
+                                n += 1;
+                        }
+                    }
                 }
             }
         }
         return n;
+    }
+
+    // 收集 rpc 体顶层的「com<<>>rpc 序列化」op（按出现顺序），供帧注入 _crpcN 槽。
+    // 顺序与 emitComAwait 内 comRpcIdx 递增一致（同序遍历 statements→ops）。
+    // 结构体定义阶段调用时变量环境未建立，故临时按 d 注册参数/异步局部（与函数体一致），
+    // 使 comChain 的 base 类型判定可用；用毕复原。
+    std::vector<const Decl*> collectComRpcStmts(const Decl& d) {
+        auto savedLocalsT  = localsT;   auto savedFnVarsL  = fnVarsL;
+        auto savedVarDimsL = varDimsL;  auto savedProjVarsL = projVarsL;
+        const bool savedInFunc = inFunc;
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
+        inFunc = true;
+        for (auto& p : d.structCommon.fields) regVar(p);
+        for (auto& f : collectAsyncLocals(d)) regVar(*f);
+
+        std::vector<const Decl*> v;
+        for (auto& sp : d.body) {
+            const Stmt& s = *sp;
+            if (s.kind != Stmt::ExprS || !s.expr) continue;
+            if (s.expr->kind != Expr::Binary || (s.expr->op != "<<" && s.expr->op != ">>")) continue;
+            std::vector<ComOp> ops;
+            if (!comChain(*s.expr, ops)) continue;
+            for (auto& o : ops)
+                if (const Decl* r = comRpcTarget(o.target, o.send)) v.push_back(r);
+        }
+
+        localsT  = std::move(savedLocalsT);  fnVarsL  = std::move(savedFnVarsL);
+        varDimsL = std::move(savedVarDimsL); projVarsL = std::move(savedProjVarsL);
+        inFunc = savedInFunc;
+        return v;
     }
 
     // 发出 async 调用/await rpc 的实参（位置参数，逐个求值）。
@@ -2506,26 +2550,166 @@ struct CGen {
         }
     }
 
-    // 异步 com 收发的一个 await 点：发起 com_read_async/com_write_async（产出 future），
-    // 登记本帧为 waiter，已就绪则续跑、否则让出。io 直接填充/读取 target，无需回写结果。
-    //   com >> v  →  _p->_fut = com_read_async (&com, &v, sizeof v); await
-    //   com << v  →  _p->_fut = com_write_async(&com, &v, sizeof v); await
+    // 异步 com 收发的一个 await 点（按右操作数形态分形）：
+    //   【D】普通变量 v   →  com_read_async/com_write_async（io 直接填充/读取 v）；
+    //   【E】com[...] 句柄 →  com_limit_read_async（框架确定读循环，遇 again 挂起续读）；
+    //   【F】rpc 调用/名   →  逐参数字段 await 序列化收发（每字段一个让出点）。
     void emitComAwait(const Expr& base, const ComOp& o, const Decl& d) {
-        if (o.target->kind == Expr::Call)
-            throw CompileError{"com 通讯的回调/rpc 形态（<< / >> 接 rpc 调用）暂未实现", o.target->line};
-        int st = ++asyncState;
         VType vt; exprVType(base, vt);
         const bool isPtr = vt.ptr >= 1;
+        // 【F】rpc 形态：发（<<）目标为 rpc 调用、收（>>）目标为裸 rpc 名
+        if (const Decl* r = comRpcTarget(o.target, o.send)) {
+            if (o.send) emitComRpcSendAsync(base, isPtr, *r, o.target->args, d);
+            else        emitComRpcRecvAsync(base, isPtr, *r, d);
+            return;
+        }
+        if (const Decl* r = comRpcTarget(o.target, !o.send)) {
+            (void)r;
+            if (o.send) throw CompileError{"com << rpc 发送需带参数：com << rpc(参数...)", o.target->line};
+            else        throw CompileError{"com >> rpc 收端不接受实参，请写 com >> rpc", o.target->line};
+        }
+        if (o.target->kind == Expr::Call)
+            throw CompileError{"com 通讯的回调形态（<< / >> 接非 rpc 调用）暂未实现", o.target->line};
+        // 【E】com[...] 句柄（limit 分身）→ 框架读流程异步驱动（仅 >>）
+        if (o.target->kind == Expr::Ident && projEntityOf(o.target->text) == "com") {
+            if (o.send)
+                throw CompileError{"com[...] 句柄仅用于 >> 读流程，不支持 << 写", o.target->line};
+            int st = ++asyncState;
+            indent(); out << "_p->_fut = com_limit_read_async(";
+            emitComBasePtr(base, isPtr);
+            out << ", "; emitExpr(*o.target, true); out << "._);\n";
+            indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
+                          << d.name << "_rpc)) goto _s" << st << ";\n";
+            indent(); out << "_p->_state = " << st << "; return;\n";
+            indent(); out << "_s" << st << ": ;\n";
+            return;
+        }
+        // 【D】普通变量：发起 com_read_async/com_write_async，io 直接填充/读取 target
+        int st = ++asyncState;
         const char* fn = o.send ? "com_write_async" : "com_read_async";
         indent(); out << "_p->_fut = " << fn << "(";
-        if (isPtr) emitExpr(base, true);
-        else { out << "&("; emitExpr(base, true); out << ")"; }
+        emitComBasePtr(base, isPtr);
         out << ", (void *)&("; emitExpr(*o.target, true); out << "), sizeof(";
         emitExpr(*o.target, true); out << "));\n";
         indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
                       << d.name << "_rpc)) goto _s" << st << ";\n";
         indent(); out << "_p->_state = " << st << "; return;\n";
         indent(); out << "_s" << st << ": ;\n";
+    }
+
+    // 异步 com io await 点（单一收发）：FN(base, dataPtr, size) → future → await 握手。
+    void emitComIoAwait(const Expr& base, bool isPtr, bool send,
+                        const std::string& dataPtr, const std::string& sizeExpr,
+                        const Decl& d) {
+        int st = ++asyncState;
+        const char* fn = send ? "com_write_async" : "com_read_async";
+        indent(); out << "_p->_fut = " << fn << "(";
+        emitComBasePtr(base, isPtr);
+        out << ", " << dataPtr << ", " << sizeExpr << ");\n";
+        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
+                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "_p->_state = " << st << "; return;\n";
+        indent(); out << "_s" << st << ": ;\n";
+    }
+
+    // 【F】发· com << rpc(实参...)（异步）：把 rpc 参数堆分配进帧槽 _p->_crpcN（跨 await
+    // 存活），先装填（无让出），再逐字段 com_write_async await 写出，末了释放该槽。
+    void emitComRpcSendAsync(const Expr& base, bool isPtr, const Decl& r,
+                             const std::vector<ExprPtr>& args, const Decl& d) {
+        if (r.hasAwait)
+            throw CompileError{"com 收发暂不支持异步 rpc：" + r.name, r.line};
+        if (r.structCommon.variadic)
+            throw CompileError{"com << rpc 暂不支持可变参数 rpc：" + r.name, r.line};
+        if (args.size() > r.structCommon.fields.size())
+            throw CompileError{"rpc 实参数量超出：" + r.name, r.line};
+        const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
+        indent(); out << rp << " = (struct " << r.name << " *)calloc(1, sizeof(struct "
+                      << r.name << "));\n";
+        for (size_t i = 0; i < args.size(); i++) {
+            const Field& f = r.structCommon.fields[i];
+            if (f.type.project)
+                throw CompileError{"com << rpc 的 com[...] 参数不支持序列化发送：" + f.name, r.line};
+            indent(); out << rp << "->" << f.name << " = "; emitExpr(*args[i], true); out << ";\n";
+            if (!f.type.arrayDims.empty()) {
+                indent(); out << rp << "->" << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f); out << ";\n";
+            }
+        }
+        for (auto& f : r.structCommon.fields) {
+            if (f.type.project)
+                throw CompileError{"com << rpc 的 com[...] 参数不支持序列化发送：" + f.name, r.line};
+            if (!f.type.arrayDims.empty())
+                emitComIoAwait(base, isPtr, true, "(void *)(" + rp + "->" + f.name + ")",
+                               "(uint32_t)" + rp + "->" + rpcArraySizeName(f), d);
+            else
+                emitComIoAwait(base, isPtr, true, "(void *)&(" + rp + "->" + f.name + ")",
+                               "sizeof(" + rp + "->" + f.name + ")", d);
+        }
+        indent(); out << "free(" << rp << ");\n";
+    }
+
+    // 【F】收· com >> rpc（异步）：堆分配帧槽 _p->_crpcN，初始化数组后备/句柄上下文（无
+    // 让出），逐字段 await 读入（句柄字段走 com_limit_read_async 框架读流程），读毕触发
+    // worker rpc_rpc，再释放该槽与数组后备。
+    void emitComRpcRecvAsync(const Expr& base, bool isPtr, const Decl& r, const Decl& d) {
+        if (r.hasAwait)
+            throw CompileError{"com 收发暂不支持异步 rpc：" + r.name, r.line};
+        if (r.structCommon.variadic)
+            throw CompileError{"com >> rpc 暂不支持可变参数 rpc：" + r.name, r.line};
+        const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
+        indent(); out << rp << " = (struct " << r.name << " *)calloc(1, sizeof(struct "
+                      << r.name << "));\n";
+        // 数组后备（堆）+ com[...] 句柄上下文初始化（无让出）
+        for (auto& f : r.structCommon.fields) {
+            if (!f.type.arrayDims.empty()) {
+                indent(); out << rp << "->" << f.name << " = calloc(1, ";
+                emitRpcArraySizeof(f); out << ");\n";
+                indent(); out << rp << "->" << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f); out << ";\n";
+            } else if (f.type.project) {
+                const std::vector<Field>* alParams = projectAllocParams(f.type.name);
+                if (f.type.projectArgs && alParams) {
+                    size_t n = std::min(f.type.projectArgs->size(), alParams->size());
+                    for (size_t i = 0; i < n; i++) {
+                        indent(); out << rp << "->" << f.name << "." << (*alParams)[i].name << " = ";
+                        emitExpr(*(*f.type.projectArgs)[i], true); out << ";\n";
+                    }
+                }
+            }
+        }
+        // 逐字段 await 读
+        for (auto& f : r.structCommon.fields) {
+            if (!f.type.arrayDims.empty()) {
+                emitComIoAwait(base, isPtr, false, "(void *)(" + rp + "->" + f.name + ")",
+                               "(uint32_t)" + rp + "->" + rpcArraySizeName(f), d);
+            } else if (f.type.project) {
+                // 绑定句柄到本 com（alloc + _self 回指），再 await 框架读流程
+                const std::vector<Field>* alParams = projectAllocParams(f.type.name);
+                indent(); out << rp << "->" << f.name << "._ = ";
+                emitExpr(base, true); out << (isPtr ? "->" : ".") << "alloc(";
+                emitComBasePtr(base, isPtr);
+                if (alParams) for (auto& p : *alParams)
+                    out << ", " << rp << "->" << f.name << "." << p.name;
+                out << ");\n";
+                indent(); out << rp << "->" << f.name << "._->_self = ";
+                emitComBasePtr(base, isPtr); out << ";\n";
+                int st = ++asyncState;
+                indent(); out << "_p->_fut = com_limit_read_async(";
+                emitComBasePtr(base, isPtr);
+                out << ", " << rp << "->" << f.name << "._);\n";
+                indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
+                              << d.name << "_rpc)) goto _s" << st << ";\n";
+                indent(); out << "_p->_state = " << st << "; return;\n";
+                indent(); out << "_s" << st << ": ;\n";
+            } else {
+                emitComIoAwait(base, isPtr, false, "(void *)&(" + rp + "->" + f.name + ")",
+                               "sizeof(" + rp + "->" + f.name + ")", d);
+            }
+        }
+        indent(); out << r.name << "_rpc(" << rp << ");\n";
+        for (auto& f : r.structCommon.fields)
+            if (!f.type.arrayDims.empty()) { indent(); out << "free(" << rp << "->" << f.name << ");\n"; }
+        indent(); out << "free(" << rp << ");\n";
     }
 
     // 完成：写返回槽 → 释放帧 → future_done 唤醒上游（return）。
@@ -2647,6 +2831,7 @@ struct CGen {
         indent(); out << "}\n";
         indent(); out << "_s0: ;\n";
         asyncState = 0;
+        comRpcIdx = 0;
         emitAsyncStmts(d);
         depth--;
         out << "}\n\n";
@@ -2772,15 +2957,11 @@ struct CGen {
                 throw CompileError{"print 需要先 inc io.sc", usesPrint};
             // 原型由 io.sc 的 @fnc print:: 接口（→ #include io.h）提供，无需在此重复声明
         }
-        // stringify 格式化关键字：依赖 adt string 与 io 的 stringify_t 选项类型
+        // stringify 格式化关键字：依赖 adt string（返回类型）；选项类型 stringify_t
+        // 已迁入 op.h（默认带入每个 C 单元，无需 inc io.sc）
         if (usesStrof && !funcs.count("stringify")) {
             if (!aggrOf("string"))
                 throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
-            bool hasIo = false;
-            for (auto& d : prog.decls)
-                if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
-            if (!hasIo)
-                throw CompileError{"stringify(...) 选项依赖 io 的 stringify_t，请先 inc io.sc", usesStrof};
         }
 
         // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）

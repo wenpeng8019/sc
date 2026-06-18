@@ -50,6 +50,8 @@ POSITIVE=(
     examples/feature18.sc
     examples/feature19.sc
     examples/feature20.sc
+    examples/feature21.sc
+    examples/feature22.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     tests/cases/cast.sc
