@@ -68,9 +68,13 @@ struct Parser {
     // 结构体内成员函数：parseDef 期间收集，parseProgram 提升为顶层 Decl
     std::vector<DeclPtr> pendingMethods;
 
+    // 当前正在解析函数体的 Decl（供 await 回写 hasAwait 标记其所在 rpc）
+    Decl* curParseFn = nullptr;
+
     explicit Parser(const std::vector<Token>& toks) : t(toks) {}
 
     [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
+    [[noreturn]] void err(int line, const std::string& m) const { throw CompileError{m, line}; }
 
     void expect(Tok k, const char* what) {
         if (!accept(k)) err(std::string("期望 ") + what + "，得到 '" + cur().text + "'");
@@ -152,6 +156,26 @@ struct Parser {
             if (acceptOp("&")) ty.ptr++;
             else if (acceptOp("&&")) ty.ptr += 2;
             else break;
+        }
+
+        // 分身/切片句柄类型 T[...]（def T: <S> {} 机制）：类型侧方括号（数组维度在
+        // 名字侧，故此处的 [ 必为句柄初值列表）。方括号内为 alloc 的实参初值表达式。
+        if (!ty.name.empty() && ty.ptr == 0 && at(Tok::LBracket)) {
+            advance();                                  // '['
+            ty.project = true;
+            ty.projectArgs = std::make_shared<std::vector<ExprPtr>>();
+            exprBracket++;
+            skipNlInBracket();
+            if (!at(Tok::RBracket)) {
+                ty.projectArgs->push_back(parseExpr());
+                while (accept(Tok::Comma)) {
+                    skipNlInBracket();
+                    ty.projectArgs->push_back(parseExpr());
+                }
+            }
+            skipNlInBracket();
+            exprBracket--;
+            expect(Tok::RBracket, "']'");
         }
         return ty;
     }
@@ -400,18 +424,25 @@ struct Parser {
 
         // <C, I>：ADT 容器标记（仅结构体）—— C=自定义容器类型，I=元素节点类型；
         // 转 C 时把 I 整体注入为 T 的首个 synthetic 成员（offset 0），从而 T& 与 I& 可零偏移互转
-        std::string adtColl, adtItem;
+        // <S>：分身/切片实体标记（仅结构体）—— S=分身/切片类型；
+        // 由解析后注入 pass 在 S 首部注入回指字段 _self: T&，并回填 S.projectEntity = T。
+        std::string adtColl, adtItem, projectSelf;
         bool isAdt = false;
         if (!linked && atOp("<")) {
-            isAdt = true;
             advance();                                  // '<'
-            if (!at(Tok::Ident)) err("期望容器类型名");
-            adtColl = advance().text;
-            expect(Tok::Comma, "','");
-            if (!at(Tok::Ident)) err("期望元素节点类型名");
-            adtItem = advance().text;
+            if (!at(Tok::Ident)) err("期望容器/分身类型名");
+            std::string first = advance().text;
+            if (accept(Tok::Comma)) {
+                isAdt = true;
+                adtColl = first;
+                if (!at(Tok::Ident)) err("期望元素节点类型名");
+                adtItem = advance().text;
+            } else {
+                projectSelf = first;                    // <S>：分身/切片
+            }
             if (!acceptOp(">")) err("'>'");
         }
+
 
         // 2. 对于 { ... } 结构体
         if (at(Tok::LBrace)) {
@@ -460,6 +491,9 @@ struct Parser {
                 d->structCommon.fields.insert(d->structCommon.fields.begin(), std::move(f));
             }
 
+            // 分身/切片实体：记录 S 类型名，回指字段 _self 由注入 pass 在 S 上补齐
+            d->projectSelf = projectSelf;
+
             expect(Tok::Newline, "换行");
             return d;
         }
@@ -467,6 +501,8 @@ struct Parser {
         // 只有结构体支持链表标记 '~'
         if (linked) err("'~' 链表标记仅支持结构体 {}");
         if (isAdt) err("'<C, I>' ADT 容器标记仅支持结构体 {}");
+        if (!projectSelf.empty()) err("'<S>' 分身/切片标记仅支持结构体 {}");
+
 
         // 3. 对于 ( ... ) 联合体
         if (at(Tok::LParen)) {
@@ -664,7 +700,10 @@ struct Parser {
         if (isBody) {
             if (d->cImpl) err("C 实现接口（::）不能有函数体");
             d->kind = Decl::FuncD;
+            Decl* savedFn = curParseFn;
+            curParseFn = d.get();
             parseStmts(d->body);
+            curParseFn = savedFn;
         }
         // 只有参数，无函数体：函数类型（rpc 时为声明）
         else d->kind = Decl::FuncTypeD;
@@ -917,6 +956,21 @@ struct Parser {
     ExprPtr parseUnary() {
 
         skipNlInBracket();
+        // async E：把 rpc 调用登记进事件循环，返回 future&（不阻塞）
+        if (at(Tok::KwAsync)) {
+            auto e = mk(Expr::Async);
+            advance();
+            e->a = parseUnary();                // 操作数：rpc 调用
+            return e;
+        }
+        // await E：挂起当前 rpc，等 E 产的 future 就绪后恢复（仅 rpc 体内）
+        if (at(Tok::KwAwait)) {
+            auto e = mk(Expr::Await);
+            advance();
+            e->a = parseUnary();                // 操作数：rpc 调用 或 返回 future& 的叶子原语调用
+            if (curParseFn) curParseFn->hasAwait = true;  // 标记所在函数为状态机
+            return e;
+        }
         if (atOp("!") || atOp("~") || atOp("-") || atOp("+") ||
             atOp("*") || atOp("&") || atOp("++") || atOp("--")) {
             auto u = mk(Expr::Unary);
@@ -1393,6 +1447,18 @@ struct Parser {
                 return s;
             }
 
+            // done 标记就绪语句：done future [, result]
+            //   等价 future_done(future, result)；result 省略=NULL，自动 void* 擦除
+            case Tok::KwDone: {
+                auto s = mkStmt(Stmt::DoneS);
+                advance();
+                s->expr = parseExpr();                              // future
+                if (accept(Tok::Comma))
+                    s->forInit = parseExpr();                       // 可选结果
+                expect(Tok::Newline, "换行");
+                return s;
+            }
+
             // print 日志输出语句：print[<chn>] arg, arg, ...（括号可省）
             //   <chn> = u1 通道（整数字面量或宏/常量名），默认 0，透传给 C print。
             //   实参为 python 风格拼接：字符串字面量=纯文本；其余表达式按静态类型
@@ -1523,8 +1589,44 @@ struct Parser {
                     err("顶层只允许 inc/def/fnc/rpc/var/let/tls，得到 '" + cur().text + "'");
             }
         }
+
+        // ── 分身/切片注入 pass：对每个 def T: <S> 实体，在 S（分身/切片类型）首部
+        //    注入回指字段 _self: T&，并回填 S.projectEntity = T，供 self 关键字与
+        //    赋值语法糖定位本体。要求 T 与 S 在同一翻译单元。
+        for (auto& dT : prog.decls) {
+            if (!dT || dT->kind != Decl::StructD || dT->projectSelf.empty()) continue;
+            Decl* dS = nullptr;
+            for (auto& d : prog.decls) {
+                if (d && d->kind == Decl::StructD && d->name == dT->projectSelf) { dS = d.get(); break; }
+            }
+            if (!dS)
+                err(dT->line, "分身/切片实体 '" + dT->name + "' 的分身类型 '" +
+                    dT->projectSelf + "' 未定义（须与实体在同一翻译单元）");
+            if (!dS->projectEntity.empty())
+                err(dT->line, "分身/切片类型 '" + dS->name + "' 已是实体 '" +
+                    dS->projectEntity + "' 的分身，不能再作为 '" + dT->name + "' 的分身");
+            dS->projectEntity = dT->name;
+            for (auto& f : dS->structCommon.fields)
+                if (f.name == "_self")
+                    err(dS->line, "_self 为分身/切片结构体内置回指成员，不可显式定义");
+            Field f;
+            f.name = "_self";
+            f.type.name = dT->name;
+            f.type.ptr = 1;                              // _self: T&
+            f.synthetic = true;
+            f.line = dS->line;
+            // 若 S 是链表结构体（已注入 _prev/_next），回指字段插在其后；否则插在最前
+            size_t pos = 0;
+            while (pos < dS->structCommon.fields.size() &&
+                   (dS->structCommon.fields[pos].name == "_prev" ||
+                    dS->structCommon.fields[pos].name == "_next"))
+                pos++;
+            dS->structCommon.fields.insert(dS->structCommon.fields.begin() + pos, std::move(f));
+        }
+
         return prog;
     }
+
 };
 
 } // namespace

@@ -110,6 +110,8 @@ struct CGen {
     // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
     struct VType { std::string name; int ptr = 0; int arr = 0; };
     std::unordered_map<std::string, VType> globalsT, localsT;
+    // 分身/切片句柄变量（var s: T[...]）：变量名 → 实体类型 T 名
+    std::unordered_map<std::string, std::string> projVarsG, projVarsL;
     // 函数指针变量的内联签名（var cb: fnc: ...）：缺参补全查询用
     std::unordered_map<std::string, const TypeRef*> fnVarsG, fnVarsL;
     // 数组变量的维度表（string 格式化顶层数组需要维度信息）
@@ -121,6 +123,7 @@ struct CGen {
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
     std::unordered_set<std::string> rpcParams;  // 当前 rpc 的参数名集合
+    int asyncState = 0;                         // 异步 rpc 状态机：当前 await 段编号
 
     // ---- 匿名函数字面量（FncLit）支撑 ----
     // 不捕获外层变量的「伪闭包」：提升为顶层 static 函数，表达式处替换为函数名。
@@ -152,6 +155,14 @@ struct CGen {
 
     // 声明一个字段/变量：T [*...]name[size]
     void emitDeclarator(const Field& f, bool asConst = false) {
+        // 分身/切片句柄字段/参数 name: T[...] → struct T__project name
+        // （rpc 伪形参与普通结构体成员皆可承载分身句柄，其本质即一个结构体）
+        if (f.type.project) {
+            if (asConst) out << "const ";
+            out << "struct " << f.type.name << "__project "
+                << (f.name == "this" ? "_this" : f.name);
+            return;
+        }
         if (f.type.fnKind != TypeRef::FncKind::None) {
             if (f.type.structCommon.type) {
                 std::string base; int ptr;
@@ -670,6 +681,14 @@ struct CGen {
                 return false;
             }
             case Expr::Member: {
+                // 分身/切片句柄成员 s._：类型为分身类型 S 的指针（S&）
+                if (e.text == "_" && e.a && e.a->kind == Expr::Ident) {
+                    const std::string ent = projEntityOf(e.a->text);
+                    if (!ent.empty()) {
+                        if (const Decl* td = aggrOf(ent))
+                            if (!td->projectSelf.empty()) { vt = {td->projectSelf, 1, 0}; return true; }
+                    }
+                }
                 VType base;
                 if (!exprVType(*e.a, base)) return false;
                 const Decl* sd = aggrOf(base.name);
@@ -848,6 +867,7 @@ struct CGen {
                 break;
             case Expr::Ident:
                 if (e.text == "this") out << "_this";      // 方法内接收者
+                else if (e.text == "self") out << "(_this->_self)";  // 分身/切片内：回指本体实体
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
                 else if (e.text == "ok" && !localsT.count("ok") && !globalsT.count("ok"))
                     out << "0";                            // ADT 接口成功返回码（类型 ret）
@@ -1145,6 +1165,21 @@ struct CGen {
                 }
                 break;
             }
+            // async E：把 rpc 调用 E 登记进事件循环，立即返回 future&（调 X__async 启动器）
+            case Expr::Async: {
+                if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
+                    const Expr& call = *e.a;
+                    out << call.a->text << "__async(";
+                    emitAsyncCallArgs(call);
+                    out << ")";
+                }
+                break;
+            }
+            // await E：仅出现在异步 rpc 体内，由 emitAsyncStmts 在语句层处理；
+            // 兜底（理论不可达）：发出其 future 操作数表达式。
+            case Expr::Await:
+                if (e.a) emitFutureExpr(*e.a);
+                break;
         }
     }
 
@@ -1152,6 +1187,22 @@ struct CGen {
     void emitVarDecls(const std::vector<Field>& decls, bool asConst,
                       bool isStatic = false, bool isTls = false) {
         for (auto& f : decls) {
+            // 分身/切片句柄 var s: T[a, b]：展开为 struct T__project s = {a, b, NULL};
+            if (f.type.project) {
+                (inFunc ? projVarsL : projVarsG)[f.name] = f.type.name;
+                indent();
+                if (isTls) out << "static TLS ";
+                else if (isStatic) out << "static ";
+                out << "struct " << f.type.name << "__project " << f.name << " = {";
+                if (f.type.projectArgs)
+                    for (size_t i = 0; i < f.type.projectArgs->size(); i++) {
+                        if (i) out << ", ";
+                        emitExpr(*(*f.type.projectArgs)[i], true);
+                    }
+                if (f.type.projectArgs && !f.type.projectArgs->empty()) out << ", ";
+                out << "NULL};\n";
+                continue;
+            }
             // 无类型 var/let（var x: = 初值）：依据初值字面量推断默认类型；
             // 推断成功时跳过 emitDeclarator，按推断结果输出声明并登记轻量类型
             std::string infBase; int infPtr = 0; bool inferred = false;
@@ -1214,6 +1265,39 @@ struct CGen {
         for (auto& s : stmts) emitStmt(*s);
     }
 
+    // 分身/切片句柄变量名 → 实体类型 T 名（非句柄返回空串）
+    std::string projEntityOf(const std::string& name) const {
+        if (inFunc) { auto it = projVarsL.find(name); if (it != projVarsL.end()) return it->second; }
+        auto it = projVarsG.find(name);
+        return it != projVarsG.end() ? it->second : std::string{};
+    }
+
+    // 分身/切片句柄赋值语法糖：
+    //   s = nil  →  if (s._) { T_free(s._->_self, s._); s._ = NULL; }
+    //   s = 本体 →  s._ = T_alloc(&本体, s.p1, s.p2, ...); s._->_self = &本体;
+    void emitProjectAssign(const std::string& s, const std::string& ent, const Expr& rhs) {
+        const bool isNil = rhs.kind == Expr::Ident && rhs.text == "nil";
+        const Decl* fr = findMethod(ent, "free");
+        const Decl* al = findMethod(ent, "alloc");
+        if (isNil) {
+            indent(); out << "if (" << s << "._) { ";
+            if (fr) out << fr->name << "(" << s << "._->_self, " << s << "._); ";
+            out << s << "._ = NULL; }\n";
+            return;
+        }
+        indent();
+        out << s << "._ = ";
+        if (al) out << al->name;
+        out << "(&";
+        emitExpr(rhs, true);
+        if (al) for (auto& p : al->structCommon.fields) out << ", " << s << "." << p.name;
+        out << ");\n";
+        indent();
+        out << s << "._->_self = &";
+        emitExpr(rhs, true);
+        out << ";\n";
+    }
+
     void emitStmt(const Stmt& s) {
         // 行号映射：指定了源文件时输出 #line 指令（调试器断点/单步/堆栈
         // 直接落在 .sc 源码）；否则输出注释供人工对照
@@ -1228,6 +1312,12 @@ struct CGen {
         
         switch (s.kind) {
             case Stmt::ExprS:
+                // 分身/切片句柄赋值语法糖：s = 本体 / s = nil
+                if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                    s.expr->a && s.expr->a->kind == Expr::Ident) {
+                    const std::string ent = projEntityOf(s.expr->a->text);
+                    if (!ent.empty()) { emitProjectAssign(s.expr->a->text, ent, *s.expr->b); break; }
+                }
                 indent();
                 emitExpr(*s.expr, true);
                 out << ";\n";
@@ -1343,6 +1433,9 @@ struct CGen {
             case Stmt::WaitS:
                 emitWaitStmt(s);
                 break;
+            case Stmt::DoneS:
+                emitDoneStmt(s);
+                break;
             case Stmt::PrintS:
                 emitPrintStmt(s);
                 break;
@@ -1455,6 +1548,28 @@ struct CGen {
         if (s.forCond) emitExpr(*s.forCond, true); else out << "0";
         out << ", ";
         if (s.forStep) emitExpr(*s.forStep, true); else out << "0";
+        out << ");\n";
+    }
+
+    // done 语句 → future_done 调用（future_done 在 async_impl 中实现）
+    //   done f            → future_done(f, NULL);                  无结果
+    //   done f, result    → future_done(f, <result 擦除为 void*>);  有结果
+    // future 实参为 future&（指针）原样传入；结果自动类型擦除：指针类直转
+    // (void*)，标量经 (void*)(intptr_t) 往返（与 future_get 调用点 : T& 还原对应）。
+    void emitDoneStmt(const Stmt& s) {
+        indent();
+        out << "future_done(";
+        emitExpr(*s.expr, true);     // future&（指针）
+        out << ", ";
+        if (!s.forInit) {
+            out << "NULL";
+        } else {
+            VType vt;
+            bool isPtr = exprVType(*s.forInit, vt) && (vt.ptr > 0 || vt.arr > 0);
+            out << (isPtr ? "(void *)(" : "(void *)(intptr_t)(");
+            emitExpr(*s.forInit, true);
+            out << ")";
+        }
         out << ");\n";
     }
 
@@ -1658,6 +1773,23 @@ struct CGen {
                     depth--;
                     indent(); out << "}\n\n";
                 }
+                // 分身/切片句柄结构体 T__project：def T: <S> {} 的 T[...] 类型展开。
+                // 字段 = T.alloc 去掉隐式 this 后的形参（句柄上下文，存切片参数初值）
+                //      + S* _（指向当前分身实例，nil=未绑定）。
+                if (d.kind == Decl::StructD && !d.projectSelf.empty()) {
+                    const Decl* al = findMethod(d.name, "alloc");
+                    if (const Decl* sDecl = aggrOf(d.projectSelf)) emitAggrWithDeps(*sDecl);
+                    indent();
+                    out << "typedef struct " << d.name << "__project {\n";
+                    depth++;
+                    if (al) for (auto& p : al->structCommon.fields) {
+                        indent(); emitDeclarator(p); out << ";\n";
+                    }
+                    indent(); out << d.projectSelf << " *_;\n";
+                    depth--;
+                    indent();
+                    out << "} " << d.name << "__project;\n\n";
+                }
                 break;
             case Decl::AliasD: {
                 std::string base; int ptr;
@@ -1732,7 +1864,7 @@ struct CGen {
         // 函数定义行映射回 .sc 源码（函数序言断点落在 fnc 行）
         if (!srcFile.empty() && d.line > 0)
             out << "#line " << d.line << " \"" << srcFile << "\"\n";
-        if (d.isRpc) { emitRpcWorker(d); return; }
+        if (d.isRpc) { if (d.hasAwait) emitAsyncRpc(d); else emitRpcWorker(d); return; }
         if (d.name != "main" && shouldStaticize(d)) out << "static ";
         emitFuncSig(d);
         out << " {\n";
@@ -1850,9 +1982,15 @@ struct CGen {
             indent();
             emitRetType(d);
             out << " _;\n";
-        } else if (d.structCommon.fields.empty()) {
+        } else if (d.structCommon.fields.empty() && !d.hasAwait) {
             indent();
             out << "char _;\n";  // C 不允许空结构体：占位
+        }
+        // 异步 rpc：追加状态机隐藏字段 + 把跨 await 存活的局部提升到帧
+        if (d.hasAwait) {
+            indent(); out << "future *_ret;\n";   // 本次调用的结果 future
+            indent(); out << "int _state;\n";     // 状态机当前段
+            indent(); out << "future *_fut;\n";   // 当前正在 await 的 future
         }
         for (auto& f : d.structCommon.fields) {
             if (!f.type.arrayDims.empty()) {       // 数组形参 → <T*, size> 两字段
@@ -1863,6 +2001,11 @@ struct CGen {
             indent();
             emitDeclarator(f);
             out << ";\n";
+        }
+        if (d.hasAwait) {                          // 提升的局部变量
+            for (auto& f : collectAsyncLocals(d)) {
+                indent(); emitDeclarator(*f); out << ";\n";
+            }
         }
         depth--;
         out << "};\n";
@@ -1906,7 +2049,15 @@ struct CGen {
         if (workerStatic) out << "static ";
         emitRpcWorkerSig(d);
         out << ";\n";
-        emitRpcWrapper(d);
+        if (d.hasAwait) {
+            // 异步 rpc：无同步包装，改发启动器原型 future* X__async(参数...)
+            if (workerStatic) out << "static ";
+            out << "future *" << d.name << "__async(";
+            emitParams(d.structCommon.fields, d.structCommon.variadic);
+            out << ");\n";
+        } else {
+            emitRpcWrapper(d);
+        }
     }
 
     // rpc 实际函数体：参数引用由 emitExpr/ReturnS 改写为 _p->xxx
@@ -1931,7 +2082,210 @@ struct CGen {
         out << "}\n\n";
     }
 
-    // inc 头文件引入 → #include 行
+    // ================= 异步 rpc（含 await）→ 状态机（stackless coroutine）=================
+    // 含 await 的 rpc 编译为：
+    //   struct X { 返回槽 _; future* _ret; int _state; future* _fut; 参数...; 提升局部...; };
+    //   future* X__async(参数...)   启动器：建帧 + 造 _ret + 装参 + 首次驱动 → 返回 _ret
+    //   void    X_rpc(struct X* _p) 状态机：switch(_state) 跳转，await 点切段、让出
+    // 约束（v1）：await 只能在 rpc 体顶层直线出现（不可在 if/while/for/case 内）；
+    //             仅形如  await E / var x:T = await E / x = await E 三种。
+
+    // 收集需提升到帧的局部变量（rpc 体顶层 var/let 声明），返回其字段集合。
+    std::vector<const Field*> collectAsyncLocals(const Decl& d) {
+        std::vector<const Field*> locals;
+        for (auto& s : d.body) {
+            if (s->kind == Stmt::VarS || s->kind == Stmt::LetS)
+                for (auto& f : s->decls) locals.push_back(&f);
+        }
+        return locals;
+    }
+
+    // 统计 rpc 体顶层 await 点数量（= 状态机段数 - 1）。
+    int countAsyncAwaits(const Decl& d) {
+        int n = 0;
+        for (auto& s : d.body) {
+            if (s->kind == Stmt::VarS || s->kind == Stmt::LetS) {
+                for (auto& f : s->decls)
+                    if (f.init && f.init->kind == Expr::Await) n++;
+            } else if (s->kind == Stmt::ExprS && s->expr) {
+                if (s->expr->kind == Expr::Await) n++;
+                else if (s->expr->kind == Expr::Binary && s->expr->op == "=" &&
+                         s->expr->b && s->expr->b->kind == Expr::Await) n++;
+            }
+        }
+        return n;
+    }
+
+    // 发出 async 调用/await rpc 的实参（位置参数，逐个求值）。
+    void emitAsyncCallArgs(const Expr& call) {
+        for (size_t i = 0; i < call.args.size(); i++) {
+            if (i) out << ", ";
+            emitExpr(*call.args[i], true);
+        }
+    }
+
+    // 发出一个"产生 future"的表达式：
+    //   - 对含 await 的 rpc 调用 → 改写为启动器 name__async(args)
+    //   - 否则（叶子原语 delay / 自定义 fnc bg_square 等）→ 原样发出
+    void emitFutureExpr(const Expr& e) {
+        if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
+            auto it = rpcs.find(e.a->text);
+            if (it != rpcs.end() && it->second->hasAwait) {
+                out << e.a->text << "__async(";
+                emitAsyncCallArgs(e);
+                out << ")";
+                return;
+            }
+        }
+        emitExpr(e, true);
+    }
+
+    // 发出 (T)future_get(_p->_fut)：指针类型直接强转；标量经 intptr_t 还原。
+    void emitFutureGetCast(const std::string& base, int ptr) {
+        if (ptr > 0) {
+            out << "(" << base << " ";
+            for (int i = 0; i < ptr; i++) out << "*";
+            out << ")future_get(_p->_fut)";
+        } else {
+            out << "(" << base << ")(intptr_t)future_get(_p->_fut)";
+        }
+    }
+
+    // 一个 await 点：发起 → 登记本帧为 waiter → 已就绪则续跑、否则让出。
+    // target 非空时（var x = await E / x = await E），恢复后把结果写回 target。
+    void emitAwaitPoint(const Expr& futureExpr, const std::string* target,
+                        const std::string& tBase, int tPtr, const Decl& d) {
+        int st = ++asyncState;
+        indent(); out << "_p->_fut = "; emitFutureExpr(futureExpr); out << ";\n";
+        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
+                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "_p->_state = " << st << "; return;\n";
+        indent(); out << "_s" << st << ": ;\n";
+        if (target) {
+            indent(); out << *target << " = "; emitFutureGetCast(tBase, tPtr); out << ";\n";
+        }
+    }
+
+    // 完成：写返回槽 → 释放帧 → future_done 唤醒上游（return）。
+    void emitAsyncComplete(const Stmt& ret, const Decl& d) {
+        const bool hasRet = rpcHasRet(d);
+        if (hasRet && ret.expr) {
+            indent(); out << "_p->_ = "; emitExpr(*ret.expr, true); out << ";\n";
+        }
+        std::string res = "NULL";
+        if (hasRet) {
+            std::string base; int ptr; resolveType(*d.structCommon.type, base, ptr);
+            res = ptr > 0 ? "(void *)(_p->_)" : "(void *)(intptr_t)(_p->_)";
+        }
+        indent();
+        out << "{ future *_r = _p->_ret; void *_res = " << res
+            << "; free(_p); future_done(_r, _res); return; }\n";
+    }
+
+    // 发出异步 rpc 体（直线语句序列；await 点切段）。
+    void emitAsyncStmts(const Decl& d) {
+        for (auto& sp : d.body) {
+            const Stmt& s = *sp;
+            if (s.line > 0 && !srcFile.empty())
+                out << "#line " << s.line << " \"" << srcFile << "\"\n";
+            switch (s.kind) {
+                case Stmt::VarS: case Stmt::LetS:
+                    for (auto& f : s.decls) {
+                        std::string base; int ptr; resolveType(f.type, base, ptr);
+                        std::string tgt = "_p->" + f.name;
+                        if (f.init && f.init->kind == Expr::Await)
+                            emitAwaitPoint(*f.init->a, &tgt, base, ptr, d);
+                        else if (f.init) {           // 普通局部（已提升到帧）：赋值
+                            indent(); out << tgt << " = "; emitExpr(*f.init, true); out << ";\n";
+                        }
+                    }
+                    break;
+                case Stmt::ExprS:
+                    if (s.expr && s.expr->kind == Expr::Await) {     // 独立 await E
+                        emitAwaitPoint(*s.expr->a, nullptr, "", 0, d);
+                    } else if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                               s.expr->b && s.expr->b->kind == Expr::Await) {  // x = await E
+                        std::string tgt; std::string base = "void"; int ptr = 0;
+                        if (s.expr->a->kind == Expr::Ident) {
+                            tgt = "_p->" + s.expr->a->text;
+                            auto it = localsT.find(s.expr->a->text);
+                            if (it != localsT.end()) { base = mapBase(it->second.name); ptr = it->second.ptr; }
+                        }
+                        emitAwaitPoint(*s.expr->b->a, &tgt, base, ptr, d);
+                    } else {                                          // 普通语句（printf 等）
+                        indent(); emitExpr(*s.expr, true); out << ";\n";
+                    }
+                    break;
+                case Stmt::ReturnS:
+                    emitAsyncComplete(s, d);
+                    break;
+                default:
+                    indent(); out << "/* async rpc：暂不支持的语句已忽略 */\n";
+                    break;
+            }
+        }
+        // 无显式 return 的 void 异步 rpc：补完成
+        if (d.body.empty() || d.body.back()->kind != Stmt::ReturnS) {
+            Stmt fake; fake.kind = Stmt::ReturnS;
+            emitAsyncComplete(fake, d);
+        }
+    }
+
+    // 启动器：future* X__async(参数...) { 建帧 + 造 _ret + 装参 + 首次驱动 → 返回 _ret }
+    void emitAsyncLauncher(const Decl& d) {
+        if (shouldStaticize(d)) out << "static ";
+        out << "future *" << d.name << "__async(";
+        emitParams(d.structCommon.fields, d.structCommon.variadic);
+        out << ") {\n";
+        depth++;
+        indent(); out << "struct " << d.name << " *_p = (struct " << d.name
+                      << " *)calloc(1, sizeof(struct " << d.name << "));\n";
+        indent(); out << "_p->_state = 0;\n";
+        indent(); out << "_p->_ret = future_new();\n";
+        for (auto& f : d.structCommon.fields) {
+            const std::string arg = (f.name == "this" ? "_this" : f.name);
+            indent(); out << "_p->" << f.name << " = " << arg << ";\n";
+        }
+        indent(); out << d.name << "_rpc(_p);\n";
+        indent(); out << "return _p->_ret;\n";
+        depth--;
+        out << "}\n\n";
+    }
+
+    // 异步 rpc：启动器 + 状态机两段定义。
+    void emitAsyncRpc(const Decl& d) {
+        std::vector<const Field*> locals = collectAsyncLocals(d);
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear();
+        inFunc = true;
+        for (auto& p : d.structCommon.fields) regVar(p);
+        for (auto& f : locals) regVar(*f);
+        curRpc = &d;
+        rpcParams.clear();
+        for (auto& p : d.structCommon.fields) rpcParams.insert(p.name);
+        for (auto& f : locals) rpcParams.insert(f->name);
+
+        emitAsyncLauncher(d);
+
+        if (shouldStaticize(d)) out << "static ";
+        out << "void " << d.name << "_rpc(struct " << d.name << " *_p) {\n";
+        depth++;
+        int nstates = countAsyncAwaits(d) + 1;
+        indent(); out << "switch (_p->_state) {\n";
+        depth++;
+        for (int i = 0; i < nstates; i++) { indent(); out << "case " << i << ": goto _s" << i << ";\n"; }
+        depth--;
+        indent(); out << "}\n";
+        indent(); out << "_s0: ;\n";
+        asyncState = 0;
+        emitAsyncStmts(d);
+        depth--;
+        out << "}\n\n";
+
+        curRpc = nullptr;
+        rpcParams.clear();
+        inFunc = false;
+    }
+
     //   inc stdio.h    → #include <stdio.h>
     //   inc "my.h"     → #include "my.h"
     //   inc <stdio.h>  → #include <stdio.h>（原样）
@@ -2089,6 +2443,22 @@ struct CGen {
                     throw CompileError{"ADT 容器 " + d->adtColl + " 缺少必备成员函数 "
                                        + req + "（def " + d->name + ":" + sig
                                        + " 要求 insert/remove/find/first/next）", d->line};
+        }
+
+        // 分身/切片（def T: <S> {}）接口完备性校验：
+        // 分身类型 S 必须已定义，且实体 T 须具备 alloc/free 成员函数
+        // （alloc: 隐式 this=T*, 余参=切片参数, 返回 S&；free: fnc: S&）。
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::StructD || d->projectSelf.empty()) continue;
+            const std::string sig = " <" + d->projectSelf + ">";
+            if (!aggrOf(d->projectSelf))
+                throw CompileError{"分身/切片类型 " + d->projectSelf + " 未定义（def "
+                                   + d->name + ":" + sig + "）", d->line};
+            for (const char* req : {"alloc", "free"})
+                if (!findMethod(d->name, req))
+                    throw CompileError{"分身/切片实体 " + d->name + " 缺少必备成员函数 "
+                                       + req + "（def " + d->name + ":" + sig
+                                       + " 要求 alloc/free）", d->line};
         }
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）

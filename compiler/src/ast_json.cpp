@@ -154,6 +154,9 @@ std::string stmtNode(const Stmt& s) {
             return node("wait", "", exprToStr(*s.expr) + ", " + exprToStr(*s.forInit) +
                         (s.forCond ? ", " + exprToStr(*s.forCond) : "") +
                         (s.forStep ? ", " + exprToStr(*s.forStep) : ""), s.line);
+        case Stmt::DoneS:
+            return node("done", "", exprToStr(*s.expr) +
+                        (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
         case Stmt::PrintS: {
             std::string d;
             for (size_t i = 0; i < s.printArgs.size(); i++) {
@@ -199,6 +202,7 @@ std::string declNode(const Decl& d) {
             std::string sd = X;
             if (d.linked) sd += "~";
             else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";
+            else if (!d.projectSelf.empty()) sd += "<" + d.projectSelf + ">";
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
                            d.name, sd, d.line, d.external, d.origin, d.used, c);
         }

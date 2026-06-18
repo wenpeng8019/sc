@@ -934,11 +934,32 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (stem == "m" && extraLd && !tc.threadsLib.empty()
             && extraLd->find(tc.threadsLib) == std::string::npos)
             *extraLd += " " + tc.threadsLib;
+        // async 模块：默认实现依赖 libuv（vendor/libuv）。编译 async_impl.c 需其头，
+        //   链接需其静态库 libuv.a；macOS 还需若干系统框架。async 内部经 future_done
+        //   跨线程唤醒，故也需线程库（与 m 同）。
+        std::string asyncInc;
+        std::filesystem::path asyncUvLib;
+        if (stem == "async") {
+            const std::filesystem::path repo = dir.parent_path().parent_path();
+            const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
+            const std::filesystem::path uvLib = repo / "vendor" / "libuv" / "build" / "libuv.a";
+            if (std::filesystem::exists(uvInc)) asyncInc = " -I " + uvInc.string();
+            if (std::filesystem::exists(uvLib)) asyncUvLib = uvLib;
+            if (extraLd) {
+                if (!tc.threadsLib.empty() && extraLd->find(tc.threadsLib) == std::string::npos)
+                    *extraLd += " " + tc.threadsLib;
+#ifdef __APPLE__
+                if (extraLd->find("CoreFoundation") == std::string::npos)
+                    *extraLd += " -framework CoreFoundation -framework CoreServices";
+#endif
+            }
+        }
         if (impl.extension() == ".c") {
             const std::filesystem::path obj = tmpDir / (stem + "_impl.o");
             std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
                 + " -I " + dir.string()
                 + " -I " + dir.parent_path().string()
+                + asyncInc
                 + " -c " + impl.string() + " -o " + obj.string();
             if (std::system(ccCmd.c_str()) != 0) {
                 std::cerr << "错误: " << stem << " 实现编译失败（" << ccCmd << "）\n";
@@ -948,6 +969,8 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         } else {
             objects.push_back(impl);  // .o/.a 直接参与链接
         }
+        // libuv.a 须排在 async_impl.o 之后（静态库依赖顺序）
+        if (!asyncUvLib.empty()) objects.push_back(asyncUvLib);
     }
 
     // 第三阶段·补：op.sc 机制运行时（builtins/op_impl.c）无条件参与链接。

@@ -34,6 +34,7 @@ struct Ty {
     int arr = 0;        // 数组维度数（[] 个数）
     bool valid = false; // true=能确定类型，false=跳过检查
     bool isNil = false; // 字面量 nil，只能赋给指针/数组
+    bool project = false; // 分身/切片句柄 T[...]：可整体被赋值为本体或 nil（语法糖）
 };
 
 // ---------------- 运算符辅助函数 ----------------
@@ -55,6 +56,7 @@ Ty fromTypeRef(const TypeRef& t) {
     ty.ptr = t.ptr;
     ty.arr = (int)t.arrayDims.size();
     ty.valid = true;
+    ty.project = t.project;
     return ty;
 }
 
@@ -204,6 +206,16 @@ struct Checker {
             case Expr::StrLit:  return Ty{"char", 1, 0, true, false};  // 字符串字面量 = char*
             case Expr::CharLit: return Ty{"i1", 0, 0, true, false};
             case Expr::FncLit: return Ty{"fnc", 0, 0, true, false};  // 匿名函数字面量类型从 lhs 推断
+            // -- await E：挂起等 future 就绪；结果类型擦除（void*），跳过赋值检查 --
+            case Expr::Await: {
+                if (e.a) (void)inferExpr(*e.a, locals, line);
+                return Ty{};  // 类型擦除：由 codegen 按 LHS 声明类型强转还原
+            }
+            // -- async E：登记 rpc 调用进事件循环，返回 future& --
+            case Expr::Async: {
+                if (e.a) (void)inferExpr(*e.a, locals, line);
+                return Ty{"future", 1, 0, true, false};
+            }
             // -- 标识符：查找 locals → globals，nil/true/false 特殊处理 ----------
             case Expr::Ident: {
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
@@ -334,7 +346,8 @@ struct Checker {
                 Ty l = inferExpr(*e.a, locals, line);
                 Ty r = inferExpr(*e.b, locals, line);
                 if (isAssignOp(e.op)) {
-                    checkAssignable(l, r, e.line);
+                    // 分身/切片句柄：s = 本体 / s = nil 均为语法糖，跳过常规赋值兼容检查
+                    if (!l.project) checkAssignable(l, r, e.line);
                     return l;
                 }
                 return l.valid ? l : r;
@@ -567,6 +580,11 @@ struct Checker {
                 if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line); // 纳秒
                 if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line); // 秒
                 break;
+            // -- done：future + 可选结果（结果在 codegen 自动 void* 擦除） --------
+            case Stmt::DoneS:
+                (void)inferExpr(*s.expr, locals, s.line);              // future
+                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 结果
+                break;
             // -- print：逐项检查实参表达式（格式覆盖 Cast 解包到被格式化的子表达式）
             case Stmt::PrintS:
                 for (auto& a : s.printArgs) {
@@ -629,8 +647,13 @@ struct Checker {
             for (auto& p : sig->structCommon.fields)
                 locals[p.name] = fromTypeRef(p.type);
             // 方法：隐式 this 参数
-            if (!d->methodOwner.empty())
+            if (!d->methodOwner.empty()) {
                 locals["this"] = Ty{d->methodOwner, 1, 0, true, false};
+                // 分身/切片类型的方法：额外提供 self 上下文（指向本体实体 T）
+                auto so = structs.find(d->methodOwner);
+                if (so != structs.end() && !so->second->projectEntity.empty())
+                    locals["self"] = Ty{so->second->projectEntity, 1, 0, true, false};
+            }
 
             Ty ret = funcRetType(*d);
             for (auto& s : d->body) checkStmt(*s, locals, ret);

@@ -19,3 +19,6 @@ examples/feature[0-9]
 examples/*.c
 examples/*.h
 examples/*.dSYM/
+
+# 第三方依赖构建产物（vendor 源码保留，仅忽略编译输出）
+vendor/libuv/build/

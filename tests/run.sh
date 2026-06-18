@@ -41,6 +41,8 @@ POSITIVE=(
     examples/feature9.sc
     examples/feature10.sc
     examples/feature11.sc
+    examples/feature12.sc
+    examples/feature13.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     tests/cases/cast.sc

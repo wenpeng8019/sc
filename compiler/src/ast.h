@@ -93,6 +93,16 @@ struct TypeRef {
 
     //---------
 
+    // 分身/切片句柄类型 T[...]（def T: <S> {} 机制）：
+    //   project=true 表示这是一个分身句柄类型，name=实体类型 T；
+    //   projectArgs=方括号内初值表达式（= T.alloc 去掉隐式 this 后的形参实参）。
+    //   转 C 时展开为匿名句柄结构体 T__project（字段=alloc 参数 + S* _）。
+    //   用 shared_ptr 包裹以保持 TypeRef 可拷贝（ExprPtr 不可拷贝）。
+    bool project = false;
+    std::shared_ptr<std::vector<ExprPtr>> projectArgs;
+
+    //---------
+
     StructCommon structCommon;
 };
 
@@ -160,6 +170,10 @@ struct Expr {
                     //             > a=被转换表达式, op=目标类型名, castPtr=指针层数（& 个数）
         FncLit,     // 匿名函数字面量  var = fnc: ret, params \n\tbody
                     //             > fncSig=签名, fncBody=函数体，赋值给同签名的函数指针变量
+        Await,      // await E  挂起当前 rpc 状态机，等 E(产 future) 就绪后恢复
+                    //             > a=被 await 的表达式（rpc 调用 或 返回 future& 的叶子原语调用）
+        Async,      // async E  把 rpc 调用登记进事件循环，立即返回 future&（不阻塞）
+                    //             > a=rpc 调用（Expr::Call）
     } kind;
 
     std::string text;           // 标识符名 / 字面量值 / 成员名 / Offsetof 的目标类型名
@@ -220,6 +234,9 @@ struct Stmt {
                     //                > expr=cond，
                     //                > forInit=mutex，forCond=可选纳秒，forStep=可选秒
                     //                  + nsec/sec 全 0 或省略 → 无限等待；调用前须已持有(lock) mutex
+        DoneS,      // done 标记就绪    done future [, result]（异步特性）
+                    //                > expr=future（future&），forInit=可选结果（自动 void* 擦除）
+                    //                  + 等价 future_done(future, result)；result 省略=NULL
         PrintS,     // print 日志输出   print[<chn>] arg, arg, ...（括号可省）
                     //                > printChn=通道 u1 的 C 表达式文本（默认 "0"），透传给 C print
                     //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
@@ -310,11 +327,17 @@ struct Decl {
     std::string adtColl;            // ADT 容器结构体 def T: <C, I> {}：C=容器类型名
     std::string adtItem;            // 同上：I=元素节点类型名（注入为 T 首个 synthetic 成员 _adt）
 
+    std::string projectSelf;        // 分身/切片实体 def T: <S> {}：S=分身/切片类型名（在 T 上标记）
+    std::string projectEntity;      // 分身/切片类型 S 上标记：其实体类型 T 名（注入 pass 回填，
+                                    // 供 self 上下文关键字定位实体、_self 回指字段定型）
+
     std::vector<StmtPtr> body;      // FuncD: 函数体的语句列表
                                     // + FuncTypeD 的 body 为空，只有签名无实现
 
     bool isRpc = false;             // rpc 声明：参数/返回值展开为同名结构体，实际函数为 void name_rpc(struct name*)
                                     // + FuncD=定义（含体），FuncTypeD=仅声明（实现在外部）
+    bool hasAwait = false;          // rpc 体内含 await：编译为状态机（stackless coroutine），
+                                    // 生成启动器 name__async + 状态机 worker；不能被 run。由解析扫描体设置。
     bool cImpl = false;             // :: 后缀标记：由 C 实现的接口（仅 FuncTypeD）
                                     // + 无函数体，转 C 时生成 extern 声明而非 typedef
                                  

@@ -137,6 +137,12 @@ struct SGen {
                 if (s.forStep) out << ", " << exprToStr(*s.forStep);
                 out << "\n";
                 break;
+            case Stmt::DoneS:
+                ind();
+                out << "done " << exprToStr(*s.expr);
+                if (s.forInit) out << ", " << exprToStr(*s.forInit);
+                out << "\n";
+                break;
             case Stmt::PrintS:
                 ind();
                 out << "print";
@@ -197,7 +203,8 @@ struct SGen {
                 const char* open = d.kind == Decl::StructD ? "{" : "(";
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
                 std::string mark = d.linked ? "~ "
-                    : (!d.adtItem.empty() ? ("<" + d.adtColl + ", " + d.adtItem + "> ") : "");
+                    : (!d.adtItem.empty() ? ("<" + d.adtColl + ", " + d.adtItem + "> ")
+                    : (!d.projectSelf.empty() ? ("<" + d.projectSelf + "> ") : ""));
                 ind(); out << X << "def " << d.name << ": "
                            << mark << open << "\n";
                 depth++;

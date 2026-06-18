@@ -72,6 +72,10 @@ std::string rec(const Expr& e, bool top) {
             if (parts.empty()) s += ":";
             return s;
         }
+        case Expr::Await:
+            return "await " + rec(*e.a, false);
+        case Expr::Async:
+            return "async " + rec(*e.a, false);
     }
     return "";
 }
@@ -98,6 +102,17 @@ std::string typeToStr(const TypeRef& t) {
     if (t.fnKind != TypeRef::FncKind::None) return fncSigStr(t);
     if (t.hasInline) return inlineStr(t);
     std::string s = t.name;
+    // 分身/切片句柄 T[...]：方括号内为初值实参（类型侧）
+    if (t.project) {
+        s += "[";
+        if (t.projectArgs)
+            for (size_t i = 0; i < t.projectArgs->size(); i++) {
+                if (i) s += ", ";
+                s += exprToStr(*(*t.projectArgs)[i]);
+            }
+        s += "]";
+        return s;
+    }
     for (int i = 0; i < t.ptr; i++) s += "&";
     return s;
 }
@@ -124,6 +139,15 @@ std::string fieldDetail(const Field& f, bool withInit) {
     for (auto& dim : f.type.arrayDims) s += "[" + dim + "]";
     if (f.type.hasInline) {
         s += ": " + inlineStr(f.type);
+    } else if (f.type.project) {
+        // 分身/切片句柄 s: T[args]
+        s += ": " + f.type.name + "[";
+        if (f.type.projectArgs)
+            for (size_t i = 0; i < f.type.projectArgs->size(); i++) {
+                if (i) s += ", ";
+                s += exprToStr(*(*f.type.projectArgs)[i]);
+            }
+        s += "]";
     } else {
         s += ":";
         if (!f.type.name.empty()) s += " " + f.type.name;
