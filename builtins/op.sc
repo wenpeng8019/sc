@@ -127,9 +127,10 @@ def operand: {
 #    运行时，会根据 stage 字段进行 goto 跳转来恢复执行，而这里关键在于依赖上下文的状态，全部保存在 rpc 结构体中
 #
 # 分工：future 类型 + async_init/loop/final 是语言底层机制，声明在此（默认导入）；
-#       C 结构体/原型见 op.h（默认带入每个 C 单元）。默认运行时（libuv）实现在
-#       builtins/async/async_impl.c —— 仅 inc async.sc 时才链接（不污染普通程序）。
-#       delay 等 libuv 叶子原语属"异步功能库"，保留在 async 模块（inc async.sc）。
+#       C 结构体/原型见 op.h（默认带入每个 C 单元）。运行时实现亦属语言自有异步
+#       内核——见 builtins/op_impl.c（始终随工程编译链接，POSIX poll + 自管道 +
+#       pthread，不依赖 libuv）。delay 等叶子原语属"异步功能库"，其声明保留在 async
+#       模块（inc async.sc），实现同在 op_impl.c。
 
 # ---------------- future：异步结果句柄（类型擦除） ----------------
 # 字段为 C ABI 布局占位（实际定义在 op.h；sc 侧仅按方法访问，不直接读字段）。
@@ -238,8 +239,8 @@ def operand: {
 #   原语真正落地（非"立即完成"桥）后与【D】统一展开。
 #
 # ---------------------- com_read_async / com_write_async ----------------------
-# 二者是【D】异步收发点的「桥接原语」（C ABI 见 op.h，默认实现在 builtins/async/
-# async_impl.c，仅 inc async 时链接）。目的：把一次 com 设备 io 封装成可被 await
+# 二者是【D】异步收发点的「桥接原语」（C ABI 见 op.h，实现在语言自有异步内核
+# builtins/op_impl.c，始终链接）。目的：把一次 com 设备 io 封装成可被 await
 # 的 future，使 rpc 状态机能以统一的 await 协议挂起/恢复。
 #   com_read_async (&com, data, size) → future&   # 发起异步读，io 完成时 future_done 兑现
 #   com_write_async(&com, buf,  size) → future&   # 发起异步写，对称
@@ -310,6 +311,20 @@ def io: i4
 # ---------------- com：设备通讯端点（机制框架）----------------
 # 具体 io 依赖设备，由 read/write/error「每对象方法指针」（MethodPtr，fnc 前置、无函数体）实现
 # 关键语法糖 >> <<（类似 c++）：见 op.sc 顶部 com 机制说明与后续阶段实现。
+#
+# ===== 多路复用就绪查询：readable / writable（设备能力，框架据此驱动 io 就绪）=====
+# 两种设备能力（可被 select/poll/epoll 监听 vs. 只能轮询）统一为一个接口：
+#   fnc readable: ret, id: &&     # 查询读就绪；id 出参=设备 id/句柄的返回地址
+#   fnc writable: ret, id: &&     # 查询写就绪（语义对称）
+# 语义（以 readable 为例）：
+#   · 出参 id：用户回填本设备可交给多路复用器（select/poll/epoll）监听的 id/句柄。
+#     - *id 非 nil（fd/句柄）→ 设备「支持多路复用」：框架把 *id 注册进多路复用器，
+#                            由 select/poll/epoll 统一等待就绪；此时 readable 返回值忽略。
+#     - *id 为 nil          → 设备「不支持多路复用」：框架转而直接看 readable 返回值判就绪：
+#         <0   出错（中断该 io）
+#          0   pending/again（未就绪，框架稍后轮询重试）
+#          1   io ready（可立即读/写）
+#   · 两条路径都收敛到「设备就绪 → 框架 pull ioq → 执行 read/write → future_done 兑现」。
 @def com: <limit> {
     dev: &                              # 设备句柄（设备相关）
     rq: ioq&                            # 读队列（nil=不支持异步读）
@@ -323,5 +338,22 @@ def io: i4
     fnc read: ret, data: &, size: u4&   # 设备读（每对象 io 实现，隐藏接收者 com&）
     fnc write: ret, buf: &, size: u4&   # 设备写（每对象 io 实现）
     fnc error: ret                      # 错误回调（每对象）
+    fnc readable: ret, id: &&           # 读就绪查询（多路复用探测，见上契约）
+    fnc writable: ret, id: &&           # 写就绪查询（语义对称）
 }
+
+# ---------------- async_io：com 设备 io 的就绪事件循环 ----------------
+# 与 async_loop（future<ID> 消息派发 / 协程 resume）正交：async_io 专司「设备 io 就绪」
+# 这一层，不关心业务消息，只把「设备何时可读/可写」翻译成对 ioq 的 pull + io + 兑现。
+# 驱动流程（每个登记了待办 io 的 com）：
+#   1. 取该 com 待办方向（rq 非空→读 / wq 非空→写）；
+#   2. 调 readable/writable(id) 探测就绪：
+#        - 给出可监听句柄(*id≠nil) → 注册进多路复用器(select/poll/epoll)，等待其就绪；
+#        - 否则按返回值：1=就绪、0=again（继续轮询）、<0=出错（结束该 io）；
+#   3. 就绪后 ioq.pull 取队首 io 缓冲，调 com.read/write 执行实际收发；
+#   4. 收发完成 → future_done 兑现对应 future（接回 await 状态机 / 派发）；
+#   5. 队列排空且无登记 com → 退出循环。
+# 分层：多路复用后端（poll）属语言自有异步内核，由 op_impl.c 的 POSIX poll 提供；
+#       就绪→执行 io→兑现这套「机制」语言自有（op_impl.c）。
+@fnc async_io::             # 驱动 com 设备 io 就绪循环至全部待办 io 完成
 

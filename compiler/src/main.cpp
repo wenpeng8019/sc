@@ -947,32 +947,24 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (stem == "m" && extraLd && !tc.threadsLib.empty()
             && extraLd->find(tc.threadsLib) == std::string::npos)
             *extraLd += " " + tc.threadsLib;
-        // async 模块：默认实现依赖 libuv（vendor/libuv）。编译 async_impl.c 需其头，
-        //   链接需其静态库 libuv.a；macOS 还需若干系统框架。async 内部经 future_done
-        //   跨线程唤醒，故也需线程库（与 m 同）。
-        std::string asyncInc;
-        std::filesystem::path asyncUvLib;
+        // async 模块：承载叶子原语（delay 等）。默认后端经 op 层钩子构建（零依赖）；
+        //   编译器若以 -DSCC_WITH_UV 构建，则 async 叶子原语可直接用 libuv 现成生态，
+        //   需 -DSCC_WITH_UV + libuv 头（libuv.a 由 op 层链接段统一带入）。
+        std::string subCFlags;
+#ifdef SCC_WITH_UV
         if (stem == "async") {
             const std::filesystem::path repo = dir.parent_path().parent_path();
             const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
-            const std::filesystem::path uvLib = repo / "vendor" / "libuv" / "build" / "libuv.a";
-            if (std::filesystem::exists(uvInc)) asyncInc = " -I " + uvInc.string();
-            if (std::filesystem::exists(uvLib)) asyncUvLib = uvLib;
-            if (extraLd) {
-                if (!tc.threadsLib.empty() && extraLd->find(tc.threadsLib) == std::string::npos)
-                    *extraLd += " " + tc.threadsLib;
-#ifdef __APPLE__
-                if (extraLd->find("CoreFoundation") == std::string::npos)
-                    *extraLd += " -framework CoreFoundation -framework CoreServices";
-#endif
-            }
+            subCFlags = " -DSCC_WITH_UV";
+            if (std::filesystem::exists(uvInc)) subCFlags += " -I " + uvInc.string();
         }
+#endif
         if (impl.extension() == ".c") {
             const std::filesystem::path obj = tmpDir / (stem + "_impl.o");
             std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
+                + subCFlags
                 + " -I " + dir.string()
                 + " -I " + dir.parent_path().string()
-                + asyncInc
                 + " -c " + impl.string() + " -o " + obj.string();
             if (std::system(ccCmd.c_str()) != 0) {
                 std::cerr << "错误: " << stem << " 实现编译失败（" << ccCmd << "）\n";
@@ -982,13 +974,14 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         } else {
             objects.push_back(impl);  // .o/.a 直接参与链接
         }
-        // libuv.a 须排在 async_impl.o 之后（静态库依赖顺序）
-        if (!asyncUvLib.empty()) objects.push_back(asyncUvLib);
     }
 
     // 第三阶段·补：op.sc 机制运行时（builtins/op_impl.c）无条件参与链接。
     //   op.sc 为默认导入模块（chain 等语法机制），其 C 运行时随每个工程自动编译
     //   并链接，无需 inc。与 platform.h 的「默认带入」对应。
+    //   op_impl.c 内含语言自有异步内核（future/async_*/delay/com_*_async/async_io，
+    //   POSIX poll + 自管道 + pthread），故链接需线程库（Linux=-lpthread；
+    //   macOS/Windows/裸机=空，由平台表给出）。
     if (!units.empty()) {
         const std::filesystem::path anyDir =
             std::filesystem::path(units.begin()->first).parent_path();
@@ -997,7 +990,22 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             const std::filesystem::path opImpl = opPath.parent_path() / "op_impl.c";
             if (std::filesystem::exists(opImpl)) {
                 const std::filesystem::path obj = tmpDir / "op_impl.o";
+                // 异步内核多路复用后端：默认 POSIX poll（零依赖）。编译器若以
+                //   -DSCC_WITH_UV 构建，则改用 libuv 后端：op_impl.c 需 -DSCC_WITH_UV
+                //   + libuv 头，链接需 libuv.a（紧随 op_impl.o）+ macOS 系统框架。
+                std::string opCFlags;
+                std::filesystem::path uvLib;
+#ifdef SCC_WITH_UV
+                {
+                    const std::filesystem::path repo = opPath.parent_path().parent_path();
+                    const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
+                    uvLib = repo / "vendor" / "libuv" / "build" / "libuv.a";
+                    opCFlags = " -DSCC_WITH_UV";
+                    if (std::filesystem::exists(uvInc)) opCFlags += " -I " + uvInc.string();
+                }
+#endif
                 std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
+                    + opCFlags
                     + " -I " + opPath.parent_path().string()
                     + " -c " + opImpl.string() + " -o " + obj.string();
                 if (std::system(ccCmd.c_str()) != 0) {
@@ -1005,6 +1013,17 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     return 1;
                 }
                 objects.push_back(obj);
+                if (!uvLib.empty() && std::filesystem::exists(uvLib))
+                    objects.push_back(uvLib);   // libuv.a 紧随 op_impl.o（静态库依赖顺序）
+                if (extraLd && !tc.threadsLib.empty()
+                    && extraLd->find(tc.threadsLib) == std::string::npos)
+                    *extraLd += " " + tc.threadsLib;   // 异步内核用 pthread
+#ifdef SCC_WITH_UV
+#ifdef __APPLE__
+                if (extraLd && extraLd->find("CoreFoundation") == std::string::npos)
+                    *extraLd += " -framework CoreFoundation -framework CoreServices";
+#endif
+#endif
             }
         }
     }

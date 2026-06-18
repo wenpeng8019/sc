@@ -6,6 +6,10 @@
 #include "op.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include <stdlib.h>     /* ioq 循环缓冲：malloc/free */
+#include <stdint.h>     /* intptr_t（结果标量往返） */
+#include <string.h>     /* memset */
+/* 异步内核的平台相关头（多路复用后端：epoll/kqueue/IOCP/poll、自管道、互斥）在
+ * 文件末尾的「异步内核」段按平台 #ifdef 引入，使本文件在 POSIX 与 Windows 均可编译。 */
 
 /* ---------------- chain：侵入式双向链表 ---------------- */
 /* 元素首部内嵌 _prev/_next（sc 编译器注入），偏移固定在结构体最前面。
@@ -257,3 +261,758 @@ int32_t limit_read(com *c, limit *s) {
     }
 }
 
+/* ============================================================================
+ * 异步内核（语言自有机制：双多路复用后端）
+ *
+ * future 是语言自身的内核机制，连同 async_init/loop/final、future_*、async_io、
+ * com_*_async 全部实现在此（op_impl.c 始终随工程编译链接）。叶子原语生态（delay
+ * 及 tcp/udp/... 等）属“异步功能库”，实现在 async 模块（inc async.sc），经本层
+ * 暴露的钩子接入：op_timer_arm（基础定时器）、op_uv_loop（uv 事件循环句柄）。
+ *
+ * 多路复用后端在编译期二选一：
+ *   · 默认（无 SCC_WITH_UV）：语言自有 O(1) 就绪通知内核。按平台选最优后端——
+ *       Linux=epoll / macOS·BSD=kqueue / Windows=IOCP / 其它 POSIX=poll(兜底)；
+ *       跨线程唤醒 POSIX 用自管道、Windows 用 PostQueuedCompletionStatus；
+ *       互斥 POSIX 用 pthread、Windows 用 CRITICAL_SECTION。单事件循环线程协作式，
+ *       future_done 任意线程安全。com io 就绪句柄常驻注册进 mux，避免每轮重建（O(1)）。
+ *   · -DSCC_WITH_UV：libuv 后端（epoll/kqueue/IOCP）。op 层事件循环即 uv_loop，
+ *     跨线程唤醒用 uv_async，定时/网络等叶子原语可直接挂 op_uv_loop() 上的 uv 句柄。
+ *
+ * 二者公开符号一致；生成码与 async 模块对后端无感。
+ * ==========================================================================*/
+
+/* ---- 后端无关的共享状态与原语 ---- */
+static future *g_ready_head;             /* 就绪队列头（经 future.next 串联） */
+static future *g_ready_tail;             /* 就绪队列尾 */
+static long    g_pending;                /* 已创建未完成 future 计数 */
+static int     g_inited;                 /* async_init 是否已建立 */
+static int   (*g_proc)(int id, future *f);   /* async_loop 传入的 id 派发回调（返回<0 停） */
+
+static void push_ready(future *f) {      /* 调用方持锁 */
+    f->next = NULL;
+    if (g_ready_tail) g_ready_tail->next = f;
+    else              g_ready_head = f;
+    g_ready_tail = f;
+}
+static future *pop_ready(void) {         /* 调用方持锁 */
+    future *f = g_ready_head;
+    if (f) {
+        g_ready_head = (future *)f->next;
+        if (!g_ready_head) g_ready_tail = NULL;
+        f->next = NULL;
+    }
+    return f;
+}
+
+uint8_t future_ready(future *_this) { return (uint8_t)(_this ? _this->ready : 0); }
+void   *future_get(future *_this)   { return _this ? _this->result : NULL; }
+void   *future_ctx(future *_this)   { return _this ? _this->ctx : NULL; }
+
+future *future_new(void) {
+    future *f = (future *)calloc(1, sizeof(future));
+    future_init(f);
+    return f;
+}
+
+#ifdef SCC_WITH_UV
+/* ===================== 后端 B：libuv（-DSCC_WITH_UV） ===================== */
+#include <uv.h>
+
+static uv_loop_t  g_loop;
+static uv_async_t g_wake;
+static uv_mutex_t g_mu;
+
+/* g_wake 回调：循环线程排空就绪队列；协程帧 resume，否则按 id 派发。 */
+static void drain_cb(uv_async_t *h) {
+    (void)h;
+    for (;;) {
+        uv_mutex_lock(&g_mu);
+        future *f = pop_ready();
+        long pend = g_pending;
+        int  empty = (g_ready_head == NULL);
+        uv_mutex_unlock(&g_mu);
+        if (f) {
+            if (f->frame && f->resume) {
+                f->resume(f->frame);
+            } else if (f->id >= 0 && g_proc) {
+                int rc = g_proc(f->id, f);
+                free(f);
+                if (rc < 0) { uv_stop(&g_loop); break; }
+            } else if (f->id >= 0) {
+                free(f);
+            }
+            continue;
+        }
+        if (pend == 0 && empty) uv_stop(&g_loop);
+        break;
+    }
+}
+
+void async_init(void) {
+    if (g_inited) return;
+    uv_loop_init(&g_loop);
+    uv_async_init(&g_loop, &g_wake, drain_cb);
+    uv_mutex_init(&g_mu);
+    g_ready_head = g_ready_tail = NULL;
+    g_pending = 0;
+    g_proc = NULL;
+    g_inited = 1;
+}
+
+void async_final(void) {
+    if (!g_inited) return;
+    uv_close((uv_handle_t *)&g_wake, NULL);
+    uv_run(&g_loop, UV_RUN_NOWAIT);
+    uv_loop_close(&g_loop);
+    uv_mutex_destroy(&g_mu);
+    g_ready_head = g_ready_tail = NULL;
+    g_pending = 0;
+    g_inited = 0;
+}
+
+void future_init(future *_this) {
+    _this->id  = -1;
+    _this->ctx = NULL;
+    uv_mutex_lock(&g_mu);
+    g_pending++;
+    uv_mutex_unlock(&g_mu);
+}
+
+void future_done(future *f, void *result) {
+    int  enqueue;
+    long remaining;
+    uv_mutex_lock(&g_mu);
+    f->result = result;
+    f->ready  = 1;
+    enqueue = (f->frame != NULL) || (f->id >= 0);
+    if (enqueue) push_ready(f);
+    g_pending--;
+    remaining = g_pending;
+    uv_mutex_unlock(&g_mu);
+    if (enqueue || remaining == 0) uv_async_send(&g_wake);
+}
+
+uint8_t future_await(future *f, void *frame, void (*resume)(void *)) {
+    uint8_t r;
+    uv_mutex_lock(&g_mu);
+    f->frame  = frame;
+    f->resume = resume;
+    r = (uint8_t)f->ready;
+    uv_mutex_unlock(&g_mu);
+    return r;
+}
+
+static void uv_drive(void) {
+    uv_mutex_lock(&g_mu);
+    int idle = (g_pending == 0 && g_ready_head == NULL);
+    uv_mutex_unlock(&g_mu);
+    if (idle) return;                 /* 无未决：避免空转阻塞（g_wake 常驻 ref） */
+    uv_run(&g_loop, UV_RUN_DEFAULT);
+}
+
+void async_loop(void *proc) {
+    if (!g_inited) return;
+    g_proc = (int (*)(int, future *))proc;
+    uv_drive();
+}
+
+void async_io(void) {
+    if (!g_inited) return;
+    uv_drive();
+}
+
+/* op 层暴露给 async 叶子原语生态的 uv 事件循环句柄（poll 后端返回 NULL）。 */
+void *op_uv_loop(void) { return g_inited ? (void *)&g_loop : NULL; }
+
+/* 基础定时器原语（uv_timer 实现）：async 模块的 delay 等在其上构建。 */
+typedef struct uv_timer_req { uv_timer_t timer; future *fut; } uv_timer_req;
+static void op_timer_closed(uv_handle_t *h) { free(h->data); }
+static void op_timer_fired(uv_timer_t *t) {
+    uv_timer_req *r = (uv_timer_req *)t->data;
+    future *f = r->fut;
+    future_done(f, NULL);
+    uv_close((uv_handle_t *)t, op_timer_closed);
+}
+void op_timer_arm(future *f, uint32_t ms) {
+    uv_timer_req *r = (uv_timer_req *)calloc(1, sizeof(uv_timer_req));
+    r->fut = f;
+    uv_timer_init(&g_loop, &r->timer);
+    r->timer.data = r;
+    uv_timer_start(&r->timer, op_timer_fired, ms, 0);
+}
+
+/* com 异步收发（uv 后端）：可多路复用（readable/writable 给句柄）→ uv_poll；
+ * 否则即时收发并兑现。 */
+typedef struct uv_io_req {
+    uv_poll_t poll;
+    com      *c;
+    int       dir;          /* 0=读 1=写 */
+    void     *buf;
+    uint32_t  size;
+    future   *fut;
+} uv_io_req;
+
+static void uv_io_complete(uv_io_req *r) {
+    uint32_t n = r->size;
+    if (r->dir == 0) { if (r->c->read)  r->c->read(r->c, r->buf, &n); }
+    else             { if (r->c->write) r->c->write(r->c, r->buf, &n); }
+    future_done(r->fut, (void *)(intptr_t)n);
+}
+static void uv_io_closed(uv_handle_t *h) { free(h->data); }
+static void uv_io_cb(uv_poll_t *p, int st, int ev) {
+    (void)st; (void)ev;
+    uv_io_req *r = (uv_io_req *)p->data;
+    uv_poll_stop(p);
+    uv_io_complete(r);
+    uv_close((uv_handle_t *)p, uv_io_closed);
+}
+
+static future *uv_com_io(com *c, int dir, void *buf, uint32_t size) {
+    future *f = future_new();
+    int32_t (*probe)(com *, void **) = (dir == 0) ? c->readable : c->writable;
+    void   *id = NULL;
+    if (probe) probe(c, &id);
+    if (probe && id != NULL) {                  /* 多路复用句柄 → uv_poll */
+        uv_io_req *r = (uv_io_req *)calloc(1, sizeof(uv_io_req));
+        r->c = c; r->dir = dir; r->buf = buf; r->size = size; r->fut = f;
+        uv_poll_init(&g_loop, &r->poll, (int)(intptr_t)id);
+        r->poll.data = r;
+        uv_poll_start(&r->poll, (dir == 0) ? UV_READABLE : UV_WRITABLE, uv_io_cb);
+        return f;
+    }
+    uint32_t n = size;                          /* 非多路复用：即时收发 */
+    if (dir == 0) { if (c->read)  c->read(c, buf, &n); }
+    else          { if (c->write) c->write(c, buf, &n); }
+    future_done(f, (void *)(intptr_t)n);
+    return f;
+}
+
+future *com_read_async(com *c, void *data, uint32_t size) { return uv_com_io(c, 0, data, size); }
+future *com_write_async(com *c, void *buf,  uint32_t size) { return uv_com_io(c, 1, buf,  size); }
+
+#else
+/* ===================== 后端 A：语言自有 O(1) 多路复用内核 =====================
+ * 平台后端：Linux=epoll / macOS·BSD=kqueue / Windows=IOCP / 其它 POSIX=poll。
+ * 统一抽象成 mux_*（多路复用器）+ 跨平台互斥/唤醒/时钟，run_loop 等上层逻辑共享。 */
+
+/* ---- 平台后端选择 ---- */
+#if defined(__linux__)
+#  define SC_MUX_EPOLL  1
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+      defined(__OpenBSD__) || defined(__DragonFly__)
+#  define SC_MUX_KQUEUE 1
+#elif defined(_WIN32)
+#  define SC_MUX_IOCP   1
+#else
+#  define SC_MUX_POLL   1
+#endif
+
+/* ---- 平台头 ---- */
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <windows.h>
+#else
+#  include <pthread.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#  include <errno.h>
+#  if defined(SC_MUX_EPOLL)
+#    include <sys/epoll.h>
+#  elif defined(SC_MUX_KQUEUE)
+#    include <sys/event.h>
+#    include <sys/time.h>
+#  else
+#    include <poll.h>
+#  endif
+#endif
+
+/* ---- 多路复用句柄类型（Windows=SOCKET，POSIX=fd） ---- */
+#ifdef _WIN32
+typedef SOCKET SC_FD;
+#  define SC_FD_NONE (INVALID_SOCKET)
+#else
+typedef int SC_FD;
+#  define SC_FD_NONE (-1)
+#endif
+
+/* ---- 跨平台互斥（POSIX=pthread / Windows=CRITICAL_SECTION） ---- */
+#ifdef _WIN32
+typedef CRITICAL_SECTION sc_mtx;
+static void mtx_init(sc_mtx *m)    { InitializeCriticalSection(m); }
+static void mtx_lock(sc_mtx *m)    { EnterCriticalSection(m); }
+static void mtx_unlock(sc_mtx *m)  { LeaveCriticalSection(m); }
+static void mtx_destroy(sc_mtx *m) { DeleteCriticalSection(m); }
+#else
+typedef pthread_mutex_t sc_mtx;
+static void mtx_init(sc_mtx *m)    { pthread_mutex_init(m, NULL); }
+static void mtx_lock(sc_mtx *m)    { pthread_mutex_lock(m); }
+static void mtx_unlock(sc_mtx *m)  { pthread_mutex_unlock(m); }
+static void mtx_destroy(sc_mtx *m) { pthread_mutex_destroy(m); }
+#endif
+static sc_mtx g_mu;                      /* 就绪队列 / g_pending 的跨线程互斥 */
+
+static uint64_t now_ms(void) {
+    P_clock c;
+    P_clock_now(&c);     /* CLOCK_MONOTONIC */
+    return (uint64_t)c.tv_sec * 1000ull + (uint64_t)c.tv_nsec / 1000000ull;
+}
+
+/* delay 定时器节点（单调时钟截止） */
+typedef struct timer_node {
+    struct timer_node *next;
+    uint64_t           deadline_ms;
+    future            *fut;
+} timer_node;
+static timer_node *g_timers;             /* 仅循环线程访问 */
+
+/* com 异步 io 请求节点（com_*_async 登记，事件循环驱动）。
+ * 句柄就绪后常驻注册进 mux，避免每轮重建（O(1)）；非多路复用（无句柄）走重探轮询。 */
+typedef struct io_req {
+    struct io_req *next;
+    com           *c;
+    int            dir;        /* 0=读 1=写 */
+    void          *buf;
+    uint32_t       size;
+    future        *fut;
+    SC_FD          fd;         /* 多路复用句柄（SC_FD_NONE=未取得/不支持） */
+    int            registered; /* 已注册进 mux（句柄常驻监听） */
+    int            armed;      /* 本轮判定就绪，待执行 io */
+    int            needs_poll; /* 无句柄的 again：每轮重探（小超时轮询） */
+} io_req;
+static io_req *g_io_reqs;                 /* 仅循环线程访问 */
+
+/* ============================ 多路复用器 mux_* ============================
+ * mux_open/close：建立/销毁后端 + 跨线程唤醒通道。
+ * wake：任意线程唤醒阻塞中的事件循环。
+ * mux_arm/disarm：把就绪句柄常驻注册/注销（udata=对应 io_req）。
+ * mux_wait：等待至多 timeout_ms；唤醒事件被消费，句柄就绪则置对应 io_req->armed。 */
+
+#if defined(SC_MUX_EPOLL)
+/* ---------------------------- Linux：epoll ---------------------------- */
+static int g_ep = -1;
+static int g_wake_pipe[2] = { -1, -1 };  /* 自管道：data.ptr=NULL 标记唤醒事件 */
+
+static int mux_open(void) {
+    g_ep = epoll_create1(0);
+    if (g_ep < 0) return -1;
+    if (pipe(g_wake_pipe) != 0) { g_wake_pipe[0] = g_wake_pipe[1] = -1; return -1; }
+    for (int i = 0; i < 2; i++) {
+        int fl = fcntl(g_wake_pipe[i], F_GETFL, 0);
+        if (fl >= 0) fcntl(g_wake_pipe[i], F_SETFL, fl | O_NONBLOCK);
+    }
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof ev);
+    ev.events   = EPOLLIN;
+    ev.data.ptr = NULL;                  /* 唤醒哨兵 */
+    epoll_ctl(g_ep, EPOLL_CTL_ADD, g_wake_pipe[0], &ev);
+    return 0;
+}
+static void mux_close(void) {
+    for (int i = 0; i < 2; i++) { if (g_wake_pipe[i] >= 0) close(g_wake_pipe[i]); g_wake_pipe[i] = -1; }
+    if (g_ep >= 0) close(g_ep);
+    g_ep = -1;
+}
+static void wake(void) {
+    if (g_wake_pipe[1] < 0) return;
+    char b = 1; ssize_t r;
+    do { r = write(g_wake_pipe[1], &b, 1); } while (r < 0 && errno == EINTR);
+    (void)r;
+}
+static void drain_wake(void) {
+    char buf[64];
+    while (read(g_wake_pipe[0], buf, sizeof buf) > 0) { /* 丢弃 */ }
+}
+static void mux_arm(SC_FD fd, int dir, io_req *r) {
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof ev);
+    ev.events   = (dir == 0) ? EPOLLIN : EPOLLOUT;
+    ev.data.ptr = r;
+    epoll_ctl(g_ep, EPOLL_CTL_ADD, fd, &ev);
+}
+static void mux_disarm(SC_FD fd, int dir) {
+    (void)dir;
+    epoll_ctl(g_ep, EPOLL_CTL_DEL, fd, NULL);
+}
+static void mux_wait(int timeout_ms) {
+    struct epoll_event evs[64];
+    int n = epoll_wait(g_ep, evs, 64, timeout_ms);
+    for (int i = 0; i < n; i++) {
+        if (evs[i].data.ptr == NULL) drain_wake();
+        else ((io_req *)evs[i].data.ptr)->armed = 1;
+    }
+}
+
+#elif defined(SC_MUX_KQUEUE)
+/* -------------------------- macOS·BSD：kqueue -------------------------- */
+static int g_kq = -1;
+static int g_wake_pipe[2] = { -1, -1 };  /* 自管道：udata=NULL 标记唤醒事件 */
+
+static int mux_open(void) {
+    g_kq = kqueue();
+    if (g_kq < 0) return -1;
+    if (pipe(g_wake_pipe) != 0) { g_wake_pipe[0] = g_wake_pipe[1] = -1; return -1; }
+    for (int i = 0; i < 2; i++) {
+        int fl = fcntl(g_wake_pipe[i], F_GETFL, 0);
+        if (fl >= 0) fcntl(g_wake_pipe[i], F_SETFL, fl | O_NONBLOCK);
+    }
+    struct kevent kev;
+    EV_SET(&kev, g_wake_pipe[0], EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, NULL); /* 唤醒哨兵 */
+    kevent(g_kq, &kev, 1, NULL, 0, NULL);
+    return 0;
+}
+static void mux_close(void) {
+    for (int i = 0; i < 2; i++) { if (g_wake_pipe[i] >= 0) close(g_wake_pipe[i]); g_wake_pipe[i] = -1; }
+    if (g_kq >= 0) close(g_kq);
+    g_kq = -1;
+}
+static void wake(void) {
+    if (g_wake_pipe[1] < 0) return;
+    char b = 1; ssize_t r;
+    do { r = write(g_wake_pipe[1], &b, 1); } while (r < 0 && errno == EINTR);
+    (void)r;
+}
+static void drain_wake(void) {
+    char buf[64];
+    while (read(g_wake_pipe[0], buf, sizeof buf) > 0) { /* 丢弃 */ }
+}
+static void mux_arm(SC_FD fd, int dir, io_req *r) {
+    struct kevent kev;
+    EV_SET(&kev, fd, (dir == 0) ? EVFILT_READ : EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, r);
+    kevent(g_kq, &kev, 1, NULL, 0, NULL);
+}
+static void mux_disarm(SC_FD fd, int dir) {
+    struct kevent kev;
+    EV_SET(&kev, fd, (dir == 0) ? EVFILT_READ : EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+    kevent(g_kq, &kev, 1, NULL, 0, NULL);
+}
+static void mux_wait(int timeout_ms) {
+    struct kevent evs[64];
+    struct timespec ts, *pts = NULL;
+    if (timeout_ms >= 0) {
+        ts.tv_sec  = timeout_ms / 1000;
+        ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
+        pts = &ts;
+    }
+    int n = kevent(g_kq, NULL, 0, evs, 64, pts);
+    for (int i = 0; i < n; i++) {
+        if (evs[i].udata == NULL) drain_wake();
+        else ((io_req *)evs[i].udata)->armed = 1;
+    }
+}
+
+#elif defined(SC_MUX_IOCP)
+/* ------------------------------ Windows：IOCP ------------------------------
+ * IOCP 为“完成”模型，与本框架 com.readable/writable 的“就绪”契约不同：故 IOCP 在此
+ * 承载事件循环核心——跨线程唤醒（PostQueuedCompletionStatus）与定时器等待
+ * （GetQueuedCompletionStatus 超时）。com io 句柄的“就绪”探测用 winsock select()
+ * 每轮 0 超时非阻塞判定（真·IOCP 就绪需未公开的 AFD 轮询，超出范围）。 */
+static HANDLE g_iocp = NULL;
+static ULONG_PTR const WAKE_KEY = 1;
+
+static int mux_open(void) {
+    g_iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+    return g_iocp ? 0 : -1;
+}
+static void mux_close(void) {
+    if (g_iocp) CloseHandle(g_iocp);
+    g_iocp = NULL;
+}
+static void wake(void) {
+    if (g_iocp) PostQueuedCompletionStatus(g_iocp, 0, WAKE_KEY, NULL);
+}
+static void mux_arm(SC_FD fd, int dir, io_req *r)  { (void)fd; (void)dir; (void)r; }   /* select 模型：无常驻注册 */
+static void mux_disarm(SC_FD fd, int dir)          { (void)fd; (void)dir; }
+static void mux_wait(int timeout_ms) {
+    /* 先用 select 0 超时非阻塞判定 com 句柄就绪 */
+    fd_set rfds, wfds;
+    FD_ZERO(&rfds); FD_ZERO(&wfds);
+    int has_fd = 0;
+    for (io_req *r = g_io_reqs; r; r = r->next) {
+        if (!r->registered || r->fd == SC_FD_NONE) continue;
+        if (r->dir == 0) FD_SET(r->fd, &rfds); else FD_SET(r->fd, &wfds);
+        has_fd = 1;
+    }
+    if (has_fd) {
+        struct timeval tv = { 0, 0 };
+        if (select(0, &rfds, &wfds, NULL, &tv) > 0) {
+            for (io_req *r = g_io_reqs; r; r = r->next) {
+                if (!r->registered || r->fd == SC_FD_NONE) continue;
+                if ((r->dir == 0 && FD_ISSET(r->fd, &rfds)) ||
+                    (r->dir == 1 && FD_ISSET(r->fd, &wfds)))
+                    r->armed = 1;
+            }
+        }
+    }
+    /* 再阻塞在 IOCP 上等定时器/唤醒（有 fd 待轮询时用 1ms 轮询步进） */
+    DWORD to = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;
+    if (has_fd && (timeout_ms < 0 || timeout_ms > 1)) to = 1;
+    DWORD bytes; ULONG_PTR key; LPOVERLAPPED ov;
+    GetQueuedCompletionStatus(g_iocp, &bytes, &key, &ov, to);  /* 唤醒/超时即返回 */
+}
+
+#else
+/* --------------------------- 其它 POSIX：poll(兜底) --------------------------- */
+static int g_wake_pipe[2] = { -1, -1 };
+
+static int mux_open(void) {
+    if (pipe(g_wake_pipe) != 0) { g_wake_pipe[0] = g_wake_pipe[1] = -1; return -1; }
+    for (int i = 0; i < 2; i++) {
+        int fl = fcntl(g_wake_pipe[i], F_GETFL, 0);
+        if (fl >= 0) fcntl(g_wake_pipe[i], F_SETFL, fl | O_NONBLOCK);
+    }
+    return 0;
+}
+static void mux_close(void) {
+    for (int i = 0; i < 2; i++) { if (g_wake_pipe[i] >= 0) close(g_wake_pipe[i]); g_wake_pipe[i] = -1; }
+}
+static void wake(void) {
+    if (g_wake_pipe[1] < 0) return;
+    char b = 1; ssize_t r;
+    do { r = write(g_wake_pipe[1], &b, 1); } while (r < 0 && errno == EINTR);
+    (void)r;
+}
+static void drain_wake(void) {
+    char buf[64];
+    while (read(g_wake_pipe[0], buf, sizeof buf) > 0) { /* 丢弃 */ }
+}
+static void mux_arm(SC_FD fd, int dir, io_req *r)  { (void)fd; (void)dir; (void)r; }   /* poll 无状态：靠 io_req->fd 每轮重建 */
+static void mux_disarm(SC_FD fd, int dir)          { (void)fd; (void)dir; }
+static void mux_wait(int timeout_ms) {
+    int nreq = 0;
+    for (io_req *r = g_io_reqs; r; r = r->next)
+        if (r->registered && r->fd >= 0) nreq++;
+    struct pollfd *pfds = (struct pollfd *)malloc(sizeof(struct pollfd) * (size_t)(nreq + 1));
+    pfds[0].fd = g_wake_pipe[0]; pfds[0].events = POLLIN; pfds[0].revents = 0;
+    int nfd = 1;
+    for (io_req *r = g_io_reqs; r; r = r->next) {
+        if (!(r->registered && r->fd >= 0)) continue;
+        pfds[nfd].fd = r->fd;
+        pfds[nfd].events = (r->dir == 0) ? POLLIN : POLLOUT;
+        pfds[nfd].revents = 0;
+        nfd++;
+    }
+    int pr = poll(pfds, (nfds_t)nfd, timeout_ms);
+    if (pr < 0 && errno != EINTR) { free(pfds); return; }
+    if (pfds[0].revents & POLLIN) drain_wake();
+    int idx = 1;
+    for (io_req *r = g_io_reqs; r; r = r->next) {
+        if (!(r->registered && r->fd >= 0)) continue;
+        if (pfds[idx].revents & (POLLIN | POLLOUT | POLLERR | POLLHUP)) r->armed = 1;
+        idx++;
+    }
+    free(pfds);
+}
+#endif /* mux 后端 */
+
+/* ============================ 后端无关上层逻辑 ============================ */
+void async_init(void) {
+    if (g_inited) return;
+    mtx_init(&g_mu);
+    g_ready_head = g_ready_tail = NULL;
+    g_pending = 0;
+    g_proc    = NULL;
+    g_timers  = NULL;
+    g_io_reqs = NULL;
+    mux_open();
+    g_inited = 1;
+}
+
+void async_final(void) {
+    if (!g_inited) return;
+    mux_close();
+    while (g_timers)  { timer_node *t = g_timers;  g_timers  = t->next; free(t); }
+    while (g_io_reqs) { io_req     *r = g_io_reqs; g_io_reqs = r->next; free(r); }
+    mtx_destroy(&g_mu);
+    g_ready_head = g_ready_tail = NULL;
+    g_pending = 0;
+    g_inited  = 0;
+}
+
+void future_init(future *_this) {
+    _this->id  = -1;         /* 默认无标签：仅协程 await 用（0 是合法 id，不能作哨兵） */
+    _this->ctx = NULL;       /* 默认无上下文；future<ID>(ctx) 由构造辅助回填 */
+    mtx_lock(&g_mu);
+    g_pending++;
+    mtx_unlock(&g_mu);
+}
+
+void future_done(future *f, void *result) {
+    int  enqueue;
+    long remaining;
+    mtx_lock(&g_mu);
+    f->result = result;
+    f->ready  = 1;
+    enqueue = (f->frame != NULL) || (f->id >= 0);   /* 协程等待者 / 带 id 待派发 → 入队 */
+    if (enqueue) push_ready(f);
+    g_pending--;
+    remaining = g_pending;
+    mtx_unlock(&g_mu);
+    if (enqueue || remaining == 0) wake();           /* 唤醒去 resume/派发，或去判退出 */
+}
+
+uint8_t future_await(future *f, void *frame, void (*resume)(void *)) {
+    uint8_t r;
+    mtx_lock(&g_mu);
+    f->frame  = frame;
+    f->resume = resume;
+    r = (uint8_t)f->ready;
+    mtx_unlock(&g_mu);
+    return r;
+}
+
+/* 排空就绪队列：协程帧 resume / 带 id 无等待者经 g_proc 派发。返回 1=请求停循环。 */
+static int drain_ready(void) {
+    for (;;) {
+        mtx_lock(&g_mu);
+        future *f = pop_ready();
+        mtx_unlock(&g_mu);
+        if (!f) return 0;
+        if (f->frame && f->resume) {
+            f->resume(f->frame);
+        } else if (f->id >= 0 && g_proc) {
+            int rc = g_proc(f->id, f);
+            free(f);
+            if (rc < 0) return 1;
+        } else if (f->id >= 0) {
+            free(f);
+        }
+    }
+}
+
+static void fire_timers(uint64_t now) {
+    timer_node **pp = &g_timers;
+    while (*pp) {
+        timer_node *t = *pp;
+        if (t->deadline_ms <= now) {
+            *pp = t->next;
+            future *f = t->fut;
+            free(t);
+            future_done(f, NULL);
+        } else {
+            pp = &t->next;
+        }
+    }
+}
+
+/* 处理新登记/无句柄的 io_req：探测就绪句柄并常驻注册进 mux；非多路复用走重探。
+ * 回填 *p_any_armed（有立即可执行的 io）/ *p_any_needs_poll（有 again 待轮询）。 */
+static void process_new_reqs(int *p_any_armed, int *p_any_needs_poll) {
+    int any_armed = 0, any_needs_poll = 0;
+    for (io_req *r = g_io_reqs; r; r = r->next) {
+        if (r->registered) continue;             /* 已常驻监听：等 mux_wait 置 armed */
+        if (r->armed) { any_armed = 1; continue; }
+        int32_t (*probe)(com *, void **) =
+            (r->dir == 0) ? r->c->readable : r->c->writable;
+        if (!probe) { r->armed = 1; any_armed = 1; continue; }   /* 不探测=立即可操作 */
+        void   *id = NULL;
+        int32_t rc = probe(r->c, &id);
+        if (id != NULL) {                        /* 多路复用句柄 → 常驻注册 */
+            r->fd = (SC_FD)(intptr_t)id;
+            mux_arm(r->fd, r->dir, r);
+            r->registered = 1;
+        } else if (rc < 0) {                     /* 出错：兑现（按 io 返回处理） */
+            r->armed = 1; any_armed = 1;
+        } else if (rc == 1) {                    /* 就绪 */
+            r->armed = 1; any_armed = 1;
+        } else {                                 /* 0=again，无句柄 → 重探轮询 */
+            any_needs_poll = 1;
+        }
+    }
+    *p_any_armed = any_armed;
+    *p_any_needs_poll = any_needs_poll;
+}
+
+/* 执行本轮就绪的 io：注销 mux、收发、摘表、兑现 future。 */
+static void execute_ready(void) {
+    io_req **pp = &g_io_reqs;
+    while (*pp) {
+        io_req *r = *pp;
+        if (r->armed) {
+            if (r->registered && r->fd != SC_FD_NONE) { mux_disarm(r->fd, r->dir); r->registered = 0; }
+            uint32_t n = r->size;
+            if (r->dir == 0) { if (r->c->read)  r->c->read(r->c, r->buf, &n); }
+            else             { if (r->c->write) r->c->write(r->c, r->buf, &n); }
+            *pp = r->next;
+            future *f = r->fut;
+            free(r);
+            future_done(f, (void *)(intptr_t)n);   /* 结果=收发字节数 */
+        } else {
+            pp = &r->next;
+        }
+    }
+}
+
+static void run_loop(void) {
+    if (!g_inited) return;
+    for (;;) {
+        if (drain_ready()) break;                    /* 派发器请求停 */
+        mtx_lock(&g_mu);
+        int done = (g_pending == 0 && g_ready_head == NULL);
+        mtx_unlock(&g_mu);
+        if (done) break;
+
+        int any_armed = 0, any_needs_poll = 0;
+        process_new_reqs(&any_armed, &any_needs_poll);
+
+        int timeout = -1;
+        if (g_timers) {
+            uint64_t now = now_ms();
+            uint64_t nearest = 0; int have = 0;
+            for (timer_node *t = g_timers; t; t = t->next)
+                if (!have || t->deadline_ms < nearest) { nearest = t->deadline_ms; have = 1; }
+            if (have) timeout = (int)((nearest > now) ? (nearest - now) : 0);
+        }
+        if (any_armed) timeout = 0;                  /* 有立即就绪：不阻塞 */
+        else if (any_needs_poll && (timeout < 0 || timeout > 1)) timeout = 1;
+
+        mux_wait(timeout);
+        fire_timers(now_ms());
+        execute_ready();
+    }
+}
+
+void async_loop(void *proc) {
+    if (!g_inited) return;
+    g_proc = (int (*)(int, future *))proc;   /* 按 id 派发回调（NULL=纯协程驱动） */
+    run_loop();
+}
+
+void async_io(void) {
+    if (!g_inited) return;
+    run_loop();
+}
+
+/* op 层暴露给 async 叶子原语生态的钩子（自有后端无 uv 循环）。 */
+void *op_uv_loop(void) { return NULL; }
+
+/* 基础定时器原语（事件循环超时驱动）：async 模块的 delay 等在其上构建。 */
+void op_timer_arm(future *f, uint32_t ms) {
+    timer_node *t = (timer_node *)calloc(1, sizeof(timer_node));
+    t->deadline_ms = now_ms() + (uint64_t)ms;
+    t->fut  = f;
+    t->next = g_timers;
+    g_timers = t;
+    wake();              /* 缩短下一次等待超时，及时按新截止重算 */
+}
+
+/* com 异步收发桥接：登记进活动表，由事件循环驱动。 */
+future *com_read_async(com *c, void *data, uint32_t size) {
+    future *f = future_new();
+    io_req *r = (io_req *)calloc(1, sizeof(io_req));
+    r->c = c; r->dir = 0; r->buf = data; r->size = size; r->fut = f; r->fd = SC_FD_NONE;
+    r->next = g_io_reqs;
+    g_io_reqs = r;
+    wake();
+    return f;
+}
+
+future *com_write_async(com *c, void *buf, uint32_t size) {
+    future *f = future_new();
+    io_req *r = (io_req *)calloc(1, sizeof(io_req));
+    r->c = c; r->dir = 1; r->buf = buf; r->size = size; r->fut = f; r->fd = SC_FD_NONE;
+    r->next = g_io_reqs;
+    g_io_reqs = r;
+    wake();
+    return f;
+}
+#endif /* SCC_WITH_UV */

@@ -48,9 +48,10 @@ void  chain_cut(chain *_this, void *from, void *to, chain *out);
  * 状态机；async 把 rpc 调用登记进当前线程事件循环并返回 future&；done 标记 future
  * 就绪并唤醒等待者。
  *
- * 声明在此（默认带入每个 C 单元），但默认运行时实现（libuv）在 builtins/async/
- * async_impl.c —— 仅当源码 inc async.sc 时才编译链接（不污染普通程序）。故用到
- * 这些原语却未 inc async.sc 将报链接错误（符合"异步是可选模块"的取舍）。
+ * 声明在此（默认带入每个 C 单元），其运行时实现亦属语言自有异步内核——见
+ * builtins/op_impl.c（始终随工程编译链接，POSIX poll + 自管道 + pthread，不依赖
+ * libuv）。故 future/async/await/done 无需 inc 任何模块即可用；async.sc 只额外提供
+ * 叶子原语声明（如 delay）。
  *
  * 可 await 契约：任何自定义异步原语在"完成时"调 future_done 即可接入 await。
  * 线程安全：future_done 可被任意线程调用；运行时在锁内置位并经事件循环唤醒，
@@ -84,6 +85,14 @@ void     future_done(future *f, void *result);  /* done 关键字：置就绪 + 
 /* await 握手（生成的状态机调用）：登记本帧为 waiter，返回是否已就绪。
  * 1=已就绪（不让出、直接续跑）；0=未就绪（保存状态后让出）。 */
 uint8_t  future_await(future *f, void *frame, void (*resume)(void *));
+
+/* op 层暴露给"异步功能库"（async 模块叶子原语生态）的钩子：
+ *   op_timer_arm —— 基础定时器：在 ms 毫秒后兑现 f（done）。两后端各自实现
+ *                   （poll=单调时钟截止表；libuv=uv_timer）。delay 即在其上构建。
+ *   op_uv_loop   —— 取 op 层事件循环的 uv_loop_t*（仅 -DSCC_WITH_UV 时非 NULL）；
+ *                   供网络/文件等 libuv 叶子原语直接挂句柄。poll 后端返回 NULL。 */
+void     op_timer_arm(future *f, uint32_t ms);
+void    *op_uv_loop(void);
 
 /* ---------------- com / limit / ioq：设备通讯机制 ----------------
  * com 是机制框架：具体 io 依赖设备，由 com 的 read/write/error 每对象方法指针
@@ -151,13 +160,20 @@ struct com {
     int32_t (*read)(struct com *_this, void *data, uint32_t *size);         /* 设备读 */
     int32_t (*write)(struct com *_this, void *buf, uint32_t *size);         /* 设备写 */
     int32_t (*error)(struct com *_this);                                    /* 错误回调 */
+    int32_t (*readable)(struct com *_this, void **id);  /* 读就绪查询：*id=可监听句柄（nil=不支持多路复用，转看返回值） */
+    int32_t (*writable)(struct com *_this, void **id);  /* 写就绪查询（语义对称，见 op.sc 契约） */
 };
 
 /* com 异步收发桥接：rpc 体内 com >> v / com << v 由编译器整合 await 时生成对其的调用，
- * 各产出一个 future（io 完成时兑现）。其默认实现在异步运行时（builtins/async）：
- * 依赖 future_*，故未 inc async 时链接缺失（与 future/await 同约束）。 */
+ * 各产出一个 future（io 完成时兑现）。实现属语言自有异步内核（op_impl.c，始终链接）：
+ * 把请求登记进活动表，由 async_loop/async_io 的 poll 循环在设备就绪时驱动收发并兑现。 */
 future *com_read_async (struct com *_this, void *data, uint32_t size);   /* 异步读 → future */
 future *com_write_async(struct com *_this, void *buf,  uint32_t size);   /* 异步写 → future */
+
+/* com 设备 io 就绪事件循环（与 async_loop 正交）：据 com.readable/writable 探测就绪
+ * （多路复用句柄 → poll；否则轮询返回值），就绪后执行 io 并 future_done 兑现。
+ * 多路复用后端为语言自有 POSIX poll 实现（op_impl.c，不依赖 libuv）。详见 op.sc。 */
+void     async_io(void);
 
 #ifdef __cplusplus
 }

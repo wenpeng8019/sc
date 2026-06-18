@@ -22,6 +22,19 @@ target_compile_options(scc PRIVATE -Wall -Wextra)
 target_link_libraries(scc PRIVATE ${CMAKE_DL_LIBS})
 
 # ------------------------------------------------------------
+# 异步内核多路复用后端：-DSCC_WITH_UV=ON
+#   默认（OFF）：op 层异步内核用 POSIX poll + 自管道 + pthread，零外部依赖、轻量。
+#   ON：改用 libuv（epoll/kqueue/IOCP）后端，并让 async 模块叶子原语接入 libuv 现成
+#       生态（uv_timer/uv_tcp/... 网络·文件·DNS）。需仓库内 vendor/libuv 已构建出
+#       vendor/libuv/build/libuv.a。此宏仅标记编译器二进制，由其在编译 op_impl.c /
+#       async_impl.c 时注入 -DSCC_WITH_UV + libuv 头/库（见 main.cpp）。
+# ------------------------------------------------------------
+option(SCC_WITH_UV "异步内核启用 libuv 多路复用后端（默认 OFF=POSIX poll）" OFF)
+if(SCC_WITH_UV)
+    target_compile_definitions(scc PRIVATE SCC_WITH_UV)
+endif()
+
+# ------------------------------------------------------------
 # 发行版变体：-DSCC_EMBED_BUILTINS=ON
 #   builtins 的 .sc/.h 资源 + 各子项目预编译 .a 内嵌进 scc 二进制，
 #   运行时释放到 ~/.cache/scc/builtins-<内容哈希>（见 main.cpp），
