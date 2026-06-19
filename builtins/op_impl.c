@@ -572,7 +572,7 @@ typedef int SC_FD;
 #  define SC_FD_NONE (-1)
 #endif
 
-static P_mutex_t g_mu;                  /* 就绪队列 / g_pending 的跨线程互斥 */
+static sc_mutex_t g_mu;                  /* 就绪队列 / g_pending 的跨线程互斥 */
 
 static uint64_t now_ms(void) {
     P_clock c;
@@ -831,7 +831,7 @@ static void mux_wait(int timeout_ms) {
 /* ============================ 后端无关上层逻辑 ============================ */
 void async_init(void) {
     if (g_inited) return;
-    P_mutex_init(&g_mu);
+    sc_mutex_init(&g_mu);
     g_ready_head = g_ready_tail = NULL;
     g_pending = 0;
     g_proc    = NULL;
@@ -846,7 +846,7 @@ void async_final(void) {
     mux_close();
     while (g_timers)  { timer_node *t = g_timers;  g_timers  = t->next; free(t); }
     while (g_io_reqs) { io_req     *r = g_io_reqs; g_io_reqs = r->next; free(r); }
-    P_mutex_final(&g_mu);
+    sc_mutex_final(&g_mu);
     g_ready_head = g_ready_tail = NULL;
     g_pending = 0;
     g_inited  = 0;
@@ -855,41 +855,41 @@ void async_final(void) {
 void future_init(future *_this) {
     _this->id  = -1;         /* 默认无标签：仅协程 await 用（0 是合法 id，不能作哨兵） */
     _this->ctx = NULL;       /* 默认无上下文；future<ID>(ctx) 由构造辅助回填 */
-    P_mutex_lock(&g_mu);
+    sc_mutex_lock(&g_mu);
     g_pending++;
-    P_mutex_unlock(&g_mu);
+    sc_mutex_unlock(&g_mu);
 }
 
 void future_done(future *f, void *result) {
     int  enqueue;
     long remaining;
-    P_mutex_lock(&g_mu);
+    sc_mutex_lock(&g_mu);
     f->result = result;
     f->ready  = 1;
     enqueue = (f->frame != NULL) || (f->id >= 0);   /* 协程等待者 / 带 id 待派发 → 入队 */
     if (enqueue) push_ready(f);
     g_pending--;
     remaining = g_pending;
-    P_mutex_unlock(&g_mu);
+    sc_mutex_unlock(&g_mu);
     if (enqueue || remaining == 0) wake();           /* 唤醒去 resume/派发，或去判退出 */
 }
 
 uint8_t future_await(future *f, void *frame, void (*resume)(void *)) {
     uint8_t r;
-    P_mutex_lock(&g_mu);
+    sc_mutex_lock(&g_mu);
     f->frame  = frame;
     f->resume = resume;
     r = (uint8_t)f->ready;
-    P_mutex_unlock(&g_mu);
+    sc_mutex_unlock(&g_mu);
     return r;
 }
 
 /* 排空就绪队列：协程帧 resume / 带 id 无等待者经 g_proc 派发。返回 1=请求停循环。 */
 static int drain_ready(void) {
     for (;;) {
-        P_mutex_lock(&g_mu);
+        sc_mutex_lock(&g_mu);
         future *f = pop_ready();
-        P_mutex_unlock(&g_mu);
+        sc_mutex_unlock(&g_mu);
         if (!f) return 0;
         if (f->frame && f->resume) {
             f->resume(f->frame);
@@ -982,9 +982,9 @@ static void run_loop(void) {
     if (!g_inited) return;
     for (;;) {
         if (drain_ready()) break;                    /* 派发器请求停 */
-        P_mutex_lock(&g_mu);
+        sc_mutex_lock(&g_mu);
         int done = (g_pending == 0 && g_ready_head == NULL);
-        P_mutex_unlock(&g_mu);
+        sc_mutex_unlock(&g_mu);
         if (done) break;
 
         int any_armed = 0, any_needs_poll = 0;

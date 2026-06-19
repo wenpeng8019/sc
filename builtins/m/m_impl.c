@@ -25,9 +25,9 @@ typedef struct {
     uint8_t    joinable;
 } thd_impl;
 
-/* 跨平台统一线程 id：复用 platform.h 的 P_thread_id（mach tid / gettid / GetCurrentThreadId） */
+/* 跨平台统一线程 id：复用 platform.h 的 sc_thread_id（mach tid / gettid / GetCurrentThreadId） */
 static uint64_t thd_current_id(void) {
-    return P_thread_id();
+    return sc_thread_id();
 }
 
 #if P_WIN
@@ -114,18 +114,18 @@ void thread_join(thread *_this) {
 
 /* ---------------- mutex ---------------- */
 
-typedef P_mutex_t mtx_state;
+typedef sc_mutex_t mtx_state;
 
 void mutex_init(mutex *_this) {
     mtx_state *m = (mtx_state *)malloc(sizeof(mtx_state));
-    if (m) P_mutex_init(m);
+    if (m) sc_mutex_init(m);
     _this->h = m;
 }
 
 void mutex_drop(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-    P_mutex_final(m);
+    sc_mutex_final(m);
     free(m);
     _this->h = NULL;
 }
@@ -133,35 +133,35 @@ void mutex_drop(mutex *_this) {
 void mutex_lock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-    P_mutex_lock(m);
+    sc_mutex_lock(m);
 }
 
 void mutex_unlock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-    P_mutex_unlock(m);
+    sc_mutex_unlock(m);
 }
 
 uint8_t mutex_try_lock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return 0;
-    return (uint8_t)P_mutex_try(m);
+    return (uint8_t)sc_mutex_try(m);
 }
 
 /* ---------------- cond ---------------- */
 
-typedef P_cond_t cnd_state;
+typedef sc_cond_t cnd_state;
 
 void cond_init(cond *_this) {
     cnd_state *c = (cnd_state *)malloc(sizeof(cnd_state));
-    if (c) P_cond_init(c);
+    if (c) sc_cond_init(c);
     _this->h = c;
 }
 
 void cond_drop(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-    P_cond_final(c);
+    sc_cond_final(c);
     free(c);
     _this->h = NULL;
 }
@@ -169,43 +169,43 @@ void cond_drop(cond *_this) {
 void cond_one(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-    P_cond_one(c);
+    sc_cond_one(c);
 }
 
 void cond_all(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-    P_cond_all(c);
+    sc_cond_all(c);
 }
 
 /* wait 语句原语：nsec/sec 全 0 → 无限等待，否则相对超时。
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
 int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec) {
     if (!c || !c->h || !m || !m->h) return -1;
-    return (int32_t)P_cond_wait((cnd_state *)c->h, (mtx_state *)m->h, nsec, sec);
+    return (int32_t)sc_cond_wait((cnd_state *)c->h, (mtx_state *)m->h, nsec, sec);
 }
 
 /* ---------------- barrier ---------------- */
-/* 直接复用 platform.h 的 P_barrier_t（mutex + cond 自实现 N 方汇合）。 */
+/* 直接复用 platform.h 的 sc_barrier_t（mutex + cond 自实现 N 方汇合）。 */
 
 void barrier_init(barrier *_this, uint32_t n) {
-    P_barrier_t *b = (P_barrier_t *)malloc(sizeof(P_barrier_t));
-    if (b) P_barrier_init(b, n);
+    sc_barrier_t *b = (sc_barrier_t *)malloc(sizeof(sc_barrier_t));
+    if (b) sc_barrier_init(b, n);
     _this->h = b;
 }
 
 void barrier_drop(barrier *_this) {
-    P_barrier_t *b = (P_barrier_t *)_this->h;
+    sc_barrier_t *b = (sc_barrier_t *)_this->h;
     if (!b) return;
-    P_barrier_final(b);
+    sc_barrier_final(b);
     free(b);
     _this->h = NULL;
 }
 
 uint8_t barrier_wait(barrier *_this) {
-    P_barrier_t *b = (P_barrier_t *)_this->h;
+    sc_barrier_t *b = (sc_barrier_t *)_this->h;
     if (!b) return 0;
-    return (uint8_t)(P_barrier_wait(b) ? 1 : 0);
+    return (uint8_t)(sc_barrier_wait(b) ? 1 : 0);
 }
 
 /* ---------------- pool ---------------- */
@@ -232,8 +232,8 @@ typedef struct {
 #endif
 } pol_state;
 
-static void pol_lock(pol_state *p)   { P_mutex_lock(&p->mu); }
-static void pol_unlock(pol_state *p) { P_mutex_unlock(&p->mu); }
+static void pol_lock(pol_state *p)   { sc_mutex_lock(&p->mu); }
+static void pol_unlock(pol_state *p) { sc_mutex_unlock(&p->mu); }
 
 /* worker 循环：取任务 → 解锁执行 → pending 递减，归零唤醒 join */
 #if P_WIN
@@ -245,7 +245,7 @@ static void *pol_worker(void *arg) {
     for (;;) {
         pol_lock(p);
         while (!p->head && !p->shutdown)
-            P_cond_wait(&p->more, &p->mu, 0, 0);   /* 无限等待来活 */
+            sc_cond_wait(&p->more, &p->mu, 0, 0);   /* 无限等待来活 */
         pool_task *t = p->head;
         if (!t) { pol_unlock(p); break; }      /* shutdown 且队列已空 */
         p->head = t->next;
@@ -257,7 +257,7 @@ static void *pol_worker(void *arg) {
 
         pol_lock(p);
         if (--p->pending == 0)
-            P_cond_all(&p->idle);
+            sc_cond_all(&p->idle);
         pol_unlock(p);
     }
     return 0;
@@ -269,9 +269,9 @@ void pool_init(pool *_this, uint32_t n) {
     pol_state *p = (pol_state *)malloc(sizeof(pol_state) + (n - 1) * sizeof(p->thr[0]));
     if (!p) return;
     memset(p, 0, sizeof(*p));
-    P_mutex_init(&p->mu);
-    P_cond_init(&p->more);
-    P_cond_init(&p->idle);
+    sc_mutex_init(&p->mu);
+    sc_cond_init(&p->more);
+    sc_cond_init(&p->idle);
     for (uint32_t i = 0; i < n; i++) {
 #if P_WIN
         p->thr[i] = CreateThread(NULL, 0, pol_worker, p, 0, NULL);
@@ -299,7 +299,7 @@ uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psi
     if (p->tail) p->tail->next = t; else p->head = t;
     p->tail = t;
     p->pending++;
-    P_cond_one(&p->more);
+    sc_cond_one(&p->more);
     pol_unlock(p);
     return 1;
 }
@@ -310,7 +310,7 @@ void pool_join(pool *_this) {
     if (!p) return;
     pol_lock(p);
     while (p->pending > 0)
-        P_cond_wait(&p->idle, &p->mu, 0, 0);   /* 无限等全部完成 */
+        sc_cond_wait(&p->idle, &p->mu, 0, 0);   /* 无限等全部完成 */
     pol_unlock(p);
 }
 
@@ -320,7 +320,7 @@ void pool_drop(pool *_this) {
     if (!p) return;
     pol_lock(p);
     p->shutdown = 1;
-    P_cond_all(&p->more);
+    sc_cond_all(&p->more);
     pol_unlock(p);
     for (uint32_t i = 0; i < p->nthr; i++) {
 #if P_WIN
@@ -330,9 +330,9 @@ void pool_drop(pool *_this) {
         pthread_join(p->thr[i], NULL);
 #endif
     }
-    P_mutex_final(&p->mu);
-    P_cond_final(&p->more);
-    P_cond_final(&p->idle);
+    sc_mutex_final(&p->mu);
+    sc_cond_final(&p->more);
+    sc_cond_final(&p->idle);
     free(p);
     _this->h = NULL;
 }
