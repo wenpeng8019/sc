@@ -576,13 +576,6 @@ struct Checker {
                 (void)inferExpr(*s.expr, locals, s.line);
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);
                 break;
-            // -- wait：条件变量 cond + mutex + 超时参数 ------------------------
-            case Stmt::WaitS:
-                (void)inferExpr(*s.expr, locals, s.line);              // cond
-                (void)inferExpr(*s.forInit, locals, s.line);           // mutex
-                if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line); // 纳秒
-                if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line); // 秒
-                break;
             // -- done：future + 可选结果（结果在 codegen 自动 void* 擦除） --------
             case Stmt::DoneS:
                 (void)inferExpr(*s.expr, locals, s.line);              // future

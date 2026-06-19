@@ -39,7 +39,6 @@ const KEYWORDS = [
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
     ['run', '以 rpc 调用创建线程或入池（run 调用[, &t|pool]，需 inc m.sc）'],
-    ['wait', '条件变量等待（wait cond, mutex[, nsec[, sec]]，需 inc m.sc）'],
     ['this', '方法体内的接收者指针（fnc T::m 中访问 this->字段）'],
 ];
 
@@ -64,7 +63,7 @@ const TYPES = [
     ['json', '内置 ADT JSON 对象'],
     ['thread', '内置线程对象（run 语句出参，需 inc m.sc）'],
     ['mutex', '内置互斥锁对象（需 inc m.sc）'],
-    ['cond', '内置条件变量对象（配合 wait 语句，需 inc m.sc）'],
+    ['cond', '内置条件变量对象（c.wait(&mu) 等待，需 inc m.sc）'],
     ['pool', '内置线程池对象（run 语句第二参入池，需 inc m.sc）'],
 ];
 

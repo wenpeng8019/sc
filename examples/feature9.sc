@@ -1,5 +1,5 @@
 # 特性 9：内置多线程支持
-# > 语言层面的支持：run/wait/tls
+# > 语言层面的支持：run/tls（条件等待为 cond.wait 方法）
 # > builtins/m 模块：线程/互斥锁/条件变量/线程池等基本多线程原语的实现
 #
 #   - run 语句以 rpc 调用创建线程（rpc 参数天然可打包，正好作线程上下文）：
@@ -8,7 +8,7 @@
 #   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
 #     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
 #   - 线程休眠用 platform.h 的 P_usleep(us)（默认 -I，直接 inc）
-#   - wait 语句：条件变量等待 wait cond, mutex[, nsec[, sec]]
+#   - cond.wait 方法：条件变量等待 c.wait(&mu[, nsec, sec])
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
 #   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
 #     run work(...), p —— 与独立线程同一个动词，按类型静态分派
@@ -127,7 +127,7 @@ fnc main: i4
 
     c.mu.drop()
 
-    # wait 语句：条件变量等待（虚假唤醒需循环复查条件）
+    # cond.wait 方法：条件变量等待（虚假唤醒需循环复查条件）
     var s: sig
     s.ready = 0
     s.mu.init()
@@ -135,13 +135,13 @@ fnc main: i4
     run ping(&s)
     s.mu.lock()
     while s.ready == 0
-        wait s.cv, s.mu          # 无限等待，被 one() 唤醒
+        s.cv.wait(&s.mu)         # 无限等待，被 one() 唤醒
     s.mu.unlock()
     printf("cond wait ok: ready=%d\n", s.ready)
 
     # 超时等待：无人唤醒，约 5ms（5000000 纳秒）后超时返回
     s.mu.lock()
-    wait s.cv, s.mu, 5000000, 0
+    s.cv.wait(&s.mu, 5000000, 0)
     s.mu.unlock()
     printf("cond timeout ok\n")
 

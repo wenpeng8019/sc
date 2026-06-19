@@ -7,14 +7,8 @@ typedef struct ctx ctx;
 typedef struct sig sig;
 typedef struct bctx bctx;
 
-typedef struct thread thread;
-extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **, uint32_t, uint8_t);
 typedef struct pool pool;
 extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
-
-typedef struct cond cond;
-typedef struct mutex mutex;
-extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);
 
 typedef struct ctx {
     mutex mu;
@@ -274,7 +268,7 @@ int32_t main(void) {
     /* line 137 */
     while (s.ready == 0) {
         /* line 138 */
-        cond_wait(&(s.cv), &(s.mu), 0, 0);
+        cond_wait(&s.cv, &(s.mu), 0, 0);
     }
     /* line 139 */
     mutex_unlock(&s.mu);
@@ -283,7 +277,7 @@ int32_t main(void) {
     /* line 143 */
     mutex_lock(&s.mu);
     /* line 144 */
-    cond_wait(&(s.cv), &(s.mu), 5000000, 0);
+    cond_wait(&s.cv, &(s.mu), 5000000, 0);
     /* line 145 */
     mutex_unlock(&s.mu);
     /* line 146 */

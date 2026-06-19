@@ -261,6 +261,183 @@ int32_t limit_read(com *c, limit *s) {
     }
 }
 
+/* ---------------- thread：线程（run 语句原语，语言内核） ----------------
+ * 跨平台原语经 platform.h（POSIX pthread / Windows 线程 API）。run 依赖 thread，
+ * 故其运行时下沉到此（op_impl.c 始终随工程编译链接，无需 inc）。
+ *
+ * run 联合实体单块布局：[thread][rpc 参数 psize][thd_impl]
+ *   t + 1            → rpc 参数（与 codegen 约定：p + sizeof(thread)）
+ *   t->h             → 实现私有区 thd_impl（同块尾部）
+ * joinable：join 等待后整块释放；detach：线程入口结束后整块自释放 */
+typedef struct {
+#if P_WIN
+    HANDLE     t;          /* 平台句柄：仅 joinable 使用（join 等待/关闭） */
+#else
+    pthread_t  t;
+#endif
+    void     (*fn)(void *); /* rpc 实际函数 */
+    uint8_t    joinable;
+} thd_impl;
+
+/* 跨平台统一线程 id：复用 platform.h 的 sc_thread_id（mach tid / gettid / GetCurrentThreadId） */
+static uint64_t thd_current_id(void) {
+    return sc_thread_id();
+}
+
+#if P_WIN
+static DWORD WINAPI thd_entry(LPVOID p) {
+#else
+static void *thd_entry(void *p) {
+#endif
+    thread   *t  = (thread *)p;
+    thd_impl *im = (thd_impl *)t->h;
+    t->id = thd_current_id();
+    im->fn((void *)(t + 1));            /* 执行 rpc 实际函数（参数紧随 thread） */
+    if (!im->joinable) free(t);         /* detach：自释放整块 */
+    return 0;
+}
+
+uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out,
+                   uint32_t stack, uint8_t prio) {
+    if (out) *out = NULL;
+    if (!fn) return 0;
+    thread *t = (thread *)malloc(sizeof(thread) + psize + sizeof(thd_impl));
+    if (!t) return 0;
+    t->id = 0;
+    t->h = (char *)(t + 1) + psize;     /* 私有区位于参数之后（同块） */
+    if (params && psize) memcpy(t + 1, params, psize);
+    thd_impl *im = (thd_impl *)t->h;
+    im->fn = fn;
+    im->joinable = out ? 1 : 0;
+#if P_WIN
+    /* stack=0 → 默认栈；非 0 作为初始提交栈字节数 */
+    HANDLE h = CreateThread(NULL, (SIZE_T)stack, thd_entry, t, 0, NULL);
+    if (!h) { free(t); return 0; }
+    /* prio：最佳努力映射到 Windows 线程优先级（0=默认不调整） */
+    if (prio) {
+        int wp = prio < 64 ? THREAD_PRIORITY_BELOW_NORMAL
+               : prio < 128 ? THREAD_PRIORITY_NORMAL
+               : prio < 192 ? THREAD_PRIORITY_ABOVE_NORMAL
+                            : THREAD_PRIORITY_HIGHEST;
+        SetThreadPriority(h, wp);
+    }
+    if (out) { im->t = h; *out = t; }
+    else CloseHandle(h);                /* detach：关闭句柄，线程自释放 */
+#else
+    pthread_t h;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    if (!out)                           /* detach：创建即分离，入口结束自释放 */
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (stack) {                        /* 设定栈大小（不低于平台下限） */
+#ifdef PTHREAD_STACK_MIN
+        size_t sz = stack < (uint32_t)PTHREAD_STACK_MIN
+                    ? (size_t)PTHREAD_STACK_MIN : (size_t)stack;
+#else
+        size_t sz = (size_t)stack;
+#endif
+        pthread_attr_setstacksize(&attr, sz);
+    }
+    int err = pthread_create(&h, &attr, thd_entry, t);
+    pthread_attr_destroy(&attr);
+    if (err) { free(t); return 0; }
+    /* prio：最佳努力（多数平台 SCHED_OTHER 不支持线程优先级，失败即忽略） */
+    if (prio) {
+        struct sched_param sp;
+        memset(&sp, 0, sizeof(sp));
+        sp.sched_priority = (int)prio;
+        pthread_setschedparam(h, SCHED_RR, &sp);
+    }
+    if (out) { im->t = h; *out = t; }   /* 仅 joinable 记录句柄（入口不读它） */
+#endif
+    return 1;
+}
+
+void thread_join(thread *_this) {
+    if (!_this || !_this->h) return;
+    thd_impl *im = (thd_impl *)_this->h;
+    if (!im->joinable) return;          /* 防误用：detach 线程不可 join */
+#if P_WIN
+    WaitForSingleObject(im->t, INFINITE);
+    CloseHandle(im->t);
+#else
+    pthread_join(im->t, NULL);
+#endif
+    free(_this);                        /* 回收联合实体（thread + 参数 + 私有区） */
+}
+
+/* ---------------- print：日志输出（语言关键字） ----------------
+ * print：C printf 风格日志输出。print 属语言内核，故其运行时下沉到此
+ * （op_impl.c 始终随工程编译链接，无需 inc）。
+ *   - 首参 chn：u1 日志通道（透传），chn!=0 时在行首附加通道标记
+ *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定级别，无前缀默认 D
+ *   - 输出 stdout：HH:MM:SS.mmm L| 文本（自动补换行）
+ *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取 */
+
+/* 级别：1=F 致命 2=E 错误 3=W 警告 4=I 状态 5=D 调试 6=V 详尽 */
+static const char SC_LV_CHARS[] = "FEWIDV";
+#define SC_LV_DEF 5 /* D */
+
+static int sc_log_level(void) {
+    static int s_level = 0;
+    if (!s_level) {
+        s_level = SC_LV_DEF;
+        const char *e = getenv("SC_LOG");
+        if (e && *e) {
+            const char *p = strchr(SC_LV_CHARS, *e);
+            if (p) s_level = (int)(p - SC_LV_CHARS) + 1;
+        }
+    }
+    return s_level;
+}
+
+void print(uint8_t chn, const char *fmt, ...) {
+    if (!fmt) return;
+
+    /* "X:" 级别前缀 */
+    int lv = SC_LV_DEF;
+    if (*fmt && fmt[1] == ':') {
+        const char *p = strchr(SC_LV_CHARS, *fmt);
+        if (p) {
+            lv = (int)(p - SC_LV_CHARS) + 1;
+            fmt += 2;
+            if (*fmt == ' ') fmt++;   /* 忽略 1 个且只忽略 1 个空格（允许多空格缩进） */
+        }
+    }
+    if (lv > sc_log_level()) return;
+
+    /* 时间戳 HH:MM:SS.mmm（本地时间） */
+    P_clock now;
+    char ts[16] = "--:--:--.---";
+    if (P_time_now(&now) == 0) {
+        struct tm tmv;
+#if P_WIN
+        time_t sec = now.tv_sec;
+        localtime_s(&tmv, &sec);
+#else
+        time_t sec = now.tv_sec;
+        localtime_r(&sec, &tmv);
+#endif
+        snprintf(ts, sizeof(ts), "%02d:%02d:%02d.%03ld",
+                 tmv.tm_hour, tmv.tm_min, tmv.tm_sec, now.tv_nsec / 1000000L);
+    }
+
+    char line[2048];
+    va_list args;
+    va_start(args, fmt);
+    int n = vsnprintf(line, sizeof(line), fmt, args);
+    va_end(args);
+    if (n < 0) return;
+    if (n >= (int)sizeof(line)) n = (int)sizeof(line) - 1;
+
+    /* 单次 fprintf 输出整行（多线程下行内不撕裂），自动补换行 */
+    const char *nl = (n > 0 && line[n - 1] == '\n') ? "" : "\n";
+    if (chn)
+        fprintf(stdout, "%s %c|%u| %s%s", ts, SC_LV_CHARS[lv - 1], (unsigned)chn, line, nl);
+    else
+        fprintf(stdout, "%s %c| %s%s", ts, SC_LV_CHARS[lv - 1], line, nl);
+}
+
 /* ============================================================================
  * 异步内核（语言自有机制：双多路复用后端）
  *

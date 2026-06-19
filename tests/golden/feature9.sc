@@ -101,11 +101,11 @@ fnc main: i4
     run ping(&s)
     s.mu.lock()
     while s.ready == 0
-        wait s.cv, s.mu
+        s.cv.wait(&s.mu)
     s.mu.unlock()
     printf("cond wait ok: ready=%d\n", s.ready)
     s.mu.lock()
-    wait s.cv, s.mu, 5000000, 0
+    s.cv.wait(&s.mu, 5000000, 0)
     s.mu.unlock()
     printf("cond timeout ok\n")
     s.cv.drop()

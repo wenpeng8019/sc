@@ -3,8 +3,6 @@
 #include "builtins/m/m.h"
 #include "builtins/async/async.h"
 
-typedef struct thread thread;
-extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **, uint32_t, uint8_t);
 typedef struct pool pool;
 extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
 

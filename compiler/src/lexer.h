@@ -51,7 +51,6 @@ enum class Tok {
     KwBreak,    // break
     KwContinue, // continue
     KwRun,      // run  — 以 rpc 调用创建线程（多线程语言特性，依赖 m 模块）
-    KwWait,     // wait — 条件变量等待（多线程语言特性，依赖 m 模块）
     KwAsync,    // async — 把 rpc 调用登记进当前线程事件循环，返回 future（异步特性，依赖 async 模块）
     KwAwait,    // await — 挂起当前 rpc，等待 future 就绪后恢复（异步特性，依赖 async 模块）
     KwDone,     // done — 标记 future 就绪并唤醒等待者：done future[, result]（异步特性）

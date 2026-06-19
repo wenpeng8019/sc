@@ -105,9 +105,25 @@ def operand: {
     fnc test_and_set_ord_or_acq::        # 成功 seq_cst / 失败 acquire
 }
 
-# todo base 的声明
-# 导航：base(o) 得到首个真实成员地址，prev(o) 得到前驱节点 void*，next(o) 得到后继节点 void*
-#   - base(&t)：跳过注入的 I，取 T 首个真实成员的地址（与链表 base 对称）。
+# ---------------- base / prev / next：节点导航内置函数（语言关键字）----------------
+# 三者是编译器内置的伪函数（语言内核），不在任何 sc 模块声明、不生成调用、不参与链接；
+# 编译器直接展开为指针重解释/字段访问（语义见 semantic.cpp，展开见 codegen_c.cpp）。
+# 与普通函数同名时让位于用户符号（局部/全局/函数名存在即按普通调用处理）。
+#   base(o)  —— 取「首个真实成员」的地址：跳过链表注入的 _prev/_next 或容器注入的 Item
+#               节点 I，定位结构体 T 的首个用户字段。
+#               · base(o: T)        → 按 o 静态类型 T 推导，结果 T&（值接收者自动取址）；
+#               · base(o: T&)/数组   → 直接以该指针为基址重解释；
+#               · base((T)o)        → 显式指定目标类型 T，把 o 首址强转为 T&（绕过推导）。
+#   prev(o) / next(o) —— 链表（def T: ~ {}）逻辑前驱/后继节点，返回 void&（nil=无）：
+#               · next(o) 取注入的 _next；prev(o) 为「边界安全前驱」（链头 → nil，
+#                 运行时经 op.h 的 chain_prev 契约判定，见下 chain 机制）。
+#   用显式 `: T&` 下转把导航结果还原回元素类型（如 t.next(it): T&）。
+#
+# ---------------- sizeof / offsetof：编译期取值（语言关键字）----------------
+# 二者为语言关键字（lexer KwSizeof / KwOffsetof），编译器直接转译为 C 同名运算，
+# 结果类型 u8（size_t）；无 sc 侧声明、不依赖任何模块。
+#   sizeof(表达式 | 类型名)        # 字节大小
+#   offsetof(类型名, 字段名)       # 字段在结构体内的字节偏移
 
 # 双向链机制
 # ----------------------------------------------------------------------------- 
@@ -186,6 +202,32 @@ def operand: {
 #   - T 构成容器的元素类型（如 treeNode）；I 是容器节点类型（如 node），被注入到 T 首位，
 #     因此 T& 与 I& 可零偏移互相强转（编译器在方法实参处自动 treeNode& ⟷ node&）。
 #   - 导航只经容器方法：t.first() / t.next(it)，返回 I&，用显式 `: T&` 下转回元素类型。
+
+
+#  run / thread 机制（抢占式并发内核）
+# ----------------------------------------------------------------------------- 
+# run 语句创建独立线程执行一个 rpc 调用（语言特性，目标必须是 rpc 调用）。
+# thread 是其线程实体类型，属语言内核（默认导入，无需 inc）：run 依赖它，
+# 故与 future/async 一样下沉到 op.sc。
+# 语法（第二参数决定执行形态，按类型静态分派）：
+#   run work(a, b)        # detach：独立线程，结束后自释放
+#   run work(a, b), &t    # joinable：t: thread&，须 t->join() 等待并回收
+#   run work(a, b), p     # 入池：p 为 pool（需 inc m.sc），任务排队执行
+# 机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
+#   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），线程实体与参数
+#   同生命周期；语法层面能拿到的 thread 必为 joinable。
+# 分工：thread 类型是语言内核机制，声明在此（默认导入）；C 结构体/原型见 op.h
+#   （默认带入每个 C 单元），运行时（thread_run/thread_join，跨平台 pthread↔Win32）
+#   见 builtins/op_impl.c（始终随工程编译链接）。pool 执行目标属多线程模块
+#   （inc m.sc）。
+
+# ---------------- thread：线程（run 创建，不可手工构造） ----------------
+@def thread: {
+    id: u8         # 跨平台统一线程 id（线程启动后由其自身填写）
+    h: &           # 实现私有区指针（同块分配，调用方不直接访问）
+
+    fnc join::          # 等待结束并回收（含 thread 对象本身，之后指针失效）
+}
 
 
 #  async 机制
@@ -456,6 +498,20 @@ def io: i4
 #       kqueue(macOS·BSD)/IOCP(Windows)/poll(其它 POSIX 兜底) 提供，均 O(1) 就绪通知；
 #       就绪→执行 io→兑现这套「机制」语言自有（op_impl.c）。
 @fnc async_io::             # 驱动 com 设备 io 就绪循环至全部待办 io 完成
+
+# ---------------- print：日志输出（语言关键字） ----------------
+# print 是语言关键字，属语言内核（op.sc 默认导入、op.h 默认带入每个 C 单元、
+# op_impl.c 始终链接）——无需 inc。编译器按实参静态类型拼接/补格式后生成
+# 对本接口的调用（首参 chn 为 u1 日志通道，其后为 C printf 风格格式串与可变参数）：
+#   print "x = ", x             # 无括号=拼接糖：字符串字面量=纯文本，
+#                               # 变量按静态类型自动补 printf 说明符（i4→%d, char&→%s ...）
+#   print("x = %d", x)          # 有括号=C printf 兼容模式：首参格式串，实参原样传递
+#   print<3> "通道 3 的日志"     # <chn> 指定 u1 日志通道（默认 0）
+#   print "E: open ", p, " 失败" # fmt 文本前缀 "X:" 指定级别，X ∈ F/E/W/I/D/V
+#   - 输出格式：HH:MM:SS.mmm L| 文本（chn!=0 时加通道标记；自动补换行）
+#   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；高于该级别的输出被丢弃）
+# C ABI 见 op.h（默认带入），运行时见 op_impl.c（始终链接）。
+@fnc print:: chn: u1, fmt: char&, ...
 
 # ---------------- stringify(...)：JSON 字符串格式化（语言关键字）----------------
 # 语言底层机制（默认导入，无需 inc）：编译器按实参静态类型生成格式化器（写入独立

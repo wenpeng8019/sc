@@ -9,7 +9,7 @@
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
-| m | `inc m.sc` | 多线程语言支持标准：run/wait 语句、thread、mutex、cond、pool（线程池） |
+| m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）、stringify（类型 JSON 格式化关键字，选项类型 `stringify_t` 见 `op.h`）；platform.h 的 sc 侧入口 |
 
 另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
@@ -325,23 +325,25 @@ thread 不可手工构造（无 init）；`run` 是唯一创建途径。
 | lock / unlock | | 加锁 / 解锁 |
 | try_lock | `bool` | 取锁成功返回 1，已被占用返回 0 |
 
-### cond 与 wait 语句 —— 条件变量
+### cond —— 条件变量
 
-条件等待由 `wait` 语句完成（语言特性，编译器生成 `cond_wait` 调用）：
+条件等待由 cond 的 `wait` 方法完成（普通方法调用，映射到 C 侧 `cond_wait`）：
 
 ```sc
-wait c, mu            # 无限等待（调用前须已持有 mu）
-wait c, mu, nsec, sec # 超时等待（nsec/sec 全 0 等价于无限等待）
+c.wait(&mu)            # 无限等待（调用前须已持有 mu）
+c.wait(&mu, nsec, sec) # 超时等待（nsec/sec 省略或全 0 等价于无限等待）
 ```
 
-c/mu 可为对象或指针，对象自动取地址；被虚假唤醒需循环复查条件。
+接收者为 cond（对象自动取地址）；首参为 mutex 指针（对象须显式 `&mu`）。
+返回 i4：0 被唤醒 / 1 超时 / -1 错误；被虚假唤醒需循环复查条件。
 Windows 下超时精度为毫秒（纳秒向上取整）。
 
-| 方法 | 说明 |
-|------|------|
-| init / drop | 构造 / 析构 |
-| one | 唤醒一个等待者 |
-| all | 唤醒全部等待者 |
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init / drop | | 构造 / 析构 |
+| one | | 唤醒一个等待者 |
+| all | | 唤醒全部等待者 |
+| wait | `i4, m: mutex&, nsec: u8, sec: u8` | 条件等待，返回 0 唤醒 / 1 超时 / -1 错误 |
 
 ### pool —— 线程池
 
@@ -368,7 +370,7 @@ pool 对象或指针 → 生成 `pool_run(&p, fn, &参数, sizeof)` 入池；其
 没有运行时多态。任务节点延续联合分配哲学：`[节点][rpc 参数]`单块
 分配，参数拷贝入节点，调用点无需保活。
 
-刻意不提供 future/cancel/动态扩容：任务级同步用 cond + wait 语句，
+刻意不提供 future/cancel/动态扩容：任务级同步用 cond + wait 方法，
 需要隔离时建多个 pool。
 
 ### 使用示例

@@ -1427,8 +1427,6 @@ var off: u8 = offsetof(point, y)  # y 字段在 point 内的字节偏移
 
 | 机制 | 章节 |
 |------|------|
-| `print` 日志输出函数 | §17 |
-| `stringify(...)` JSON 格式化 | §11.1 |
 | `chain` 双向链表方法（append / push / pop / first / last 等） | §7.6 |
 | `operand` 设备操作数指令（get / set / inc / CAS 等） | §8.9 |
 | `future` 异步结果句柄（init / ready / get / ctx） | §11.4 |

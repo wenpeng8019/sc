@@ -57,7 +57,7 @@ bool isAssignOp(const std::string& op) {
 
 // 是否为关键字 token（Tok 枚举中关键字段连续区间 KwDef..KwOffsetof）。
 // 用于成员名位置容忍关键字拼写：成员/方法名永不可能是语句关键字，
-// 故 .wait() / .run() 等与语句关键字同名的方法可被正常解析。
+// 故 .run() / .done() 等与语句关键字同名的方法可被正常解析。
 bool isKeywordTok(Tok k) {
     return k >= Tok::KwDef && k <= Tok::KwOffsetof;
 }
@@ -243,7 +243,7 @@ struct Parser {
         d->line = cur().line;
         advance();                                  // 跳过 fnc 关键字
         // 成员函数名容忍关键字拼写（同成员访问位置：方法名不可能是语句关键字，
-        // 故 fnc wait::/run:: 等与语句关键字同名的方法声明可正常解析）
+        // 故 fnc run::/done:: 等与语句关键字同名的方法声明可正常解析）
         if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望成员函数名");
         d->methodName = advance().text;
         if (accept(Tok::DColon)) d->cImpl = true;   // :: → C 实现接口
@@ -983,7 +983,7 @@ struct Parser {
                 advance();
                 m->a = std::move(e);
                 // 成员名位置容忍关键字拼写：成员/方法名不可能是语句关键字，
-                // 故 .wait()/.run() 等与语句关键字同名的方法可正常解析
+                // 故 .run()/.done() 等与语句关键字同名的方法可正常解析
                 if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望成员名");
                 m->text = advance().text;           // text = 成员名
                 e = std::move(m);
@@ -1473,23 +1473,6 @@ struct Parser {
                     !s->expr->a || s->expr->a->kind != Expr::Ident)
                     err("run 期望 rpc 调用形式 name(args)");
                 if (accept(Tok::Comma)) s->forInit = parseExpr();   // thread 出参地址
-                expect(Tok::Newline, "换行");
-                return s;
-            }
-
-            // wait 条件等待语句：wait cond, mutex [, nsec [, sec]]
-            //   nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
-            case Tok::KwWait: {
-                auto s = mkStmt(Stmt::WaitS);
-                advance();
-                s->expr = parseExpr();                              // cond
-                expect(Tok::Comma, "','");
-                s->forInit = parseExpr();                           // mutex
-                if (accept(Tok::Comma)) {
-                    s->forCond = parseExpr();                       // 纳秒
-                    if (accept(Tok::Comma)) 
-                        s->forStep = parseExpr();                   // 秒
-                }
                 expect(Tok::Newline, "换行");
                 return s;
             }

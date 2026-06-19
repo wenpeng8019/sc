@@ -98,8 +98,6 @@ struct CGen {
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
-    bool usesWait = false;      // 程序中出现 wait 语句：需输出 cond_wait 原型
-    int  usesPrint = 0;         // print 关键字首次出现行号（需 inc io.sc + print 原型）
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见；stringify_t 在 op.h 默认带入）
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
@@ -275,9 +273,7 @@ struct CGen {
 
     void scanStmtForNew(const Stmt& s) {
         if (s.kind == Stmt::RunS) usesRun = true;
-        if (s.kind == Stmt::WaitS) usesWait = true;
         if (s.kind == Stmt::PrintS) {
-            if (!usesPrint) usesPrint = s.line;
             for (auto& a : s.printArgs) scanExprForNew(*a);
         }
         if (s.expr) scanExprForNew(*s.expr);
@@ -1813,9 +1809,6 @@ struct CGen {
             case Stmt::RunS:
                 emitRunStmt(s);
                 break;
-            case Stmt::WaitS:
-                emitWaitStmt(s);
-                break;
             case Stmt::DoneS:
                 emitDoneStmt(s);
                 break;
@@ -1849,8 +1842,7 @@ struct CGen {
         if (call.args.size() > r->structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出: " + r->name + " 期望至多 " +
                                std::to_string(r->structCommon.fields.size()) + " 个", s.line};
-        if (!aggrOf("thread"))
-            throw CompileError{"run 语句需要 thread 类型，请先 inc m.sc", s.line};
+        // thread 类型属语言内核（op.sc 默认导入），detach/joinable 形态无需 inc m.sc。
         // run<stack:N, prio:M> 选项：透传给 C（stack=u4 栈字节数，prio=u1 优先级；
         //   0 表示由 C 取默认）。键在此校验，值越界（u4/u1）报错。
         long long optStack = 0, optPrio = 0;
@@ -1913,25 +1905,6 @@ struct CGen {
         }
         depth--;
         indent(); out << "}\n";
-    }
-
-    // wait 语句 → cond_wait 调用（cond_wait 在 m_impl 中实现）
-    //   wait c, m            → cond_wait(&c, &m, 0, 0);        无限等待
-    //   wait c, m, ns, s     → cond_wait(&c, &m, ns, s);       超时等待
-    // cond/mutex 实参可为对象或指针：对象自动取地址（与方法调用糖一致）
-    void emitWaitStmt(const Stmt& s) {
-        if (!aggrOf("cond") || !aggrOf("mutex"))
-            throw CompileError{"wait 语句需要 cond/mutex 类型，请先 inc m.sc", s.line};
-        indent();
-        out << "cond_wait(";
-        emitAutoAddr(*s.expr);     // cond
-        out << ", ";
-        emitAutoAddr(*s.forInit);  // mutex
-        out << ", ";
-        if (s.forCond) emitExpr(*s.forCond, true); else out << "0";
-        out << ", ";
-        if (s.forStep) emitExpr(*s.forStep, true); else out << "0";
-        out << ");\n";
     }
 
     // done 语句 → future_done 调用（future_done 在 async_impl 中实现）
@@ -3014,38 +2987,20 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
 
-        // print 关键字：需 io 模块（inc io.sc → #include io.h 提供 print 原型 + 参与链接）
-        if (usesPrint && !funcs.count("print")) {
-            bool hasIo = false;
-            for (auto& d : prog.decls)
-                if (d->kind == Decl::IncD && endsWith(d->name, "io.sc")) hasIo = true;
-            if (!hasIo)
-                throw CompileError{"print 需要先 inc io.sc", usesPrint};
-            // 原型由 io.sc 的 @fnc print:: 接口（→ #include io.h）提供，无需在此重复声明
-        }
+        // print 关键字：已属语言内核（op.sc 默认导入声明 @fnc print::，原型由 op.h
+        // 默认带入，运行时 op_impl.c 始终链接），无需 inc io.sc，亦无需在此声明。
         // stringify 格式化关键字：依赖 adt string（返回类型）；选项类型 stringify_t
-        // 已迁入 op.h（默认带入每个 C 单元，无需 inc io.sc）
         if (usesStrof && !funcs.count("stringify")) {
             if (!aggrOf("string"))
                 throw CompileError{"stringify(...) 格式化依赖内置 string，请先 inc adt.sc", usesStrof};
         }
 
-        // run 语句线程原语：thread 对象与 rpc 参数联合分配，实现在 m 子项目（m_impl）
-        if (usesRun) {
-            out << "typedef struct thread thread;\n"
-                << "extern uint8_t thread_run(void (*)(void *), const void *, size_t, thread **, uint32_t, uint8_t);\n";
-            // 第二参可能是 pool：pool 类型可见即一并输出 pool_run 原型
-            if (aggrOf("pool"))
-                out << "typedef struct pool pool;\n"
-                    << "extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);\n";
-            out << "\n";
+        // run 语句线程原语：thread 类型与 thread_run 已属语言内核（op.h 默认带入，
+        // op_impl.c 始终链接），无需在此声明。pool 目标仍属 m 模块（m.h，inc m.sc）。
+        if (usesRun && aggrOf("pool")) {
+            out << "typedef struct pool pool;\n"
+                << "extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);\n\n";
         }
-
-        // wait 语句条件等待原语：实现在 m 子项目（m_impl）
-        if (usesWait)
-            out << "typedef struct cond cond;\n"
-                << "typedef struct mutex mutex;\n"
-                << "extern int32_t cond_wait(cond *, mutex *, uint64_t, uint64_t);\n\n";
 
         // ADT 容器（def T: <C, I> {}）接口完备性校验：
         // 容器 C 与元素节点 I 必须已定义，且 C 具备必备成员函数 insert/remove/find/first/next

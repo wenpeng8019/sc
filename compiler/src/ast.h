@@ -240,10 +240,6 @@ struct Stmt {
                     //                > forInit=可选出参（&t，t 为 thread&）
                     //                  + 有出参 → joinable（join 等待并回收）；无 → detach 自释放
                     //                > runOpts=可选线程属性（stack:u4 栈大小, prio:u1 优先级），透传给 C
-        WaitS,      // wait 条件等待   wait cond, mutex [, nsec [, sec]]
-                    //                > expr=cond，
-                    //                > forInit=mutex，forCond=可选纳秒，forStep=可选秒
-                    //                  + nsec/sec 全 0 或省略 → 无限等待；调用前须已持有(lock) mutex
         DoneS,      // done 标记就绪    done future [, result]（异步特性）
                     //                > expr=future（future&），forInit=可选结果（自动 void* 擦除）
                     //                  + 等价 future_done(future, result)；result 省略=NULL

@@ -55,11 +55,6 @@ cc feature1.c -o feature1 && ./feature1
             --builtins boards/m4/builtins      # 裸机：.bin 镜像 + 目标适配库
 ```
 
-## 路线
-
-- 一期（当前）：sc → C 转译（`codegen_c`）
-- 二期：基于同一 AST 增加 LLVM IR 后端，直接作为 LLVM 前端
-
 ## VSCode 插件安装
 
 ```sh

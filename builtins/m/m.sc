@@ -1,4 +1,4 @@
-# m —— sc 多线程语言支持标准（run/wait/thread/mutex/cond/pool）
+# m —— sc 多线程语言支持标准（mutex/cond/barrier/pool；thread 与 run 线程创建已下沉至 op.sc 内核）
 #
 # 本文件是 m 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -13,11 +13,13 @@
 #   run work(a, b)        # detach：独立线程，结束后自释放
 #   run work(a, b), &t    # joinable：t: thread&，须 t->join() 等待并回收
 #   run work(a, b), p     # 入池：p 为 pool（对象或指针），任务排队执行
+# 其中 thread 类型与 detach/joinable 线程创建属语言内核（op.sc，默认导入，无需 inc）；
+# 本模块仅提供入池形态 run work(...), p 的 pool 执行目标。
 #
-# 条件等待由 wait 语句完成（语言特性，编译器生成 cond_wait 调用）：
-#   wait c, mu            # 无限等待（调用前须已持有 mu）
-#   wait c, mu, nsec, sec # 超时等待（nsec/sec 全 0 等价于无限等待）
-#   c/mu 可为对象或指针，对象自动取地址；被虚假唤醒需循环复查条件
+# 条件等待由 cond 的 wait 方法完成（普通方法调用，映射到 C 侧 cond_wait）：
+#   c.wait(&mu)            # 无限等待（调用前须已持有 mu）
+#   c.wait(&mu, nsec, sec) # 超时等待（nsec/sec 省略或全 0 等价于无限等待）
+#   返回 i4：0 被唤醒 / 1 超时 / -1 错误；被虚假唤醒需循环复查条件
 #
 # 实现机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
 #   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），
@@ -25,15 +27,6 @@
 #
 # 定位：多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；
 #       后续按语言特性需要扩展（原子操作/线程局部存储等）。
-
-# ---------------- thread：线程（run 创建，不可手工构造） ----------------
-
-@def thread: {
-    id: u8        # 跨平台统一线程 id（线程启动后由其自身填写）
-    h: &           # 实现私有区指针（同块分配，调用方不直接访问）
-
-    fnc join::          # 等待结束并回收（含 thread 对象本身，之后指针失效）
-}
 
 # ---------------- mutex：互斥锁 ----------------
 
@@ -47,7 +40,7 @@
     fnc try_lock:: bool # 取锁成功返回 1，已被占用返回 0
 }
 
-# ---------------- cond：条件变量（配合 wait 语句使用） ----------------
+# ---------------- cond：条件变量（配合 wait 方法使用） ----------------
 
 @def cond: {
     h: &           # 平台条件变量句柄（实现私有）
@@ -56,6 +49,9 @@
     fnc drop::            # 析构
     fnc one::             # 唤醒一个等待者
     fnc all::             # 唤醒全部等待者
+    # wait：条件等待，调用前须持有 m；nsec/sec 省略或全 0 → 无限等待，否则相对超时
+    #       返回 0 被唤醒 / 1 超时 / -1 错误
+    fnc wait:: i4, m: mutex&, nsec: u8, sec: u8
 }
 
 # ---------------- barrier：屏障（N 方汇合） ----------------
@@ -80,4 +76,4 @@
 
 # 任务提交复用 run 语句（无新增方法）：run work(a, b), p
 # 任务节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，
-# 调用点无需保活；不提供 future/cancel，任务级同步用 cond + wait 语句
+# 调用点无需保活；不提供 future/cancel，任务级同步用 cond + wait 方法

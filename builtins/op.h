@@ -42,6 +42,32 @@ void  chain_append_to(chain *_this, chain *dst);     /* 自身清空 */
 void  chain_push_to(chain *_this, chain *dst);       /* 自身清空 */
 void  chain_cut(chain *_this, void *from, void *to, chain *out);
 
+/* ---------------- thread：线程（run 语句原语，语言内核） ----------------
+ * thread 是 run 语句创建的线程实体。run 依赖它，故属语言内核（op.sc 默认导入、
+ * op.h 默认带入每个 C 单元、op_impl.c 始终链接）——无需 inc。
+ *   - 线程由 run 语句创建：编译器生成 thread_run 调用，单次
+ *     malloc(sizeof(thread) + psize + 实现私有区)，rpc 参数 memcpy 到 thread
+ *     对象紧随位置（t + 1）
+ *   - out 非空 → joinable：*out 接收 thread*，须 thread_join 等待并回收（整块释放）
+ *     out 为空 → detach：线程结束后自释放
+ *   - id 由新线程自身填写（跨平台统一 tid），创建后立即读取可能尚未写入
+ *   - h 为实现私有区指针（指向同块尾部），调用方不直接访问
+ * pool 执行目标（pool_run）属多线程模块（m.h，inc m.sc）。 */
+
+typedef struct thread {
+    uint64_t id;   /* 跨平台统一线程 id（线程启动后由其自身填写） */
+    void *h;       /* 实现私有区指针（同块分配） */
+} thread;
+
+/* run 语句原语：fn 为 rpc 实际函数（void name_rpc(struct name*)），
+ * params/psize 为装填好的参数结构体；out 为空即 detach 自释放。
+ * stack 为栈字节数（0=平台默认），prio 为优先级（0=默认，1..255 最佳努力映射）。
+ * 返回 1 成功 / 0 失败（失败时 *out 置 NULL） */
+uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out,
+                   uint32_t stack, uint8_t prio);
+
+void    thread_join(thread *_this);   /* 等待结束并回收（含 thread 对象本身） */
+
 /* ---------------- future / async：单线程协作式异步机制 ----------------
  * 语言底层机制：future 类型 + async/await/done 关键字 + async_init/loop/final。
  * future 是异步结果句柄（类型擦除：result 为 void*）。含 await 的 rpc 被编译为
@@ -180,6 +206,16 @@ future *com_limit_read_async(struct com *_this, struct limit *s);
  * （多路复用句柄 → poll；否则轮询返回值），就绪后执行 io 并 future_done 兑现。
  * 多路复用后端为语言自有 POSIX poll 实现（op_impl.c，不依赖 libuv）。详见 op.sc。 */
 void     async_io(void);
+
+/* ---------------- print：日志输出（语言关键字） ----------------
+ * print 关键字 → 编译器生成 print 调用（首参为 u1 通道 chn，默认 0）。
+ * print 属语言内核：声明在此（默认带入每个 C 单元），运行时实现在 op_impl.c
+ * （始终随工程编译链接）——无需 inc。
+ *   - chn：日志通道（透传），chn==0 为默认通道；F/E/W/I/D/V 级别与通道正交
+ *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定日志级别，无前缀默认 D（调试）
+ *   - 输出 stdout：HH:MM:SS.mmm L| 文本（chn!=0 时加 通道标记；自动补换行）
+ *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取 */
+void print(uint8_t chn, const char *fmt, ...);
 
 /* ---------------- stringify：JSON 格式化关键字选项 ----------------
  * stringify<选项>(值[, 缓存, 大小]) 由编译器按静态类型生成格式化器（写入独立

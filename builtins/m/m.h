@@ -1,15 +1,9 @@
 /* m.h —— sc 多线程支持标准的 C ABI 契约（与 builtins/m/m.sc 同步维护）
  *
  * 约定：
- *   - 线程由 run 语句创建：编译器生成 thread_run 调用，
- *     单次 malloc(sizeof(thread) + psize + 实现私有区)，
- *     rpc 参数 memcpy 到 thread 对象紧随位置（t + 1）
- *   - out 非空 → joinable：*out 接收 thread*，须 thread_join 等待并回收（整块释放）
- *     out 为空 → detach：线程结束后自释放
- *   - id 由新线程自身填写（跨平台统一 tid），创建后立即读取可能尚未写入
- *   - h 为实现私有区指针（指向同块尾部），调用方不直接访问
+ *   - thread 与 run 线程创建（thread_run/thread_join）已下沉至语言内核（op.h/op_impl.c）
  *   - mutex：init/drop 配对；lock/unlock 配对
- *   - cond：init/drop 配对；wait 语句由编译器生成 cond_wait 调用
+ *   - cond：init/drop 配对；wait 为 cond 方法（编译器生成 cond_wait 调用）
  *   - pool：init/drop 配对；run 语句第二参为 pool 时编译器生成 pool_run 调用
  *   - 返回 uint8_t（sc 的 bool 类型）的函数：1 成功 / 0 失败
  */
@@ -23,21 +17,9 @@
 extern "C" {
 #endif
 
-/* ---------------- thread：线程（run 语句原语） ---------------- */
-
-typedef struct thread {
-    uint64_t id;   /* 跨平台统一线程 id（线程启动后由其自身填写） */
-    void *h;       /* 实现私有区指针（同块分配） */
-} thread;
-
-/* run 语句原语：fn 为 rpc 实际函数（void name_rpc(struct name*)），
- * params/psize 为装填好的参数结构体；out 为空即 detach 自释放。
- * stack 为栈字节数（0=平台默认），prio 为优先级（0=默认，1..255 最佳努力映射）。
- * 返回 1 成功 / 0 失败（失败时 *out 置 NULL） */
-uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread **out,
-                   uint32_t stack, uint8_t prio);
-
-void    thread_join(thread *_this);   /* 等待结束并回收（含 thread 对象本身） */
+/* thread 类型与 run 线程创建（thread_run/thread_join）已下沉至语言内核：
+ * 见 builtins/op.h（默认带入）与 op_impl.c（始终链接）。pool 仍为本模块执行目标，
+ * 其 pool_run 接收与 thread_run 同形的参数帧。 */
 
 /* ---------------- pool：线程池（run 语句的另一种执行目标） ---------------- */
 
@@ -77,7 +59,7 @@ void    cond_drop(cond *_this);
 void    cond_one(cond *_this);            /* 唤醒一个等待者 */
 void    cond_all(cond *_this);            /* 唤醒全部等待者 */
 
-/* wait 语句原语：调用前须已持有 m；nsec/sec 全 0 → 无限等待，
+/* cond.wait 方法原语：调用前须已持有 m；nsec/sec 全 0 → 无限等待，
  * 否则为相对超时时长（sec 秒 + nsec 纳秒）。
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
 int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec);

@@ -150,10 +150,6 @@ std::string stmtNode(const Stmt& s) {
                         exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
         }
-        case Stmt::WaitS:
-            return node("wait", "", exprToStr(*s.expr) + ", " + exprToStr(*s.forInit) +
-                        (s.forCond ? ", " + exprToStr(*s.forCond) : "") +
-                        (s.forStep ? ", " + exprToStr(*s.forStep) : ""), s.line);
         case Stmt::DoneS:
             return node("done", "", exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);

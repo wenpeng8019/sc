@@ -40,7 +40,6 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"goto", Tok::KwGoto},
     {"continue", Tok::KwContinue},
     {"run", Tok::KwRun},
-    {"wait", Tok::KwWait},
     {"async", Tok::KwAsync},
     {"await", Tok::KwAwait},
     {"done", Tok::KwDone},
