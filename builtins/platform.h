@@ -517,6 +517,47 @@ static inline uint64_t P_thread_id(void) {
 #endif
 }
 
+/* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
+ * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */
+typedef struct {
+    P_mutex_t mu;
+    P_cond_t  cv;
+    uint32_t  total;     /* 需汇合的线程数 */
+    uint32_t  count;     /* 本代已到达数 */
+    uint32_t  phase;     /* 代际，每满一轮翻转 */
+} P_barrier_t;
+
+static inline void P_barrier_init(P_barrier_t* b, uint32_t n) {
+    P_mutex_init(&b->mu);
+    P_cond_init(&b->cv);
+    b->total = n ? n : 1;
+    b->count = 0;
+    b->phase = 0;
+}
+
+static inline void P_barrier_final(P_barrier_t* b) {
+    P_mutex_final(&b->mu);
+    P_cond_final(&b->cv);
+}
+
+/* 汇合点：阻塞至 total 个线程全部到达。返回非 0 表示本线程为最后到达者
+ * （对应 PTHREAD_BARRIER_SERIAL_THREAD，可用于选一个线程做收尾工作）。 */
+static inline int P_barrier_wait(P_barrier_t* b) {
+    P_mutex_lock(&b->mu);
+    uint32_t ph = b->phase;
+    if (++b->count == b->total) {
+        b->phase++;                 /* 进入下一代 */
+        b->count = 0;
+        P_cond_all(&b->cv);         /* 放行全部 */
+        P_mutex_unlock(&b->mu);
+        return 1;                   /* serial thread */
+    }
+    while (ph == b->phase)          /* 等代际翻转，抗虚假唤醒/跨轮抢用 */
+        P_cond_wait(&b->cv, &b->mu, 0, 0);
+    P_mutex_unlock(&b->mu);
+    return 0;
+}
+
 //------------------  原子操作（operand 指令的 C 侧实现：sc_*）  ----------------
 // 优先使用 C11 stdatomic.h，否则使用平台特定实现。命名直接采用 op.sc 的 operand
 // 指令名 sc_<op>，由编译器对基础类型的 . 操作透传调用（见文末 operand 指令透传说明）。

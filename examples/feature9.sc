@@ -69,6 +69,23 @@ rpc ping: s: sig&
     s->cv.one()
     s->mu.unlock()
 
+# barrier：N 方汇合（自实现于 platform.h，跨平台不依赖 pthread_barrier_t）
+def bctx: {
+    bar: barrier
+    mu: mutex
+    arrived: i4        # 汇合前各线程累加（验证全部到达）
+    serial: i4         # 最后到达者标记次数（应恰好 1）
+}
+
+rpc bwork: b: bctx&
+    b->mu.lock()
+    b->arrived = b->arrived + 1
+    b->mu.unlock()
+    if b->bar.wait()               # 汇合点：最后到达者返回 1，余者 0
+        b->mu.lock()
+        b->serial = b->serial + 1
+        b->mu.unlock()
+
 fnc main: i4
     var c: ctx
     c.n = 0
@@ -146,4 +163,23 @@ fnc main: i4
     p.drop()                   # 析构：等任务完成后停池回收
     printf("pool drop: n=%d\n", c2.n)      # 期望 9000
     c2.mu.drop()
+
+    # barrier：3 个线程汇合，最后到达者做收尾标记
+    var bc: bctx
+    bc.arrived = 0
+    bc.serial = 0
+    bc.mu.init()
+    bc.bar.init(3)             # 3 方汇合
+    var bt1: thread& = nil
+    var bt2: thread& = nil
+    var bt3: thread& = nil
+    run bwork(&bc), &bt1
+    run bwork(&bc), &bt2
+    run bwork(&bc), &bt3
+    bt1->join()
+    bt2->join()
+    bt3->join()
+    printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)  # 期望 3 1
+    bc.bar.drop()
+    bc.mu.drop()
     return 0

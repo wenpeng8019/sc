@@ -185,6 +185,29 @@ int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec) {
     return (int32_t)P_cond_wait((cnd_state *)c->h, (mtx_state *)m->h, nsec, sec);
 }
 
+/* ---------------- barrier ---------------- */
+/* 直接复用 platform.h 的 P_barrier_t（mutex + cond 自实现 N 方汇合）。 */
+
+void barrier_init(barrier *_this, uint32_t n) {
+    P_barrier_t *b = (P_barrier_t *)malloc(sizeof(P_barrier_t));
+    if (b) P_barrier_init(b, n);
+    _this->h = b;
+}
+
+void barrier_drop(barrier *_this) {
+    P_barrier_t *b = (P_barrier_t *)_this->h;
+    if (!b) return;
+    P_barrier_final(b);
+    free(b);
+    _this->h = NULL;
+}
+
+uint8_t barrier_wait(barrier *_this) {
+    P_barrier_t *b = (P_barrier_t *)_this->h;
+    if (!b) return 0;
+    return (uint8_t)(P_barrier_wait(b) ? 1 : 0);
+}
+
 /* ---------------- pool ---------------- */
 
 /* 任务节点：联合分配 [pool_task][rpc 参数 psize]（与 run 的联合实体同哲学） */

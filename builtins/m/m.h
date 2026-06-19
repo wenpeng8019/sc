@@ -82,6 +82,16 @@ void    cond_all(cond *_this);            /* 唤醒全部等待者 */
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
 int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec);
 
+/* ---------------- barrier：屏障（N 方汇合） ---------------- */
+
+typedef struct barrier {
+    void *h;       /* 实现私有区指针（mutex + cond + 计数） */
+} barrier;
+
+void    barrier_init(barrier *_this, uint32_t n);  /* n 方汇合（0 视为 1） */
+void    barrier_drop(barrier *_this);
+uint8_t barrier_wait(barrier *_this);     /* 阻塞至全部到达；最后到达者返回 1，其余 0 */
+
 #ifdef __cplusplus
 }
 #endif

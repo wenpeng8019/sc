@@ -55,6 +55,13 @@ bool isAssignOp(const std::string& op) {
            op == "<<=" || op == ">>=";
 }
 
+// 是否为关键字 token（Tok 枚举中关键字段连续区间 KwDef..KwOffsetof）。
+// 用于成员名位置容忍关键字拼写：成员/方法名永不可能是语句关键字，
+// 故 .wait() / .run() 等与语句关键字同名的方法可被正常解析。
+bool isKeywordTok(Tok k) {
+    return k >= Tok::KwDef && k <= Tok::KwOffsetof;
+}
+
 // Parser 内部类 —— 封装所有语法分析状态
 struct Parser {
     const std::vector<Token>& t;                    // 输入 token 序列（引用外部持有）
@@ -235,7 +242,9 @@ struct Parser {
         auto d = std::make_unique<Decl>();
         d->line = cur().line;
         advance();                                  // 跳过 fnc 关键字
-        if (!at(Tok::Ident)) err("期望成员函数名");
+        // 成员函数名容忍关键字拼写（同成员访问位置：方法名不可能是语句关键字，
+        // 故 fnc wait::/run:: 等与语句关键字同名的方法声明可正常解析）
+        if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望成员函数名");
         d->methodName = advance().text;
         if (accept(Tok::DColon)) d->cImpl = true;   // :: → C 实现接口
 
@@ -973,7 +982,9 @@ struct Parser {
                 m->op = at(Tok::Arrow) ? "->" : ".";
                 advance();
                 m->a = std::move(e);
-                if (!at(Tok::Ident)) err("期望成员名");
+                // 成员名位置容忍关键字拼写：成员/方法名不可能是语句关键字，
+                // 故 .wait()/.run() 等与语句关键字同名的方法可正常解析
+                if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望成员名");
                 m->text = advance().text;           // text = 成员名
                 e = std::move(m);
             } else if (atOp("++") || atOp("--")) {  // 后缀自增/自减

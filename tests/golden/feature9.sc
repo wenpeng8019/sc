@@ -49,6 +49,22 @@ rpc ping: s: sig&
     s->cv.one()
     s->mu.unlock()
 
+def bctx: {
+    bar: barrier
+    mu: mutex
+    arrived: i4
+    serial: i4
+}
+
+rpc bwork: b: bctx&
+    b->mu.lock()
+    b->arrived = (b->arrived + 1)
+    b->mu.unlock()
+    if b->bar.wait()
+        b->mu.lock()
+        b->serial = (b->serial + 1)
+        b->mu.unlock()
+
 fnc main: i4
     var c: ctx
     c.n = 0
@@ -108,4 +124,21 @@ fnc main: i4
     p.drop()
     printf("pool drop: n=%d\n", c2.n)
     c2.mu.drop()
+    var bc: bctx
+    bc.arrived = 0
+    bc.serial = 0
+    bc.mu.init()
+    bc.bar.init(3)
+    var bt1: thread& = nil
+    var bt2: thread& = nil
+    var bt3: thread& = nil
+    run bwork(&bc), &bt1
+    run bwork(&bc), &bt2
+    run bwork(&bc), &bt3
+    bt1->join()
+    bt2->join()
+    bt3->join()
+    printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)
+    bc.bar.drop()
+    bc.mu.drop()
     return 0
