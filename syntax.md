@@ -104,9 +104,9 @@ name[x][y]: type& # 多维指针数组
 - 强制类型转换的指针也写在类型侧：`(p: type&)`、`(p: type&&)`（见 §10）。
 
 
-## 5. 导入
+## 5. 导入与加入
 
-### 头文件
+### 导入头文件
 
 ```sc
 inc stdio.h
@@ -118,7 +118,7 @@ inc "my.h"
 - `inc stdio.h` -> `#include <stdio.h>`
 - `inc "my.h"` -> `#include "my.h"`
 
-### sc 模块
+### 导入 sc 模块
 
 ```sc
 inc io.sc
@@ -138,7 +138,7 @@ inc io.sc
   操作数通用指令（`operand`），透传为 `platform.h` 的 `sc_<op>` 宏，详见 8.9。
 - 内置模块参考手册见 `builtins/REFERENCE.md`。
 
-### C 实现与库文件
+### 加入 C 实现或库文件
 
 `inc` 解决「接口声明」的引入，但对于**由 C 实现的接口**（`fnc name::` 形态，
 声明在 sc、实现在 C 侧），其对应的 `.c` 文件此前没有并入工程的机制；
@@ -231,49 +231,8 @@ fnc main: i4
 - 运行模式下，每个模块单元编译时会自动附加源 `.sc` 文件所在目录为头文件搜索路径，
   因此 `inc "platform.h"` 能找到与源码同目录的本地头。
 
-### 工具链配置（编译选项与链接库）
-
-两种输出路径对配置的需求不同：
-
-- `--emit-c` 转译模式：只产出 C 源码，编译选项由后续手工编译时自行指定，
-  **不受下列配置影响**。
-- 运行模式（默认，类似 python 直接执行）：scc 需要调用 C 工具链，
-  通过下列配置控制编译与链接。
-
-配置来源与优先级：**环境变量 > 当前目录 `.sc` 配置文件**（逐键独立生效）：
-
-| 环境变量 | `.sc` 配置键 | 含义 | 展开为 |
-|---|---|---|---|
-| `SCC_CC` / `CC` | `cc` | C 编译器 | — |
-| `SCC_CFLAGS` | `cflags` | 额外编译选项（空格分隔） | 原样附加 |
-| `SCC_LDFLAGS` | `ldflags` | 额外链接选项（空格分隔） | 原样附加 |
-| `SCC_INC` | `inc` | 头文件搜索路径，`:` 分隔多路径（类似 PATH） | 逐项 `-I` |
-| `SCC_LIB` | `lib` | 库搜索路径，`:` 分隔多路径 | 逐项 `-L` |
-| `SCC_LIBS` | `libs` | 链接库名，空格或逗号分隔 | 逐项 `-l` |
-| `SCC_ADT` | `adt` | adt 自定义实现（`.c`/`.o`/`.a`） | 参与链接 |
-
-此外 scc 命令行支持 `-l <名>`（可重复，`-lm` 紧凑写法也支持），
-与配置中的 `libs` 合并；`--adt <path>` 优先于 `SCC_ADT` 与配置键 `adt`。
-
-`.sc` 配置文件示例（每行 `key = value`，`#` 行注释）：
-
-```
-cc     = clang
-cflags = -O2 -Wall
-inc    = vendor/inc:/opt/homebrew/include
-lib    = vendor/lib:/opt/homebrew/lib
-libs   = mylib, m
-```
-
-等价的环境变量与命令行写法：
-
-```sh
-SCC_INC=vendor/inc SCC_LIB=vendor/lib SCC_LIBS="mylib m" scc t.sc
-scc t.sc -l mylib -lm        # -l 追加链接库
-```
-
-生效位置：`cflags`/`-I` 作用于每个模块单元的编译；`ldflags`/`-L`/`-l`
-作用于最终链接。单文件 stdin 模式（`scc -`）编译链接一步完成，两类选项都附加。
+> 关于编译选项、链接库、`.sc` 配置文件等工具链配置
+> 详见 [compiler.md](compiler.md) §4「工具链配置」。
 
 ## 6. 导出
 
@@ -395,7 +354,7 @@ while it != nil
 成员），用于在已知节点指针时取回业务数据首址。`base(o: T&)` 形式则把节点
 首址直接重解释为 `T*`（零偏移）。
 
-### 7.7 ADT 容器结构体
+### 7.7 容器结构体
 
 与 `~` 对称的另一套机制：`~` 提供内置的 prev/next 链接，`<C, I>` 则让元素
 绑定到一套**自定义抽象数据类型（ADT）集合实现**。
@@ -451,7 +410,7 @@ if lst.find(&found, 20) == ok    # &found（task&&）自动转 tnode&&
 **`base(&t)`**：跳过注入的 `I`，返回 `T` 首个真实成员的地址（与链表 `base`
 对称）。
 
-## 8. 函数、函数类型和方法
+## 8. 函数、函数类型、函数指针和方法
 
 ### 8.1 函数类型
 
@@ -492,7 +451,7 @@ fnc area: i4
   省略（如 `fnc tick`）。无返回值函数不能 `return 表达式`。
 - void 指针返回类型写裸 `&`（如 `@fnc list::pop: &`）。
 
-### 8.3 成员函数（方法）
+### 8.3 方法（成员函数）
 
 成员函数直接在结构体定义内部实现：写法与函数签名字段一致，随后的缩进块即函数体。
 
@@ -946,7 +905,6 @@ var tab[2][3]: i4 = {
 - `break`
 - `continue`
 - `run`（以 rpc 调用创建线程，见 11.2）
-- `wait`（条件变量等待，见 11.3）
 - `done`（标记 future 就绪并唤醒等待者，见 11.4）
 - 变量/常量声明
 - 表达式语句
@@ -1035,38 +993,7 @@ for i = 0; i < 10; i++
     printf("%d\n", i)
 ```
 
-### 11.1 print 与 stringify(...) 格式化（io 内置关键字）
-
-`print` 是日志输出关键字，由内置 io 子模块实现（需 `inc io.sc`）。它有两种写法：
-**无括号拼接糖**与**有括号 C printf 兼容模式**：
-
-```sc
-inc io.sc
-
-# 拼接糖（无括号）：字符串字面量=纯文本，非字面量按静态类型自动补说明符
-var n: i4 = 42
-var s: char& = "hello"
-print "n=", n, " s=", s             # → n=42 s=hello（i4→%d, char&→%s）
-print "默认浮点=", pi, " 定点=", (pi: "%.2f")   # (expr: "%fmt") 显式格式覆盖
-print<7> "通道 7 日志"               # <chn> 指定 u1 日志通道（默认 0），透传给 C print
-
-# C printf 兼容模式（有括号）：首参为格式串，实参原样传递
-print("n=%d s=%s", 42, "hello")     # 默认 D 级别
-print("E: 错误 code=%d", -1)        # 格式串前缀 "X:" 设级别
-```
-
-- **拼接糖**：字符串字面量直接作为文本（`%` 自动转义）；其余实参按静态类型自动选择
-  printf 说明符并追加到可变参数。类型→说明符映射：
-  `i1/i2/i4`→`%d`、`i8`→`%`PRId64、`u1/u2/u4`→`%u`、`u8`→`%`PRIu64、
-  `f4/f8`→`%f`、`char`→`%c`、`bool`→`%d`、`char&`/`char[]`→`%s`、
-  `string` 值/指针→`%s`（经 `string_cstr`）、枚举→`%d`、其余指针/数组→`%p`。
-  无法推断时用 `(expr: "%fmt")` 显式指定该实参格式。
-- **兼容模式**：等价于直接调用 C `print`，格式串与实参原样传递（沿用旧的 printf 用法）。
-- 两种写法均支持 `<chn>` 通道块与文本前缀 `F:`/`E:`/`W:`/`I:`/`D:`/`V:` 设日志级别
-  （致命/错误/警告/信息/调试/详细），无前缀默认 `D`。
-- 输出格式 `HH:MM:SS.mmm L| 文本`（`chn!=0` 时加通道标记），自动换行，单次 fprintf
-  保证多线程不串行。
-- 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
+### 11.1 stringify(...) 格式化（io 内置关键字）
 
 `stringify(值)` 是 JSON 字符串格式化关键字（区别于类型 `string` 与堆构造
 `string()`）：按实参的静态类型生成格式化代码，返回内置 `string`（需 `inc adt.sc`
@@ -1097,7 +1024,7 @@ print "t=", stringify<compact:1>(t, b, 256)   # 缓存 + 紧凑：{"id":1,"name"
 一维数组→`[v, v, ...]`；顶层实参为结构体一级指针时自动解引用展开内容（nil→"nil"）。
 暂不支持多维数组。
 
-`print` / `stringify(...)` 是上下文关键字：若作用域内存在同名函数/变量，
+`stringify(...)` 是上下文关键字：若作用域内存在同名函数/变量，
 按普通标识符解析。
 
 ### 11.2 run 语句（多线程）
@@ -1128,7 +1055,7 @@ fnc main: i4
 
 - 第二参数（可选）按类型分派：`&t`（t 为 `thread&`）→ joinable
   独立线程，必须 `join()` 等待并回收；pool 对象或指针 → 任务入池
-  （对象自动取地址，与 wait 语句一致）；省略 → 线程内部 detach，
+  （对象自动取地址，与方法调用糖一致）；省略 → 线程内部 detach，
   结束后自释放。
 - thread 对象由 run 内部联合分配：单次
   `alloc(sizeof(thread) + sizeof(rpc参数) + 实现私有区)`，rpc 参数紧随
@@ -1165,41 +1092,7 @@ run<prio:5> note(7)                            # 仅设优先级（detach 线程
   `thread_run(..., (uint32_t)stack, (uint8_t)prio)`，省略的键传 0
   （表示由 C 取平台默认）。
 
-### 11.3 wait 语句（条件变量等待）
-
-`wait` 在条件变量上等待唤醒，需要 `inc m.sc`（cond/mutex 类型与
-原语实现）：
-
-```sc
-wait 条件变量, 互斥锁 [, 纳秒 [, 秒]]
-```
-
-```sc
-inc m.sc
-
-var mu: mutex
-var cv: cond
-
-mu.lock()
-while ready == 0               # 虚假唤醒：必须循环复查条件
-    wait cv, mu                # 无限等待
-mu.unlock()
-
-mu.lock()
-wait cv, mu, 5000000, 0        # 超时等待：5ms（5000000 纳秒）
-mu.unlock()
-```
-
-- 前两参数为 cond 与 mutex，可为对象或指针（对象自动取地址，与
-  方法调用糖一致）；调用前须已持有该 mutex，等待期间自动释锁，
-  返回前重新加锁。
-- 后两参数（可选）为超时：第三参纳秒、第四参秒；全 0 或省略 →
-  无限等待。
-- 唤醒由 cond 方法完成：`one()` 唤醒一个等待者，`all()` 唤醒全部。
-- 转 C：生成条件等待原语 `cond_wait(&cond, &mutex, 纳秒, 秒)`
-  （m_impl 提供；Windows 下超时精度为毫秒，纳秒向上取整）。
-
-### 11.4 异步（async / await / done / future）
+### 11.4 异步（async / await / done）
 
 与 `run`（抢占式、多线程）相对的**第二套并发模型**：单线程协作式异步——
 一个事件循环 + 把含 `await` 的 `rpc` 编译为状态机（stackless coroutine）。
@@ -1339,7 +1232,7 @@ var a:i1
 - 调试符号生成：行号映射注释、-g 编译标志支持源码级调试（GDB/LLDB）
 - 预定义 ADT 接口（`inc adt.sc`）：`string` / `list` / `dict` / `dim` / `json`（高覆盖 Python 常用能力，具体实现由插件注入）
 - 链表结构体 `def T: ~ {}`：末尾注入 `_prev`/`_next` 自链指针，配合内置 `chain` 双向链表（append/push 时编译器自动注入偏移）；`chain` 属 op.sc 默认导入机制，无需 inc；成员访问位提供 `prev`/`next` 上下文关键字
-- io 内置关键字：`print` C 风格日志输出（F/E/W/I/D/V 级别前缀、SC_LOG 过滤，需 `inc io.sc`）；`stringify(值[, 缓存, 大小])` 按静态类型 JSON 格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`，转 C 时生成独立 `stringify.h`）
+- io 内置关键字：`stringify(值[, 缓存, 大小])` 按静态类型 JSON 格式化（返回 `string` 或缓存 `char&`，需 `inc adt.sc`，转 C 时生成独立 `stringify.h`）；`print` 日志输出函数（拼接糖 + C printf 兼容模式，F/E/W/I/D/V 级别、SC_LOG 过滤，需 `inc io.sc`，详见 §17）
 - 异步机制（op.sc 默认导入，async 运行时需 `inc async.sc`）：内置类型 `future` + 关键字 `async`（发起返回 future&）/`await`（rpc 内挂起，编译为状态机）/`done`（标记就绪并唤醒，跨线程安全）；`async_init`/`async_loop`/`async_final` 事件循环生命周期；libuv 默认实现含叶子原语 `delay`，可 await 契约支持自定义异步源
 - VS Code 工具链增强：实时诊断、悬停提示、跳转定义、文档符号、`Format Document`（基于 `scc --emit-sc`）
 - 定义顺序无关：生成 C 时默认自动输出结构/联合前置声明与函数原型，支持先使用后定义（含递归/互递归函数）
@@ -1541,5 +1434,40 @@ var t: i4 = x: i4                  # 值转换：右值位置免括号
 - 预处理能力（宏定义、条件编译）是**有意不提供**的设计决策而非缺失，见第 5 节“无预处理器设计”。
 - 目前的工程化能力主要集中在转译与 AST，标准库和工具链仍偏薄。
 
-这些限制不是“缺文档”，而是“语言还在演进中”的真实状态，应该在后续实现时逐条收敛。
+这些限制不是”缺文档”，而是”语言还在演进中”的真实状态，应该在后续实现时逐条收敛。
+
+## 17. print 日志输出（io 内置函数）
+
+`print` 是日志输出函数（非语言语句），由内置 io 子模块实现（需 `inc io.sc`）。
+它有两种写法：**无括号拼接糖**与**有括号 C printf 兼容模式**：
+
+```sc
+inc io.sc
+
+# 拼接糖（无括号）：字符串字面量=纯文本，非字面量按静态类型自动补说明符
+var n: i4 = 42
+var s: char& = “hello”
+print “n=”, n, “ s=”, s             # → n=42 s=hello（i4→%d, char&→%s）
+print “默认浮点=”, pi, “ 定点=”, (pi: “%.2f”)   # (expr: “%fmt”) 显式格式覆盖
+print<7> “通道 7 日志”               # <chn> 指定 u1 日志通道（默认 0），透传给 C print
+
+# C printf 兼容模式（有括号）：首参为格式串，实参原样传递
+print(“n=%d s=%s”, 42, “hello”)     # 默认 D 级别
+print(“E: 错误 code=%d”, -1)        # 格式串前缀 “X:” 设级别
+```
+
+- **拼接糖**：字符串字面量直接作为文本（`%` 自动转义）；其余实参按静态类型自动选择
+  printf 说明符并追加到可变参数。类型→说明符映射：
+  `i1/i2/i4`→`%d`、`i8`→`%`PRId64、`u1/u2/u4`→`%u`、`u8`→`%`PRIu64、
+  `f4/f8`→`%f`、`char`→`%c`、`bool`→`%d`、`char&`/`char[]`→`%s`、
+  `string` 值/指针→`%s`（经 `string_cstr`）、枚举→`%d`、其余指针/数组→`%p`。
+  无法推断时用 `(expr: “%fmt”)` 显式指定该实参格式。
+- **兼容模式**：等价于直接调用 C `print`，格式串与实参原样传递（沿用旧的 printf 用法）。
+- 两种写法均支持 `<chn>` 通道块与文本前缀 `F:`/`E:`/`W:`/`I:`/`D:`/`V:` 设日志级别
+  （致命/错误/警告/信息/调试/详细），无前缀默认 `D`。
+- 输出格式 `HH:MM:SS.mmm L| 文本`（`chn!=0` 时加通道标记），自动换行，单次 fprintf
+  保证多线程不串行。
+- 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。
+
+`print` 是上下文关键字：若作用域内存在同名函数/变量，按普通标识符解析。
 
