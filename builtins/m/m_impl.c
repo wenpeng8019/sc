@@ -6,12 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !P_WIN
-#include <pthread.h>
-#endif
-#if P_LINUX
-#include <sys/syscall.h>
-#endif
+/* 线程/互斥/条件变量的跨平台原语均由 platform.h 提供（POSIX 下已含 pthread.h）；
+ * 本模块仅保留自有的单块线程 ABI（[thread][参数][thd_impl]）。 */
 
 /* ---------------- thread ---------------- */
 
@@ -29,17 +25,9 @@ typedef struct {
     uint8_t    joinable;
 } thd_impl;
 
-/* 跨平台统一线程 id（参考 stdc：mach tid / gettid / GetCurrentThreadId） */
+/* 跨平台统一线程 id：复用 platform.h 的 P_thread_id（mach tid / gettid / GetCurrentThreadId） */
 static uint64_t thd_current_id(void) {
-#if P_WIN
-    return (uint64_t)GetCurrentThreadId();
-#elif P_DARWIN
-    return (uint64_t)pthread_mach_thread_np(pthread_self());
-#elif P_LINUX
-    return (uint64_t)syscall(SYS_gettid);
-#else
-    return (uint64_t)(uintptr_t)pthread_self();
-#endif
+    return P_thread_id();
 }
 
 #if P_WIN
@@ -126,32 +114,18 @@ void thread_join(thread *_this) {
 
 /* ---------------- mutex ---------------- */
 
-#if P_WIN
-typedef CRITICAL_SECTION mtx_state;
-#else
-typedef pthread_mutex_t  mtx_state;
-#endif
+typedef P_mutex_t mtx_state;
 
 void mutex_init(mutex *_this) {
     mtx_state *m = (mtx_state *)malloc(sizeof(mtx_state));
-    if (m) {
-#if P_WIN
-        InitializeCriticalSection(m);
-#else
-        pthread_mutex_init(m, NULL);
-#endif
-    }
+    if (m) P_mutex_init(m);
     _this->h = m;
 }
 
 void mutex_drop(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-#if P_WIN
-    DeleteCriticalSection(m);
-#else
-    pthread_mutex_destroy(m);
-#endif
+    P_mutex_final(m);
     free(m);
     _this->h = NULL;
 }
@@ -159,59 +133,35 @@ void mutex_drop(mutex *_this) {
 void mutex_lock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-#if P_WIN
-    EnterCriticalSection(m);
-#else
-    pthread_mutex_lock(m);
-#endif
+    P_mutex_lock(m);
 }
 
 void mutex_unlock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return;
-#if P_WIN
-    LeaveCriticalSection(m);
-#else
-    pthread_mutex_unlock(m);
-#endif
+    P_mutex_unlock(m);
 }
 
 uint8_t mutex_try_lock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return 0;
-#if P_WIN
-    return TryEnterCriticalSection(m) ? 1 : 0;
-#else
-    return pthread_mutex_trylock(m) == 0 ? 1 : 0;
-#endif
+    return (uint8_t)P_mutex_try(m);
 }
 
 /* ---------------- cond ---------------- */
 
-#if P_WIN
-typedef CONDITION_VARIABLE cnd_state;
-#else
-typedef pthread_cond_t     cnd_state;
-#endif
+typedef P_cond_t cnd_state;
 
 void cond_init(cond *_this) {
     cnd_state *c = (cnd_state *)malloc(sizeof(cnd_state));
-    if (c) {
-#if P_WIN
-        InitializeConditionVariable(c);
-#else
-        pthread_cond_init(c, NULL);
-#endif
-    }
+    if (c) P_cond_init(c);
     _this->h = c;
 }
 
 void cond_drop(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-#if !P_WIN
-    pthread_cond_destroy(c);    /* Windows 条件变量无需销毁 */
-#endif
+    P_cond_final(c);
     free(c);
     _this->h = NULL;
 }
@@ -219,56 +169,20 @@ void cond_drop(cond *_this) {
 void cond_one(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-#if P_WIN
-    WakeConditionVariable(c);
-#else
-    pthread_cond_signal(c);
-#endif
+    P_cond_one(c);
 }
 
 void cond_all(cond *_this) {
     cnd_state *c = (cnd_state *)_this->h;
     if (!c) return;
-#if P_WIN
-    WakeAllConditionVariable(c);
-#else
-    pthread_cond_broadcast(c);
-#endif
+    P_cond_all(c);
 }
 
 /* wait 语句原语：nsec/sec 全 0 → 无限等待，否则相对超时。
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
 int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec) {
     if (!c || !c->h || !m || !m->h) return -1;
-    cnd_state *cv = (cnd_state *)c->h;
-    mtx_state *mx = (mtx_state *)m->h;
-#if P_WIN
-    if (!nsec && !sec)
-        return SleepConditionVariableCS(cv, mx, INFINITE) ? 0 : -1;
-    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
-    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
-    return SleepConditionVariableCS(cv, mx, ms) ? 0
-         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
-#else
-    if (!nsec && !sec)
-        return pthread_cond_wait(cv, mx) == 0 ? 0 : -1;
-    int ret;
-#if P_DARWIN
-    /* macOS 提供相对超时接口，无需转绝对时间 */
-    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
-                            (long)(nsec % 1000000000ULL) };
-    ret = pthread_cond_timedwait_relative_np(cv, mx, &rel);
-#else
-    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
-    struct timespec abs_time;
-    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
-    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
-    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
-    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
-    ret = pthread_cond_timedwait(cv, mx, &abs_time);
-#endif
-    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
-#endif
+    return (int32_t)P_cond_wait((cnd_state *)c->h, (mtx_state *)m->h, nsec, sec);
 }
 
 /* ---------------- pool ---------------- */
@@ -295,20 +209,8 @@ typedef struct {
 #endif
 } pol_state;
 
-static void pol_lock(pol_state *p)   {
-#if P_WIN
-    EnterCriticalSection(&p->mu);
-#else
-    pthread_mutex_lock(&p->mu);
-#endif
-}
-static void pol_unlock(pol_state *p) {
-#if P_WIN
-    LeaveCriticalSection(&p->mu);
-#else
-    pthread_mutex_unlock(&p->mu);
-#endif
-}
+static void pol_lock(pol_state *p)   { P_mutex_lock(&p->mu); }
+static void pol_unlock(pol_state *p) { P_mutex_unlock(&p->mu); }
 
 /* worker 循环：取任务 → 解锁执行 → pending 递减，归零唤醒 join */
 #if P_WIN
@@ -319,13 +221,8 @@ static void *pol_worker(void *arg) {
     pol_state *p = (pol_state *)arg;
     for (;;) {
         pol_lock(p);
-        while (!p->head && !p->shutdown) {
-#if P_WIN
-            SleepConditionVariableCS(&p->more, &p->mu, INFINITE);
-#else
-            pthread_cond_wait(&p->more, &p->mu);
-#endif
-        }
+        while (!p->head && !p->shutdown)
+            P_cond_wait(&p->more, &p->mu, 0, 0);   /* 无限等待来活 */
         pool_task *t = p->head;
         if (!t) { pol_unlock(p); break; }      /* shutdown 且队列已空 */
         p->head = t->next;
@@ -336,13 +233,8 @@ static void *pol_worker(void *arg) {
         free(t);
 
         pol_lock(p);
-        if (--p->pending == 0) {
-#if P_WIN
-            WakeAllConditionVariable(&p->idle);
-#else
-            pthread_cond_broadcast(&p->idle);
-#endif
-        }
+        if (--p->pending == 0)
+            P_cond_all(&p->idle);
         pol_unlock(p);
     }
     return 0;
@@ -354,15 +246,9 @@ void pool_init(pool *_this, uint32_t n) {
     pol_state *p = (pol_state *)malloc(sizeof(pol_state) + (n - 1) * sizeof(p->thr[0]));
     if (!p) return;
     memset(p, 0, sizeof(*p));
-#if P_WIN
-    InitializeCriticalSection(&p->mu);
-    InitializeConditionVariable(&p->more);
-    InitializeConditionVariable(&p->idle);
-#else
-    pthread_mutex_init(&p->mu, NULL);
-    pthread_cond_init(&p->more, NULL);
-    pthread_cond_init(&p->idle, NULL);
-#endif
+    P_mutex_init(&p->mu);
+    P_cond_init(&p->more);
+    P_cond_init(&p->idle);
     for (uint32_t i = 0; i < n; i++) {
 #if P_WIN
         p->thr[i] = CreateThread(NULL, 0, pol_worker, p, 0, NULL);
@@ -390,11 +276,7 @@ uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psi
     if (p->tail) p->tail->next = t; else p->head = t;
     p->tail = t;
     p->pending++;
-#if P_WIN
-    WakeConditionVariable(&p->more);
-#else
-    pthread_cond_signal(&p->more);
-#endif
+    P_cond_one(&p->more);
     pol_unlock(p);
     return 1;
 }
@@ -404,13 +286,8 @@ void pool_join(pool *_this) {
     pol_state *p = _this ? (pol_state *)_this->h : NULL;
     if (!p) return;
     pol_lock(p);
-    while (p->pending > 0) {
-#if P_WIN
-        SleepConditionVariableCS(&p->idle, &p->mu, INFINITE);
-#else
-        pthread_cond_wait(&p->idle, &p->mu);
-#endif
-    }
+    while (p->pending > 0)
+        P_cond_wait(&p->idle, &p->mu, 0, 0);   /* 无限等全部完成 */
     pol_unlock(p);
 }
 
@@ -420,11 +297,7 @@ void pool_drop(pool *_this) {
     if (!p) return;
     pol_lock(p);
     p->shutdown = 1;
-#if P_WIN
-    WakeAllConditionVariable(&p->more);
-#else
-    pthread_cond_broadcast(&p->more);
-#endif
+    P_cond_all(&p->more);
     pol_unlock(p);
     for (uint32_t i = 0; i < p->nthr; i++) {
 #if P_WIN
@@ -434,13 +307,9 @@ void pool_drop(pool *_this) {
         pthread_join(p->thr[i], NULL);
 #endif
     }
-#if P_WIN
-    DeleteCriticalSection(&p->mu);   /* Windows 条件变量无需销毁 */
-#else
-    pthread_mutex_destroy(&p->mu);
-    pthread_cond_destroy(&p->more);
-    pthread_cond_destroy(&p->idle);
-#endif
+    P_mutex_final(&p->mu);
+    P_cond_final(&p->more);
+    P_cond_final(&p->idle);
     free(p);
     _this->h = NULL;
 }

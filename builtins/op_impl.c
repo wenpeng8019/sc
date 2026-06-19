@@ -538,26 +538,21 @@ future *com_limit_read_async(com *c, limit *s) {
  * 统一抽象成 mux_*（多路复用器）+ 跨平台互斥/唤醒/时钟，run_loop 等上层逻辑共享。 */
 
 /* ---- 平台后端选择 ---- */
-#if defined(__linux__)
+#if P_LINUX
 #  define SC_MUX_EPOLL  1
-#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
-      defined(__OpenBSD__) || defined(__DragonFly__)
+#elif P_DARWIN || P_BSD
 #  define SC_MUX_KQUEUE 1
-#elif defined(_WIN32)
+#elif P_WIN
 #  define SC_MUX_IOCP   1
 #else
 #  define SC_MUX_POLL   1
 #endif
 
-/* ---- 平台头 ---- */
-#ifdef _WIN32
+/* ---- 平台头（互斥/线程基础原语由 platform.h 提供，此处仅引多路复用后端头） ---- */
+#if P_WIN
 #  include <winsock2.h>
-#  include <windows.h>
 #else
-#  include <pthread.h>
-#  include <unistd.h>
 #  include <fcntl.h>
-#  include <errno.h>
 #  if defined(SC_MUX_EPOLL)
 #    include <sys/epoll.h>
 #  elif defined(SC_MUX_KQUEUE)
@@ -569,7 +564,7 @@ future *com_limit_read_async(com *c, limit *s) {
 #endif
 
 /* ---- 多路复用句柄类型（Windows=SOCKET，POSIX=fd） ---- */
-#ifdef _WIN32
+#if P_WIN
 typedef SOCKET SC_FD;
 #  define SC_FD_NONE (INVALID_SOCKET)
 #else
@@ -577,25 +572,11 @@ typedef int SC_FD;
 #  define SC_FD_NONE (-1)
 #endif
 
-/* ---- 跨平台互斥（POSIX=pthread / Windows=CRITICAL_SECTION） ---- */
-#ifdef _WIN32
-typedef CRITICAL_SECTION sc_mtx;
-static void mtx_init(sc_mtx *m)    { InitializeCriticalSection(m); }
-static void mtx_lock(sc_mtx *m)    { EnterCriticalSection(m); }
-static void mtx_unlock(sc_mtx *m)  { LeaveCriticalSection(m); }
-static void mtx_destroy(sc_mtx *m) { DeleteCriticalSection(m); }
-#else
-typedef pthread_mutex_t sc_mtx;
-static void mtx_init(sc_mtx *m)    { pthread_mutex_init(m, NULL); }
-static void mtx_lock(sc_mtx *m)    { pthread_mutex_lock(m); }
-static void mtx_unlock(sc_mtx *m)  { pthread_mutex_unlock(m); }
-static void mtx_destroy(sc_mtx *m) { pthread_mutex_destroy(m); }
-#endif
-static sc_mtx g_mu;                      /* 就绪队列 / g_pending 的跨线程互斥 */
+static P_mutex_t g_mu;                  /* 就绪队列 / g_pending 的跨线程互斥 */
 
 static uint64_t now_ms(void) {
     P_clock c;
-    P_clock_now(&c);     /* CLOCK_MONOTONIC */
+    P_clock_now(&c);                    /* CLOCK_MONOTONIC */
     return (uint64_t)c.tv_sec * 1000ull + (uint64_t)c.tv_nsec / 1000000ull;
 }
 
@@ -605,24 +586,24 @@ typedef struct timer_node {
     uint64_t           deadline_ms;
     future            *fut;
 } timer_node;
-static timer_node *g_timers;             /* 仅循环线程访问 */
+static timer_node *g_timers;            /* 仅循环线程访问 */
 
 /* com 异步 io 请求节点（com_*_async 登记，事件循环驱动）。
  * 句柄就绪后常驻注册进 mux，避免每轮重建（O(1)）；非多路复用（无句柄）走重探轮询。 */
 typedef struct io_req {
     struct io_req *next;
     com           *c;
-    int            dir;        /* 0=读 1=写 */
+    int            dir;                 /* 0=读 1=写 */
     void          *buf;
     uint32_t       size;
-    limit         *lim;        /* 非 NULL=【E】com[...] 句柄有界读（框架读循环） */
+    limit         *lim;                 /* 非 NULL=【E】com[...] 句柄有界读（框架读循环） */
     future        *fut;
-    SC_FD          fd;         /* 多路复用句柄（SC_FD_NONE=未取得/不支持） */
-    int            registered; /* 已注册进 mux（句柄常驻监听） */
-    int            armed;      /* 本轮判定就绪，待执行 io */
-    int            needs_poll; /* 无句柄的 again：每轮重探（小超时轮询） */
+    SC_FD          fd;                  /* 多路复用句柄（SC_FD_NONE=未取得/不支持） */
+    int            registered;          /* 已注册进 mux（句柄常驻监听） */
+    int            armed;               /* 本轮判定就绪，待执行 io */
+    int            needs_poll;          /* 无句柄的 again：每轮重探（小超时轮询） */
 } io_req;
-static io_req *g_io_reqs;                 /* 仅循环线程访问 */
+static io_req *g_io_reqs;               /* 仅循环线程访问 */
 
 /* ============================ 多路复用器 mux_* ============================
  * mux_open/close：建立/销毁后端 + 跨线程唤醒通道。
@@ -850,7 +831,7 @@ static void mux_wait(int timeout_ms) {
 /* ============================ 后端无关上层逻辑 ============================ */
 void async_init(void) {
     if (g_inited) return;
-    mtx_init(&g_mu);
+    P_mutex_init(&g_mu);
     g_ready_head = g_ready_tail = NULL;
     g_pending = 0;
     g_proc    = NULL;
@@ -865,7 +846,7 @@ void async_final(void) {
     mux_close();
     while (g_timers)  { timer_node *t = g_timers;  g_timers  = t->next; free(t); }
     while (g_io_reqs) { io_req     *r = g_io_reqs; g_io_reqs = r->next; free(r); }
-    mtx_destroy(&g_mu);
+    P_mutex_final(&g_mu);
     g_ready_head = g_ready_tail = NULL;
     g_pending = 0;
     g_inited  = 0;
@@ -874,41 +855,41 @@ void async_final(void) {
 void future_init(future *_this) {
     _this->id  = -1;         /* 默认无标签：仅协程 await 用（0 是合法 id，不能作哨兵） */
     _this->ctx = NULL;       /* 默认无上下文；future<ID>(ctx) 由构造辅助回填 */
-    mtx_lock(&g_mu);
+    P_mutex_lock(&g_mu);
     g_pending++;
-    mtx_unlock(&g_mu);
+    P_mutex_unlock(&g_mu);
 }
 
 void future_done(future *f, void *result) {
     int  enqueue;
     long remaining;
-    mtx_lock(&g_mu);
+    P_mutex_lock(&g_mu);
     f->result = result;
     f->ready  = 1;
     enqueue = (f->frame != NULL) || (f->id >= 0);   /* 协程等待者 / 带 id 待派发 → 入队 */
     if (enqueue) push_ready(f);
     g_pending--;
     remaining = g_pending;
-    mtx_unlock(&g_mu);
+    P_mutex_unlock(&g_mu);
     if (enqueue || remaining == 0) wake();           /* 唤醒去 resume/派发，或去判退出 */
 }
 
 uint8_t future_await(future *f, void *frame, void (*resume)(void *)) {
     uint8_t r;
-    mtx_lock(&g_mu);
+    P_mutex_lock(&g_mu);
     f->frame  = frame;
     f->resume = resume;
     r = (uint8_t)f->ready;
-    mtx_unlock(&g_mu);
+    P_mutex_unlock(&g_mu);
     return r;
 }
 
 /* 排空就绪队列：协程帧 resume / 带 id 无等待者经 g_proc 派发。返回 1=请求停循环。 */
 static int drain_ready(void) {
     for (;;) {
-        mtx_lock(&g_mu);
+        P_mutex_lock(&g_mu);
         future *f = pop_ready();
-        mtx_unlock(&g_mu);
+        P_mutex_unlock(&g_mu);
         if (!f) return 0;
         if (f->frame && f->resume) {
             f->resume(f->frame);
@@ -1001,9 +982,9 @@ static void run_loop(void) {
     if (!g_inited) return;
     for (;;) {
         if (drain_ready()) break;                    /* 派发器请求停 */
-        mtx_lock(&g_mu);
+        P_mutex_lock(&g_mu);
         int done = (g_pending == 0 && g_ready_head == NULL);
-        mtx_unlock(&g_mu);
+        P_mutex_unlock(&g_mu);
         if (done) break;
 
         int any_armed = 0, any_needs_poll = 0;

@@ -4,7 +4,8 @@
  *       统一经由本头文件实现跨平台，不直接散落 #ifdef。
  * 内容：常用标准 C 头（scc 生成的 C 统一由本头带入）、平台判定宏、
  *       平台基础头、路径分隔符、TLS、字节序、
- *       时钟（墙钟/单调/CPU 耗时）、微秒休眠、CPU 核数、原子操作。
+ *       时钟（墙钟/单调/CPU 耗时）、微秒休眠、CPU 核数、原子操作、
+ *       互斥/条件变量/线程 id（跨平台 pthread ↔ Win32）。
  * 发行：与其他 builtins 资源一样内嵌进 scc 二进制并随用释放。
  */
 #ifndef SC_PLATFORM_H
@@ -83,6 +84,12 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #if !P_WIN || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__MINGW64__)
 #   include <unistd.h>
 #   include <errno.h>
+#endif
+#if !P_WIN
+#   include <pthread.h>          /* 互斥/条件变量/线程：POSIX 后端 */
+#   if P_LINUX
+#       include <sys/syscall.h>  /* SYS_gettid（线程 id） */
+#   endif
 #endif
 
 /* POSIX（Linux, macOS, BSD 等），该宏依赖 unistd.h */
@@ -430,6 +437,83 @@ static inline void P_usleep(uint64_t us) {
 #else
     struct timespec ts = { (time_t)(us / 1000000ULL), (long)(us % 1000000ULL) * 1000L };
     nanosleep(&ts, NULL);
+#endif
+}
+
+/* ---------------- 互斥 / 条件变量 / 线程 ---------------- */
+/* 跨平台薄包装（POSIX pthread ↔ Windows Win32），供 builtins 内 m / op 等模块
+ * 共用，避免各处散落 #ifdef。互斥与条件变量均为无全局态的句柄包装，适合 header。 */
+
+#if P_WIN
+typedef CRITICAL_SECTION P_mutex_t;
+#define P_mutex_init(pm)    InitializeCriticalSection(pm)
+#define P_mutex_final(pm)   DeleteCriticalSection(pm)
+#define P_mutex_lock(pm)    EnterCriticalSection(pm)
+#define P_mutex_unlock(pm)  LeaveCriticalSection(pm)
+#define P_mutex_try(pm)     (TryEnterCriticalSection(pm) ? 1 : 0)   /* 成功 1 / 否则 0 */
+
+typedef CONDITION_VARIABLE P_cond_t;
+#define P_cond_init(pc)     InitializeConditionVariable(pc)
+#define P_cond_final(pc)    ((void)0)                               /* Win 条件变量无需销毁 */
+#define P_cond_one(pc)      WakeConditionVariable(pc)
+#define P_cond_all(pc)      WakeAllConditionVariable(pc)
+#else
+typedef pthread_mutex_t P_mutex_t;
+#define P_mutex_init(pm)    pthread_mutex_init(pm, NULL)
+#define P_mutex_final(pm)   pthread_mutex_destroy(pm)
+#define P_mutex_lock(pm)    pthread_mutex_lock(pm)
+#define P_mutex_unlock(pm)  pthread_mutex_unlock(pm)
+#define P_mutex_try(pm)     (pthread_mutex_trylock(pm) == 0 ? 1 : 0) /* 成功 1 / 否则 0 */
+
+typedef pthread_cond_t P_cond_t;
+#define P_cond_init(pc)     pthread_cond_init(pc, NULL)
+#define P_cond_final(pc)    pthread_cond_destroy(pc)
+#define P_cond_one(pc)      pthread_cond_signal(pc)
+#define P_cond_all(pc)      pthread_cond_broadcast(pc)
+#endif
+
+/* 条件等待：nsec/sec 全 0 → 无限等待；否则相对超时（sec 秒 + nsec 纳秒）。
+ * 调用前须持有 pm。返回 0=被唤醒 / 1=超时 / -1=错误。 */
+static inline int P_cond_wait(P_cond_t* pc, P_mutex_t* pm, uint64_t nsec, uint64_t sec) {
+#if P_WIN
+    if (!nsec && !sec)
+        return SleepConditionVariableCS(pc, pm, INFINITE) ? 0 : -1;
+    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
+    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
+    return SleepConditionVariableCS(pc, pm, ms) ? 0
+         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
+#else
+    if (!nsec && !sec)
+        return pthread_cond_wait(pc, pm) == 0 ? 0 : -1;
+    int ret;
+#if P_DARWIN
+    /* macOS 提供相对超时接口，无需转绝对时间 */
+    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
+                            (long)(nsec % 1000000000ULL) };
+    ret = pthread_cond_timedwait_relative_np(pc, pm, &rel);
+#else
+    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
+    struct timespec abs_time;
+    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
+    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
+    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
+    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
+    ret = pthread_cond_timedwait(pc, pm, &abs_time);
+#endif
+    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
+#endif
+}
+
+/* 当前线程的内核级 id（mach tid / gettid / GetCurrentThreadId；其余回退 pthread_self） */
+static inline uint64_t P_thread_id(void) {
+#if P_WIN
+    return (uint64_t)GetCurrentThreadId();
+#elif P_DARWIN
+    return (uint64_t)pthread_mach_thread_np(pthread_self());
+#elif P_LINUX
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
 #endif
 }
 
