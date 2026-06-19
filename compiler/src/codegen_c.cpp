@@ -368,6 +368,18 @@ struct CGen {
         return 0;
     }
 
+    // 标量字节宽度（1/2/4/8）：用于 operand 序列化指令按宽度派发 sc_<op>_s/_l/_ll。
+    // 非标量（聚合/未知）返回 0；枚举按底层 int（4 字节）。
+    int scalarByteSize(const std::string& rawName) const {
+        std::string n = resolveAliasName(rawName);
+        if (enums.count(n)) return 4;
+        if (n == "i1" || n == "u1" || n == "bool" || n == "char" || n == "c1") return 1;
+        if (n == "i2" || n == "u2") return 2;
+        if (n == "i4" || n == "u4" || n == "f4" || n == "ret") return 4;
+        if (n == "i8" || n == "u8" || n == "f8") return 8;
+        return 0;
+    }
+
     // sc 类型 → C 类型文本（聚合用规范名，标量经 mapBase）
     std::string cTypeOf(const std::string& name, int ptr) const {
         std::string base;
@@ -1084,6 +1096,60 @@ struct CGen {
                                 emitDefaultArg(md->structCommon.fields[i]);
                             }
                             out << ")";
+                            break;
+                        }
+                    }
+                    // operand 序列化指令（read/write/nread/nwrite/nget/nset）：与类型无关的
+                    // 原子指令不同，这些需按接收者标量宽度派发到 platform.h 的
+                    // sc_<op>_s/_l/_ll（仅支持 2/4/8 字节标量接收者）。
+                    {
+                        static const std::unordered_set<std::string> kSerOps = {
+                            "read", "write", "nread", "nwrite", "nget", "nset"};
+                        if (kSerOps.count(e.a->text) && findMethod("operand", e.a->text)) {
+                            const std::string& op = e.a->text;
+                            VType rv;
+                            bool ok = exprVType(*e.a->a, rv);
+                            int ptr = rv.ptr - (e.a->op == "->" ? 1 : 0);
+                            int sz = ok ? scalarByteSize(rv.name) : 0;
+                            if (!ok || ptr != 0 || rv.arr != 0
+                                || (sz != 2 && sz != 4 && sz != 8))
+                                throw CompileError{"operand 序列化指令 " + op
+                                    + " 仅支持 2/4/8 字节标量接收者", e.line};
+                            const char* sfx = sz == 2 ? "s" : sz == 4 ? "l" : "ll";
+                            // 接收者地址形态（&v / p）与值形态（v / *p）
+                            auto emitAddr = [&] {
+                                if (e.a->op == ".") out << "&";
+                                out << "("; emitExpr(*e.a->a, true); out << ")";
+                            };
+                            auto emitVal = [&] {
+                                if (e.a->op == ".") { out << "("; emitExpr(*e.a->a, true); out << ")"; }
+                                else { out << "(*("; emitExpr(*e.a->a, true); out << "))"; }
+                            };
+                            if (op == "read" || op == "nread") {
+                                if (e.args.size() != 1)
+                                    throw CompileError{op + " 需要 1 个缓冲实参", e.line};
+                                out << "sc_" << op << "_" << sfx << "(";
+                                emitAddr(); out << ", "; emitExpr(*e.args[0], true); out << ")";
+                                break;
+                            }
+                            if (op == "write" || op == "nwrite") {
+                                if (e.args.size() != 1)
+                                    throw CompileError{op + " 需要 1 个缓冲实参", e.line};
+                                out << "sc_" << op << "_" << sfx << "(";
+                                emitExpr(*e.args[0], true); out << ", "; emitVal(); out << ")";
+                                break;
+                            }
+                            if (op == "nget") {
+                                if (!e.args.empty())
+                                    throw CompileError{"nget 不接受实参", e.line};
+                                out << "sc_nget_" << sfx << "("; emitVal(); out << ")";
+                                break;
+                            }
+                            // nset：v = sc_nset_X(网络序值)
+                            if (e.args.size() != 1)
+                                throw CompileError{"nset 需要 1 个网络序值实参", e.line};
+                            out << "("; emitVal(); out << " = sc_nset_" << sfx << "(";
+                            emitExpr(*e.args[0], true); out << "))";
                             break;
                         }
                     }

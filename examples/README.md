@@ -30,3 +30,25 @@
 | feature_forward.sc | 定义顺序无关（前置声明 + 函数原型，互递归） | 可直接运行 |
 | feature_export_inc.sc | `@inc` 导出到生成头文件 | 仅 `--emit-c -o`（无 main） |
 | feature_bad_value_cycle.sc | 按值互相包含的语义报错 | 负向用例，预期编译失败 |
+
+## 维护引用清单：增删 / 重排 / 改名 feature 时要连带改的地方
+
+feature 的**文件名**与**编号顺序**被多处硬编码引用。调整时按下表逐一同步，
+否则回归会失败或文档失准：
+
+| 牵连位置 | 内容 | 何时要改 |
+|----------|------|----------|
+| [tests/golden/](../tests/golden) | 每个 feature 一对同名快照 `featureN.c` + `featureN.sc`（负向用例为 `feature_bad_value_cycle.err`） | 改名→`git mv` 重命名；改内容/重排→ `./tests/run.sh --update` 重生成 |
+| [tests/run.sh](../tests/run.sh) | POSITIVE 列表逐行硬编码 `examples/featureN.sc` 路径与顺序，末尾负向单列 | 增删 / 重排 / 改名 |
+| [build.sh](../build.sh) | e2e 冒烟 `for f in feature1 ... feature_forward` 编号列表；另有特例硬编码 `feature1`（--emit-c 演示）、`feature_export_inc`（仅头文件）、`feature_bad_value_cycle`（预期报错） | 增删 / 重排；动到这三个特例的名字/编号时 |
+| 本文件 [README.md](README.md) | 上方两张特性索引表（编号系列强调"按引入顺序"，重排即需重写描述） | 增删 / 重排 / 改内容 |
+| feature 间交叉引用 | feature 源码注释里互相提编号，如 [feature15.sc](feature15.sc) 注释"对比 feature12" | 被引用方改号时 |
+| [builtins/REFERENCE.md](../builtins/REFERENCE.md) | "完整示例见 `examples/feature6.sc` / `feature7.sc`"等编号引用 | 被引用方改号时 |
+| 根 [README.md](../README.md) | 命令示例用 `feature1.sc` | 仅 feature1 被动到时 |
+| [compiler.md](../compiler.md) | 示意报错文本 `feature1.sc:31`（影响很小） | 仅 feature1 被动到时 |
+
+**不用动**：`.git/*`（历史提交信息）、构建产物（`compiler/build*`、`CMakeFiles/*`、`vendor/*`）。
+
+**推荐顺序**：① 改/移动 `examples/featureN.sc` 本体 → ② 同步 `tests/run.sh`、`build.sh` 编号清单
+→ ③ 改交叉引用注释、本表所列文档编号 → ④ `git mv` 或删除对应 `tests/golden/featureN.*`
+→ ⑤ `./tests/run.sh --update` 重生成 golden → ⑥ `./build.sh test` 跑通双后端回归。

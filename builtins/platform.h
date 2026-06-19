@@ -99,23 +99,190 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #define P_POSIX_LIKE 0
 #endif
 
-/* ---------------- 字节序 ---------------- */
+///////////////////////////////////////////////////////////////////////////////
+// 内存对齐
+///////////////////////////////////////////////////////////////////////////////
+
+// 返回类型的对齐要求（字节数）
+#if defined(__cplusplus)
+#   define ALIGN_OF(type)   alignof(type)
+#elif __STDC_VERSION__ >= 201112L
+#   define ALIGN_OF(type)   _Alignof(type)
+#elif defined(_MSC_VER)
+#   define ALIGN_OF(type)   __alignof(type)
+#else
+#   define ALIGN_OF(type)   __alignof__(type)
+#endif
+
+// 平台最大对齐要求（malloc/calloc 保证的对齐）
+// + C11: stddef.h 定义了 max_align_t
+// + 旧标准：手动定义为包含所有最大对齐类型的 union
+#if __STDC_VERSION__ >= 201112L
+    // C11 already defines max_align_t in stddef.h (included above)
+#   define MAX_ALIGN        ALIGN_OF(max_align_t)
+#elif defined(__cplusplus) && __cplusplus >= 201103L
+    // C++11 has std::max_align_t
+#   include <cstddef>
+    typedef std::max_align_t max_align_t;
+#   define MAX_ALIGN        ALIGN_OF(max_align_t)
+#else
+    // Pre-C11: define manually
+    typedef union {
+        long long ll;
+        long double ld;
+        void *p;
+        double d;
+    } max_align_t;
+#   define MAX_ALIGN        ALIGN_OF(max_align_t)
+#endif
+
+// 声明对齐属性
+// + 用法: ALIGN_AS(16) uint8_t buf[64];
+// + 如果直接使用对象类型（如结构体）定义，则默认会对齐为类型的自然对齐，即无需显式通过 ALIGN_AS 指定对齐
+#if defined(_MSC_VER)
+#   define ALIGN_AS(n)      __declspec(align(n))
+#else
+#   define ALIGN_AS(n)      __attribute__((aligned(n)))
+#endif
+
+// 检查指针是否按指定字节数对齐
+// + 用法: if (IS_ALIGNED(ptr, 4)) { ... }
+#define IS_ALIGNED(ptr, n)  (((uintptr_t)(ptr) & ((n) - 1)) == 0)
+
+// 主机字节序的未对齐安全读写（不做字节序转换，仅解决对齐问题）
+// + 前提：数据字节序与本机一致（本机存、本机取）
+// sc_read_x/sc_write_x: 通过指针读写，sc_read_s(&result, bytes) / sc_write_s(bytes, value)
+// sc_get_x: 返回值版本，uint16_t val = sc_get_s(bytes)
+// + memcpy 会被编译器优化为单条 load/store 指令
+static inline uint16_t sc_get_s(const void *src)  { uint16_t v; memcpy(&v, src, 2); return v; }
+static inline uint32_t sc_get_l(const void *src)  { uint32_t v; memcpy(&v, src, 4); return v; }
+static inline uint64_t sc_get_ll(const void *src) { uint64_t v; memcpy(&v, src, 8); return v; }
+#define sc_read_s(sp, bytes)   memcpy((sp), (bytes), 2)
+#define sc_read_l(lp, bytes)   memcpy((lp), (bytes), 4)
+#define sc_read_ll(llp, bytes) memcpy((llp), (bytes), 8)
+#define sc_write_s(bytes, s)   memcpy((bytes), &(s), 2)
+#define sc_write_l(bytes, l)   memcpy((bytes), &(l), 4)
+#define sc_write_ll(bytes, ll) memcpy((bytes), &(ll), 8)
+
+///////////////////////////////////////////////////////////////////////////////
+// 字节序
+///////////////////////////////////////////////////////////////////////////////
 
 #if P_WIN
-#   ifndef LITTLE_ENDIAN
-#   define LITTLE_ENDIAN 1234
+#   define LITTLE_ENDIAN   1234
+#   define BIG_ENDIAN      4321
+#   define BYTE_ORDER      LITTLE_ENDIAN
+    // 参考 winsock2.h 条件判断逻辑
+    // + Windows: SDK 在 Windows 8+ 或定义 INCL_EXTRA_HTON_FUNCTIONS 时提供 htonll/ntohll
+#   if !defined(INCL_EXTRA_HTON_FUNCTIONS) && \
+       (!defined(NTDDI_VERSION) || NTDDI_VERSION < 0x06020000) /* NTDDI_WIN8 */
+    static inline uint64_t htonll(uint64_t x) {
+        return (((uint64_t)htonl((uint32_t)(x & 0xFFFFFFFFULL))) << 32) | (uint64_t)htonl((uint32_t)(x >> 32));
+    }
+    static inline uint64_t ntohll(uint64_t x) { return htonll(x); }
 #   endif
-#   ifndef BIG_ENDIAN
-#   define BIG_ENDIAN    4321
-#   endif
-#   ifndef BYTE_ORDER
-#   define BYTE_ORDER    LITTLE_ENDIAN
-#   endif
-#elif P_DARWIN || P_BSD
+#elif P_DARWIN
 #   include <machine/endian.h>
-#else
+#   include <libkern/OSByteOrder.h>
+#   ifndef htonll
+#       define htonll(x) OSSwapHostToBigInt64(x)
+#   endif
+#   ifndef ntohll
+#       define ntohll(x) OSSwapBigToHostInt64(x)
+#   endif
+#elif P_LINUX || P_BSD
 #   include <endian.h>
+#   ifndef htonll
+#       define htonll(x) htobe64(x)
+#   endif
+#   ifndef ntohll
+#       define ntohll(x) be64toh(x)
+#   endif
+#else
+#   include <sys/param.h>
+    static inline uint64_t htonll(uint64_t x) {
+        const uint32_t hi = htonl((uint32_t)(x >> 32));
+        const uint32_t lo = htonl((uint32_t)(x & 0xFFFFFFFFULL));
+        return ((uint64_t)lo << 32) | hi;
+    }
+    static inline uint64_t ntohll(uint64_t x) { return htonll(x); }
 #endif
+
+#if BYTE_ORDER == BIG_ENDIAN
+#   define IS_BIG_ENDIAN 1
+#   define IS_LITTLE_ENDIAN 0
+#elif BYTE_ORDER == LITTLE_ENDIAN
+#   define IS_BIG_ENDIAN 0
+#   define IS_LITTLE_ENDIAN 1
+#else
+#error "Unknown byte order"
+#endif
+
+// 网络字节序（大端）的未对齐安全读写（同时完成字节序转换）
+// sc_nread/sc_nwrite: 通过指针读写，sc_nread_s(&result, bytes) / sc_nwrite_s(bytes, value)
+// sc_nget/sc_nset: 值↔值字节序转换（operand 的 nget/nset）
+//   sc_nget_X(h)：取主机序值 h 的网络序值（host→net，等价 htonX）
+//   sc_nset_X(n)：取网络序值 n 的主机序值（net→host，等价 ntohX）
+//                字节交换自反，故 sc_nset 复用 sc_nget；h/n 会多次求值，不得带副作用
+// + 避免未对齐访问，适用于从网络包 payload 直接读取/构造
+#if IS_BIG_ENDIAN
+#   define sc_nread_s(bytes, result)   memcpy((result), (bytes), 2)
+#   define sc_nread_l(bytes, result)   memcpy((result), (bytes), 4)
+#   define sc_nread_ll(bytes, result)  memcpy((result), (bytes), 8)
+#   define sc_nwrite_s(h, bytes)       memcpy((bytes), &(h), 2)
+#   define sc_nwrite_l(h, bytes)       memcpy((bytes), &(h), 4)
+#   define sc_nwrite_ll(h, bytes)      memcpy((bytes), &(h), 8)
+#   define sc_nget_s(h)                ((uint16_t)(h))
+#   define sc_nget_l(h)                ((uint32_t)(h))
+#   define sc_nget_ll(h)               ((uint64_t)(h))
+#else
+#   define sc_nread_s(sp, bytes)       (*(sp) = ((uint16_t)(bytes)[0] << 8) | (uint16_t)(bytes)[1])
+#   define sc_nread_l(lp, bytes)       (*(lp) = ((uint32_t)(bytes)[0] << 24) | \
+                                             ((uint32_t)(bytes)[1] << 16) | \
+                                             ((uint32_t)(bytes)[2] << 8) | \
+                                             (uint32_t)(bytes)[3])
+#   define sc_nread_ll(llp, bytes)     (*(llp) = ((uint64_t)(bytes)[0] << 56) | \
+                                              ((uint64_t)(bytes)[1] << 48) | \
+                                              ((uint64_t)(bytes)[2] << 40) | \
+                                              ((uint64_t)(bytes)[3] << 32) | \
+                                              ((uint64_t)(bytes)[4] << 24) | \
+                                              ((uint64_t)(bytes)[5] << 16) | \
+                                              ((uint64_t)(bytes)[6] << 8) | \
+                                              (uint64_t)(bytes)[7])
+#   define sc_nwrite_s(bytes, s)       ((bytes)[0] = (uint8_t)((s) >> 8), \
+                                     (bytes)[1] = (uint8_t)((s) & 0xFF))
+#   define sc_nwrite_l(bytes, l)       ((bytes)[0] = (uint8_t)((l) >> 24), \
+                                     (bytes)[1] = (uint8_t)((l) >> 16), \
+                                     (bytes)[2] = (uint8_t)((l) >> 8), \
+                                     (bytes)[3] = (uint8_t)((l) & 0xFF))
+#   define sc_nwrite_ll(bytes, ll)     ((bytes)[0] = (uint8_t)((ll) >> 56), \
+                                     (bytes)[1] = (uint8_t)((ll) >> 48), \
+                                     (bytes)[2] = (uint8_t)((ll) >> 40), \
+                                     (bytes)[3] = (uint8_t)((ll) >> 32), \
+                                     (bytes)[4] = (uint8_t)((ll) >> 24), \
+                                     (bytes)[5] = (uint8_t)((ll) >> 16), \
+                                     (bytes)[6] = (uint8_t)((ll) >> 8), \
+                                     (bytes)[7] = (uint8_t)((ll) & 0xFF))
+#   define sc_nget_s(h)                ((uint16_t)((((uint16_t)(h)) >> 8) | (((uint16_t)(h)) << 8)))
+#   define sc_nget_l(h)                ((uint32_t)((((uint32_t)(h)) >> 24) | \
+                                       ((((uint32_t)(h)) >> 8) & 0x0000FF00U) | \
+                                       ((((uint32_t)(h)) << 8) & 0x00FF0000U) | \
+                                       (((uint32_t)(h)) << 24)))
+#   define sc_nget_ll(h)               ((uint64_t)((((uint64_t)(h)) >> 56) | \
+                                       ((((uint64_t)(h)) >> 40) & 0x000000000000FF00ULL) | \
+                                       ((((uint64_t)(h)) >> 24) & 0x0000000000FF0000ULL) | \
+                                       ((((uint64_t)(h)) >> 8)  & 0x00000000FF000000ULL) | \
+                                       ((((uint64_t)(h)) << 8)  & 0x000000FF00000000ULL) | \
+                                       ((((uint64_t)(h)) << 24) & 0x0000FF0000000000ULL) | \
+                                       ((((uint64_t)(h)) << 40) & 0x00FF000000000000ULL) | \
+                                       (((uint64_t)(h)) << 56)))
+#endif
+// sc_nset_X(n) = net→host（字节交换自反，与 sc_nget 同操作）
+#define sc_nset_s(n)                   sc_nget_s(n)
+#define sc_nset_l(n)                   sc_nget_l(n)
+#define sc_nset_ll(n)                  sc_nget_ll(n)
+
+static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
 
 /* ---------------- 线程局部存储 ---------------- */
 
@@ -266,12 +433,21 @@ static inline void P_usleep(uint64_t us) {
 #endif
 }
 
-//------------------  原子操作  ------------------------------------------------
-// 优先使用 C11 stdatomic.h，否则使用平台特定实现
-// 注意：所有 P_inc/P_and/P_or/P_xor 等操作返回新值（操作后的值）
-// P_get_and_xxx 操作返回旧值（操作前的值）
-// P_test_and_set 返回 bool（true 表示成功）；失败时 *pTestVar 更新为实际旧值
+//------------------  原子操作（operand 指令的 C 侧实现：sc_*）  ----------------
+// 优先使用 C11 stdatomic.h，否则使用平台特定实现。命名直接采用 op.sc 的 operand
+// 指令名 sc_<op>，由编译器对基础类型的 . 操作透传调用（见文末 operand 指令透传说明）。
+// 注意：所有 sc_inc/sc_and/sc_or/sc_xor 等操作返回新值（操作后的值）
+// sc_get_and_xxx 操作返回旧值（操作前的值）
+// sc_test_and_set 返回 bool（true 表示成功）；失败时 *pTestVar 更新为实际旧值
 // 注意：C11/MSVC 分支的返回新值宏中 v 会求值两次，v 不得带副作用
+//-----------------------------------------------------------------------------
+
+//------------------  operand 指令透传（sc_*）  -------------------------------
+// op.sc 的 operand 伪结构体在 sc 侧声明设备操作数通用指令；scc 把基础/任意类型
+// 上的 . 操作（如 v.get() / p->set(x)）透传为上面同名的 sc_<op> 宏（按平台分支
+// 直接定义，无中间层）。接收者一律以指针传入（值接收者 v.op() 自动取址 &v），故各
+// sc_<op> 首参均为指针 pVar。这些宏类型无关（__typeof__ 推导），新增 operand 操作
+// 时在 op.sc 与本文件三个平台分支中成对添加同名 sc_<op>。
 //-----------------------------------------------------------------------------
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
@@ -281,243 +457,391 @@ static inline void P_usleep(uint64_t us) {
 /* 用 __typeof__ 而非 typeof：typeof 是 GCC/Clang 扩展，C23 前非标准，
  * 会触发 Clang -Wlanguage-extension-token 警告；__typeof__ 是双下划线形式，
  * 同样受 GCC/Clang 支持但不触发该警告。 */
-#define P_get(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_relaxed)
-#define P_set(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_acq(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_acquire)
-#define P_set_rel(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_ord(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_seq_cst)
-#define P_set_ord(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_relaxed)
+#define sc_set(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_acq(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_acquire)
+#define sc_set_rel(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_ord(pVar) atomic_load_explicit((_Atomic __typeof__(*pVar)*)pVar, memory_order_seq_cst)
+#define sc_set_ord(pVar, v) atomic_store_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
 
-#define P_get_and_set(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_and_set_dbl(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
-#define P_get_and_set_acq(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
-#define P_get_and_set_rel(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_and_set_ord(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get_and_set(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_and_set_dbl(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define sc_get_and_set_acq(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define sc_get_and_set_rel(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_and_set_ord(pVar, v) atomic_exchange_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
 
-#define P_inc(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) + (v))
-#define P_inc_dbl(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) + (v))
-#define P_inc_acq(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) + (v))
-#define P_inc_rel(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) + (v))
-#define P_inc_ord(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) + (v))
-#define P_and(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) & (v))
-#define P_and_dbl(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) & (v))
-#define P_and_acq(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) & (v))
-#define P_and_rel(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) & (v))
-#define P_and_ord(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) & (v))
-#define P_or(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) | (v))
-#define P_or_dbl(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) | (v))
-#define P_or_acq(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) | (v))
-#define P_or_rel(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) | (v))
-#define P_or_ord(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) | (v))
-#define P_xor(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) ^ (v))
-#define P_xor_dbl(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) ^ (v))
-#define P_xor_acq(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) ^ (v))
-#define P_xor_rel(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) ^ (v))
-#define P_xor_ord(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) ^ (v))
+#define sc_inc(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) + (v))
+#define sc_inc_dbl(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) + (v))
+#define sc_inc_acq(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) + (v))
+#define sc_inc_rel(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) + (v))
+#define sc_inc_ord(pVar, v) (atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) + (v))
+#define sc_and(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) & (v))
+#define sc_and_dbl(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) & (v))
+#define sc_and_acq(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) & (v))
+#define sc_and_rel(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) & (v))
+#define sc_and_ord(pVar, v) (atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) & (v))
+#define sc_or(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) | (v))
+#define sc_or_dbl(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) | (v))
+#define sc_or_acq(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) | (v))
+#define sc_or_rel(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) | (v))
+#define sc_or_ord(pVar, v) (atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) | (v))
+#define sc_xor(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed) ^ (v))
+#define sc_xor_dbl(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel) ^ (v))
+#define sc_xor_acq(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire) ^ (v))
+#define sc_xor_rel(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release) ^ (v))
+#define sc_xor_ord(pVar, v) (atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst) ^ (v))
 
-#define P_get_and_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_and_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
-#define P_get_and_inc_acq(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
-#define P_get_and_inc_rel(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_and_inc_ord(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
-#define P_get_and_and(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_and_and_dbl(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
-#define P_get_and_and_acq(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
-#define P_get_and_and_rel(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_and_and_ord(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
-#define P_get_and_or(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_and_or_dbl(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
-#define P_get_and_or_acq(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
-#define P_get_and_or_rel(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_and_or_ord(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
-#define P_get_and_xor(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
-#define P_get_and_xor_dbl(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
-#define P_get_and_xor_acq(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
-#define P_get_and_xor_rel(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
-#define P_get_and_xor_ord(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get_and_inc(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_and_inc_dbl(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define sc_get_and_inc_acq(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define sc_get_and_inc_rel(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_and_inc_ord(pVar, v) atomic_fetch_add_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get_and_and(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_and_and_dbl(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define sc_get_and_and_acq(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define sc_get_and_and_rel(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_and_and_ord(pVar, v) atomic_fetch_and_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get_and_or(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_and_or_dbl(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define sc_get_and_or_acq(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define sc_get_and_or_rel(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_and_or_ord(pVar, v) atomic_fetch_or_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
+#define sc_get_and_xor(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_relaxed)
+#define sc_get_and_xor_dbl(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acq_rel)
+#define sc_get_and_xor_acq(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_acquire)
+#define sc_get_and_xor_rel(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_release)
+#define sc_get_and_xor_ord(pVar, v) atomic_fetch_xor_explicit((_Atomic __typeof__(*pVar)*)pVar, v, memory_order_seq_cst)
 
-#define P_test_and_set(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_relaxed)
-#define P_test_and_set_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_relaxed)
-#define P_test_and_set_rel(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_relaxed)
-#define P_test_and_set_dbl(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_relaxed)
-#define P_test_and_set_ord(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_relaxed)
+#define sc_test_and_set(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_relaxed)
+#define sc_test_and_set_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_relaxed)
+#define sc_test_and_set_rel(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_relaxed)
+#define sc_test_and_set_dbl(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_relaxed)
+#define sc_test_and_set_ord(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_relaxed)
 
 /* 注：以下 _or_acq 变体的失败序强于成功序，C11 禁止该组合（C17 起放宽）；
  * gcc/clang 实际均接受，严格 C11 环境下请用成功序 ≥ 失败序的变体 */
-#define P_test_and_set_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_acquire)
-#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_acquire)
-#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_acquire)
-#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_acquire)
-#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_acquire)
+#define sc_test_and_set_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_relaxed, memory_order_acquire)
+#define sc_test_and_set_acq_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acquire, memory_order_acquire)
+#define sc_test_and_set_rel_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_release, memory_order_acquire)
+#define sc_test_and_set_dbl_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_acq_rel, memory_order_acquire)
+#define sc_test_and_set_ord_or_acq(pVar, pTestVar, v) atomic_compare_exchange_strong_explicit((_Atomic __typeof__(*pVar)*)pVar, pTestVar, v, memory_order_seq_cst, memory_order_acquire)
 
 #elif P_WIN && !defined(__GNUC__)
 // Windows MSVC (Interlocked* 操作默认有 full barrier，无法实现弱内存序)
 // 限制：本分支统一按 32 位 LONG 操作，仅适用于 32 位整型；
 //        64 位变量需 Interlocked*64 系列，未封装（MinGW 走 __GNUC__ 分支不受限）。
-//        P_get/P_get_acq 为普通读（x86 对齐读天然原子且自带 acquire）；
-//        P_get_ord 用 InterlockedOr(p, 0) 获得 full barrier 语义。
+//        sc_get/sc_get_acq 为普通读（x86 对齐读天然原子且自带 acquire）；
+//        sc_get_ord 用 InterlockedOr(p, 0) 获得 full barrier 语义。
 
-#define P_get(pVar) (*(pVar))
-#define P_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_acq(pVar) (*(pVar))
-#define P_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_ord(pVar) InterlockedOr((volatile LONG*)(pVar), 0)
-#define P_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get(pVar) (*(pVar))
+#define sc_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_acq(pVar) (*(pVar))
+#define sc_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_ord(pVar) InterlockedOr((volatile LONG*)(pVar), 0)
+#define sc_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
 
-#define P_get_and_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_set_dbl(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_set_acq(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_set(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_set_dbl(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_set_acq(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_set_rel(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_set_ord(pVar, v) InterlockedExchange((volatile LONG*)(pVar), (LONG)(v))
 
 // 返回新值：InterlockedExchangeAdd 返回旧值，需要 + v
-#define P_inc(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
-#define P_inc_dbl(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
-#define P_inc_acq(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
-#define P_inc_rel(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
-#define P_inc_ord(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define sc_inc(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define sc_inc_dbl(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define sc_inc_acq(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define sc_inc_rel(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
+#define sc_inc_ord(pVar, v) (InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v)) + (v))
 // 返回新值：InterlockedAnd 返回旧值，需要 & v
-#define P_and(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
-#define P_and_dbl(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
-#define P_and_acq(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
-#define P_and_rel(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
-#define P_and_ord(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
-#define P_or(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
-#define P_or_dbl(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
-#define P_or_acq(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
-#define P_or_rel(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
-#define P_or_ord(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
-#define P_xor(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
-#define P_xor_dbl(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
-#define P_xor_acq(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
-#define P_xor_rel(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
-#define P_xor_ord(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define sc_and(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define sc_and_dbl(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define sc_and_acq(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define sc_and_rel(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define sc_and_ord(pVar, v) (InterlockedAnd((volatile LONG*)(pVar), (LONG)(v)) & (v))
+#define sc_or(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define sc_or_dbl(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define sc_or_acq(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define sc_or_rel(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define sc_or_ord(pVar, v) (InterlockedOr((volatile LONG*)(pVar), (LONG)(v)) | (v))
+#define sc_xor(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define sc_xor_dbl(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define sc_xor_acq(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define sc_xor_rel(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
+#define sc_xor_ord(pVar, v) (InterlockedXor((volatile LONG*)(pVar), (LONG)(v)) ^ (v))
 
 // 返回旧值
-#define P_get_and_inc(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_inc_dbl(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_inc_acq(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_inc_rel(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_inc_ord(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_and(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_and_dbl(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_and_acq(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_and_rel(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_and_ord(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_or(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_or_dbl(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_or_acq(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_or_rel(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_or_ord(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_xor(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_xor_dbl(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_xor_acq(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_xor_rel(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
-#define P_get_and_xor_ord(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_inc(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_inc_dbl(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_inc_acq(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_inc_rel(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_inc_ord(pVar, v) InterlockedExchangeAdd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_and(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_and_dbl(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_and_acq(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_and_rel(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_and_ord(pVar, v) InterlockedAnd((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_or(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_or_dbl(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_or_acq(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_or_rel(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_or_ord(pVar, v) InterlockedOr((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_xor(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_xor_dbl(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_xor_acq(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_xor_rel(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
+#define sc_get_and_xor_ord(pVar, v) InterlockedXor((volatile LONG*)(pVar), (LONG)(v))
 
 // 返回 bool：InterlockedCompareExchange 返回旧值，比较是否等于 expected
-static inline bool P_test_and_set_impl(volatile LONG* pVar, LONG* pTestVar, LONG v) {
+static inline bool sc_test_and_set_impl(volatile LONG* pVar, LONG* pTestVar, LONG v) {
     LONG old = InterlockedCompareExchange(pVar, v, *pTestVar);
     if (old == *pTestVar) return true;
     *pTestVar = old;
     return false;
 }
-#define P_test_and_set(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_rel(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_dbl(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_ord(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_rel(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_dbl(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_ord(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
 
-#define P_test_and_set_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
-#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) P_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_or_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_acq_or_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_rel_or_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_dbl_or_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
+#define sc_test_and_set_ord_or_acq(pVar, pTestVar, v) sc_test_and_set_impl((volatile LONG*)(pVar), (LONG*)(pTestVar), (LONG)(v))
 
 #elif defined(__GNUC__)
 
-#define P_get(pVar) __atomic_load_n(pVar, __ATOMIC_RELAXED)
-#define P_set(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELAXED)
-#define P_get_acq(pVar) __atomic_load_n(pVar, __ATOMIC_ACQUIRE)
-#define P_set_rel(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELEASE)
-#define P_get_ord(pVar) __atomic_load_n(pVar, __ATOMIC_SEQ_CST)
-#define P_set_ord(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get(pVar) __atomic_load_n(pVar, __ATOMIC_RELAXED)
+#define sc_set(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_acq(pVar) __atomic_load_n(pVar, __ATOMIC_ACQUIRE)
+#define sc_set_rel(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_ord(pVar) __atomic_load_n(pVar, __ATOMIC_SEQ_CST)
+#define sc_set_ord(pVar, v) __atomic_store_n(pVar, v, __ATOMIC_SEQ_CST)
 
-#define P_get_and_set(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELAXED)
-#define P_get_and_set_dbl(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQ_REL)
-#define P_get_and_set_acq(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQUIRE)
-#define P_get_and_set_rel(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELEASE)
-#define P_get_and_set_ord(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get_and_set(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_and_set_dbl(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_get_and_set_acq(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_get_and_set_rel(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_and_set_ord(pVar, v) __atomic_exchange_n(pVar, v, __ATOMIC_SEQ_CST)
 
-#define P_inc(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELAXED)
-#define P_inc_dbl(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQ_REL)
-#define P_inc_acq(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQUIRE)
-#define P_inc_rel(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELEASE)
-#define P_inc_ord(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_SEQ_CST)
-#define P_and(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELAXED)
-#define P_and_dbl(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQ_REL)
-#define P_and_acq(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQUIRE)
-#define P_and_rel(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELEASE)
-#define P_and_ord(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_SEQ_CST)
-#define P_or(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELAXED)
-#define P_or_dbl(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQ_REL)
-#define P_or_acq(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQUIRE)
-#define P_or_rel(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELEASE)
-#define P_or_ord(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_SEQ_CST)
-#define P_xor(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELAXED)
-#define P_xor_dbl(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQ_REL)
-#define P_xor_acq(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQUIRE)
-#define P_xor_rel(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELEASE)
-#define P_xor_ord(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_inc(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELAXED)
+#define sc_inc_dbl(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_inc_acq(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_inc_rel(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_RELEASE)
+#define sc_inc_ord(pVar, v) __atomic_add_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_and(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELAXED)
+#define sc_and_dbl(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_and_acq(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_and_rel(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_RELEASE)
+#define sc_and_ord(pVar, v) __atomic_and_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_or(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELAXED)
+#define sc_or_dbl(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_or_acq(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_or_rel(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_RELEASE)
+#define sc_or_ord(pVar, v) __atomic_or_fetch(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_xor(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELAXED)
+#define sc_xor_dbl(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_xor_acq(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_xor_rel(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_RELEASE)
+#define sc_xor_ord(pVar, v) __atomic_xor_fetch(pVar, v, __ATOMIC_SEQ_CST)
 
-#define P_get_and_inc(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELAXED)
-#define P_get_and_inc_dbl(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQ_REL)
-#define P_get_and_inc_acq(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQUIRE)
-#define P_get_and_inc_rel(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELEASE)
-#define P_get_and_inc_ord(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_SEQ_CST)
-#define P_get_and_and(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELAXED)
-#define P_get_and_and_dbl(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQ_REL)
-#define P_get_and_and_acq(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQUIRE)
-#define P_get_and_and_rel(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELEASE)
-#define P_get_and_and_ord(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_SEQ_CST)
-#define P_get_and_or(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELAXED)
-#define P_get_and_or_dbl(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQ_REL)
-#define P_get_and_or_acq(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQUIRE)
-#define P_get_and_or_rel(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELEASE)
-#define P_get_and_or_ord(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_SEQ_CST)
-#define P_get_and_xor(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELAXED)
-#define P_get_and_xor_dbl(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQ_REL)
-#define P_get_and_xor_acq(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQUIRE)
-#define P_get_and_xor_rel(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELEASE)
-#define P_get_and_xor_ord(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get_and_inc(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_and_inc_dbl(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_get_and_inc_acq(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_get_and_inc_rel(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_and_inc_ord(pVar, v) __atomic_fetch_add(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get_and_and(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_and_and_dbl(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_get_and_and_acq(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_get_and_and_rel(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_and_and_ord(pVar, v) __atomic_fetch_and(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get_and_or(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_and_or_dbl(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_get_and_or_acq(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_get_and_or_rel(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_and_or_ord(pVar, v) __atomic_fetch_or(pVar, v, __ATOMIC_SEQ_CST)
+#define sc_get_and_xor(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELAXED)
+#define sc_get_and_xor_dbl(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQ_REL)
+#define sc_get_and_xor_acq(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_ACQUIRE)
+#define sc_get_and_xor_rel(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_RELEASE)
+#define sc_get_and_xor_ord(pVar, v) __atomic_fetch_xor(pVar, v, __ATOMIC_SEQ_CST)
 
-#define P_test_and_set(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+#define sc_test_and_set(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
 
-#define P_test_and_set_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)
-#define P_test_and_set_rel(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED)
-#define P_test_and_set_dbl(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)
-#define P_test_and_set_ord(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)
+#define sc_test_and_set_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)
+#define sc_test_and_set_rel(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_RELAXED)
+#define sc_test_and_set_dbl(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)
+#define sc_test_and_set_ord(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_RELAXED)
 
-#define P_test_and_set_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_ACQUIRE)
-#define P_test_and_set_acq_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)
-#define P_test_and_set_rel_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
-#define P_test_and_set_dbl_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
-#define P_test_and_set_ord_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_ACQUIRE)
+#define sc_test_and_set_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELAXED, __ATOMIC_ACQUIRE)
+#define sc_test_and_set_acq_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)
+#define sc_test_and_set_rel_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
+#define sc_test_and_set_dbl_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)
+#define sc_test_and_set_ord_or_acq(pVar, pTestVar, v) __atomic_compare_exchange_n(pVar, pTestVar, v, false, __ATOMIC_SEQ_CST, __ATOMIC_ACQUIRE)
 
 #else
 #error "Unsupported platform"
 #endif
 
-//------------------  operand 指令透传（sc_*）  -------------------------------
-// op.sc 的 operand 伪结构体在 sc 侧声明设备操作数通用指令；scc 把基础/任意类型
-// 上的 . 操作（如 v.get() / p->set(x)）透传为下面的同名 sc_<op> 宏。接收者一律以
-// 指针传入（值接收者 v.op() 自动取址 &v），故各 sc_<op> 首参均为指针 pVar。
-// 这些宏类型无关（__typeof__ 推导），新增 operand 操作时在 op.sc 与此处成对添加。
-//-----------------------------------------------------------------------------
-#define sc_get(pVar)        P_get(pVar)          /* 原子读（relaxed） */
-#define sc_set(pVar, v)     P_set(pVar, v)       /* 原子写（relaxed） */
-#define sc_get_acq(pVar)    P_get_acq(pVar)      /* 原子读（acquire） */
-#define sc_set_rel(pVar, v) P_set_rel(pVar, v)   /* 原子写（release） */
+///////////////////////////////////////////////////////////////////////////////
+// 随机数生成
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * P_rand_init()   - 初始化随机数生成器（可选，仅降级方案需要）
+ * P_rand32()      - 生成 32 位随机数（加密安全）
+ * P_rand64()      - 生成 64 位随机数（加密安全）
+ * P_rand_bytes()  - 填充随机字节
+ *
+ * 平台实现：
+ *   - macOS/BSD:  arc4random() (ChaCha20, CSPRNG) - 无需初始化
+ *   - Windows:    rand_s() (RtlGenRandom, CSPRNG) - 无需初始化
+ *   - Linux:      /dev/urandom (内核 CSPRNG) - 随用随开，无需初始化
+ *   - 降级方案:   srand(time) + rand() (自动初始化，仅用于测试)
+ *
+ * 性能考虑：
+ *   - Linux 平台采用"随用随开"策略，每次打开/关闭 /dev/urandom
+ *   - 现代内核的 open() 开销很小，适合中低频调用
+ *   - 避免长期占用文件描述符，简化生命周期管理
+ *
+ * 返回值：非零随机数（0 保留为无效值）
+ */
+
+#if P_DARWIN || P_BSD
+    // macOS/BSD: arc4random() 无需初始化
+    static inline void P_rand_init(void) { /* 无操作 */ }
+
+    static inline uint32_t P_rand32(void) {
+        uint32_t r = arc4random();
+        return r ? r : 1;  // 避免返回 0
+    }
+
+    static inline uint64_t P_rand64(void) {
+        uint64_t r = ((uint64_t)arc4random() << 32) | arc4random();
+        return r ? r : 1;
+    }
+
+#elif P_WIN
+    // Windows: rand_s() 在 <stdlib.h> 中，需要定义 _CRT_RAND_S
+    #ifndef _CRT_RAND_S
+        #define _CRT_RAND_S
+    #endif
+
+    #if !(defined(_MSC_VER) && _MSC_VER >= 1400)
+        static bool g_rand_initialized = false;
+    #endif
+
+    static inline void P_rand_init(void) {
+        #if defined(_MSC_VER) && _MSC_VER >= 1400
+            /* rand_s() 无需初始化 */
+        #else
+            /* 降级方案：初始化 rand() */
+            if (!g_rand_initialized) {
+                srand((unsigned int)time(NULL));
+                g_rand_initialized = true;
+            }
+        #endif
+    }
+
+    static inline uint32_t P_rand32(void) {
+        uint32_t r;
+        #if defined(_MSC_VER) && _MSC_VER >= 1400
+            if (rand_s(&r) != 0) r = (uint32_t)time(NULL);
+        #else
+            if (!g_rand_initialized) P_rand_init();
+            r = (uint32_t)rand();  // 降级方案
+        #endif
+        return r ? r : 1;
+    }
+
+    static inline uint64_t P_rand64(void) {
+        uint64_t r;
+        #if defined(_MSC_VER) && _MSC_VER >= 1400
+            uint32_t hi, lo;
+            while (rand_s(&hi) != 0 || rand_s(&lo) != 0) { /* retry */ }
+            r = ((uint64_t)hi << 32) | lo;
+        #else
+            if (!g_rand_initialized) P_rand_init();
+            // 降级方案：组合多个 rand() 调用
+            r = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^
+                ((uint64_t)rand() << 16) ^ (uint64_t)rand();
+        #endif
+        return r ? r : 1;
+    }
+
+#else
+    // Linux/其他 POSIX: 使用 /dev/urandom（随用随开，避免长期占用文件描述符）
+    static bool g_rand_initialized = false;
+
+    static inline void P_rand_init(void) {
+        if (!g_rand_initialized) {
+            /* 初始化 rand() 作为降级方案 */
+            srand((unsigned int)time(NULL));
+            g_rand_initialized = true;
+        }
+    }
+
+    static inline uint32_t P_rand32(void) {
+        uint32_t r;
+        FILE *fp = fopen("/dev/urandom", "rb");
+        
+        if (fp && fread(&r, sizeof(r), 1, fp) == 1) {
+            fclose(fp);
+            /* 成功从 /dev/urandom 读取 */
+        } else {
+            if (fp) fclose(fp);
+            /* 降级方案：使用 rand() */
+            if (!g_rand_initialized) P_rand_init();
+            r = (uint32_t)rand();
+        }
+        return r ? r : 1;
+    }
+
+    static inline uint64_t P_rand64(void) {
+        uint64_t r;
+        FILE *fp = fopen("/dev/urandom", "rb");
+        
+        if (fp && fread(&r, sizeof(r), 1, fp) == 1) {
+            fclose(fp);
+            /* 成功从 /dev/urandom 读取 */
+        } else {
+            if (fp) fclose(fp);
+            /* 降级方案：组合多个 rand() */
+            if (!g_rand_initialized) P_rand_init();
+            r = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^
+                ((uint64_t)rand() << 16) ^ (uint64_t)rand();
+        }
+        return r ? r : 1;
+    }
+#endif
+
+
+/*
+ * P_rand_bytes() - 填充缓冲区为随机字节
+ * @param buf  目标缓冲区
+ * @param len  字节数
+ */
+static inline void P_rand_bytes(void *buf, size_t len) {
+    if (!buf || len == 0) return;
+    
+    uint8_t *p = (uint8_t *)buf;
+    
+    // 每次填充 4 字节，利用 P_rand32()
+    while (len >= 4) {
+        uint32_t r = P_rand32();
+        memcpy(p, &r, 4);
+        p += 4;
+        len -= 4;
+    }
+    
+    // 处理剩余的 1-3 字节
+    if (len > 0) {
+        uint32_t r = P_rand32();
+        memcpy(p, &r, len);
+    }
+}
+
 
 //------------------  op.sc 机制运行时（默认带入）  ----------------------
 // op.sc 为默认导入的语法机制声明模块；op.h 是其 C 侧伴随头（chain 等

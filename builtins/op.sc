@@ -15,14 +15,94 @@
 #       type& 等）扩展 . 操作来调用：v.get() / p->set(x)。scc 不生成 operand_xxx，
 #       而是透传为 platform.h 的同名 sc_<op> 宏（接收者以指针传入，值接收者自动取址）。
 #       指令类型无关（C 侧 __typeof__ 推导），故忽略入参与返回值类型。
-# 扩展：新增一条指令时，在此 operand 内加一行 fnc 声明，并在 platform.h 加同名
-#       sc_<op> 宏即可。
+# 扩展：新增一条指令时，在此 operand 内加一行 fnc 声明，并在 platform.h 三个平台
+#       分支各加同名 sc_<op> 宏即可。
+# 内存序后缀：无=relaxed、_acq=acquire、_rel=release、_dbl=acq_rel、_ord=seq_cst。
+#   · sc_inc/and/or/xor 返回新值；sc_get_and_* 返回旧值；
+#   · sc_test_and_set* 为 CAS，返回 bool（成功 true，失败把实际旧值写回 *pTest）。
 
 def operand: {
+    # 序列化指令（按接收者标量宽度 2/4/8 派发 sc_<op>_s/_l/_ll；非 2/4/8 字节报错）。
+    # buf 为字节缓冲指针；与原子指令不同，这些要看变量类型选 platform 的 read_s/_l/_ll 等。
+    fnc read::                           # v.read(buf)   → sc_read_X(&v, buf)   主机序：buf→v（反序列化）
+    fnc write::                          # v.write(buf)  → sc_write_X(buf, v)   主机序：v→buf（序列化）
+    fnc nread::                          # v.nread(buf)  → sc_nread_X(&v, buf)  网络序：buf→v
+    fnc nwrite::                         # v.nwrite(buf) → sc_nwrite_X(buf, v)  网络序：v→buf
+    fnc nget::                           # v.nget()      → sc_nget_X(v)         取 v 的网络序值（host→net，返回）
+    fnc nset::                           # v.nset(x)     → v = sc_nset_X(x)     把网络序值 x 转主机序赋给 v（net→host）
+
+
+    # 原子读/写：get=relaxed 读，set=relaxed 写（带内存序后缀变体）
     fnc get::                            # v.get()      → sc_get(&v)        原子读（relaxed）
-    fnc set::                            # v.set(x)     → sc_set(&v, x)     原子写（relaxed）
     fnc get_acq::                        # v.get_acq()  → sc_get_acq(&v)    原子读（acquire）
+    fnc get_ord::                        # v.get_ord()  → sc_get_ord(&v)    原子读（seq_cst）
+    fnc set::                            # v.set(x)     → sc_set(&v, x)     原子写（relaxed）
     fnc set_rel::                        # v.set_rel(x) → sc_set_rel(&v, x) 原子写（release）
+    fnc set_ord::                        # v.set_ord(x) → sc_set_ord(&v, x) 原子写（seq_cst）
+
+    # 原子交换（返回旧值）：get_and_set
+    fnc get_and_set::                    # v.get_and_set(x)     → sc_get_and_set(&v, x)     交换（relaxed）
+    fnc get_and_set_dbl::                # v.get_and_set_dbl(x) → sc_get_and_set_dbl(&v, x) 交换（acq_rel）
+    fnc get_and_set_acq::                # 交换（acquire）
+    fnc get_and_set_rel::                # 交换（release）
+    fnc get_and_set_ord::                # 交换（seq_cst）
+
+    # 读改写（返回新值）：inc(加)/and/or/xor
+    fnc inc::                            # v.inc(n) → sc_inc(&v, n)  加并返回新值（relaxed）
+    fnc inc_dbl::
+    fnc inc_acq::
+    fnc inc_rel::
+    fnc inc_ord::
+    fnc and::                            # v.and(m) → sc_and(&v, m)  按位与并返回新值（relaxed）
+    fnc and_dbl::
+    fnc and_acq::
+    fnc and_rel::
+    fnc and_ord::
+    fnc or::                             # v.or(m)  → sc_or(&v, m)   按位或并返回新值（relaxed）
+    fnc or_dbl::
+    fnc or_acq::
+    fnc or_rel::
+    fnc or_ord::
+    fnc xor::                            # v.xor(m) → sc_xor(&v, m)  按位异或并返回新值（relaxed）
+    fnc xor_dbl::
+    fnc xor_acq::
+    fnc xor_rel::
+    fnc xor_ord::
+
+    # 读改写（返回旧值）：get_and_inc/and/or/xor
+    fnc get_and_inc::                    # v.get_and_inc(n) → sc_get_and_inc(&v, n)  加并返回旧值（relaxed）
+    fnc get_and_inc_dbl::
+    fnc get_and_inc_acq::
+    fnc get_and_inc_rel::
+    fnc get_and_inc_ord::
+    fnc get_and_and::                    # 按位与并返回旧值（relaxed）
+    fnc get_and_and_dbl::
+    fnc get_and_and_acq::
+    fnc get_and_and_rel::
+    fnc get_and_and_ord::
+    fnc get_and_or::                     # 按位或并返回旧值（relaxed）
+    fnc get_and_or_dbl::
+    fnc get_and_or_acq::
+    fnc get_and_or_rel::
+    fnc get_and_or_ord::
+    fnc get_and_xor::                    # 按位异或并返回旧值（relaxed）
+    fnc get_and_xor_dbl::
+    fnc get_and_xor_acq::
+    fnc get_and_xor_rel::
+    fnc get_and_xor_ord::
+
+    # 比较并交换（CAS，返回 bool）：test_and_set(&expect, newval)
+    # 成功序后缀同上；_or_acq 系列额外指定「失败时的 acquire 读序」。
+    fnc test_and_set::                   # v.test_and_set(&e, x) → sc_test_and_set(&v, &e, x)  CAS（成功 relaxed / 失败 relaxed）
+    fnc test_and_set_acq::               # 成功 acquire
+    fnc test_and_set_rel::               # 成功 release
+    fnc test_and_set_dbl::               # 成功 acq_rel
+    fnc test_and_set_ord::               # 成功 seq_cst
+    fnc test_and_set_or_acq::            # 成功 relaxed / 失败 acquire
+    fnc test_and_set_acq_or_acq::        # 成功 acquire / 失败 acquire
+    fnc test_and_set_rel_or_acq::        # 成功 release / 失败 acquire
+    fnc test_and_set_dbl_or_acq::        # 成功 acq_rel / 失败 acquire
+    fnc test_and_set_ord_or_acq::        # 成功 seq_cst / 失败 acquire
 }
 
 # todo base 的声明
