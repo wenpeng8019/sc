@@ -45,7 +45,7 @@ fnc main: i4
     var n: = 100
     var pi: = 3.14
     printf("n=%d pi=%.2f\n", n, pi)
-    var msg:
+    var msg: char&
     msg = "hello"
     printf("%s\n", msg)
     var i: i4 = 0, j: i4 = 0
@@ -54,6 +54,8 @@ fnc main: i4
     printf("inline var: x=%d y=%d\n", tmp.x, tmp.y)
     var pt: point = {5, 6}
     printf("pt: x=%d y=%d\n", pt.x, pt.y)
+    var pt3: point = {x = 9, y = 11}
+    printf("pt3: x=%d y=%d\n", pt3.x, pt3.y)
     var o: obj
     o.id = 1
     o.meta.tag = 10
@@ -70,9 +72,9 @@ fnc main: i4
     printf("px->x=%d\n", px->x)
     var pp: point&& = &px
     printf("pp=%p\n", pp)
-    var arr[3]: i4 = {10, 20, 30}
+    var arr[3]: i4 = [10, 20, 30]
     printf("arr: %d %d %d\n", arr[0], arr[1], arr[2])
-    var tab[2][3]: i4 = {{1, 2, 3}, {4, 5, 6}}
+    var tab[2][3]: i4 = [[1, 2, 3], [4, 5, 6]]
     printf("tab[0][1]=%d tab[1][2]=%d\n", tab[0][1], tab[1][2])
     var m[2][3]: i4
     for i = 0; i < 2; i++

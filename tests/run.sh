@@ -52,6 +52,7 @@ POSITIVE=(
     examples/feature20.sc
     examples/feature21.sc
     examples/feature22.sc
+    examples/feature23.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     tests/cases/cast.sc
@@ -63,6 +64,7 @@ POSITIVE=(
     tests/cases/stack_canary.sc
     tests/cases/goto_scope.sc
     tests/cases/ptr_check.sc
+    tests/cases/qualifiers.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物

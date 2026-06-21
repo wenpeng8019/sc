@@ -147,7 +147,15 @@ struct Parser {
 
     // 解析类型引用：可以是命名类型 type&&、内联 {struct}/(union)、或裸 &/&&（void*）
     TypeRef parseTypeRef() { TypeRef ty;
-        
+
+        // 前置类型限定符 const/volatile（上下文标识符：非关键字，按文本识别）。
+        // 处于类型位置（冒号后），故 const/volatile 必为限定符，可叠加任意顺序。
+        for (;;) {
+            if (at(Tok::Ident) && cur().text == "const")    { ty.qConst = true; advance(); }
+            else if (at(Tok::Ident) && cur().text == "volatile") { ty.qVolatile = true; advance(); }
+            else break;
+        }
+
         // 内联结构/联合：直接以 { 或 ( 开头
         if (at(Tok::LBrace) || at(Tok::LParen)) {
             ty.hasInline = true;
@@ -168,6 +176,9 @@ struct Parser {
             else if (acceptOp("&&")) ty.ptr += 2;
             else break;
         }
+
+        // 尾置 restrict 限定符（上下文标识符；约束指针无别名，仅对指针有意义）
+        if (at(Tok::Ident) && cur().text == "restrict") { ty.qRestrict = true; advance(); }
 
         // 胖指针 T@（自动指针，见 builtins/auto_ptr.md）：恒为单层，与 & 互斥。
         // C 侧展开为 sc_fat，参与引用图与释放点验证。
@@ -860,15 +871,25 @@ struct Parser {
             return e;
         }
 
-        // 对于初始化列表：{e1, e2, ...}，可嵌套，允许尾逗号
+        // 聚合字面量 —— 花括号 {} 用于结构体/联合：位置 {e1, e2} 或指定成员 {a=1, b=2}
         if (accept(Tok::LBrace)) {
             exprBracket++;
-            
+
             auto e = mk(Expr::InitList);
+            e->initBracket = false;
             skipNlInBracket();
             if (!at(Tok::RBrace)) {
                 for (;;) {
-                    e->args.push_back(parseExpr());     // 解析逗号分隔的表达式列表
+                    // 指定成员 name = expr（C99 .name=expr）：Ident 紧跟单个 '='
+                    if (at(Tok::Ident) && peek().kind == Tok::Op && peek().text == "=") {
+                        e->initNames.push_back(advance().text);  // 成员名
+                        advance();                                // '='
+                        skipNlInBracket();
+                        e->args.push_back(parseExpr());
+                    } else {
+                        e->initNames.push_back("");               // 位置初始化
+                        e->args.push_back(parseExpr());
+                    }
                     skipNlInBracket();
                     if (!accept(Tok::Comma)) break;     // 后面不再是逗号，则结束列表
                     skipNlInBracket();
@@ -877,6 +898,33 @@ struct Parser {
             }
             skipNlInBracket();
             expect(Tok::RBrace, "'}'");
+            // 全部位置初始化时清空 initNames（便于后端按位置处理）
+            bool anyNamed = false;
+            for (auto& n : e->initNames) if (!n.empty()) anyNamed = true;
+            if (!anyNamed) e->initNames.clear();
+
+            exprBracket--;
+            return e;
+        }
+
+        // 数组字面量 —— 方括号 [] 用于数组：[e1, e2, ...]，可嵌套，允许尾逗号
+        if (accept(Tok::LBracket)) {
+            exprBracket++;
+
+            auto e = mk(Expr::InitList);
+            e->initBracket = true;
+            skipNlInBracket();
+            if (!at(Tok::RBracket)) {
+                for (;;) {
+                    e->args.push_back(parseExpr());     // 解析逗号分隔的表达式列表
+                    skipNlInBracket();
+                    if (!accept(Tok::Comma)) break;     // 后面不再是逗号，则结束列表
+                    skipNlInBracket();
+                    if (at(Tok::RBracket)) break;       // 逗号后允许直接跟 ']' 结束列表（尾逗号）
+                }
+            }
+            skipNlInBracket();
+            expect(Tok::RBracket, "']'");
 
             exprBracket--;
             return e;

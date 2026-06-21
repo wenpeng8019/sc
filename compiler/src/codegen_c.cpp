@@ -187,6 +187,11 @@ struct CGen {
             base = mapBase(t.name);
             ptr = t.ptr;
         }
+        // 类型侧 const/volatile 限定「指向对象/对象本身」，前缀到底层类型名。
+        std::string q;
+        if (t.qConst) q += "const ";
+        if (t.qVolatile) q += "volatile ";
+        base = q + base;
     }
 
     // 声明一个字段/变量：T [*...]name[size]
@@ -245,10 +250,23 @@ struct CGen {
             return;
         }
         std::string base; int ptr;
-        resolveType(f.type, base, ptr);
-        if (asConst) out << "const ";
-        out << base << " ";
-        for (int i = 0; i < ptr; i++) out << "*";
+        resolveType(f.type, base, ptr);   // base 已含类型侧 const/volatile（限定指向对象）
+        if (ptr == 0) {
+            // 标量/对象：let（asConst）→ 对象本身 const（与类型侧 const 去重）
+            if (asConst && !f.type.qConst) out << "const ";
+            out << base << " ";
+        } else {
+            out << base << " ";
+            for (int i = 0; i < ptr; i++) {
+                out << "*";
+                // 最外层指针承载「指针本身」限定：let → 指针 const；restrict → 别名约束
+                if (i == ptr - 1) {
+                    if (asConst) out << "const";
+                    if (f.type.qRestrict) out << (asConst ? " restrict" : "restrict");
+                    if (asConst || f.type.qRestrict) out << " ";
+                }
+            }
+        }
         out << (f.name == "this" ? "_this" : f.name);  // 参数名 this → _this
         for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
     }
@@ -1516,9 +1534,13 @@ struct CGen {
                 break;
             }
             case Expr::InitList: {
+                // 数组 [..] 与结构体/联合 {..} 在 C 侧统一为花括号聚合初始化；
+                // 指定成员 {name=expr} → C99 .name=expr
                 out << "{";
                 for (size_t i = 0; i < e.args.size(); i++) {
                     if (i) out << ", ";
+                    if (i < e.initNames.size() && !e.initNames[i].empty())
+                        out << "." << e.initNames[i] << " = ";
                     emitExpr(*e.args[i], true);
                 }
                 out << "}";

@@ -28,8 +28,8 @@ fnc main: i4
     printf("add(3,4) = %d\n", add(3, 4))
     greet(2)
     printf("strlen2 = %d\n", strlen2("abc"))
-    var u[3]: i4 = {1, 2, 3}
-    var v[3]: i4 = {4, 5, 6}
+    var u[3]: i4 = [1, 2, 3]
+    var v[3]: i4 = [4, 5, 6]
     printf("dot = %d\n", dot(u, v))
     printf("square(9) = %d\n", square(9))
     return 0

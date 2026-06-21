@@ -68,8 +68,8 @@ fnc main: i4
     var pi: = 3.14
     printf("n=%d pi=%.2f\n", n, pi)
 
-    # 默认类型：省略类型和初值 → char&
-    var msg:
+    # 显式类型：无初值的字符串指针（不再有“省略类型默认 char&”）
+    var msg: char&
     msg = "hello"
     printf("%s\n", msg)
 
@@ -88,6 +88,10 @@ fnc main: i4
     # 结构体初始化列表
     var pt: point = {5, 6}
     printf("pt: x=%d y=%d\n", pt.x, pt.y)
+
+    # 结构体指定成员初始化（C99 .field=）
+    var pt3: point = {x = 9, y = 11}
+    printf("pt3: x=%d y=%d\n", pt3.x, pt3.y)
 
     # 匿名内联结构字段访问
     var o: obj
@@ -118,15 +122,15 @@ fnc main: i4
 
     #-------------- []：数组 / 多维数组 / 初始化列表 -----------
 
-    # 初始化列表（一维）
-    var arr[3]: i4 = {10, 20, 30}
+    # 数组字面量（一维，用方括号 []）
+    var arr[3]: i4 = [10, 20, 30]
     printf("arr: %d %d %d\n", arr[0], arr[1], arr[2])
 
-    # 多维数组初始化列表（可嵌套、允许尾逗号）
-    var tab[2][3]: i4 = {
-        {1, 2, 3},
-        {4, 5, 6},
-    }
+    # 多维数组字面量（可嵌套、允许尾逗号）
+    var tab[2][3]: i4 = [
+        [1, 2, 3],
+        [4, 5, 6],
+    ]
     printf("tab[0][1]=%d tab[1][2]=%d\n", tab[0][1], tab[1][2])
 
     # 多维数组遍历赋值

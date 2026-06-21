@@ -85,216 +85,220 @@ int32_t main(void) {
     /* line 90 */
     printf("pt: x=%d y=%d\n", pt.x, pt.y);
     /* line 93 */
-    obj o = {0};
+    point pt3 = {.x = 9, .y = 11};
     /* line 94 */
-    o.id = 1;
-    /* line 95 */
-    o.meta.tag = 10;
-    /* line 96 */
-    o.meta.flag = true;
+    printf("pt3: x=%d y=%d\n", pt3.x, pt3.y);
     /* line 97 */
+    obj o = {0};
+    /* line 98 */
+    o.id = 1;
+    /* line 99 */
+    o.meta.tag = 10;
+    /* line 100 */
+    o.meta.flag = true;
+    /* line 101 */
     printf("obj: id=%d meta.tag=%d meta.flag=%d\n", o.id, o.meta.tag, o.meta.flag);
-    /* line 102 */
+    /* line 106 */
     int32_t *np = NULL;
-    /* line 103 */
+    /* line 107 */
     if (np == NULL) {
-        /* line 104 */
+        /* line 108 */
         printf("np is nil\n");
     }
-    /* line 107 */
-    void *vp = NULL;
-    /* line 108 */
-    printf("vp=%p\n", vp);
-    /* line 110 */
-    point pt2 = {0};
     /* line 111 */
-    (pt2.x = 7) , (pt2.y = 8);
+    void *vp = NULL;
     /* line 112 */
-    point *px = &(pt2);
-    /* line 113 */
-    printf("px->x=%d\n", px->x);
+    printf("vp=%p\n", vp);
+    /* line 114 */
+    point pt2 = {0};
+    /* line 115 */
+    (pt2.x = 7) , (pt2.y = 8);
     /* line 116 */
-    point **pp = &(px);
+    point *px = &(pt2);
     /* line 117 */
+    printf("px->x=%d\n", px->x);
+    /* line 120 */
+    point **pp = &(px);
+    /* line 121 */
     printf("pp=%p\n", pp);
-    /* line 122 */
-    int32_t arr[3] = {10, 20, 30};
-    /* line 123 */
-    printf("arr: %d %d %d\n", arr[0], arr[1], arr[2]);
     /* line 126 */
-    int32_t tab[2][3] = {{1, 2, 3}, {4, 5, 6}};
+    int32_t arr[3] = {10, 20, 30};
+    /* line 127 */
+    printf("arr: %d %d %d\n", arr[0], arr[1], arr[2]);
     /* line 130 */
-    printf("tab[0][1]=%d tab[1][2]=%d\n", tab[0][1], tab[1][2]);
-    /* line 133 */
-    int32_t m[2][3];
+    int32_t tab[2][3] = {{1, 2, 3}, {4, 5, 6}};
     /* line 134 */
-    for (i = 0; i < 2; i++) {
-        /* line 135 */
-        for (j = 0; j < 3; j++) {
-            /* line 136 */
-            m[i][j] = ((i * 3) + j);
-        }
-    }
+    printf("tab[0][1]=%d tab[1][2]=%d\n", tab[0][1], tab[1][2]);
     /* line 137 */
-    int32_t s = 0;
+    int32_t m[2][3];
     /* line 138 */
     for (i = 0; i < 2; i++) {
         /* line 139 */
         for (j = 0; j < 3; j++) {
             /* line 140 */
-            s += m[i][j];
+            m[i][j] = ((i * 3) + j);
         }
     }
     /* line 141 */
-    printf("sum = %d\n", s);
-    /* line 144 */
-    char name[8][16];
+    int32_t s = 0;
+    /* line 142 */
+    for (i = 0; i < 2; i++) {
+        /* line 143 */
+        for (j = 0; j < 3; j++) {
+            /* line 144 */
+            s += m[i][j];
+        }
+    }
     /* line 145 */
+    printf("sum = %d\n", s);
+    /* line 148 */
+    char name[8][16];
+    /* line 149 */
     strcpy(name[0], "hi");
-    /* line 146 */
-    printf("name0 = %s\n", name[0]);
     /* line 150 */
+    printf("name0 = %s\n", name[0]);
+    /* line 154 */
     uint8_t ok = true;
-    /* line 151 */
-    uint8_t no = false;
-    /* line 152 */
-    printf("ok=%d no=%d\n", ok, no);
     /* line 155 */
-    uint32_t mask = 0xFF00;
+    uint8_t no = false;
     /* line 156 */
-    printf("mask=0x%x\n", mask);
+    printf("ok=%d no=%d\n", ok, no);
     /* line 159 */
-    uint64_t big = 100UL;
+    uint32_t mask = 0xFF00;
     /* line 160 */
+    printf("mask=0x%x\n", mask);
+    /* line 163 */
+    uint64_t big = 100UL;
+    /* line 164 */
     const float pi_f = 3.14f;
-    /* line 161 */
+    /* line 165 */
     printf("big=%llu pi_f=%.2f\n", big, pi_f);
-    /* line 166 */
+    /* line 170 */
     int64_t big2 = 300;
-    /* line 167 */
-    int32_t small = ((int32_t)(big2));
-    /* line 168 */
-    printf("cast: %d\n", small);
     /* line 171 */
-    char *buf = ((char*)(malloc(8)));
+    int32_t small = ((int32_t)(big2));
     /* line 172 */
-    free(((void*)(buf)));
-    /* line 174 */
-    double f = 3.75;
+    printf("cast: %d\n", small);
     /* line 175 */
-    printf("cast expr: %d\n", ((int32_t)(small + f)));
+    char *buf = ((char*)(malloc(8)));
+    /* line 176 */
+    free(((void*)(buf)));
     /* line 178 */
-    void *pv = &(tmp);
+    double f = 3.75;
     /* line 179 */
-    printf("paren cast: %d\n", ((point*)(pv))->x);
+    printf("cast expr: %d\n", ((int32_t)(small + f)));
+    /* line 182 */
+    void *pv = &(tmp);
     /* line 183 */
+    printf("paren cast: %d\n", ((point*)(pv))->x);
+    /* line 187 */
     printf("sizeof(point)=%lu\n", sizeof(point));
-    /* line 184 */
+    /* line 188 */
     printf("offsetof(point,y)=%lu\n", offsetof(point, y));
-    /* line 189 */
+    /* line 193 */
     if (tmp.x == 1) {
-        /* line 190 */
+        /* line 194 */
         printf("one\n");
     } else if (tmp.x == 2) {
-        /* line 192 */
+        /* line 196 */
         printf("two\n");
     } else {
-        /* line 194 */
+        /* line 198 */
         printf("other\n");
     }
-    /* line 197 */
+    /* line 201 */
     if ((tmp.x > 0) && (tmp.y < 10)) {
-        /* line 200 */
+        /* line 204 */
         printf("cond ok\n");
     } else {
-        /* line 202 */
+        /* line 206 */
         printf("cond fail\n");
     }
-    /* line 205 */
+    /* line 209 */
     counter = 0;
-    /* line 206 */
+    /* line 210 */
     for (i = 0; i < 3; i++) {
-        /* line 207 */
+        /* line 211 */
         counter += i;
     }
-    /* line 208 */
+    /* line 212 */
     printf("counter = %d\n", counter);
-    /* line 210 */
+    /* line 214 */
     for (; counter < 10; counter++) {
-        /* line 211 */
+        /* line 215 */
         printf("counter at %d\n", counter);
     }
-    /* line 214 */
+    /* line 218 */
     while (counter > 3) {
-        /* line 215 */
+        /* line 219 */
         counter--;
-        /* line 216 */
+        /* line 220 */
         if (counter == 5) {
-            /* line 217 */
+            /* line 221 */
             break;
         }
     }
-    /* line 220 */
+    /* line 224 */
     i = 0;
-    /* line 221 */
+    /* line 225 */
     do {
-        /* line 222 */
+        /* line 226 */
         i++;
     } while (i < 3);
-    /* line 224 */
+    /* line 228 */
     printf("do-while: i=%d\n", i);
-    /* line 227 */
+    /* line 231 */
     for (i = 0; i < 5; i++) {
-        /* line 228 */
+        /* line 232 */
         if (i == 2) {
-            /* line 229 */
+            /* line 233 */
             continue;
         }
-        /* line 230 */
+        /* line 234 */
         printf("  i=%d\n", i);
     }
-    /* line 233 */
+    /* line 237 */
     int32_t code = 2;
-    /* line 234 */
+    /* line 238 */
     switch (code) {
         case 1:
         case 2:
         {
-            /* line 236 */
+            /* line 240 */
             printf("case 1 or 2\n");
             break;
         }
         case 3:
         {
-            /* line 238 */
+            /* line 242 */
             printf("case 3\n");
         }
         case 4:
         {
-            /* line 241 */
+            /* line 245 */
             printf("case 3 through to 4\n");
             break;
         }
         default:
         {
-            /* line 243 */
+            /* line 247 */
             printf("default\n");
             break;
         }
     }
-    /* line 246 */
+    /* line 250 */
     int32_t cnt = 0;
-    /* line 247 */
+    /* line 251 */
     again:;
-        /* line 248 */
+        /* line 252 */
         cnt++;
-        /* line 249 */
+        /* line 253 */
         if (cnt < 2) {
-            /* line 250 */
+            /* line 254 */
             goto again;
         }
-    /* line 251 */
+    /* line 255 */
     printf("goto: cnt=%d\n", cnt);
-    /* line 253 */
+    /* line 257 */
     return 0;
 }

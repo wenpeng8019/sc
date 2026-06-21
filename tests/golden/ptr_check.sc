@@ -16,7 +16,7 @@
     return *p
 
 @fnc main: i4
-    var arr[3]: i4 = {10, 20, 30}
+    var arr[3]: i4 = [10, 20, 30]
     var total: i4 = sum(&arr[0], 3)
     var one: i4 = arr[0]
     var x: node

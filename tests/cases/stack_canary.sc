@@ -19,7 +19,7 @@ fnc fill_buf
     printf("tmp7=%d\n", tmp[7])
 
 fnc sum_first: i4
-    var data[5]: i4 = {2, 4, 6, 8, 10}
+    var data[5]: i4 = [2, 4, 6, 8, 10]
     var s: i4 = 0
     var i: i4 = 0
     for i = 0; i < 5; i++

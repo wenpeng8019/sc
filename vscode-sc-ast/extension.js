@@ -47,6 +47,7 @@ const ICONS = {
     return: 'arrow-left', break: 'debug-step-out', continue: 'debug-continue',
     run: 'play',
     wait: 'watch',
+    final: 'shield', done: 'check-all',
     expr: 'symbol-operator', error: 'error',
     section: 'symbol-namespace', module: 'package', warning: 'warning',
 };

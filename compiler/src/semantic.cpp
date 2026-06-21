@@ -432,15 +432,16 @@ struct Checker {
 
     // ---- 变量声明 ----
 
-    // 确定变量声明的类型：优先用显式声明的类型，否则从初值推导
-    // 无声明无初值的默认类型为 char&（兼容既有语义：无类型对象默认字符串/缓冲区）
+    // 确定变量声明的类型：优先用显式声明的类型，否则从初值的字面量推导。
+    // 无类型且无初值无法推断 → 报错（强制显式类型，与主流语言一致）。
     Ty declaredOrInferredType(const Field& f,
                               const std::unordered_map<std::string, Ty>& locals) {
         const bool declared = f.type.hasInline || !f.type.name.empty() ||
                               f.type.ptr > 0 || !f.type.arrayDims.empty() ||
                               f.type.fnKind != TypeRef::FncKind::None;
         if (declared) return fromTypeRef(f.type);
-        if (!f.init) return Ty{"char", 1, 0, true, false};
+        if (!f.init)
+            err(f.line, "变量缺少类型：无类型且无初值无法推断，请显式声明类型（如 var x: i4）");
 
         Ty t = inferExpr(*f.init, locals, f.line);
         if (t.isNil) err(f.line, "nil 不能用于无类型推断，请显式声明指针类型");

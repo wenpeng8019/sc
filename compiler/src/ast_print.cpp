@@ -54,12 +54,17 @@ std::string rec(const Expr& e, bool top) {
             return s + ")";
         }
         case Expr::InitList: {
-            std::string s = "{";
+            // 数组用 [ ]，结构体/联合用 { }（可含指定成员 name=expr）
+            const char* open = e.initBracket ? "[" : "{";
+            const char* close = e.initBracket ? "]" : "}";
+            std::string s = open;
             for (size_t i = 0; i < e.args.size(); i++) {
                 if (i) s += ", ";
+                if (i < e.initNames.size() && !e.initNames[i].empty())
+                    s += e.initNames[i] + " = ";
                 s += rec(*e.args[i], true);
             }
-            return s + "}";
+            return s + close;
         }
         case Expr::FncLit: {
             // 匿名函数签名（不含函数体；函数体由 codegen_sc 在语句层多行输出）
@@ -104,7 +109,10 @@ static std::string fncSigStr(const TypeRef& t) {
 std::string typeToStr(const TypeRef& t) {
     if (t.fnKind != TypeRef::FncKind::None) return fncSigStr(t);
     if (t.hasInline) return inlineStr(t);
-    std::string s = t.name;
+    std::string s;
+    if (t.qConst) s += "const ";
+    if (t.qVolatile) s += "volatile ";
+    s += t.name;
     // 分身/切片句柄 T[...]：方括号内为初值实参（类型侧）
     if (t.project) {
         s += "[";
@@ -118,6 +126,7 @@ std::string typeToStr(const TypeRef& t) {
     }
     for (int i = 0; i < t.ptr; i++) s += "&";
     if (t.fat) s += "@";   // 自动指针标记（恒单层，与 ptr 互斥）
+    if (t.qRestrict) s += " restrict";
     return s;
 }
 
@@ -160,14 +169,20 @@ std::string fieldDetail(const Field& f, bool withInit) {
         s += "]";
     } else {
         s += ":";
+        // 类型侧限定符 const/volatile 写在类型名前
+        if (f.type.qConst) s += " const";
+        if (f.type.qVolatile) s += " volatile";
         if (!f.type.name.empty()) s += " " + f.type.name;
         // 指针 & 写在类型侧（冒号后）：i4& / &（裸 void*）
         if (f.type.ptr > 0) {
-            s += f.type.name.empty() ? " " : "";
+            // 无类型名时（裸 void*）须在 & 前补空格分隔（: & 或 : const &）
+            if (f.type.name.empty()) s += " ";
             for (int i = 0; i < f.type.ptr; i++) s += "&";
         }
         // 自动指针 @ 写在类型侧（冒号后）：node@
         if (f.type.fat) s += "@";
+        // 尾置 restrict（指针别名约束）
+        if (f.type.qRestrict) s += " restrict";
     }
     if (withInit && f.init) s += " = " + exprToStr(*f.init);
     return s;

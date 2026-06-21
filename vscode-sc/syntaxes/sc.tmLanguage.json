@@ -11,6 +11,7 @@
         { "include": "#fnc-decl" },
         { "include": "#var-decl" },
         { "include": "#label-decl" },
+        { "include": "#qualified-type" },
         { "include": "#keywords" },
         { "include": "#builtins" },
         { "include": "#constants" },
@@ -72,11 +73,18 @@
                 "1": { "name": "entity.name.label.sc" }
             }
         },
+        "qualified-type": {
+            "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*((?:const|volatile)(?:\\s+(?:const|volatile))*)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "storage.modifier.qualifier.sc" },
+                "2": { "name": "entity.name.type.annotated.sc" }
+            }
+        },
         "keywords": {
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|do|for|case|through|goto|return|break|continue|run|done)\\b"
+                    "match": "\\b(if|else|while|do|for|case|through|goto|return|break|continue|run|done|await|async|final)\\b"
                 },
                 {
                     "name": "keyword.control.io.sc",
@@ -85,6 +93,10 @@
                 {
                     "name": "keyword.declaration.sc",
                     "match": "\\b(def|fnc|rpc|var|let|tls|inc|add)\\b"
+                },
+                {
+                    "name": "storage.modifier.qualifier.sc",
+                    "match": "\\b(const|volatile|restrict)\\b"
                 },
                 {
                     "name": "variable.language.this.sc",
@@ -120,7 +132,7 @@
                 },
                 {
                     "name": "entity.name.type.library.sc",
-                    "match": "\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b"
+                    "match": "\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool|com|chain|future|operand)\\b"
                 },
                 {
                     "name": "storage.type.primitive.sc",
@@ -128,7 +140,7 @@
                 },
                 {
                     "name": "entity.name.type.library.sc",
-                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool)\\b(?!\\s*[:(])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(va_list|adt_obj|string|list|dict|dim|json|thread|mutex|cond|pool|com|chain|future|operand)\\b(?!\\s*[:(])"
                 },
                 {
                     "name": "entity.name.type.annotated.sc",
@@ -168,6 +180,10 @@
                 {
                     "name": "storage.modifier.pointer.sc",
                     "match": "(?<=[A-Za-z0-9_\\]])&"
+                },
+                {
+                    "name": "storage.modifier.autopointer.sc",
+                    "match": "(?<=[A-Za-z0-9_\\]])@"
                 },
                 {
                     "name": "storage.modifier.array.sc",

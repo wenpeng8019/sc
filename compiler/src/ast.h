@@ -71,6 +71,21 @@ struct TypeRef {
 
     //---------
 
+    // 类型限定符（const/volatile/restrict）：在 sc 中以「上下文标识符」书写，非关键字。
+    // + qConst/qVolatile：写在类型名前（类型侧），约束「指向对象/对象本身」只读或易变。
+    //     eg: var a: volatile i4    → volatile int32_t a
+    //         var p: const node&    → const node *p（指针可改，指向只读）
+    //         var x: const volatile u4& → const volatile uint32_t *x（MMIO 只读寄存器）
+    //   注意「指针本身」是否只读由 let/var 决定（let p: node& → node *const p），
+    //   与类型侧 const 正交。
+    // + qRestrict：尾置（写在 & 之后），约束指针无别名（restrict）。
+    //     eg: fnc copy: dst: i4& restrict, src: const i4& restrict
+    bool qConst = false;
+    bool qVolatile = false;
+    bool qRestrict = false;
+
+    //---------
+
     // 对于数组类型：eg: name[x][y]
     // + 这里要记录维度 shape 列表 → {"x","y"}；
     //   空字符串表示未指定长度（name[]）；
@@ -198,6 +213,14 @@ struct Expr {
                                 // Index/Member/Call: a=被操作对象
     std::vector<ExprPtr> args;  // Call 函数调用的实参列表
                                 // InitList 时为初始化元素列表
+
+    // InitList 形态区分（数组用 [ ]，结构体/联合用 { }）：
+    //   initBracket=true  → 方括号数组字面量 [a, b, c]（仅用于数组目标）
+    //   initBracket=false → 花括号聚合字面量 {a, b} 或指定成员 {x=1, y=2}（结构体/联合目标）
+    // initNames 与 args 平行：非空串表示该项为指定成员 name=expr（C99 .name=expr），
+    //   空串表示位置初始化；整表为空表示全部位置初始化。
+    bool initBracket = false;
+    std::vector<std::string> initNames;
 
     std::string op;             // 针对目标项的运算和操作（Cast 时为目标类型名）
     int castPtr = 0;            // Cast: 目标类型的指针层数
