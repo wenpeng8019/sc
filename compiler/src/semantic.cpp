@@ -35,6 +35,7 @@ struct Ty {
     bool valid = false; // true=能确定类型，false=跳过检查
     bool isNil = false; // 字面量 nil，只能赋给指针/数组
     bool project = false; // 分身/切片句柄 T[...]：可整体被赋值为本体或 nil（语法糖）
+    bool fat = false;   // 自动指针 T@（胖指针）：指针类，可与 T()/T@/nil 互赋
 };
 
 // ---------------- 运算符辅助函数 ----------------
@@ -46,8 +47,8 @@ bool isAssignOp(const std::string& op) {
            op == "<<=" || op == ">>=";
 }
 
-// 指针或数组：均可解引用
-bool isPointerLike(const Ty& t) { return t.ptr > 0 || t.arr > 0; }
+// 指针或数组：均可解引用（胖指针 T@ 亦视为指针类）
+bool isPointerLike(const Ty& t) { return t.ptr > 0 || t.arr > 0 || t.fat; }
 
 // TypeRef → Ty 转换
 Ty fromTypeRef(const TypeRef& t) {
@@ -57,6 +58,7 @@ Ty fromTypeRef(const TypeRef& t) {
     ty.arr = (int)t.arrayDims.size();
     ty.valid = true;
     ty.project = t.project;
+    ty.fat = t.fat;
     // 函数指针字段（普通函数指针 / 每对象方法指针）作为值即一个指针：
     // 视为指针类，使其能与通用指针 & 互相赋值（如把 alloc 透传的 & 存入 MethodPtr 字段）。
     if (t.fnKind != TypeRef::FncKind::None && ty.ptr == 0) ty.ptr = 1;
@@ -116,8 +118,9 @@ struct Checker {
         // 函数字段不参与按值包含图（函数指针大小固定）
         if (t.fnKind != TypeRef::FncKind::None) return;
 
-        // 指针或数组字段不会形成"按值递归包含"（它们只是引用，大小固定）
-        if (t.ptr == 0 && t.arrayDims.empty() && !t.name.empty()) {
+        // 指针或数组字段不会形成"按值递归包含"（它们只是引用，大小固定）。
+        // 胖指针 T@（fat）同理：C 侧为 sc_fat（24 字节固定），不按值嵌入目标类型。
+        if (t.ptr == 0 && !t.fat && t.arrayDims.empty() && !t.name.empty()) {
             const std::string base = resolveAliasToName(t.name);
             if (structs.find(base) != structs.end()) out.push_back({base, line});
         }
@@ -671,10 +674,48 @@ struct Checker {
         }
     }
 
+    // ---- 自动指针 T@ 边界检查（§13.5）----
+    // 当前未实现：T@ 数组（元素引用图清理/下标赋值记账缺失，静默会泄露）→ 直接报错。
+    void checkFatTypeRef(const TypeRef& t, int line, const char* where) const {
+        if (t.fat && !t.arrayDims.empty())
+            err(line, std::string("暂不支持 T@ 数组（") + where +
+                "）：元素的引用图清理与下标赋值记账尚未实现；如需指针数组请用裸指针 T& 数组");
+        // 内联结构/联合字段递归
+        if (t.hasInline)
+            for (auto& f : t.structCommon.fields)
+                checkFatTypeRef(f.type, f.line ? f.line : line, "内联字段");
+    }
+
+    void checkFatBoundariesStmt(const Stmt& s) const {
+        for (auto& d : s.decls)
+            checkFatTypeRef(d.type, d.line ? d.line : s.line, "局部变量/常量");
+        for (auto& b : s.body) checkFatBoundariesStmt(*b);
+        for (auto& b : s.elseBody) checkFatBoundariesStmt(*b);
+        for (auto& arm : s.caseArms)
+            for (auto& b : arm.body) checkFatBoundariesStmt(*b);
+        if (s.decl)
+            for (auto& f : s.decl->structCommon.fields)
+                checkFatTypeRef(f.type, f.line ? f.line : s.line, "局部类型字段");
+    }
+
+    void checkFatBoundaries() const {
+        for (auto& d : prog.decls) {
+            // 结构/联合字段 + 全局变量类型 + 函数参数/返回类型
+            for (auto& f : d->structCommon.fields)
+                checkFatTypeRef(f.type, f.line ? f.line : d->line,
+                                d->kind == Decl::FuncD ? "函数参数" : "结构字段/全局变量");
+            if (d->structCommon.type)
+                checkFatTypeRef(*d->structCommon.type, d->line, "返回类型");
+            if (d->kind == Decl::FuncD)
+                for (auto& s : d->body) checkFatBoundariesStmt(*s);
+        }
+    }
+
     // ---- 主入口：三阶段检查 ---------------------------------
     void run() {
         collectTop();                   // 1. 收集顶层符号 + 检查全局初值
         checkAggregateByValueCycles();  // 2. 按值包含环检测
+        checkFatBoundaries();           // 2.5 自动指针 T@ 边界检查
         checkFunctions();               // 3. 遍历所有函数体
     }
 };

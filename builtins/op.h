@@ -14,10 +14,61 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ---------------- 自动指针 T@（胖指针 + 引用图 + 释放点验证） ----------------
+ * 见 builtins/auto_ptr.md。一次指针赋值是一条双向边，对两端各记一次账：
+ *   in  = 入边数（被多少胖指针指向），由胖指针 tar 维护；
+ *   out = 出边数（持有多少胖指针），由胖指针 own 维护。
+ * 释放不变式：in==0 && out==0 才可释放（in>0 悬挂 / out>0 未清理）。
+ *
+ * 堆对象内存布局（T() 分配）：[ sc_ref 头 | pad | ===== T 实体 ===== ]
+ *   头固定置于 malloc 块首，实体在 SC_REF_HDR 偏移处（统一过对齐，免去 per-type alignof）；
+ *   故 (sc_ref*)((char*)obj - SC_REF_HDR) 即头，free 时还原块首。 */
+
+typedef struct sc_ref {
+    int32_t in;       /* 入边数（tar 维护；>0 释放=悬挂） */
+    int32_t out;      /* 出边数（own 维护；>0 释放=未清理） */
+    int32_t heap;     /* 1=堆对象（in→0&&out==0 可自动 free）/ 0=栈或全局（退域断言） */
+    int32_t _pad;     /* 对齐占位（保持 16 字节，site 追踪构建可改用） */
+} sc_ref;
+
+typedef struct sc_fat {
+    void    *p;       /* 目标地址（首成员，可强转裸指针，&fat==&fat.p） */
+    int32_t *tar;     /* 目标 sc_ref.in 地址（NULL=目标无头/不追踪） */
+    int32_t *own;     /* 持有者 sc_ref.out 地址（哨兵见下；NULL=未初始化） */
+} sc_fat;
+
+#define SC_REF_HDR  16                  /* 堆对象头偏移（≥sizeof(sc_ref)，过 max_align 对齐） */
+#define SC_OWN_ROOT ((int32_t*)-1)      /* 栈/全局根指针：域退出自动拆 */
+#define SC_OWN_RAW  ((int32_t*)-2)      /* 经裸 base / 显式转裸：不追踪 */
+/* own 是否「真实持有者」（普通 out 地址）：排除 NULL/ROOT/RAW 哨兵
+ * （哨兵 -1/-2 作无符号指针是最大地址，不能用 >0 判定） */
+#define SC_OWN_REAL(ow) ((ow) != (int32_t*)0 && (ow) != SC_OWN_ROOT && (ow) != SC_OWN_RAW)
+
+/* 释放点验证：in!=0 悬挂 / out!=0 未清理（追踪构建附 who 源码定位） */
+void sc_ref_check(sc_ref *r, const char *who);
+/* 胖指针入边归零回调：out==0 且 heap → 自动 free；out>0 → 报未清理出边 */
+void sc_fat_on_zero(sc_fat *f);
+
+/* 绑定一条边：目标.in++、持有者.out++（哨兵 own 跳过 out 记账） */
+static inline void sc_fat_bind(sc_fat *f, void *tgt, sc_ref *tr, int32_t *ow) {
+    f->p = tgt;
+    f->tar = tr ? &tr->in : (int32_t *)0;
+    f->own = ow;
+    if (f->tar) (*f->tar)++;
+    if (SC_OWN_REAL(f->own)) (*f->own)++;
+}
+/* 解绑一条边：目标.in--（触 0 → sc_fat_on_zero）、持有者.out--；清空指针 */
+static inline void sc_fat_unbind(sc_fat *f) {
+    if (f->tar && --(*f->tar) == 0) sc_fat_on_zero(f);
+    if (SC_OWN_REAL(f->own)) (*f->own)--;
+    f->p = (void *)0; f->tar = (int32_t *)0;
+}
 
 /* ---------------- chain：侵入式双向链表 ----------------
  * 元素为 sc 链表结构体（def T: ~ {}，首位有 void *_prev, *_next）

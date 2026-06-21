@@ -85,6 +85,8 @@ static void usage() {
               << "             目标平台头解析复用交叉编译配置（triple/sysroot/inc/cflags）；\n"
               << "             完全不带 --clang 则退化为头文件文本匹配\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
+              << "  --check=ref  开启自动指针 T@ 栈悬挂检查：注入栈对象引用头并在退域处\n"
+              << "             断言悬挂（含源码定位）；默认关闭（堆 ARC 自动回收始终生效）\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
               << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
               << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
@@ -1227,6 +1229,8 @@ int main(int argc, char** argv) {
     std::string clangLib;                     // --clang 指定的 libclang 路径（空 + clangRequested = 自动检测）
     bool clangRequested = false;              // 是否出现 --clang（决定检测/加载失败是否报错）
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
+    if (const char* rc = std::getenv("SCC_REF_CHECK"); rc && *rc && std::string(rc) != "0")
+        setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--") {                                     // 其后全部为程序参数
@@ -1257,6 +1261,10 @@ int main(int argc, char** argv) {
         else if (a == "--emit-c") mode = "c";                // 转译 C 模式
         else if (a == "--ast") mode = "ast";                 // AST JSON 模式
         else if (a == "--emit-sc") mode = "sc";              // 再生 sc 模式
+        else if (a == "--check=ref") setRefCheck(true);      // 自动指针 T@ 栈悬挂检查（带源码定位）
+        else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "ref") {
+            ++i; setRefCheck(true);                          // --check ref 分写形式
+        }
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (input.empty()) input = a;                   // 第一个非选项参数 = 输入文件
         else { usage(); return 1; }
@@ -1359,6 +1367,7 @@ int main(int argc, char** argv) {
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
+        if (getRefCheck()) setRefSrcFile(input);                    // T@ 栈悬挂断言 site 用源码文件名
         auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
                : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h

@@ -63,6 +63,14 @@ struct TypeRef {
 
     //---------
 
+    // 对于胖指针类型（自动指针）：eg: name@
+    // + fat=true 表示这是一个参与引用图与释放点验证的胖指针（见 builtins/auto_ptr.md）。
+    //   C 侧展开为 sc_fat { void* p; int32_t* tar; int32_t* own; }（24 字节，首成员 p 即裸指针）。
+    //   胖指针恒为单层（T@，不存在 T@@）；ptr 与 fat 互斥（fat 时 ptr==0）。
+    bool fat = false;
+
+    //---------
+
     // 对于数组类型：eg: name[x][y]
     // + 这里要记录维度 shape 列表 → {"x","y"}；
     //   空字符串表示未指定长度（name[]）；

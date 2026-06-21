@@ -56,6 +56,7 @@ POSITIVE=(
     examples/feature_export_inc.sc
     tests/cases/cast.sc
     tests/cases/expr.sc
+    tests/cases/auto_ptr.sc
 )
 
 # 负向用例（预期编译失败，比对 stderr 错误信息）

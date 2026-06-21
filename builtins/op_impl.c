@@ -11,6 +11,24 @@
 /* 异步内核的平台相关头（多路复用后端：epoll/kqueue/IOCP/poll、自管道、互斥）在
  * 文件末尾的「异步内核」段按平台 #ifdef 引入，使本文件在 POSIX 与 Windows 均可编译。 */
 
+/* ---------------- 自动指针 T@ 运行时（见 op.h / builtins/auto_ptr.md） ----------------
+ * 释放点验证 + 入边归零处理。绑定/解绑为 op.h 内联（热路径）；此处是其回调与显式检查。 */
+
+void sc_ref_check(sc_ref *r, const char *who) {
+    if (!r) return;
+    if (r->in != 0)
+        fprintf(stderr, "sc: 悬挂：%s 释放时仍被 %d 个引用指向\n", who ? who : "对象", r->in);
+    if (r->out != 0)
+        fprintf(stderr, "sc: 未清理：%s 释放时仍持有 %d 个出向引用\n", who ? who : "对象", r->out);
+}
+
+void sc_fat_on_zero(sc_fat *f) {
+    sc_ref *r = (sc_ref *)f->tar;          /* in 为 sc_ref 首成员，故 &ref->in == ref == 块首 */
+    if (!r) return;
+    if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 仍持出边 → 报未清理，不释放 */
+    if (r->heap) free(r);                  /* 堆对象 in==0 && out==0 → 释放整块（含头） */
+}
+
 /* ---------------- chain：侵入式双向链表 ---------------- */
 /* 元素首部内嵌 _prev/_next（sc 编译器注入），偏移固定在结构体最前面。
  * 约定：首元素 _prev = 尾元素（rear），尾元素 _next = NULL。 */

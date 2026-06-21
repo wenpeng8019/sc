@@ -22,6 +22,11 @@
 
 namespace {
 
+// 自动指针 T@ 引用检查开关（--check=ref）：默认关闭，仅栈悬挂断言受其控制。
+bool g_refCheck = false;
+// 栈悬挂断言 site 文案用的源码文件名（与 #line 的 srcFile 解耦，避免强制注入 #line）。
+std::string g_refSrcFile;
+
 // sc 内置基本类型 → C 标准类型映射
 std::string mapBase(const std::string& n) {
     static const std::unordered_map<std::string, std::string> m = {
@@ -108,8 +113,18 @@ struct CGen {
     // 顶层方法表：所属类型 → 方法名 → Decl（结构内实现或 fnc T::m 声明）
     std::unordered_map<std::string, std::unordered_map<std::string, const Decl*>> methods;
     // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
-    struct VType { std::string name; int ptr = 0; int arr = 0; };
+    struct VType { std::string name; int ptr = 0; int arr = 0; bool fat = false; };
     std::unordered_map<std::string, VType> globalsT, localsT;
+    // 自动指针 T@：被构造为胖目标（T()）的类型名集合（决定生成 T__new_ref 带头分配）
+    std::set<std::string> fatTypeNames;
+    // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量名，退块/return 时逆序 unbind
+    std::vector<std::vector<std::string>> fatScopes;
+    // 与 fatScopes 平行：每层本块内被 & 借出（须注入 sc_ref 头）的普通栈变量，
+    // 退块时（拆边后）逐个 sc_ref_check 检测外部悬挂（§4.2/§7.3）。仅 --check=ref 开启时填充。
+    struct FatStackVar { std::string name; std::string site; };
+    std::vector<std::vector<FatStackVar>> fatStackScopes;
+    // 本函数内被 &var 借入胖指针的普通栈变量名集合（预扫描得出，决定声明处注入 ref 头）。
+    std::set<std::string> fatBorrowVars;
     // 分身/切片句柄变量（var s: T[...]）：变量名 → 实体类型 T 名
     std::unordered_map<std::string, std::string> projVarsG, projVarsL;
     // 函数指针变量的内联签名（var cb: fnc: ...）：缺参补全查询用
@@ -119,6 +134,7 @@ struct CGen {
     // 枚举类型名集合（string 格式化按整数）
     std::unordered_set<std::string> enums;
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
+    const Decl* curFnSig = nullptr;  // 当前普通函数签名（return 临时变量取返回类型用）
 
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
@@ -163,6 +179,13 @@ struct CGen {
             if (asConst) out << "const ";
             out << "struct " << f.type.name << "__project "
                 << (f.name == "this" ? "_this" : f.name);
+            return;
+        }
+        // 胖指针（自动指针 T@）：C 侧统一为 sc_fat（24 字节，首成员 p 即裸指针）。
+        if (f.type.fat) {
+            if (asConst) out << "const ";
+            out << "sc_fat " << (f.name == "this" ? "_this" : f.name);
+            for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
         }
         if (f.type.fnKind != TypeRef::FncKind::None) {
@@ -289,6 +312,24 @@ struct CGen {
         }
     }
 
+    // 自动指针 T@：收集胖目标类型名（递归内联结构体；遍历语句中的 var 声明）
+    void noteFatType(const TypeRef& t) {
+        if (t.fat && !t.name.empty()) fatTypeNames.insert(t.name);
+        if (t.hasInline)
+            for (auto& f : t.structCommon.fields) noteFatType(f.type);
+    }
+    void collectFatTypesStmt(const Stmt& s) {
+        for (auto& f : s.decls) noteFatType(f.type);
+        if (s.decl) {
+            for (auto& f : s.decl->structCommon.fields) noteFatType(f.type);
+            if (s.decl->structCommon.type) noteFatType(*s.decl->structCommon.type);
+        }
+        for (auto& b : s.body) collectFatTypesStmt(*b);
+        for (auto& b : s.elseBody) collectFatTypesStmt(*b);
+        for (auto& arm : s.caseArms)
+            for (auto& b : arm.body) collectFatTypesStmt(*b);
+    }
+
     // 生成堆构造辅助函数：T *T__new(void) = malloc + 默认值/清零 + init
     void emitNewHelpers() {
         for (auto& tn : heapNews) {
@@ -306,6 +347,22 @@ struct CGen {
             if (im && im->structCommon.fields.empty())
                 out << "        " << im->name << "(_p);\n";
             out << "    }\n    return _p;\n}\n\n";
+
+            // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
+            if (fatTypeNames.count(tn)) {
+                out << "static inline " << tn << " *" << tn << "__new_ref(void) {\n"
+                    << "    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(" << tn << "));\n"
+                    << "    if (!_h) return 0;\n"
+                    << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->_pad = 0;\n"
+                    << "    " << tn << " *_p = (" << tn << " *)((char *)_h + SC_REF_HDR);\n";
+                if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
+                    out << "    *_p = " << tn << "__default();\n";
+                else
+                    out << "    memset(_p, 0, sizeof(" << tn << "));\n";
+                if (im && im->structCommon.fields.empty())
+                    out << "    " << im->name << "(_p);\n";
+                out << "    return _p;\n}\n\n";
+            }
         }
         // future<ID>(ctx?) 构造：在 future__new 基础上打 id 标签 + 可选用户上下文 ctx
         if (usesFutureId) {
@@ -734,6 +791,7 @@ struct CGen {
                 for (auto& f : sd->structCommon.fields)
                     if (f.name == fn) {
                         vt = {f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
+                        vt.fat = f.type.fat;
                         return true;
                     }
                 return false;
@@ -815,12 +873,118 @@ struct CGen {
                         }
                     }
                 }
+                // 普通函数调用 f(...) → 仅当返回 T@ 胖指针时解析（非胖保持旧行为，
+                // 不改动 print/stringify 等既有类型推断，避免撼动 golden）
+                if (e.a && e.a->kind == Expr::Ident) {
+                    auto fit = funcs.find(e.a->text);
+                    if (fit != funcs.end()) {
+                        const Decl* sig = fit->second;
+                        if (!sig->funcTypeName.empty()) {
+                            auto ft = funcTypes.find(sig->funcTypeName);
+                            if (ft != funcTypes.end()) sig = ft->second;
+                        }
+                        const auto& rt = sig->structCommon.type;
+                        if (rt && rt->fat) {
+                            vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                            vt.fat = true;
+                            return true;
+                        }
+                    }
+                }
                 return false;
             default: return false;
         }
     }
 
-    // 若 m 是成员访问且该成员是函数指针字段，返回字段指针（否则 nullptr）
+    // 表达式静态类型是否胖指针 T@；是则置 *outType 为目标类型名
+    bool isFatExpr(const Expr& e, std::string* outType = nullptr) const {
+        VType vt;
+        if (exprVType(e, vt) && vt.fat) { if (outType) *outType = vt.name; return true; }
+        return false;
+    }
+
+    // 取址 &access 的「最近胖 hop」：从 access 的 base 链向内 walk，首个胖子表达式
+    // 即该子成员所住堆对象的 hop（其 tar 即子成员共享的 in 计数）。无胖 base 返回 nullptr。
+    const Expr* fatHopOf(const Expr& access) const {
+        const Expr* cur = (access.kind == Expr::Member || access.kind == Expr::Index)
+                              ? access.a.get() : nullptr;
+        while (cur) {
+            if (isFatExpr(*cur)) return cur;
+            if ((cur->kind == Expr::Member || cur->kind == Expr::Index) && cur->a)
+                cur = cur->a.get();
+            else break;
+        }
+        return nullptr;
+    }
+
+    // 访问路径的根标识符（沿 Member/Index 的 .a 向内到底）。非标识符根返回 nullptr。
+    const Expr* rootIdentOf(const Expr& e) const {
+        const Expr* cur = &e;
+        while (cur) {
+            if (cur->kind == Expr::Ident) return cur;
+            if ((cur->kind == Expr::Member || cur->kind == Expr::Index) && cur->a)
+                cur = cur->a.get();
+            else return nullptr;
+        }
+        return nullptr;
+    }
+
+    // ---- Step4b 预扫描：找出本函数内被 &var 借入胖指针的普通栈变量 ----
+    std::unordered_map<std::string, bool> preFatMap;  // 局部名 → 是否 T@（预扫描临时）
+
+    void preCollectLocalFat(const std::vector<StmtPtr>& stmts) {
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            if (s.kind == Stmt::VarS || s.kind == Stmt::LetS || s.kind == Stmt::TlsS)
+                for (auto& d : s.decls) preFatMap[d.name] = d.type.fat;
+            preCollectLocalFat(s.body);
+            preCollectLocalFat(s.elseBody);
+            for (auto& arm : s.caseArms) preCollectLocalFat(arm.body);
+        }
+    }
+
+    // rhs 若是 &<根为非胖局部> → 标记该根变量需注入 ref 头
+    void preNoteBorrow(const Expr& rhs) {
+        if (rhs.kind != Expr::Unary || rhs.op != "&" || !rhs.a) return;
+        const Expr* root = rootIdentOf(*rhs.a);
+        if (!root) return;
+        auto it = preFatMap.find(root->text);
+        if (it != preFatMap.end() && !it->second) fatBorrowVars.insert(root->text);
+    }
+
+    void preCollectFatBorrows(const std::vector<StmtPtr>& stmts) {
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            if (s.kind == Stmt::VarS || s.kind == Stmt::LetS)
+                for (auto& d : s.decls)
+                    if (d.type.fat && d.init) preNoteBorrow(*d.init);
+            if (s.kind == Stmt::ExprS && s.expr && s.expr->kind == Expr::Binary &&
+                s.expr->op == "=" && s.expr->a && s.expr->a->kind == Expr::Ident) {
+                auto it = preFatMap.find(s.expr->a->text);
+                if (it != preFatMap.end() && it->second && s.expr->b) preNoteBorrow(*s.expr->b);
+            }
+            preCollectFatBorrows(s.body);
+            preCollectFatBorrows(s.elseBody);
+            for (auto& arm : s.caseArms) preCollectFatBorrows(arm.body);
+        }
+    }
+
+    // 进入函数体前：重建 fatBorrowVars
+    void preScanFatBorrows(const std::vector<StmtPtr>& body) {
+        fatBorrowVars.clear();
+        preFatMap.clear();
+        preCollectLocalFat(body);
+        preCollectFatBorrows(body);
+    }
+
+    // 胖指针 base 解析为裸 T*：((T*)(<base>).p)，供成员/解引用复用
+    void emitFatBaseAsRaw(const Expr& base, const std::string& tt) {
+        out << "((" << tt << " *)(";
+        emitExpr(base, true);
+        out << ").p)";
+    }
+
+
     const Field* callableField(const Expr& m) const {
         if (m.kind != Expr::Member) return nullptr;
         VType base;
@@ -1204,6 +1368,15 @@ struct CGen {
                 out << "]";
                 break;
             case Expr::Member: {
+                // 胖指针 T@ 成员访问：p->field → ((T*)(p).p)->field（base 先解胖为裸 T*）
+                {
+                    std::string tt;
+                    if (e.a && isFatExpr(*e.a, &tt)) {
+                        emitFatBaseAsRaw(*e.a, tt);
+                        out << "->" << e.text;
+                        break;
+                    }
+                }
                 // prev 上下文关键字（链表结构体）：边界安全前驱 → head 返回 NULL
                 if (e.text == "prev") {
                     VType base;
@@ -1303,6 +1476,189 @@ struct CGen {
     }
 
     // ---------------- 语句 ----------------
+
+    int fatTmpSeq = 0;  // 胖指针建头临时变量编号
+    std::vector<size_t> fatBreakBoundary;     // break 目标处的 fatScopes 层数（循环/switch）
+    std::vector<size_t> fatContinueBoundary;  // continue 目标处的 fatScopes 层数（循环）
+
+    // 把表达式发到字符串（临时换出 out），用于构造 C 左值/own 子表达式
+    std::string captureExpr(const Expr& e) {
+        std::ostringstream tmp;
+        std::swap(out, tmp);
+        emitExpr(e, true);
+        std::swap(out, tmp);
+        return tmp.str();
+    }
+
+    // 胖指针左值信息：lv = sc_fat 左值 C 表达式；own = 持有者 out 指针表达式
+    //   根变量（Ident）          → lv=名字, own=SC_OWN_ROOT
+    //   胖 base 的胖成员 base->m → lv=((T*)(base).p)->m, own=&((sc_ref*)(base).tar)->out
+    // 返回 false 表示非可记账胖左值。
+    bool fatLhsInfo(const Expr& lhs, std::string& lv, std::string& own) {
+        if (lhs.kind == Expr::Ident) {
+            VType vt;
+            if (!exprVType(lhs, vt) || !vt.fat) return false;
+            lv = lhs.text;
+            own = "SC_OWN_ROOT";
+            return true;
+        }
+        if (lhs.kind == Expr::Member && lhs.a) {
+            std::string tt;
+            if (!isFatExpr(lhs, nullptr)) return false;  // 成员本身须是 T@
+            if (!isFatExpr(*lhs.a, &tt)) {
+                // 经裸 base 写胖成员：§7.4 禁止
+                throw CompileError{"禁止经裸指针写自动指针 T@ 成员（须经 T@ base）", lhs.line};
+            }
+            std::string baseStr = captureExpr(*lhs.a);
+            lv = "((" + tt + " *)(" + baseStr + ").p)->" + lhs.text;
+            own = "&((sc_ref *)(" + baseStr + ").tar)->out";
+            return true;
+        }
+        return false;
+    }
+
+    // 自动指针 T@ 根变量声明：sc_fat 声明 + 按初值形态绑定，并登记进当前作用域。
+    void emitFatVarInit(const Field& f, bool asConst, bool isStatic) {
+        regVar(f);
+        if (!fatScopes.empty()) fatScopes.back().push_back(f.name);
+        indent();
+        if (isStatic) out << "static ";
+        if (asConst) out << "const ";
+        out << "sc_fat " << f.name << " = {0};\n";
+        if (!f.init) return;
+        emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true);
+    }
+
+    // 胖指针赋值（lv=左值, own=持有者 out 表达式）：
+    //   T()   → 带头堆分配 + 绑新边（目标.in++、own.out++）
+    //   调用  → 移动：结构体拷贝（入边守恒）；own 非 ROOT 时改挂并 own.out++
+    //   胖左值→ 绑定：新增一条边（目标.in++、own.out++）
+    //   nil   → 解绑（清空）
+    // isInit=false 时先解绑旧边（§4.1 重新赋值必先拆旧边）。
+    void emitFatBind(const std::string& lv, const std::string& own,
+                     const Expr& init, bool isInit) {
+        // nil：仅解绑
+        if (init.kind == Expr::Ident && init.text == "nil") {
+            if (!isInit) { indent(); out << "sc_fat_unbind(&" << lv << ");\n"; }
+            return;
+        }
+        if (!isInit) { indent(); out << "sc_fat_unbind(&" << lv << ");\n"; }
+        // T() → 带头分配 + 绑定
+        if (const Decl* td = typeCallee(init)) {
+            std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
+            indent();
+            out << td->name << " *" << tmp << " = " << td->name << "__new_ref();\n";
+            indent();
+            out << "sc_fat_bind(&" << lv << ", " << tmp
+                << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own << ");\n";
+            return;
+        }
+        // 普通调用返回 T@ → 移动（结构体拷贝，入边守恒；own 非 ROOT 改挂 + out++）
+        if (init.kind == Expr::Call) {
+            indent();
+            out << lv << " = ";
+            emitExpr(init, true);
+            out << ";\n";
+            if (own != "SC_OWN_ROOT") {
+                indent(); out << lv << ".own = " << own << ";\n";
+                indent(); out << "if (SC_OWN_REAL(" << own << ")) (*(" << own << "))++;\n";
+            }
+            return;
+        }
+        // & 取址传染（§4.2）：对胖目标子成员取址 → 结果也是胖指针，
+        //   tar 来自最近胖 hop（共享其堆对象 in），own 由接收者位置定。
+        if (init.kind == Expr::Unary && init.op == "&" && init.a) {
+            if (const Expr* hop = fatHopOf(*init.a)) {
+                std::string addr = "&(" + captureExpr(*init.a) + ")";
+                std::string tarx = "(" + captureExpr(*hop) + ").tar";
+                indent();
+                out << "sc_fat_bind(&" << lv << ", " << addr
+                    << ", (sc_ref *)" << tarx << ", " << own << ");\n";
+                return;
+            }
+            // 4b：& 普通栈变量（无胖 base）→ tar 指向其注入的伴生 sc_ref 头（§4.2）
+            if (const Expr* root = rootIdentOf(*init.a)) {
+                if (fatBorrowVars.count(root->text)) {
+                    std::string addr = "&(" + captureExpr(*init.a) + ")";
+                    indent();
+                    if (g_refCheck) {
+                        // 开启检查：tar→伴生 sc_ref 头，退域断言悬挂
+                        out << "sc_fat_bind(&" << lv << ", " << addr
+                            << ", &__scref_" << root->text << ", " << own << ");\n";
+                    } else {
+                        // 默认构建：不注入栈头，借用按非追踪处理（tar=NULL，仅 own 记账）
+                        out << "sc_fat_bind(&" << lv << ", " << addr
+                            << ", (sc_ref *)0, " << own << ");\n";
+                    }
+                    return;
+                }
+            }
+        }
+        // 胖左值（Ident/Member/Index）→ 绑定一条新边
+        std::string tt;
+        if (isFatExpr(init, &tt)) {
+            std::string rhs = captureExpr(init);
+            indent();
+            out << "sc_fat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
+                << rhs << ").tar, " << own << ");\n";
+            return;
+        }
+        // 兜底（含 &expr 取址，Step4 实现）：暂作结构体拷贝
+        indent();
+        out << lv << " = ";
+        emitExpr(init, true);
+        out << ";\n";
+    }
+
+    // 胖指针赋值语句入口（左值任意：根变量 / 胖成员）。返回 false 表示非胖左值。
+    bool emitFatAssignStmt(const Expr& lhs, const Expr& init, bool isInit) {
+        std::string lv, own;
+        if (!fatLhsInfo(lhs, lv, own)) return false;
+        emitFatBind(lv, own, init, isInit);
+        return true;
+    }
+
+    // 作用域退出：对本块内胖根变量逆序 unbind（skip = 被移动返回的变量名，跳过）
+    void emitFatScopeCleanup(const std::vector<std::string>& scope, const std::string& skip) {
+        for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
+            if (*it == skip) continue;
+            indent();
+            out << "sc_fat_unbind(&" << *it << ");\n";
+        }
+    }
+
+    // 作用域退出两阶段（§5）：① 拆本块全部胖根边 ② 再对本块注入 ref 头的栈变量断言悬挂。
+    void emitScopeCleanupAt(size_t i, const std::string& skip) {
+        emitFatScopeCleanup(fatScopes[i], skip);                  // phase1：拆边
+        if (i < fatStackScopes.size())                           // phase2：栈对象断言（带 site）
+            for (auto it = fatStackScopes[i].rbegin(); it != fatStackScopes[i].rend(); ++it) {
+                indent();
+                out << "sc_ref_check(&__scref_" << it->name << ", \"" << it->site << "\");\n";
+            }
+    }
+
+    // 跨全部活动作用域清理（return 时用，skip = 移动返回的变量）
+    void emitFatReturnCleanup(const std::string& skip) {
+        for (size_t i = fatScopes.size(); i-- > 0; )
+            emitScopeCleanupAt(i, skip);
+    }
+
+    // 从最内层清理到 fromIdx 作用域（含）——break/continue 早退用。
+    void emitFatCleanupTo(size_t fromIdx) {
+        for (size_t i = fatScopes.size(); i-- > fromIdx; )
+            emitScopeCleanupAt(i, "");
+    }
+
+    // 语句序列是否以终结语句（return/break/continue/goto）收尾（其后清理由它接管）
+    static bool lastTerminates(const std::vector<StmtPtr>& stmts) {
+        if (stmts.empty()) return false;
+        switch (stmts.back()->kind) {
+            case Stmt::ReturnS: case Stmt::BreakS:
+            case Stmt::ContinueS: case Stmt::GotoS: return true;
+            default: return false;
+        }
+    }
+
     void emitVarDecls(const std::vector<Field>& decls, bool asConst,
                       bool isStatic = false, bool isTls = false) {
         for (auto& f : decls) {
@@ -1320,6 +1676,12 @@ struct CGen {
                     }
                 if (f.type.projectArgs && !f.type.projectArgs->empty()) out << ", ";
                 out << "NULL};\n";
+                continue;
+            }
+            // 自动指针 T@（胖指针根变量）：声明 sc_fat + 绑定（T()=新建 / 调用=移动 /
+            // 胖左值=绑定借用）；登记入当前作用域，退域/return 处自动 unbind。
+            if (f.type.fat && f.type.arrayDims.empty() && inFunc) {
+                emitFatVarInit(f, asConst, isStatic);
                 continue;
             }
             // 无类型 var/let（var x: = 初值）：依据初值字面量推断默认类型；
@@ -1366,12 +1728,33 @@ struct CGen {
                     out << im->name << "(&" << f.name << ");\n";
                 }
             }
+            // Step4b：被 &var 借入胖指针的普通栈变量 → 注入伴生 sc_ref 头；
+            // 退域两阶段清理（拆边后）对其 sc_ref_check，捕获借用比目标活得久的悬挂（§4.2/§7.3）。
+            // 仅 --check=ref 开启时注入（默认构建省此开销，堆 ARC 不受影响）。
+            if (g_refCheck && inFunc && !isStatic && !isTls && !f.type.fat
+                && fatBorrowVars.count(f.name)) {
+                indent();
+                out << "sc_ref __scref_" << f.name << " = {0, 0, 0, 0};\n";
+                if (!fatStackScopes.empty())
+                    fatStackScopes.back().push_back({f.name, fatStackSite(f)});
+            }
         }
+    }
+
+    // 栈悬挂断言的 who 文案：含源码定位（文件名:行）。
+    std::string fatStackSite(const Field& f) const {
+        std::string s = f.name;
+        if (!g_refSrcFile.empty() && f.line > 0) {
+            std::string base = std::filesystem::path(g_refSrcFile).filename().string();
+            s += "@" + base + ":" + std::to_string(f.line);
+        }
+        return s;
     }
 
     // 记录变量的轻量类型（函数内→局部表，否则→全局表）
     void regVar(const Field& f) {
         VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
+        vt.fat = f.type.fat;
         (inFunc ? localsT : globalsT)[f.name] = vt;
         if (!f.type.arrayDims.empty())
             (inFunc ? varDimsL : varDimsG)[f.name] = f.type.arrayDims;
@@ -1384,7 +1767,23 @@ struct CGen {
     }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
+        fatScopes.emplace_back();
+        fatStackScopes.emplace_back();
         for (auto& s : stmts) emitStmt(*s);
+        // 块正常落出（非 return/break/... 收尾）：两阶段清理本块（拆胖边 + 栈对象断言）
+        if (!lastTerminates(stmts)) emitScopeCleanupAt(fatScopes.size() - 1, "");
+        fatScopes.pop_back();
+        fatStackScopes.pop_back();
+    }
+
+    // 循环体：登记 break/continue 边界（= 体作用域层）后发出语句
+    void emitLoopBody(const std::vector<StmtPtr>& stmts) {
+        size_t boundary = fatScopes.size();  // emitStmts 即将 push 的体作用域索引
+        fatBreakBoundary.push_back(boundary);
+        fatContinueBoundary.push_back(boundary);
+        emitStmts(stmts);
+        fatContinueBoundary.pop_back();
+        fatBreakBoundary.pop_back();
     }
 
     // 分身/切片句柄变量名 → 实体类型 T 名（非句柄返回空串）
@@ -1697,6 +2096,19 @@ struct CGen {
                     const std::string ent = projEntityOf(s.expr->a->text);
                     if (!ent.empty()) { emitProjectAssign(s.expr->a->text, ent, *s.expr->b); break; }
                 }
+                // 胖指针赋值：p = ... / base->m = ...（先拆旧边再绑新边，§4.1）
+                if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                    s.expr->a && isFatExpr(*s.expr->a)) {
+                    if (emitFatAssignStmt(*s.expr->a, *s.expr->b, /*isInit*/ false)) break;
+                }
+                // 丢弃返回 T@ 的调用：移动来的入边无新主 → 丢弃点自动解绑临时（§7.7）
+                if (s.expr && s.expr->kind == Expr::Call && isFatExpr(*s.expr)) {
+                    std::string tmp = "_fatd" + std::to_string(fatTmpSeq++);
+                    indent(); out << "{ sc_fat " << tmp << " = ";
+                    emitExpr(*s.expr, true);
+                    out << "; sc_fat_unbind(&" << tmp << "); }\n";
+                    break;
+                }
                 indent();
                 emitExpr(*s.expr, true);
                 out << ";\n";
@@ -1705,8 +2117,8 @@ struct CGen {
             case Stmt::LetS: emitVarDecls(s.decls, true); break;
             case Stmt::TlsS: emitVarDecls(s.decls, false, false, true); break;
             case Stmt::ReturnS:
-                indent();
                 if (curRpc) {
+                    indent();
                     // rpc 实际函数：返回值写入结构体首个默认成员 _
                     if (s.expr && rpcHasRet(*curRpc)) {
                         out << "_p->_ = ";
@@ -1715,12 +2127,51 @@ struct CGen {
                     } else out << "return;\n";
                     break;
                 }
-                out << "return";
-                if (s.expr) { out << " "; emitExpr(*s.expr, true); }
-                out << ";\n";
+                {
+                    // 自动指针：是否有待清理胖根变量
+                    bool anyFat = false;
+                    for (auto& sc : fatScopes) if (!sc.empty()) { anyFat = true; break; }
+                    // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
+                    std::string skip;
+                    if (s.expr && s.expr->kind == Expr::Ident && isFatExpr(*s.expr))
+                        skip = s.expr->text;
+                    if (!anyFat) {
+                        indent();
+                        out << "return";
+                        if (s.expr) { out << " "; emitExpr(*s.expr, true); }
+                        out << ";\n";
+                        break;
+                    }
+                    // 有清理：先把返回值算入临时（braced 块隔离 _ret），清理后再返回，
+                    // 避免清理过程释放掉返回值所依赖的对象。
+                    indent(); out << "{\n";
+                    depth++;
+                    if (s.expr) {
+                        indent();
+                        if (curFnSig) emitRetType(*curFnSig); else out << "intptr_t";
+                        out << " _ret = ";
+                        emitExpr(*s.expr, true);
+                        out << ";\n";
+                        emitFatReturnCleanup(skip);
+                        indent(); out << "return _ret;\n";
+                    } else {
+                        emitFatReturnCleanup(skip);
+                        indent(); out << "return;\n";
+                    }
+                    depth--;
+                    indent(); out << "}\n";
+                }
                 break;
-            case Stmt::BreakS: indent(); out << "break;\n"; break;
-            case Stmt::ContinueS: indent(); out << "continue;\n"; break;
+            case Stmt::BreakS:
+                if (!fatBreakBoundary.empty())
+                    emitFatCleanupTo(fatBreakBoundary.back());
+                indent(); out << "break;\n";
+                break;
+            case Stmt::ContinueS:
+                if (!fatContinueBoundary.empty())
+                    emitFatCleanupTo(fatContinueBoundary.back());
+                indent(); out << "continue;\n";
+                break;
             case Stmt::IfS:
                 indent();
                 out << "if (";
@@ -1745,12 +2196,12 @@ struct CGen {
                 out << "while (";
                 emitExpr(*s.expr, true);
                 out << ") {\n";
-                depth++; emitStmts(s.body); depth--;
+                depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "}\n";
                 break;
             case Stmt::DoWhileS:
                 indent(); out << "do {\n";
-                depth++; emitStmts(s.body); depth--;
+                depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "} while (";
                 emitExpr(*s.expr, true);
                 out << ");\n";
@@ -1764,7 +2215,7 @@ struct CGen {
                 out << "; ";
                 if (s.forStep) emitExpr(*s.forStep, true);
                 out << ") {\n";
-                depth++; emitStmts(s.body); depth--;
+                depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "}\n";
                 break;
             case Stmt::CaseS:
@@ -1773,6 +2224,7 @@ struct CGen {
                 emitExpr(*s.expr, true);
                 out << ") {\n";
                 depth++;
+                fatBreakBoundary.push_back(fatScopes.size());  // switch 也是 break 目标
                 for (auto& arm : s.caseArms) {
                     if (arm.labels.empty()) {
                         indent(); out << "default:\n";
@@ -1793,6 +2245,7 @@ struct CGen {
                     depth--;
                     indent(); out << "}\n";
                 }
+                fatBreakBoundary.pop_back();
                 depth--;
                 indent(); out << "}\n";
                 break;
@@ -2190,6 +2643,7 @@ struct CGen {
             out << "void"; // 空指针 / 省略返回类型 = void
             return;
         }
+        if (rt->fat) { out << "sc_fat"; return; }  // 返回自动指针 T@ → 胖指针
         std::string base; int ptr;
         resolveType(*rt, base, ptr);
         out << base;
@@ -2248,10 +2702,13 @@ struct CGen {
             if (it != funcTypes.end()) sig = it->second;
         }
         for (auto& p : sig->structCommon.fields) regVar(p);
+        curFnSig = sig;
+        preScanFatBorrows(d.body);   // Step4b：预扫描被 & 借出的栈变量，决定注入 ref 头
         depth++;
         emitStmts(d.body);
         depth--;
         inFunc = false;
+        curFnSig = nullptr;
         out << "}\n\n";
     }
 
@@ -2987,6 +3444,14 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
 
+        // 自动指针 T@：收集被当作胖目标的类型名（决定生成 T__new_ref 带头分配辅助）
+        for (auto& d : prog.decls) {
+            for (auto& f : d->structCommon.fields) noteFatType(f.type);
+            if (d->structCommon.type) noteFatType(*d->structCommon.type);
+            if (!d->external)
+                for (auto& s : d->body) collectFatTypesStmt(*s);
+        }
+
         // print 关键字：已属语言内核（op.sc 默认导入声明 @fnc print::，原型由 op.h
         // 默认带入，运行时 op_impl.c 始终链接），无需 inc io.sc，亦无需在此声明。
         // stringify 格式化关键字：依赖 adt string（返回类型）；选项类型 stringify_t
@@ -3171,6 +3636,10 @@ struct CGen {
 };
 
 } // namespace
+
+void setRefCheck(bool on) { g_refCheck = on; }
+bool getRefCheck() { return g_refCheck; }
+void setRefSrcFile(const std::string& path) { g_refSrcFile = path; }
 
 std::string emitC(const Program& prog, const std::string& srcFile) {
     CGen g(prog);

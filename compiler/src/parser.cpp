@@ -169,9 +169,18 @@ struct Parser {
             else break;
         }
 
+        // 胖指针 T@（自动指针，见 builtins/auto_ptr.md）：恒为单层，与 & 互斥。
+        // C 侧展开为 sc_fat，参与引用图与释放点验证。
+        if (atOp("@")) {
+            advance();
+            if (ty.ptr > 0) err("胖指针 @ 不能与 & 组合（T@ 恒为单层）");
+            if (ty.name.empty()) err("胖指针 @ 须作用于命名类型（如 T@）");
+            ty.fat = true;
+        }
+
         // 分身/切片句柄类型 T[...]（def T: <S> {} 机制）：类型侧方括号（数组维度在
         // 名字侧，故此处的 [ 必为句柄初值列表）。方括号内为 alloc 的实参初值表达式。
-        if (!ty.name.empty() && ty.ptr == 0 && at(Tok::LBracket)) {
+        if (!ty.name.empty() && ty.ptr == 0 && !ty.fat && at(Tok::LBracket)) {
             advance();                                  // '['
             ty.project = true;
             ty.projectArgs = std::make_shared<std::vector<ExprPtr>>();

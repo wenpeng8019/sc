@@ -31,6 +31,15 @@
 // 传绝对路径以保证调试器在任意工作目录都能找到源文件。
 std::string emitC(const Program& prog, const std::string& srcFile = "");
 
+// 自动指针 T@ 引用检查开关（--check=ref / SCC_REF_CHECK）。
+//   开启：注入栈对象 sc_ref 头 + 退域 sc_release_check 断言（带源码定位 site），
+//        捕获「借用比目标活得久」的悬挂（auto_ptr.md §7.3）。
+//   关闭（默认）：栈断言编译掉，省开销；堆对象 ARC（in→0 自动 free / out>0 报错）始终保留。
+void setRefCheck(bool on);
+bool getRefCheck();
+// 栈悬挂断言 site 文案使用的源码文件名（独立于 #line 的 srcFile）。
+void setRefSrcFile(const std::string& path);
+
 // emitC 变体：程序使用 stringify(...) 时，将按类型生成的 JSON 格式化器写入独立头文件。
 //   stringifyHeaderName 非空且 stringifyHeaderOut 非空：格式化器写入 *stringifyHeaderOut
 //   （含 include guard），生成的 .c 在类型定义之后 #include 该头文件名；程序未使用

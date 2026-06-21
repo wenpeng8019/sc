@@ -116,6 +116,7 @@ std::string typeToStr(const TypeRef& t) {
         return s;
     }
     for (int i = 0; i < t.ptr; i++) s += "&";
+    if (t.fat) s += "@";   // 自动指针标记（恒单层，与 ptr 互斥）
     return s;
 }
 
@@ -164,6 +165,8 @@ std::string fieldDetail(const Field& f, bool withInit) {
             s += f.type.name.empty() ? " " : "";
             for (int i = 0; i < f.type.ptr; i++) s += "&";
         }
+        // 自动指针 @ 写在类型侧（冒号后）：node@
+        if (f.type.fat) s += "@";
     }
     if (withInit && f.init) s += " = " + exprToStr(*f.init);
     return s;
