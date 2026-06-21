@@ -226,6 +226,11 @@ struct Expr {
     int castPtr = 0;            // Cast: 目标类型的指针层数
     bool castIsFmt = false;     // Cast: op 为 printf 格式串字面量（含引号）而非类型名
                                 // —— print 实参的格式覆盖 (expr: "%.5d")，仅 print 语境有意义
+    // Cast 目标类型限定符（与声明侧同义，见 §4）：const/volatile 前缀到底层类型，
+    // restrict 尾置于指针（仅指针强转有意义，约束无别名）。
+    bool castConst = false;     // Cast: 目标类型 const 限定（前缀）
+    bool castVolatile = false;  // Cast: 目标类型 volatile 限定（前缀）
+    bool castRestrict = false;  // Cast: 目标指针 restrict 限定（尾置）
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
@@ -293,6 +298,8 @@ struct Stmt {
                     //                    ! f()   等价 if (!($=f())) { body }
                     //                    > f()   等价 if (($=f()) >  0) { body }（< <= >= 类推）
                     //                    !! f()  等价 $=f(); if ($ != ok) assert(false)
+                    //                > retProp=true（尾置 ? 错误传播糖）：体执行后向上层
+                    //                  return $（函数 void 则 return;），仅 ! / 比较形态可加 ?
     } kind;
 
     ExprPtr expr;                       // ExprS: 表达式的值
@@ -330,11 +337,13 @@ struct Stmt {
     bool printCompat = false;           // PrintS: 括号形式 print(...) → C printf 兼容模式（实参原样传递）
 
     std::string retOp;                  // RetCallS: 语法糖操作符（"!" ">" "<" ">=" "<=" "!!"）
+    bool retProp = false;               // RetCallS: 尾置 ? 错误传播糖（体后 return $）
 
     struct CaseArm {
         std::vector<ExprPtr> labels;    // 空=default 分支
         std::vector<StmtPtr> body;      // 分支体
         bool through = false;           // 末尾 through：贯穿到下一分支
+        std::string binding;            // 标签联合解构绑定名（Variant as x）；空=无绑定
         int line = 0;
     };
     std::vector<CaseArm> caseArms;      // CaseS: 分支列表（labels 为空表示 default）
@@ -394,6 +403,10 @@ struct Decl {
     bool genTypeHeader = false;     // 编译器合成的 future_id 枚举：转译工程下写入 type.h（各 .c #include），
                                     //   emit-sc 不输出；stdout/内联模式则就地内联进 .c（自包含）
     bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
+
+    bool tagged = false;            // 标签联合 def T: @( v1 / v2:T / ... )：UnionD 加隐藏 tag，
+                                    // 安全构造 T.Variant(payload) + case 解构（Variant as x）。
+                                    // 字段即变体：type.name 为空表示无载荷变体。
 
     std::string adtColl;            // ADT 容器结构体 def T: <C, I> {}：C=容器类型名
     std::string adtItem;            // 同上：I=元素节点类型名（注入为 T 首个 synthetic 成员 _adt）

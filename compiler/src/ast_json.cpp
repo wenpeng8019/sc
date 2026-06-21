@@ -96,7 +96,7 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::RetCallS: {
             std::vector<std::string> c;
             for (auto& b : s.body) c.push_back(stmtNode(*b));
-            return node("retcall", s.retOp, exprToStr(*s.expr), s.line, c);
+            return node("retcall", s.retOp + (s.retProp ? "?" : ""), exprToStr(*s.expr), s.line, c);
         }
         case Stmt::WhileS: {
             std::vector<std::string> c;
@@ -145,6 +145,7 @@ std::string stmtNode(const Stmt& s) {
                         if (i) d += ", ";
                         d += exprToStr(*arm.labels[i]);
                     }
+                    if (!arm.binding.empty()) d += " as " + arm.binding;
                     d += ":";
                 }
                 c.push_back(node("arm", "", d, arm.line, bc));
@@ -221,7 +222,8 @@ std::string declNode(const Decl& d) {
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
             std::string sd = X;
-            if (d.linked) sd += "~";
+            if (d.tagged) sd += "@";
+            else if (d.linked) sd += "~";
             else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";
             else if (!d.projectSelf.empty()) sd += "<" + d.projectSelf + ">";
             return nodeExt(d.kind == Decl::StructD ? "struct" : "union",

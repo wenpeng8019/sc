@@ -141,6 +141,16 @@ fnc copy: dst: i4& restrict, src: const i4& restrict   # int32_t *restrict / con
 - `restrict` **尾置**（写在 `&` 之后），声明该指针不与其他指针别名（仅对指针有意义），
   常用于函数形参以启用别名优化。
 
+强制类型转换的目标类型同样可写限定符，规则与声明侧一致（见 §10）：
+
+```sc
+let ro: const i4& = (p: const i4&)        # ((const int32_t*)(p))
+var vp: volatile u4& = (&reg: volatile u4&)  # ((volatile uint32_t*)(&reg))
+use((&x: i4& restrict))                    # ((int32_t* restrict)(&x))
+```
+
+`const` / `volatile` 前缀到目标类型，`restrict` 尾置于指针（用于非指针强转会编译报错）。
+
 
 ### 4.1 自动指针 `T@`（引用图与释放点验证）
 
@@ -434,6 +444,37 @@ def value: (
 )
 ```
 
+### 7.3.1 标签联合（tagged union / sum type）
+
+裸联合 `( )` 不带标签，取值全靠程序员自觉，是 C 里取错分支的经典隐患来源。
+在联合前加 `@` 前缀即得**带标签的安全联合**：编译器托管一个隐藏 `tag`，强制
+「先判分支再取载荷」。
+
+```sc
+def Rect: { w: f4, h: f4 }
+
+# 三类变体：无载荷 / 标量载荷 / 具名类型载荷
+def Shape: @( Empty, Circle: f4, Rect: Rect )
+```
+
+- **无载荷变体**：只写变体名（`Empty`）。
+- **载荷变体**：`变体名: 类型`，载荷须为标量或具名类型；多字段载荷请先 `def`
+  一个具名结构体（不支持内联 `{}` 载荷，保持纯数据布局的 C ABI）。
+
+**构造**：`T.Variant(载荷)`，无载荷写 `T.Variant`。
+
+```sc
+var a: Shape = Shape.Circle(2.0)
+var b: Shape = Shape.Empty
+var c: Shape = Shape.Rect(rc)          # rc: Rect
+```
+
+**解构**：用 `case`（见 §11），`Variant as x` 把当前变体载荷**拷贝**为只读
+视图 `x`；无 `default :` 分支时必须**穷尽**覆盖全部变体，否则编译报错。
+
+转 C：展开为 `struct { enum {...} tag; union {...} u; }`，变体常量名为
+`T__Variant`，构造即指定初值器复合字面量，零运行时开销。
+
 ### 7.4 类型别名
 
 ```sc
@@ -660,15 +701,17 @@ p->add(1, 2)    # → obj_add(p, 1, 2)
 - `init`（无参）：**声明即构造**。函数内 `var x: T` 且无显式初值、
   非指针非数组时，转 C 会自动插入 `T_init(&x)`。
   全局变量不自动构造（C 静态初始化限制），需手动调用。
-- `drop`：析构，当前需**手动调用** `x.drop()`（命名保留，
-  未来支持作用域结束自动插入）。
+- `drop`：析构。**栈值对象退域时自动调用**（RAII）：函数内 `var x: T`
+  且 `T` 含无参 `drop` 时，作用域结束（含 `return`/`break`/`continue`/`goto`
+  跨域跳转）会按声明逆序自动插入 `x.drop()`。已显式 `x.drop()` 或取过址
+  `&x`（可能转移所有权）的变量不再重复析构；`return x` 走移动语义，不析构。
+  指针对象（`T&`/`T@`）与全局变量不在此列，仍需手动调用。
 
 ```sc
 fnc main: i4
     var s: string      # 自动 string_init(&s)
     s.append("hi")
-    s.drop()           # 手动释放
-    return 0
+    return 0           # 退域自动 string_drop(&s)
 ```
 
 #### 堆构造：T() 类型伪调用
@@ -1018,6 +1061,15 @@ expr: type&&    # 二级指针转换
 
 指针层数 `&` 加在目标类型名之后，与声明中的类型侧指针写法一致（见 §4）。
 
+**类型限定符**可写在目标类型上，规则与声明侧一致（见 §4）：`const` / `volatile`
+前缀类型名，`restrict` 尾置于指针：
+
+```sc
+(p: const i4&)          # ((const int32_t*)(p))    指向 const 的指针
+(&reg: volatile u4&)    # ((volatile uint32_t*)(&reg))  易变对象（MMIO）
+(&x: i4& restrict)      # ((int32_t* restrict)(&x))  别名约束（restrict 仅对指针有意义）
+```
+
 **仅作右值时免括号**：赋值右侧、实参、return 表达式等右值位置
 可直接写裸形态；需对强转结果继续操作（如 `->` 取成员）或处于
 三目分支内时，仍需括号：
@@ -1063,6 +1115,7 @@ var tab[2][3]: i4 = [
 - `for in`（集合遍历，见 11.6）
 - `case`（替代 C 的 `switch/case/default`）
 - `through`（仅用于 case 分支末尾，表示贯穿）
+- `as`（仅用于 case 解构标签联合：`Variant as x` 绑定载荷，见 7.3.1）
 - `goto`
 - 标签语句（`label:`）
 - `break`
@@ -1135,6 +1188,16 @@ case code:
         printf("C\n")
     :
         printf("default\n")
+
+# case 解构标签联合（见 7.3.1）：分支标签即变体名，Variant as x 绑定载荷
+case s:
+    Empty:
+        return 0.0
+    Circle as r:                 # r 为 Circle 载荷的只读拷贝
+        return 3.14159 * r * r
+    Rect as box:                 # box 为 Rect 载荷
+        return box.w * box.h
+# 无 default `:` 时须覆盖全部变体，否则编译报错（穷尽性检查）
 
 # goto 与标签
 start:
@@ -1894,10 +1957,7 @@ var a:i1
 - `inc *.sc` 已支持单元编译与链接，但命名空间/包版本管理仍未完成。
 - 还没有独立的包管理和版本依赖描述。
 - 还没有完整的泛型/模板能力。
-- 作用域退出钩子已有 `final`（见 §11.5），但析构钩子、RAII 式自动析构等更完整的资源管理机制仍未提供。
 - 自动指针 `T@` 已支持局部一维数组、`goto` 跨域清理与含 `T@` 成员结构体跨 C ABI 约束（见 §4.1）；仍不支持多维/字段/全局/参数/返回位置的 `T@` 数组。
-- 初始化列表已支持数组 `[...]`、结构体 `{...}` 与指定成员 `{a = x}`（C99 designated init）。
-- 类型限定符 `const` / `volatile` / `restrict` 已支持（见 §4）；尚未支持强转表达式上的限定符书写。
 - 预处理能力（宏定义、条件编译）是**有意不提供**的设计决策而非缺失，见第 5 节“无预处理器设计”。
 - 目前的工程化能力主要集中在转译与 AST，标准库和工具链仍偏薄。
 

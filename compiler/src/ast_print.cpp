@@ -52,8 +52,12 @@ std::string rec(const Expr& e, bool top) {
         case Expr::Offsetof:
             return "offsetof(" + e.text + ", " + e.op + ")";
         case Expr::Cast: {
-            std::string s = "(" + rec(*e.a, true) + ": " + e.op;
+            std::string s = "(" + rec(*e.a, true) + ": ";
+            if (e.castConst) s += "const ";
+            if (e.castVolatile) s += "volatile ";
+            s += e.op;
             for (int i = 0; i < e.castPtr; i++) s += "&";
+            if (e.castRestrict) s += " restrict";
             return s + ")";
         }
         case Expr::InitList: {

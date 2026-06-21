@@ -29,4 +29,9 @@ fnc main: i4
     let q: point& = &pt
     q->x = 100
     printf("q->x:      %d\n", q->x)
+    var raw: i4& = &pt.x
+    let ro: const i4& = (raw: const i4&)
+    printf("ro:        %d\n", *ro)
+    var vp: volatile i4& = (&flag: volatile i4&)
+    printf("vp:        %d\n", *vp)
     return 0

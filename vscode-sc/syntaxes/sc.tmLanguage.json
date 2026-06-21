@@ -110,7 +110,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|do|for|case|through|goto|return|break|continue|run|done|await|async|final)\\b"
+                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue|run|done|await|async|final)\\b"
                 },
                 {
                     "name": "keyword.control.io.sc",

@@ -19,8 +19,10 @@ fnc classify: ret, n: i4
     return 1
 
 fnc demo_sugar: void
+    ! classify(-2)
+        printf("fail branch, $=%d\n", $)
     ! classify(0)
-        printf("ok branch, $=%d\n", $)
+        printf("never here\n")
     > classify(7)
         printf("warn branch, $=%d\n", $)
     < classify(-2)
@@ -28,7 +30,26 @@ fnc demo_sugar: void
     !! classify(0)
     printf("after assert, $=%d\n", $)
 
+fnc check_pos: ret, n: i4
+    if n < 0
+        return -1
+    return ok
+
+fnc do_step: ret, n: i4
+    ! check_pos(n) ?
+        printf("do_step: check_pos(%d) failed, $=%d, propagate up\n", n, $)
+    printf("do_step: ok n=%d\n", n)
+    return ok
+
+fnc run_pipeline: ret
+    ! do_step(5) ?
+    ! do_step(-1) ?
+    printf("run_pipeline: never reached\n")
+    return ok
+
 fnc main: i4
     show_suffix()
     demo_sugar()
+    var r: ret = run_pipeline()
+    printf("pipeline result = %d\n", r)
     return 0

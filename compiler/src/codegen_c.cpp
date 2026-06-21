@@ -146,6 +146,13 @@ struct CGen {
     // 与 fatScopes 平行：每层本块内登记的 final 域退出钩子（按源序）。退出点（正常落出/
     // return/break/continue）先于本块胖边拆解，按 LIFO 逐块发出其 body（§16.2 defer 等价）。
     std::vector<std::vector<const Stmt*>> fatFinalScopes;
+    // 与 fatScopes 平行：每层本块内声明的栈值对象（类型有 drop 方法），退域 LIFO 自动调
+    // drop（RAII 闭环）。name=变量名，dropFn=drop 方法的 C 名（T_drop）。
+    struct DropVar { std::string name; std::string dropFn; };
+    std::vector<std::vector<DropVar>> dropScopes;
+    // 本函数内被显式 x.drop()/x->drop() 调用的变量名（预扫描）：move 语义——显式 drop
+    // 抑制该变量的退域自动 drop（用户接管其生命周期，避免双重释放）。
+    std::set<std::string> manualDropVars;
     // 本函数内被 &var 借入胖指针的普通栈变量名集合（预扫描得出，决定声明处注入 ref 头）。
     std::set<std::string> fatBorrowVars;
     // 分身/切片句柄变量（var s: T[...]）：变量名 → 实体类型 T 名
@@ -813,6 +820,40 @@ struct CGen {
         return nullptr;
     }
 
+    // RAII 预扫描：收集本函数内被显式 x.drop()/x->drop() 调用的变量名（move 语义抑制），
+    // 以及被显式取址 &x 的变量名（可能经别名指针管理生命周期，保守抑制以免双重释放）。
+    // 注意：方法调用 o.m() 的接收者取址是 codegen 隐式注入，AST 中无 & 节点，不会误伤。
+    void scanManualDropsExpr(const Expr* e) {
+        if (!e) return;
+        if (e->kind == Expr::Call && e->a && e->a->kind == Expr::Member
+            && e->a->text == "drop" && e->a->a && e->a->a->kind == Expr::Ident)
+            manualDropVars.insert(e->a->a->text);
+        if (e->kind == Expr::Unary && e->op == "&" && e->a && e->a->kind == Expr::Ident)
+            manualDropVars.insert(e->a->text);
+        scanManualDropsExpr(e->a.get());
+        scanManualDropsExpr(e->b.get());
+        scanManualDropsExpr(e->c.get());
+        for (auto& a : e->args) scanManualDropsExpr(a.get());
+        for (auto& s : e->fncBody) scanManualDropsStmt(s.get());
+    }
+    void scanManualDropsStmt(const Stmt* s) {
+        if (!s) return;
+        scanManualDropsExpr(s->expr.get());
+        scanManualDropsExpr(s->forInit.get());
+        scanManualDropsExpr(s->forCond.get());
+        scanManualDropsExpr(s->forStep.get());
+        for (auto& f : s->decls) scanManualDropsExpr(f.init.get());
+        for (auto& a : s->printArgs) scanManualDropsExpr(a.get());
+        for (auto& b : s->body) scanManualDropsStmt(b.get());
+        for (auto& b : s->elseBody) scanManualDropsStmt(b.get());
+        for (auto& arm : s->caseArms)
+            for (auto& b : arm.body) scanManualDropsStmt(b.get());
+    }
+    void scanManualDrops(const std::vector<StmtPtr>& body) {
+        manualDropVars.clear();
+        for (auto& s : body) scanManualDropsStmt(s.get());
+    }
+
     // 容器下标糖识别：e 是否为「对容器实例的 find 下标」。命中条件——e.a 静态类型是
     // 某 def T: <C, I> 的容器 C（值或一级指针、非数组）且 C 具备 find 方法。命中返回
     // find 方法 Decl 并回填接收者类型 *recv；否则 nullptr（退回普通数组/指针下标）。
@@ -841,6 +882,30 @@ struct CGen {
     static bool hasFieldDefaults(const Decl* d) {
         for (auto& f : d->structCommon.fields) if (f.init) return true;
         return false;
+    }
+
+    // 标签联合识别：name 经别名解析后是否为 def T: @( ... ) 标签联合
+    const Decl* taggedUnionOf(const std::string& name) const {
+        const Decl* d = aggrOf(name);
+        return (d && d->kind == Decl::UnionD && d->tagged) ? d : nullptr;
+    }
+    // 在标签联合 d 中查找变体字段（name 为变体名），未找到返回 nullptr
+    static const Field* taggedVariant(const Decl* d, const std::string& v) {
+        for (auto& f : d->structCommon.fields) if (f.name == v) return &f;
+        return nullptr;
+    }
+    // 判断 Member 表达式是否为「标签联合变体构造引用」T.Variant
+    //   （T 为标签联合类型名且未被局部/全局变量遮蔽，Variant 为其变体）→ 返回变体字段
+    const Field* taggedCtorMember(const Expr& m, const Decl** outDecl = nullptr) const {
+        if (m.kind != Expr::Member || m.op != "." || !m.a || m.a->kind != Expr::Ident)
+            return nullptr;
+        const std::string& tn = m.a->text;
+        if (localsT.count(tn) || globalsT.count(tn)) return nullptr;
+        const Decl* d = taggedUnionOf(tn);
+        if (!d) return nullptr;
+        const Field* v = taggedVariant(d, m.text);
+        if (outDecl) *outDecl = d;
+        return v;
     }
 
     // 表达式的轻量类型推断（仅覆盖方法调用需要的场景）
@@ -1342,6 +1407,28 @@ struct CGen {
                     emitStrofCall(e);
                     break;
                 }
+                // 标签联合变体构造：T.Variant(payload) → ((T){ .tag = T__Variant, .u.Variant = payload })
+                if (e.a->kind == Expr::Member) {
+                    const Decl* td = nullptr;
+                    if (const Field* vf = taggedCtorMember(*e.a, &td)) {
+                        const bool hasPayload = !vf->type.name.empty() || vf->type.ptr > 0;
+                        if (!hasPayload) {
+                            if (!e.args.empty())
+                                throw CompileError("标签联合变体 " + td->name + "." + vf->name +
+                                                   " 无载荷，不能带实参构造", e.line);
+                            out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name << " })";
+                            break;
+                        }
+                        if (e.args.size() != 1)
+                            throw CompileError("标签联合变体 " + td->name + "." + vf->name +
+                                               " 需要且仅需要一个载荷实参", e.line);
+                        out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name
+                            << ", .u." << vf->name << " = ";
+                        emitExpr(*e.args[0], true);
+                        out << " })";
+                        break;
+                    }
+                }
                 // 顶层方法调用糖：o.m(...) / p->m(...) → T_m(&o/p, ...)
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
@@ -1523,6 +1610,18 @@ struct CGen {
                 out << "]";
                 break;
             case Expr::Member: {
+                // 标签联合无载荷变体构造：T.Variant → ((T){ .tag = T__Variant })
+                {
+                    const Decl* td = nullptr;
+                    if (const Field* vf = taggedCtorMember(e, &td)) {
+                        if (!vf->type.name.empty() || vf->type.ptr > 0)
+                            throw CompileError("标签联合变体 " + td->name + "." + vf->name +
+                                               " 带载荷，构造须写 " + td->name + "." + vf->name +
+                                               "(载荷)", e.line);
+                        out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name << " })";
+                        break;
+                    }
+                }
                 // 胖指针 T@ 成员访问：p->field → ((T*)(p).p)->field（base 先解胖为裸 T*）
                 {
                     std::string tt;
@@ -1597,9 +1696,13 @@ struct CGen {
                 // 中被拆解）；出现在其他表达式位置则是误用。
                 if (e.castIsFmt)
                     throw CompileError{"格式说明符 (expr: \"%fmt\") 只能用于 print 实参", e.line};
-                // (expr: type&) → ((T*)(expr))
-                out << "((" << mapBase(e.op);
+                // (expr: type&) → ((T*)(expr))；含类型限定符 (expr: const T&) → ((const T*)(expr))
+                out << "((";
+                if (e.castConst) out << "const ";
+                if (e.castVolatile) out << "volatile ";
+                out << mapBase(e.op);
                 for (int i = 0; i < e.castPtr; i++) out << "*";
+                if (e.castRestrict) out << " restrict";
                 out << ")(";
                 emitExpr(*e.a, true);
                 out << "))";
@@ -1853,6 +1956,12 @@ struct CGen {
     // 其前另有 phase0：发出本块登记的 final 钩子（LIFO），先于拆边/断言执行。
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
         emitFinalScope(i);                                       // phase0：final 钩子
+        if (i < dropScopes.size())                               // phase0.5：栈值对象 RAII 自动 drop
+            for (auto it = dropScopes[i].rbegin(); it != dropScopes[i].rend(); ++it) {
+                if (it->name == skip) continue;                  // 被移动返回的对象跳过
+                indent();
+                out << it->dropFn << "(&" << it->name << ");\n";
+            }
         emitFatScopeCleanup(fatScopes[i], skip);                  // phase1：拆边
         if (i < fatArrayScopes.size())                           // phase1b：T@ 数组逐元素拆边
             for (auto it = fatArrayScopes[i].rbegin(); it != fatArrayScopes[i].rend(); ++it) {
@@ -2061,6 +2170,15 @@ struct CGen {
                     out << im->name << "(&" << f.name << ");\n";
                 }
             }
+            // RAII 闭环：栈值对象（类型有 drop 方法）退域自动 drop，LIFO。被显式 drop 的
+            // 变量（manualDropVars，move 语义）跳过，由用户接管，避免双重释放。
+            if (inFunc && !isStatic && !isTls && f.type.ptr == 0 && f.type.arrayDims.empty()
+                && !f.type.fat && !f.type.project && !f.type.hasInline
+                && !manualDropVars.count(f.name)) {
+                const Decl* dm = findMethod(f.type.name, "drop");
+                if (dm && !dropScopes.empty())
+                    dropScopes.back().push_back({f.name, dm->name});
+            }
             // Step4b：被 &var 借入胖指针的普通栈变量 → 注入伴生 sc_ref 头；
             // 退域两阶段清理（拆边后）对其 sc_ref_check，捕获借用比目标活得久的悬挂（§4.2/§7.3）。
             // 仅 --check=ref 开启时注入（默认构建省此开销，堆 ARC 不受影响）。
@@ -2122,6 +2240,7 @@ struct CGen {
         fatStackScopes.emplace_back();
         memCanaryScopes.emplace_back();
         fatFinalScopes.emplace_back();
+        dropScopes.emplace_back();
         // 本作用域直接子标签登记入 labelDepth（进域可见、退域注销），供 goto 跨域清理定位。
         size_t scopeIdx = fatScopes.size() - 1;
         for (auto& s : stmts)
@@ -2136,6 +2255,7 @@ struct CGen {
         fatStackScopes.pop_back();
         memCanaryScopes.pop_back();
         fatFinalScopes.pop_back();
+        dropScopes.pop_back();
     }
 
     // 循环体：登记 break/continue 边界（= 体作用域层）后发出语句
@@ -2747,11 +2867,17 @@ struct CGen {
                     // --check=mem 栈数组尾哨兵：任意活动作用域登记了栈数组 → return 前须校验
                     bool anyCanary = false;
                     for (auto& mc : memCanaryScopes) if (!mc.empty()) { anyCanary = true; break; }
+                    // RAII：任意活动作用域登记了栈值对象 → return 前须自动 drop
+                    bool anyDrop = false;
+                    for (auto& dc : dropScopes) if (!dc.empty()) { anyDrop = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
+                    // return v（v 为栈值对象）= 移动：跳过其自动 drop，所有权移交调用方
                     std::string skip;
                     if (s.expr && s.expr->kind == Expr::Ident && isFatExpr(*s.expr))
                         skip = s.expr->text;
-                    if (!anyFat && !anyFinal && !anyCanary) {
+                    else if (s.expr && s.expr->kind == Expr::Ident)
+                        skip = s.expr->text;
+                    if (!anyFat && !anyFinal && !anyCanary && !anyDrop) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
@@ -2821,20 +2947,28 @@ struct CGen {
                     indent(); out << "if (_sc_ret != 0) assert(false);\n";
                     break;
                 }
-                // ! f()  → if (!((_sc_ret = f())))      { body }
-                // OP f() → if (((_sc_ret = f())) OP 0)  { body }（OP ∈ > < >= <=）
+                // ! f()  → if (((_sc_ret = f())) != 0)  { body }（失败 $!=ok 进块）
+                // OP f() → if (((_sc_ret = f())) OP 0)   { body }（OP ∈ > < >= <=）
                 indent(); out << "if (";
                 if (s.retOp == "!") {
-                    out << "!((_sc_ret = ";
+                    out << "((_sc_ret = ";
                     emitExpr(*s.expr, true);
-                    out << "))";
+                    out << ")) != 0";
                 } else {
                     out << "((_sc_ret = ";
                     emitExpr(*s.expr, true);
                     out << ") " << s.retOp << " 0)";
                 }
                 out << ") {\n";
-                depth++; emitStmts(s.body); depth--;
+                depth++; emitStmts(s.body);
+                if (s.retProp) {
+                    // 错误传播糖 ?：体后向上层 return $（void 函数则 return;）
+                    const auto& rt = curFnSig ? curFnSig->structCommon.type : nullptr;
+                    const bool retVoid = !rt || (rt->name.empty() && rt->ptr == 0);
+                    indent();
+                    out << (retVoid ? "return;\n" : "return _sc_ret;\n");
+                }
+                depth--;
                 indent(); out << "}\n";
                 break;
             }
@@ -2866,7 +3000,11 @@ struct CGen {
                 depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "}\n";
                 break;
-            case Stmt::CaseS:
+            case Stmt::CaseS: {
+                // 标签联合解构：case 作用于 def T: @( ... ) 值 → 按 tag 安全分发并绑定载荷
+                VType sv;
+                const Decl* tu = exprVType(*s.expr, sv) ? taggedUnionOf(sv.name) : nullptr;
+                if (tu) { emitTaggedCase(s, *tu); break; }
                 indent();
                 out << "switch (";
                 emitExpr(*s.expr, true);
@@ -2897,6 +3035,7 @@ struct CGen {
                 depth--;
                 indent(); out << "}\n";
                 break;
+            }
             case Stmt::GotoS: {
                 // goto 跨域清理：目标标签若在当前活动作用域链上，则从最内层清理到「标签
                 // 所在作用域的子层」（含被跳过的胖根/final/栈哨兵；回跳同时拆解标签体使其重入干净）。
@@ -3229,6 +3368,125 @@ struct CGen {
         out << "} " << d.name << "__project;\n\n";
     }
 
+    // 标签联合 def T: @( v1 / v2:payload / ... )：展开为带隐藏 tag 的安全和类型。
+    //   typedef struct T { enum { T__v1, T__v2, ... } tag; union { payload... } u; } T;
+    //   无载荷变体不占 union 成员；全部无载荷时省略 union（退化为带名枚举的标量）。
+    void emitTaggedUnion(const Decl& d) {
+        indent();
+        out << "typedef struct " << d.name << " {\n";
+        depth++;
+        // tag 枚举：变体常量名 T__Variant（C 枚举常量泄漏到外层作用域，供构造/解构引用）
+        indent();
+        out << "enum {";
+        for (size_t i = 0; i < d.structCommon.fields.size(); i++)
+            out << (i ? ", " : " ") << d.name << "__" << d.structCommon.fields[i].name;
+        out << " } tag;\n";
+        // 载荷 union：仅含有载荷的变体
+        bool anyPayload = false;
+        for (auto& f : d.structCommon.fields)
+            if (!f.type.name.empty() || f.type.ptr > 0) { anyPayload = true; break; }
+        if (anyPayload) {
+            indent(); out << "union {\n";
+            depth++;
+            for (auto& f : d.structCommon.fields) {
+                if (f.type.name.empty() && f.type.ptr == 0) continue;  // 无载荷变体跳过
+                indent();
+                emitDeclarator(f);
+                out << ";\n";
+            }
+            depth--;
+            indent(); out << "} u;\n";
+        }
+        depth--;
+        indent();
+        out << "} " << d.name << ";\n\n";
+    }
+
+    // 标签联合解构 case：先将被解构值绑定到临时量（避免重复求值），按 tag 分发，
+    // 每个 Variant as x 分支把当前变体载荷拷贝到只读视图 x。无 default 时强制穷尽。
+    void emitTaggedCase(const Stmt& s, const Decl& tu) {
+        // 预校验：标签合法、绑定仅用于有载荷单变体、穷尽性
+        std::set<std::string> covered;
+        bool hasDefault = false;
+        for (auto& arm : s.caseArms) {
+            if (arm.labels.empty()) { hasDefault = true; continue; }
+            for (auto& lab : arm.labels) {
+                if (lab->kind != Expr::Ident)
+                    throw CompileError("标签联合 case 分支标签须为变体名", arm.line);
+                const Field* vf = taggedVariant(&tu, lab->text);
+                if (!vf)
+                    throw CompileError("'" + lab->text + "' 不是标签联合 " + tu.name + " 的变体", arm.line);
+                if (!covered.insert(lab->text).second)
+                    throw CompileError("标签联合变体 " + tu.name + "." + lab->text + " 分支重复", arm.line);
+            }
+            if (!arm.binding.empty()) {
+                if (arm.labels.size() != 1)
+                    throw CompileError("标签联合 case 绑定 'as' 仅适用于单变体分支", arm.line);
+                const Field* vf = taggedVariant(&tu, arm.labels[0]->text);
+                if (vf->type.name.empty() && vf->type.ptr == 0)
+                    throw CompileError("变体 " + tu.name + "." + arm.labels[0]->text +
+                                       " 无载荷，不能用 'as' 绑定", arm.line);
+            }
+        }
+        if (!hasDefault && covered.size() < tu.structCommon.fields.size()) {
+            std::string missing;
+            for (auto& f : tu.structCommon.fields)
+                if (!covered.count(f.name))
+                    missing += (missing.empty() ? "" : ", ") + f.name;
+            throw CompileError("标签联合 " + tu.name + " 的 case 解构不穷尽，缺少变体: " + missing +
+                               "（补齐分支或添加 default ':'）", s.line);
+        }
+
+        std::string tmp = "_case" + std::to_string(fatTmpSeq++);
+        indent();
+        out << tu.name << " " << tmp << " = ";
+        emitExpr(*s.expr, true);
+        out << ";\n";
+        indent();
+        out << "switch (" << tmp << ".tag) {\n";
+        depth++;
+        fatBreakBoundary.push_back(fatScopes.size());
+        for (auto& arm : s.caseArms) {
+            if (arm.labels.empty()) {
+                indent(); out << "default:\n";
+            } else {
+                for (auto& lab : arm.labels) {
+                    indent();
+                    out << "case " << tu.name << "__" << lab->text << ":\n";
+                }
+            }
+            indent(); out << "{\n";
+            depth++;
+            // 载荷绑定 Variant as x：拷贝当前变体载荷到只读视图 x
+            bool restore = false, hadSaved = false;
+            VType savedVT;
+            if (!arm.binding.empty()) {
+                const Field* vf = taggedVariant(&tu, arm.labels[0]->text);
+                std::string base; int ptr; resolveType(vf->type, base, ptr);
+                indent();
+                out << base << " ";
+                for (int i = 0; i < ptr; i++) out << "*";
+                out << arm.binding << " = " << tmp << ".u." << arm.labels[0]->text << ";\n";
+                auto it = localsT.find(arm.binding);
+                if (it != localsT.end()) { hadSaved = true; savedVT = it->second; }
+                localsT[arm.binding] = {vf->type.name, vf->type.ptr,
+                                        (int)vf->type.arrayDims.size()};
+                restore = true;
+            }
+            emitStmts(arm.body);
+            if (restore) {
+                if (hadSaved) localsT[arm.binding] = savedVT;
+                else localsT.erase(arm.binding);
+            }
+            if (!arm.through) { indent(); out << "break;\n"; }
+            depth--;
+            indent(); out << "}\n";
+        }
+        fatBreakBoundary.pop_back();
+        depth--;
+        indent(); out << "}\n";
+    }
+
     void emitTypeDecl(const Decl& d) {
         switch (d.kind) {
             case Decl::EnumD:
@@ -3251,6 +3509,11 @@ struct CGen {
                 break;
             case Decl::StructD:
             case Decl::UnionD:
+                // 标签联合 def T: @( ... )：tag 枚举 + 载荷 union 的安全和类型
+                if (d.kind == Decl::UnionD && d.tagged) {
+                    emitTaggedUnion(d);
+                    break;
+                }
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
                     << " " << d.name << " {\n";
@@ -3372,6 +3635,7 @@ struct CGen {
         for (auto& p : sig->structCommon.fields) regVar(p);
         curFnSig = sig;
         preScanFatBorrows(d.body);   // Step4b：预扫描被 & 借出的栈变量，决定注入 ref 头
+        scanManualDrops(d.body);     // RAII：预扫描显式 drop 的变量（move 语义抑制自动 drop）
         depth++;
         emitStmts(d.body);
         depth--;
@@ -3397,6 +3661,10 @@ struct CGen {
         inFunc = true;
         retDollarDeclared = false;
         depth = 0;
+        auto savedManualDrops = std::move(manualDropVars);   // RAII：lambda 独立预扫描
+        auto savedDropScopes  = std::move(dropScopes);
+        dropScopes.clear();
+        scanManualDrops(e.fncBody);
 
         Decl sigDecl;                                   // 仅承载返回类型给 emitRetType
         sigDecl.structCommon.type = e.fncSig.type;
@@ -3420,6 +3688,8 @@ struct CGen {
         varDimsL = std::move(savedVarDimsL);
         inFunc = savedInFunc;
         depth  = savedDepth;
+        manualDropVars = std::move(savedManualDrops);
+        dropScopes     = std::move(savedDropScopes);
     }
 
     // ---------------- rpc：伪形参函数糖 ----------------
@@ -4061,7 +4331,9 @@ struct CGen {
             if (exportedOnly && !d->exported) continue;
             if (d->external) continue;  // 外部模块类型由其模块头提供
             if (!emitted.insert(d->name).second) continue;
-            out << "typedef " << (d->kind == Decl::UnionD ? "union" : "struct")
+            // 标签联合展开为 struct（带 tag + union），前向声明须与定义一致用 struct
+            const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
+            out << "typedef " << (asUnion ? "union" : "struct")
                 << " " << d->name << " " << d->name << ";\n";
         }
         if (!emitted.empty()) out << "\n";

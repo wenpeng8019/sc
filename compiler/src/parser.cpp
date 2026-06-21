@@ -163,9 +163,27 @@ struct Parser {
             || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&"));
     }
 
+    // 解析强转目标类型部分到 Cast 节点：[const|volatile]* name [&|&&]* [restrict]
+    // 与声明侧 parseTypeRef 的限定符规则一致（见 §4）：const/volatile 前缀类型侧，
+    // restrict 尾置于指针。处于冒号后的类型位置，const/volatile/restrict 必为限定符。
+    void parseCastType(Expr* c) {
+        for (;;) {
+            if (at(Tok::Ident) && cur().text == "const")    { c->castConst = true; advance(); }
+            else if (at(Tok::Ident) && cur().text == "volatile") { c->castVolatile = true; advance(); }
+            else break;
+        }
+        if (!at(Tok::Ident)) err("强转期望类型名");
+        c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
+        while (atOp("&") || atOp("&&"))
+            c->castPtr += advance().text == "&&" ? 2 : 1;
+        if (at(Tok::Ident) && cur().text == "restrict") {
+            if (c->castPtr == 0) err("restrict 限定符仅对指针强转有意义");
+            c->castRestrict = true; advance();
+        }
+    }
+
     // 解析类型引用：可以是命名类型 type&&、内联 {struct}/(union)、或裸 &/&&（void*）
     TypeRef parseTypeRef() { TypeRef ty;
-
         // 前置类型限定符 const/volatile（上下文标识符：非关键字，按文本识别）。
         // 处于类型位置（冒号后），故 const/volatile 必为限定符，可叠加任意顺序。
         for (;;) {
@@ -557,11 +575,27 @@ struct Parser {
         if (!projectSelf.empty()) err("'<S>' 分身/切片标记仅支持结构体 {}");
 
 
-        // 3. 对于 ( ... ) 联合体
-        if (at(Tok::LParen)) {
+        // 3. 对于 ( ... ) 联合体（含 @( ... ) 标签联合）
+        if (at(Tok::LParen) || (atOp("@") && peek().kind == Tok::LParen)) {
 
             d->kind = Decl::UnionD;
+            d->tagged = acceptOp("@");          // @ 前缀：带标签的安全联合（sum type）
             parseFieldBlock(d->structCommon.fields);
+
+            if (d->tagged) {
+                if (d->structCommon.fields.empty())
+                    err("标签联合至少需要一个变体");
+                for (auto& f : d->structCommon.fields) {
+                    if (f.name.empty())
+                        err("标签联合的变体必须具名（匿名 {}/() 载荷不支持，请改用具名类型）");
+                    if (f.name == "tag" || f.name == "u")
+                        err("tag/u 为标签联合内置成员，不可用作变体名");
+                    if (f.type.hasInline)
+                        err("标签联合变体载荷不支持内联 {}/()，请改用具名类型");
+                    if (!f.type.arrayDims.empty())
+                        err("标签联合变体载荷暂不支持数组，请改用具名类型");
+                }
+            }
 
             expect(Tok::Newline, "换行");
             return d;
@@ -876,9 +910,7 @@ struct Parser {
                 if (!at(Tok::Ident)) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
-                c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
-                while (atOp("&") || atOp("&&"))
-                    c->castPtr += advance().text == "&&" ? 2 : 1;
+                parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]
                 c->a = std::move(e);
                 e = std::move(c);
                 skipNlInBracket();
@@ -1149,7 +1181,9 @@ struct Parser {
     ExprPtr parseTernary() {
         auto c = parseBinary(1);                // 递归优先解析二元表达式
 
-        if (acceptOp("?")) {
+        // 尾置 '? \n'（错误传播糖标记）不作三元：三元必有 '? expr : expr'
+        if (atOp("?") && peek().kind != Tok::Newline) {
+            advance();                          // 消费 '?'
             auto e = mk(Expr::Ternary);
             e->a = std::move(c);                // 条件
             ternDepth.push_back(exprBracket);   // 分支内禁用裸强转（':' 归三目）
@@ -1175,9 +1209,7 @@ struct Parser {
             (ternDepth.empty() || exprBracket > ternDepth.back())) {
             advance();  // ':'
             auto c = mk(Expr::Cast);
-            c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
-            while (atOp("&") || atOp("&&"))
-                c->castPtr += advance().text == "&&" ? 2 : 1;
+            parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]
             c->a = std::move(lhs);
             lhs = std::move(c);
         }
@@ -1325,8 +1357,15 @@ struct Parser {
             // 对于普通带标签的 case 分支
             else {
                 arm.labels.push_back(parseExpr());          // 解析 case 标签表达式
-                while (accept(Tok::Comma))                  // 支持逗号分隔多个标签
-                    arm.labels.push_back(parseExpr());
+                // 标签联合解构绑定：Variant as x —— 把当前变体载荷拷贝绑定到 x（只读视图）
+                if (at(Tok::Ident) && cur().text == "as") {
+                    advance();                              // 跳过 as
+                    if (!at(Tok::Ident)) err("'as' 后期望绑定名");
+                    arm.binding = advance().text;
+                } else {
+                    while (accept(Tok::Comma))              // 支持逗号分隔多个标签
+                        arm.labels.push_back(parseExpr());
+                }
                 expect(Tok::Colon, "':'");
             }
 
@@ -1468,7 +1507,10 @@ struct Parser {
             auto s = mkStmt(Stmt::RetCallS);
             s->retOp = op;
             s->expr = parseExpr();
-            parseBlock(s->body);
+            if (acceptOp("?")) s->retProp = true;       // 尾置 ? 错误传播糖
+            // 处理体可选（仅 ? 传播而不处理时允许空体）
+            expect(Tok::Newline, "换行");
+            if (accept(Tok::Indent)) { parseStmts(s->body); accept(Tok::Dedent); }
             return s;
         }
         return nullptr;

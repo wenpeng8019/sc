@@ -4,6 +4,7 @@
 #   - const / volatile 写在类型名之前 → 限定被指对象
 #   - restrict 跟在指针 & 之后        → 形参不别名
 #   - 用 let 声明 → 绑定本身只读（标量只读 / 指针为 const 指针）
+#   - 强转表达式同样可写限定符：(e: const T&) / (e: volatile T&) / (e: T& restrict)
 # 初始化列表：数组用 [...] / 结构体用 {...} / 指定成员用 {name = expr}
 
 inc stdio.h
@@ -44,5 +45,12 @@ fnc main: i4
     let q: point& = &pt
     q->x = 100
     printf("q->x:      %d\n", q->x)
+
+    # 强转表达式上的类型限定符：与声明侧同义（const/volatile 前缀，restrict 尾置）
+    var raw: i4& = &pt.x
+    let ro: const i4& = (raw: const i4&)     # 转成“指向 const 的指针”
+    printf("ro:        %d\n", *ro)
+    var vp: volatile i4& = (&flag: volatile i4&)
+    printf("vp:        %d\n", *vp)
 
     return 0

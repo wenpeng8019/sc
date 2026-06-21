@@ -605,7 +605,25 @@ struct Checker {
             }
             // -- case 多分支：每个 arm 独立作用域 -------------------------------
             case Stmt::CaseS: {
-                (void)inferExpr(*s.expr, locals, s.line);
+                Ty st = inferExpr(*s.expr, locals, s.line);
+                // 标签联合解构：变体名标签不当变量推断；Variant as x 绑定载荷类型
+                const Decl* tu = (st.valid && st.ptr == 0 && st.arr == 0)
+                                 ? resolveStruct(st.name) : nullptr;
+                if (tu && tu->kind == Decl::UnionD && tu->tagged) {
+                    for (auto& arm : s.caseArms) {
+                        auto a = locals;
+                        if (!arm.binding.empty() && !arm.labels.empty()
+                            && arm.labels[0]->kind == Expr::Ident) {
+                            for (auto& f : tu->structCommon.fields)
+                                if (f.name == arm.labels[0]->text) {
+                                    a[arm.binding] = fromTypeRef(f.type);
+                                    break;
+                                }
+                        }
+                        for (auto& x : arm.body) checkStmt(*x, a, retTy);
+                    }
+                    break;
+                }
                 for (auto& arm : s.caseArms) {
                     auto a = locals;
                     for (auto& lab : arm.labels) (void)inferExpr(*lab, a, s.line);

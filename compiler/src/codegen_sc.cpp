@@ -69,8 +69,10 @@ struct SGen {
                 emitElse(s.elseBody);
                 break;
             case Stmt::RetCallS:
-                // ret 调用语法糖：retOp func()[ \n body]
-                ind(); out << s.retOp << " " << exprToStr(*s.expr) << "\n";
+                // ret 调用语法糖：retOp func()[ ?][ \n body]
+                ind(); out << s.retOp << " " << exprToStr(*s.expr);
+                if (s.retProp) out << " ?";
+                out << "\n";
                 if (s.retOp != "!!") { depth++; emitStmts(s.body); depth--; }
                 break;
             case Stmt::WhileS:
@@ -120,6 +122,7 @@ struct SGen {
                             if (i) out << ", ";
                             out << exprToStr(*arm.labels[i]);
                         }
+                        if (!arm.binding.empty()) out << " as " << arm.binding;
                         out << ":\n";
                     }
                     depth++;
@@ -226,12 +229,19 @@ struct SGen {
                 std::string mark = d.linked ? "~ "
                     : (!d.adtItem.empty() ? ("<" + d.adtColl + ", " + d.adtItem + "> ")
                     : (!d.projectSelf.empty() ? ("<" + d.projectSelf + "> ") : ""));
+                if (d.tagged) mark = "@";  // 标签联合：def T: @( ... )
                 ind(); out << X << "def " << d.name << ": "
                            << mark << open << "\n";
                 depth++;
                 for (auto& f : d.structCommon.fields) {
                     if (f.synthetic) continue;  // 链表注入成员由 ~ 标记再生
-                    ind(); out << fieldToStr(f, true) << "\n";
+                    // 标签联合无载荷变体：只回写变体名（无 ": 类型"）
+                    if (d.tagged && f.type.name.empty() && f.type.ptr == 0
+                        && !f.type.hasInline && f.type.arrayDims.empty()) {
+                        ind(); out << f.name << "\n";
+                    } else {
+                        ind(); out << fieldToStr(f, true) << "\n";
+                    }
                 }
                 // 成员函数：签名字段 + 缩进函数体（结构体内实现）
                 auto mi = methodImpls.find(d.name);
