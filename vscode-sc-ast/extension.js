@@ -43,6 +43,7 @@ const ICONS = {
     param: 'symbol-parameter', field: 'symbol-field', item: 'symbol-enum-member',
     case: 'list-selection', arm: 'list-flat', through: 'arrow-right',
     if: 'git-branch', else: 'git-branch', while: 'sync', for: 'sync',
+    'for-in': 'sync',
     'do-while': 'sync-ignored', goto: 'arrow-swap', label: 'tag',
     return: 'arrow-left', break: 'debug-step-out', continue: 'debug-continue',
     run: 'play',

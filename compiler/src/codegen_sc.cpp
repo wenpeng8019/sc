@@ -79,6 +79,25 @@ struct SGen {
                 break;
             case Stmt::ForS:
                 ind();
+                if (s.forIn) {
+                    out << "for " << s.forVar;
+                    if (s.forVarHasType) out << ": " << typeToStr(s.forVarType);
+                    for (auto& iv : s.forIdxVars) out << ", " << iv;
+                    out << " in ";
+                    if (s.forIsRange) {
+                        out << "[" << exprToStr(*s.forRangeLo) << ", " << exprToStr(*s.forRangeHi)
+                            << (s.forRangeIncl ? "]" : ")");
+                    } else {
+                        out << exprToStr(*s.forColl);
+                    }
+                    if (s.forRevert) out << " revert";
+                    if (s.forStepE)   out << " step " << exprToStr(*s.forStepE);
+                    if (s.forOffsetE) out << " offset " << exprToStr(*s.forOffsetE);
+                    if (s.forNumE)    out << " num " << exprToStr(*s.forNumE);
+                    out << "\n";
+                    depth++; emitStmts(s.body); depth--;
+                    break;
+                }
                 out << "for "
                     << (s.forInit ? exprToStr(*s.forInit) : "") << "; "
                     << (s.forCond ? exprToStr(*s.forCond) : "") << "; "

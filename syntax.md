@@ -548,6 +548,18 @@ if lst.find(&found, 20) == ok    # &found（task&&）自动转 tnode&&
 **`base(&t)`**：跳过注入的 `I`，返回 `T` 首个真实成员的地址（与链表 `base`
 对称）。
 
+**`[]` 下标糖**：对容器实例 `c` 执行 `c[key, ...]`，等价调用 `find`，命中返回
+元素节点 `I&`（用 `: T&` 下转回元素类型），未命中或出错（`find` 返回非 `ok`）
+返回 `nil`。方括号内为透传给 `find` 的检索键（逗号分隔多键）：
+
+```sc
+var hit: task& = lst[30]: task&      # 命中：等价 find，返回 tnode&，: task& 下转
+var miss: task& = lst[99]: task&     # 未命中：返回 nil
+```
+
+等价展开：`c[k]  <==>  { var _o: I&; (c.find(&_o, k) == ok) ? _o : nil }`。仅对
+容器类型 `C` 生效，普通数组/指针下标语义不变。
+
 ## 8. 函数、函数类型、函数指针和方法
 
 ### 8.1 函数类型
@@ -1043,6 +1055,7 @@ var tab[2][3]: i4 = [
 - `while`
 - `do ... while`
 - `for`
+- `for in`（集合遍历，见 11.6）
 - `case`（替代 C 的 `switch/case/default`）
 - `through`（仅用于 case 分支末尾，表示贯穿）
 - `goto`
@@ -1095,6 +1108,16 @@ for i = 0; i < 3; i++
 # for（省略某段）
 for ; running; 
     step()
+
+# for（省略全部三段，等价 while(true) 无限循环）
+for ;;
+    poll()
+for                              # 连 ;; 也可省略
+    poll()
+
+# for in（集合遍历，见 11.6）
+for x in a
+    sum += x
 
 # case（替代 switch，默认自动 break）
 case code:
@@ -1388,6 +1411,94 @@ print(“E: 错误 code=%d”, -1)        # 格式串前缀 “X:” 设级别
 - **限制（当前版本）**：`final` 块体内不要再用 `return`/`break`/`continue` 跳出外层作用域
   （会与清理流程重入，属未定义行为）；`goto` 跨作用域跳转不触发被跳过作用域的 `final`
   （与既有 `goto` 清理缺口一致）。
+
+### 11.6 for in 集合遍历
+
+统一的集合遍历语句，转 C 后即普通 `for`/`while` 循环，零额外开销；与经典三段式
+`for init; cond; step` 并存（按 `in` 关键字区分）。
+
+```
+for name[: T&] [, i [, j ...]] in 集合 [revert] [step <expr>] [offset <expr>] [num <expr>]
+    体...
+```
+
+**集合分三类**：
+
+| 类别 | 形式 | 说明 |
+|------|------|------|
+| 值序列 | `[a, b]` / `[a, b)` / 整数 `n` | 范围闭区间/半开区间；`n` 等价 `[0, n)` |
+| 索引序列 | 静态数组 / 字符串 | 数组编译期已知长度（支持多维）；字符串 `char&`/`char[]` 按 `\0` 终止 |
+| 链式序列 | `chain` / 容器 | 双向链；ADT 容器（`def T: <C, I>`），经 `first`/`next` 游标遍历 |
+
+**循环变量类型**：默认按集合元素类型推断——范围/整数→`i4`；数组→元素类型；
+字符串→`char`；链→`void&`（须显式下转）；容器→注入节点 `I&`（须 `: T&` 下转回
+元素）。可显式注解 `name: T&` 覆盖（链/容器常用）。
+
+**索引/坐标变量**（`name` 之后逗号列出 `i, j, ...`，命名须互不相同且不同于 `name`）：
+
+- 数量须与集合维度一致：一维集合 0 或 1 个；N 维静态数组恰好 N 个（生成 N 层嵌套
+  循环遍历全部标量，`name` 为最内层标量元素，`i/j/...` 为各维下标）。
+- 取值：可索引集合（静态数组/标量/范围，可得 count）→ **真实下标**，`revert` 时下标
+  随元素倒序，`name == 集合[i]` 恒等；仅 `next` 迭代的集合（字符串/链/容器）→ `0,1,2...`
+  **递增计数**（与 `revert`/`offset` 无关）。
+
+**尾随选项**（任意顺序，各至多一次；多维数组仅支持 `revert`）：
+
+| 选项 | 说明 |
+|------|------|
+| `revert` | 逆序遍历（范围/数组从尾向头；链/容器改用 `last`/`prev`，容器须实现 `last`/`prev`） |
+| `step <expr>` | 每次前进 `expr` 步（默认 1） |
+| `offset <expr>` | 起点跳过 `expr` 个元素（默认 0） |
+| `num <expr>` | 最多遍历 `expr` 个元素（默认无上限） |
+
+```sc
+# 值序列
+for i in [1, 5]                  # 1 2 3 4 5（闭区间）
+    printf("%d ", i)
+for i in [1, 5)                  # 1 2 3 4（半开）
+    printf("%d ", i)
+for i in 4                       # 0 1 2 3（整数计数）
+    printf("%d ", i)
+for i in [0, 10] step 2          # 0 2 4 6 8 10
+    printf("%d ", i)
+
+# 索引序列：数组 / 字符串
+var a[5]: i4
+for x in a revert offset 1       # 跳过末元素，从倒数第二个起逆序
+    printf("%d ", x)
+var s: char& = "hello"
+for c in s num 3                 # h e l（仅前 3 个字符）
+    printf("%c ", c)
+
+# 链式序列：chain / 容器（默认游标须显式下转）
+for it: task& in lst             # 容器：注入节点，: task& 下转回元素
+    printf("%d ", it->id)
+for it: task& in lst revert step 2
+    printf("%d ", it->id)
+
+# 索引/坐标变量
+for x, i in a                    # 数组：i 为真实下标，x == a[i] 恒等
+    printf("a[%d]=%d ", i, x)
+for it: task&, i in lst          # 容器：i 为 0,1,2... 递增计数
+    printf("#%d=%d ", i, it->id)
+
+# 多维数组：N 维 → N 个坐标变量，嵌套遍历全部标量
+var m[2][3]: i4
+for v, i, j in m
+    printf("m[%d][%d]=%d ", i, j, v)
+```
+
+**等价展开示例**：
+
+```
+for i in [a, b]        <==>  for var i = a; i <= b; i++
+for i in n             <==>  for var i = 0; i < n; i++
+for x, i in arr        <==>  for var i = 0; i < len(arr); i++ { var x = arr[i]; ... }
+for v, i, j in mat     <==>  for i.. { for j.. { var v = mat[i][j]; ... } }
+for c in s             <==>  for var _i = 0; s[_i] != '\0'; _i++ { var c = s[_i]; ... }
+for it: T& in l        <==>  for var p = l.first(); p != nil; p = next(p) { var it = p: T&; ... }
+```
+
 
 ## 12. I/O通讯与流操作符
 

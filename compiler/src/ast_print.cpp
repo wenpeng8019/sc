@@ -40,8 +40,11 @@ std::string rec(const Expr& e, bool top) {
             }
             return s + ")";
         }
-        case Expr::Index:
-            return rec(*e.a, false) + "[" + rec(*e.b, true) + "]";
+        case Expr::Index: {
+            std::string s = rec(*e.a, false) + "[" + rec(*e.b, true);
+            for (auto& k : e.args) s += ", " + rec(*k, true);  // 容器多键下标
+            return s + "]";
+        }
         case Expr::Member:
             return rec(*e.a, false) + e.op + e.text;
         case Expr::Sizeof:

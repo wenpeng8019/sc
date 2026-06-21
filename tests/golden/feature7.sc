@@ -90,6 +90,12 @@ fnc main: i4
     var found: task&
     if lst.find(&found, 20) == ok
         printf("find 20 -> id=%d\n", found->id)
+    var hit: task& = (lst[30]: task&)
+    if hit != nil
+        printf("lst[30] -> id=%d\n", hit->id)
+    var miss: task& = (lst[99]: task&)
+    if miss == nil
+        printf("lst[99] -> nil\n")
     lst.remove(&a[1])
     var it2: task& = (lst.first(): task&)
     printf("remove 20 后:")

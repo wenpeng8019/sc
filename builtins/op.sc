@@ -236,6 +236,46 @@ def operand: {
 #   - T 构成容器的元素类型（如 treeNode）；I 是容器节点类型（如 node），被注入到 T 首位，
 #     因此 T& 与 I& 可零偏移互相强转（编译器在方法实参处自动 treeNode& ⟷ node&）。
 #   - 导航只经容器方法：t.first() / t.next(it)，返回 I&，用显式 `: T&` 下转回元素类型。
+#   - 下标糖 c[key, ...]：对容器实例 c（类型 C）执行 find，命中得元素节点 I&（用 `: T&`
+#     下转回元素类型），未命中/出错（find 返回非 ok）得 nil。等价展开：
+#       c[k]  <==>  { var _o: I&; (c.find(&_o, k) == ok) ? _o : nil }
+#     方括号内为 find 的检索键（透传给 find 的可变参数，逗号分隔多键）。仅对容器类型 C
+#     生效，普通数组/指针下标语义不变。
+
+
+#  for-in 遍历语法（集合遍历糖）
+# ----------------------------------------------------------------------------- 
+# 统一的集合遍历语句，转 C 后即普通 for/while 循环，零额外开销；与经典三段式
+# for init; cond; step 并存（按 in 关键字区分）。
+# 语法：
+#   for name[: T&] [, i [, j ...]] in 集合 [revert] [step <expr>] [offset <expr>] [num <expr>]
+#       体...
+# 集合分三类：
+#   ① 值序列：范围 [a, b]（闭区间，含 b）/ [a, b)（半开，不含 b）；整数 n（== [0, n)）
+#   ② 索引序列：静态数组（编译期已知长度，支持多维）；字符串（char& / char[]，按 '\0' 终止）
+#   ③ 链式序列：双向链 chain；ADT 容器（def T: <C, I>），经 first/next 游标遍历
+# 循环变量类型：
+#   - 默认按集合元素类型推断：范围/整数→i4；数组→元素类型；字符串→char；
+#     链→void&（须显式下转）；容器→注入节点 I&（须显式 : T& 下转回元素）。
+#   - 可显式注解 name: T& 覆盖（链/容器常用：把游标下转回元素指针）。
+# 索引/坐标变量（name 之后逗号列出 i, j, ...，命名须互不相同且不同于 name）：
+#   - 数量须与集合维度一致：一维集合 0 或 1 个；N 维静态数组恰好 N 个（生成 N 层嵌套
+#     循环遍历全部标量，name 为最内层标量元素，i/j/... 为各维下标）。
+#   - 取值：可索引集合（静态数组/标量/范围，可得 count）→ 真实下标，revert 时下标随元素
+#     倒序，name == 集合[i] 恒等；仅 next 迭代的集合（字符串/链/容器）→ 0,1,2... 递增计数
+#     （与 revert/offset 无关）。
+# 尾随选项（任意顺序，各至多一次；多维数组仅支持 revert）：
+#   revert        逆序遍历（范围/数组从尾向头；链/容器改用 last/prev，容器须实现 last/prev）
+#   step <expr>   每次前进 expr 步（默认 1）
+#   offset <expr> 起点跳过 expr 个元素（默认 0）
+#   num <expr>    最多遍历 expr 个元素（默认无上限）
+# 等价展开示例：
+#   for i in [a, b]        <==>  for var i = a; i <= b; i++
+#   for i in n             <==>  for var i = 0; i < n; i++
+#   for x, i in arr        <==>  for var i = 0; i < len(arr); i++ { var x = arr[i]; ... }
+#   for v, i, j in mat     <==>  for i.. { for j.. { var v = mat[i][j]; ... } }
+#   for c in s             <==>  for var _i = 0; s[_i] != '\0'; _i++ { var c = s[_i]; ... }
+#   for it: T& in l        <==>  for var p = l.first(); p != nil; p = next(p) { var it = p: T&; ... }
 
 
 #  run / thread 机制（抢占式并发内核）

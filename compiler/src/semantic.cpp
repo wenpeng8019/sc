@@ -76,6 +76,8 @@ struct Checker {
     std::unordered_map<std::string, const Decl*> structs;   // 结构/联合定义
     std::unordered_map<std::string, std::string> aliases;   // 类型别名（name → 目标类型）
     std::unordered_map<std::string, Ty> globals;            // 全局 var/let/tls 的类型
+    // 容器类型 C（def T: <C, I>）→ 元素节点类型 I：下标糖 t[key] → find 结果为 I&
+    std::unordered_map<std::string, std::string> containerItem;
 
     explicit Checker(const Program& p) : prog(p) {}
 
@@ -255,6 +257,15 @@ struct Checker {
             // -- 下标：相当于 *，操作数必须是指针/数组 --------------------------
             case Expr::Index: {
                 Ty a = inferExpr(*e.a, locals, line);
+                // 容器下标糖：t[key,...] → find(...)，结果为元素节点类型 I&（未命中为 nil）
+                if (a.valid && a.arr == 0 && a.ptr <= 1) {
+                    auto ci = containerItem.find(resolveAliasToName(a.name));
+                    if (ci != containerItem.end()) {
+                        (void)inferExpr(*e.b, locals, line);
+                        for (auto& k : e.args) (void)inferExpr(*k, locals, line);
+                        return Ty{ci->second, 1, 0, true, false};
+                    }
+                }
                 if (a.valid && !isPointerLike(a)) err(e.line, "非法下标：操作数不是指针/数组");
                 if (a.valid) {
                     if (a.arr > 0) a.arr--;
@@ -543,6 +554,40 @@ struct Checker {
             }
             // -- for：init/cond/step 三段，体在独立作用域 ------------------------
             case Stmt::ForS: {
+                if (s.forIn) {
+                    // for-in：推断集合/范围/选项，登记循环变量类型，再检查体
+                    Ty coll;
+                    if (s.forIsRange) {
+                        if (s.forRangeLo) (void)inferExpr(*s.forRangeLo, locals, s.line);
+                        if (s.forRangeHi) (void)inferExpr(*s.forRangeHi, locals, s.line);
+                    } else if (s.forColl) {
+                        coll = inferExpr(*s.forColl, locals, s.line);
+                    }
+                    if (s.forStepE)   (void)inferExpr(*s.forStepE, locals, s.line);
+                    if (s.forOffsetE) (void)inferExpr(*s.forOffsetE, locals, s.line);
+                    if (s.forNumE)    (void)inferExpr(*s.forNumE, locals, s.line);
+                    // 循环变量类型：显式注解优先，否则按集合元素类型推断
+                    Ty vt;
+                    if (s.forVarHasType) {
+                        vt = fromTypeRef(s.forVarType);
+                    } else if (s.forIsRange) {
+                        vt = Ty{"i4", 0, 0, true, false};
+                    } else if (coll.valid) {
+                        const std::string cn = resolveAliasToName(coll.name);
+                        auto ci = containerItem.find(cn);
+                        if (coll.arr > 0)                       vt = Ty{coll.name, coll.ptr, 0, true, false};
+                        else if (ci != containerItem.end())     vt = Ty{ci->second, 1, 0, true, false};
+                        else if (cn == "chain")                 vt = Ty{"", 1, 0, true, false};
+                        else if (cn == "char")                  vt = Ty{"char", 0, 0, true, false};
+                        else                                    vt = Ty{"i4", 0, 0, true, false};
+                    }
+                    auto a = locals;
+                    if (!s.forVar.empty() && vt.valid) a[s.forVar] = vt;
+                    for (auto& iv : s.forIdxVars)               // 索引/坐标变量：整型计数
+                        if (!iv.empty()) a[iv] = Ty{"i4", 0, 0, true, false};
+                    for (auto& x : s.body) checkStmt(*x, a, retTy);
+                    break;
+                }
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line);
                 if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line);
                 if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line);
@@ -613,6 +658,11 @@ struct Checker {
             if (d->kind == Decl::AliasD)
                 aliases[d->name] = d->structCommon.type->name;
         }
+
+        // 容器映射 C → I（def T: <C, I>）：下标糖 t[key] 推导 find 结果类型 I&
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::StructD && !d->adtColl.empty())
+                containerItem[resolveAliasToName(d->adtColl)] = d->adtItem;
 
         // 第二遍：检查全局 var/let/tls 声明
         for (auto& d : prog.decls) {            

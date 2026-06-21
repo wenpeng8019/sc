@@ -299,6 +299,22 @@ struct Stmt {
 
     ExprPtr forInit, forCond, forStep;  // ForS: for (init; cond; step) 三段表达式
 
+    // ForS（for-in 变体）：for name[: T&] in coll [revert] [step e] [offset e] [num e]
+    bool forIn = false;                 // true=for-in 变体（与经典三段式互斥）
+    std::string forVar;                 // 循环变量名
+    std::vector<std::string> forIdxVars; // 索引/坐标变量名（v 之后逗号分隔）：for v, i, j in ...
+                                        //   数量须与集合维度一致（一维 0 或 1 个，N 维数组 N 个）；
+                                        //   可索引集合（数组/标量/范围）→ 真实下标（revert 时倒序，
+                                        //   v==coll[i] 恒等）；仅 next 迭代（串/链/容器）→ 0,1,2... 递增计数
+    TypeRef forVarType;                 // 显式 name: T& 循环变量类型（forVarHasType 为真时有效）
+    bool forVarHasType = false;
+    ExprPtr forColl;                    // 集合表达式（数组/链/容器/串/整数计数）；范围字面量时为空
+    ExprPtr forRangeLo, forRangeHi;     // 范围 [lo, hi] / [lo, hi) 的下/上界（forIsRange 时有效）
+    bool forIsRange = false;            // true=范围字面量集合 [lo, hi]/[lo, hi)
+    bool forRangeIncl = false;          // true=闭区间 ]（含上界），false=半开 )（不含上界）
+    bool forRevert = false;             // revert 选项：逆序遍历
+    ExprPtr forStepE, forOffsetE, forNumE;  // step/offset/num 选项表达式（空=默认 1/0/无上限）
+
     std::vector<std::pair<std::string, long long>> runOpts;  // RunS: run<stack:N, prio:M> 线程属性（键:整数值），透传给 C
 
     std::string printChn;               // PrintS: <chn> 通道的 C 表达式文本（默认 "0"）

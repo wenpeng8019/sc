@@ -108,6 +108,24 @@ struct Parser {
     // 跳过连续换行和缩进
     void skipLayout() { while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance(); }
 
+    // for 之后是否为 for-in 变体：形如 name [: type] [, idx...] in ...。
+    // 判定：当前须为标识符（循环变量），且本行 ';'/换行前存在顶层上下文关键字 in。
+    // 经典三段式 for init; cond; step 在首个 ';' 前不会出现顶层 in，故可区分。
+    bool forInAhead() const {
+        if (!at(Tok::Ident)) return false;
+        int depth = 0;
+        for (size_t i = p; i < t.size(); i++) {
+            const Token& tk = t[i];
+            if (tk.kind == Tok::LParen || tk.kind == Tok::LBracket || tk.kind == Tok::LBrace) depth++;
+            else if (tk.kind == Tok::RParen || tk.kind == Tok::RBracket || tk.kind == Tok::RBrace) { if (depth) depth--; }
+            else if (depth == 0) {
+                if (tk.kind == Tok::Semi || tk.kind == Tok::Newline) return false;
+                if (tk.kind == Tok::Ident && tk.text == "in") return true;
+            }
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------------
 
     static std::string mangleMethodName(const std::string& owner, const std::string& name) {
@@ -1037,11 +1055,19 @@ struct Parser {
                 expect(Tok::RParen, "')'");
                 exprBracket--;
                 e = std::move(call);
-            } else if (accept(Tok::LBracket)) { // 下标：expr[index]
+            } else if (accept(Tok::LBracket)) { // 下标：expr[index]；容器 expr[key, ...] → find 糖
                 exprBracket++;
                 auto ix = mk(Expr::Index);
                 ix->a = std::move(e);
+                skipNlInBracket();
                 ix->b = parseExpr();
+                while (true) {                  // 多键（容器 find 实参）：逗号分隔收入 args
+                    skipNlInBracket();
+                    if (!accept(Tok::Comma)) break;
+                    skipNlInBracket();
+                    ix->args.push_back(parseExpr());
+                }
+                skipNlInBracket();
                 expect(Tok::RBracket, "']'");
                 exprBracket--;
                 e = std::move(ix);
@@ -1498,10 +1524,59 @@ struct Parser {
             case Tok::KwDo:
                 return parseDoWhileStmt();
 
-            // for 循环：for init; cond; step \n body
+            // for 循环：经典三段式 for init; cond; step \n body
+            //          或 for-in：for name[: T&] in coll [revert][step e][offset e][num e] \n body
             case Tok::KwFor: {
                 auto s = mkStmt(Stmt::ForS);
                 advance();
+                if (forInAhead()) {                                 // ---- for-in 变体 ----
+                    s->forIn = true;
+                    s->forVar = advance().text;                     // 循环变量名
+                    if (accept(Tok::Colon)) {                       // 可选 name: T& 类型注解
+                        s->forVarType = parseTypeRef();
+                        s->forVarHasType = true;
+                    }
+                    while (accept(Tok::Comma)) {                     // 索引/坐标变量：, i, j, ...
+                        if (!at(Tok::Ident)) err("for-in 索引变量期望标识符");
+                        const std::string idx = advance().text;
+                        if (idx == s->forVar) err("for-in 索引变量名不能与循环变量同名");
+                        for (auto& x : s->forIdxVars)
+                            if (x == idx) err("for-in 索引变量名重复");
+                        s->forIdxVars.push_back(idx);
+                    }
+                    if (!(at(Tok::Ident) && cur().text == "in")) err("for-in 期望 'in'");
+                    advance();                                      // 消费上下文关键字 in
+                    if (at(Tok::LBracket)) {                        // 范围字面量 [lo, hi] / [lo, hi)
+                        s->forIsRange = true;
+                        advance();                                  // [
+                        exprBracket++;
+                        skipNlInBracket();
+                        s->forRangeLo = parseExpr();
+                        skipNlInBracket();
+                        expect(Tok::Comma, "','");
+                        skipNlInBracket();
+                        s->forRangeHi = parseExpr();
+                        skipNlInBracket();
+                        if (accept(Tok::RBracket)) s->forRangeIncl = true;       // ] 闭区间
+                        else if (accept(Tok::RParen)) s->forRangeIncl = false;   // ) 半开区间
+                        else err("范围期望 ']' 或 ')'");
+                        exprBracket--;
+                    } else {
+                        s->forColl = parseExpr();                   // 数组/链/容器/串/整数计数
+                    }
+                    // 尾随选项：revert / step e / offset e / num e（任意顺序，各至多一次）
+                    while (at(Tok::Ident)) {
+                        const std::string& kw = cur().text;
+                        if (kw == "revert")      { advance(); s->forRevert = true; }
+                        else if (kw == "step")   { advance(); s->forStepE = parseExpr(); }
+                        else if (kw == "offset") { advance(); s->forOffsetE = parseExpr(); }
+                        else if (kw == "num")    { advance(); s->forNumE = parseExpr(); }
+                        else break;
+                    }
+                    parseBlock(s->body);
+                    return s;
+                }
+                if (at(Tok::Newline)) { parseBlock(s->body); return s; }  // for\n（省略 ;;）等价 while(true)
                 if (!at(Tok::Semi)) s->forInit = parseExpr();       // 初始化表达式（可为空）
                 expect(Tok::Semi, "';'");
                 if (!at(Tok::Semi)) s->forCond = parseExpr();       // 条件表达式（可为空）

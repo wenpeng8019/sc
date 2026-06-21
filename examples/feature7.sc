@@ -130,6 +130,14 @@ fnc main: i4
     if lst.find(&found, 20) == ok
         printf("find 20 -> id=%d\n", found->id)
 
+    #-------------- [] 下标糖：c[key] <==> find，命中得 I&，未命中 nil --
+    var hit: task& = lst[30]: task&      # 命中：返回 tnode&，: task& 下转
+    if hit != nil
+        printf("lst[30] -> id=%d\n", hit->id)        # 30
+    var miss: task& = lst[99]: task&     # 未命中：返回 nil
+    if miss == nil
+        printf("lst[99] -> nil\n")
+
     #-------------- remove：传 task&，自动转 tnode& ------------
     lst.remove(&a[1])                    # 移除 id=20
     var it2: task& = lst.first(): task&

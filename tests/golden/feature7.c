@@ -197,24 +197,38 @@ int32_t main(void) {
         printf("find 20 -> id=%d\n", found->id);
     }
     /* line 134 */
-    slist_remove(&lst, (tnode *)(&(a[1])));
+    task *hit = ((task*)((__extension__ ({ tnode *_scfo = (void *)0; (slist_find(&lst, &_scfo, 30) == 0) ? _scfo : (void *)0; }))));
     /* line 135 */
-    task *it2 = ((task*)(slist_first(&lst)));
-    /* line 136 */
-    printf("remove 20 后:");
+    if (hit != NULL) {
+        /* line 136 */
+        printf("lst[30] -> id=%d\n", hit->id);
+    }
     /* line 137 */
-    while (it2 != NULL) {
-        /* line 138 */
-        printf(" %d", it2->id);
+    task *miss = ((task*)((__extension__ ({ tnode *_scfo = (void *)0; (slist_find(&lst, &_scfo, 99) == 0) ? _scfo : (void *)0; }))));
+    /* line 138 */
+    if (miss == NULL) {
         /* line 139 */
+        printf("lst[99] -> nil\n");
+    }
+    /* line 142 */
+    slist_remove(&lst, (tnode *)(&(a[1])));
+    /* line 143 */
+    task *it2 = ((task*)(slist_first(&lst)));
+    /* line 144 */
+    printf("remove 20 后:");
+    /* line 145 */
+    while (it2 != NULL) {
+        /* line 146 */
+        printf(" %d", it2->id);
+        /* line 147 */
         it2 = ((task*)(slist_next(&lst, (tnode *)(it2))));
     }
-    /* line 140 */
+    /* line 148 */
     printf("\n");
-    /* line 143 */
+    /* line 151 */
     int32_t *pid = ((int32_t*)(((void *)&((&(a[0]))->id))));
-    /* line 144 */
+    /* line 152 */
     printf("base(&a[0]) -> id=%d\n", *(pid));
-    /* line 146 */
+    /* line 154 */
     return 0;
 }

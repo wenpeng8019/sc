@@ -151,6 +151,9 @@ struct CGen {
     std::unordered_map<std::string, std::vector<std::string>> varDimsG, varDimsL;
     // 枚举类型名集合（string 格式化按整数）
     std::unordered_set<std::string> enums;
+    // 容器类型名集合（def T: <C, I> 的 C）：t[key,...] → t.find(...) 糖识别用
+    std::unordered_set<std::string> adtColls;
+    int forSeq = 0;             // for-in 临时变量序号（生成唯一 _fi/_fb/... 名）
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
     const Decl* curFnSig = nullptr;  // 当前普通函数签名（return 临时变量取返回类型用）
 
@@ -340,6 +343,12 @@ struct CGen {
         if (s.forInit) scanExprForNew(*s.forInit);
         if (s.forCond) scanExprForNew(*s.forCond);
         if (s.forStep) scanExprForNew(*s.forStep);
+        if (s.forColl) scanExprForNew(*s.forColl);
+        if (s.forRangeLo) scanExprForNew(*s.forRangeLo);
+        if (s.forRangeHi) scanExprForNew(*s.forRangeHi);
+        if (s.forStepE) scanExprForNew(*s.forStepE);
+        if (s.forOffsetE) scanExprForNew(*s.forOffsetE);
+        if (s.forNumE) scanExprForNew(*s.forNumE);
         for (auto& b : s.body) scanStmtForNew(*b);
         for (auto& b : s.elseBody) scanStmtForNew(*b);
         for (auto& arm : s.caseArms) {
@@ -798,6 +807,20 @@ struct CGen {
         return nullptr;
     }
 
+    // 容器下标糖识别：e 是否为「对容器实例的 find 下标」。命中条件——e.a 静态类型是
+    // 某 def T: <C, I> 的容器 C（值或一级指针、非数组）且 C 具备 find 方法。命中返回
+    // find 方法 Decl 并回填接收者类型 *recv；否则 nullptr（退回普通数组/指针下标）。
+    const Decl* containerFindOf(const Expr& e, VType* recv = nullptr) const {
+        if (e.kind != Expr::Index || !e.a) return nullptr;
+        VType bt;
+        if (!exprVType(*e.a, bt) || bt.arr != 0 || bt.ptr > 1) return nullptr;
+        if (!adtColls.count(resolveAliasName(bt.name))) return nullptr;
+        const Decl* fm = findMethod(bt.name, "find");
+        if (!fm || fm->structCommon.fields.empty()) return nullptr;  // 须有 out 参数
+        if (recv) *recv = bt;
+        return fm;
+    }
+
     // T() 类型伪调用：被调对象是聚合类型名（无参、未被变量遮蔽）
     // → 堆构造糖，返回解析后的聚合类型 Decl（否则 nullptr）
     const Decl* typeCallee(const Expr& call) const {
@@ -847,6 +870,12 @@ struct CGen {
                 return false;
             }
             case Expr::Index:
+                // 容器下标糖 t[key,...] → find：结果为元素节点类型 I&（out 参数去一级指针）
+                if (const Decl* fm = containerFindOf(e)) {
+                    const TypeRef& ot = fm->structCommon.fields[0].type;
+                    vt = {ot.name, ot.ptr > 0 ? ot.ptr - 1 : 0, 0};
+                    return true;
+                }
                 if (!exprVType(*e.a, vt)) return false;
                 if (vt.arr) vt.arr--; else if (vt.ptr) vt.ptr--;
                 return true;
@@ -1424,6 +1453,34 @@ struct CGen {
                 break;
             }
             case Expr::Index:
+                // 容器下标糖：t[key,...] → ({ I *_o=nil; C_find(&t,&_o,key,...)==ok ? _o : nil; })
+                // 即对容器实例执行 find，命中得元素节点 I&（用 : T& 下转回元素），未命中/出错为 nil。
+                {
+                    VType recv;
+                    if (const Decl* fm = containerFindOf(e, &recv)) {
+                        const TypeRef& ot = fm->structCommon.fields[0].type;  // out: I&&
+                        const std::string itemTy = mapBase(resolveAliasName(ot.name));
+                        out << "(__extension__ ({ " << itemTy << " ";
+                        for (int i = 2; i < ot.ptr; i++) out << "*";   // _o 比 out 少一级指针
+                        out << "*_scfo = (void *)0; (" << fm->name << "(";
+                        if (recv.ptr == 0) out << "&";                 // 值接收者自动取址
+                        emitExpr(*e.a);
+                        out << ", &_scfo";
+                        // 检索键（首键 e.b + 其余 e.args）逐一过 find 参数（自动 T&⟷I& 转换）
+                        size_t keyi = 1;  // fields[0] 为 out，键从 fields[1] 起
+                        auto emitKey = [&](const Expr& k) {
+                            out << ", ";
+                            const Field* pf = keyi < fm->structCommon.fields.size()
+                                            ? &fm->structCommon.fields[keyi] : nullptr;
+                            emitMethodArg(k, pf);
+                            keyi++;
+                        };
+                        if (e.b) emitKey(*e.b);
+                        for (auto& a : e.args) emitKey(*a);
+                        out << ") == 0) ? _scfo : (void *)0; }))";
+                        break;
+                    }
+                }
                 // --check=ptr：已知维度的栈数组下标 → SC_BOUNDCHK 越界校验；裸指针下标 → SC_PTRCHK nil 校验。
                 if (g_ptrCheck) {
                     const std::vector<std::string>* dims =
@@ -2076,6 +2133,254 @@ struct CGen {
         fatBreakBoundary.pop_back();
     }
 
+    // for-in 糖：把 for name[: T&] in 集合 [revert][step][offset][num] 降解为 C 循环。
+    // 集合分三类：① 值序列（范围 [a,b]/[a,b)、整数计数 n=[0,n)）；② 索引序列（静态数组、
+    // 字符串按 '\0' 终止）；③ 链式序列（双向链 chain、ADT 容器，经 first/next 游标遍历）。
+    void emitForIn(const Stmt& s) {
+        const int n = forSeq++;
+        const std::string FI = "_fi" + std::to_string(n);   // 游标 / 索引
+        const std::string FB = "_fb" + std::to_string(n);   // 基址指针（索引序列）
+        const std::string FE = "_fe" + std::to_string(n);   // 终界 / 长度
+        const std::string FR = "_fr" + std::to_string(n);   // 接收者指针（链式序列）
+        const std::string FC = "_fc" + std::to_string(n);   // 计数（num 上限用）
+        const std::string FLO = "_flo" + std::to_string(n); // 范围下界
+        const std::string FHI = "_fhi" + std::to_string(n); // 范围上界
+
+        auto emitOpt = [&](const ExprPtr& e, const char* def) {
+            if (e) { out << "("; emitExpr(*e, true); out << ")"; }
+            else out << def;
+        };
+        const bool hasNum = (bool)s.forNumE;
+
+        // 集合分类
+        enum Kind { KRange, KInt, KArray, KString, KChain, KContainer } kind = KRange;
+        VType ct; bool ctok = false;
+        if (s.forIsRange) kind = KRange;
+        else {
+            ctok = exprVType(*s.forColl, ct);
+            const std::string cn = ctok ? resolveAliasName(ct.name) : "";
+            if (ctok && cn == "char" && (ct.ptr >= 1 || ct.arr >= 1)) kind = KString;
+            else if (ctok && ct.arr > 0) kind = KArray;
+            else if (ctok && ct.arr == 0 && ct.ptr <= 1 && adtColls.count(cn)) kind = KContainer;
+            else if (ctok && ct.arr == 0 && ct.ptr <= 1 && cn == "chain") kind = KChain;
+            else if (ctok && ct.arr == 0 && ct.ptr == 0
+                     && (scalarClass(ct.name) == 'i' || scalarClass(ct.name) == 'u')) kind = KInt;
+            else throw CompileError{"for-in 不支持的集合类型", s.line};
+        }
+
+        // 循环变量类型（显式注解优先；否则按集合元素类型推断）
+        std::string varName, varPtrName;  // varName=C 类型文本；varPtrName=取址后(cast)文本
+        std::string vBase; int vPtr = 0;  // 用于 regVar
+        bool cast = s.forVarHasType;
+        if (cast) { vBase = s.forVarType.name; vPtr = s.forVarType.ptr; }
+
+        // 集合维度与索引变量数量校验：数组维度=knownDims 大小，其余集合维度恒为 1。
+        const std::vector<std::string>* dims =
+            (kind == KArray && s.forColl->kind == Expr::Ident) ? knownDims(s.forColl->text) : nullptr;
+        const size_t D = (kind == KArray && dims) ? dims->size() : 1;
+        if (D == 1) {
+            if (s.forIdxVars.size() > 1)
+                throw CompileError{"for-in：一维集合至多 1 个索引变量", s.line};
+        } else if (s.forIdxVars.size() != D) {
+            throw CompileError{"for-in：" + std::to_string(D) + " 维数组需恰好 "
+                               + std::to_string(D) + " 个索引变量", s.line};
+        }
+        // 索引变量发射：idxExpr 为该集合的「索引取值」C 表达式文本（可索引集合=真实下标，
+        // 仅 next 迭代集合=递增计数）。仅一维分支调用；多维数组单独走嵌套循环路径。
+        auto emitIdx = [&](const std::string& idxExpr) {
+            if (!s.forIdxVars.empty()) {
+                indent(); out << "int " << s.forIdxVars[0] << " = (int)(" << idxExpr << ");\n";
+            }
+        };
+
+        indent(); out << "{\n"; depth++;
+
+        // ---- 多维数组：N 层嵌套循环遍历全部标量元素（v=标量，索引变量=各维下标）----
+        if (kind == KArray && D > 1) {
+            if (s.forStepE || s.forOffsetE || s.forNumE)
+                throw CompileError{"for-in：多维数组暂不支持 step/offset/num 选项", s.line};
+            std::string elemBase = ct.name; int elemPtr = ct.ptr;
+            std::string declTy = cast ? cTypeOf(vBase, vPtr) : cTypeOf(elemBase, elemPtr);
+            if (!cast) { vBase = elemBase; vPtr = elemPtr; }
+            std::vector<std::string> ids;
+            for (size_t d = 0; d < D; d++) {
+                std::string id = FI + "_" + std::to_string(d);
+                ids.push_back(id);
+                indent();
+                out << "for (long " << id << " = "
+                    << (s.forRevert ? "(" + (*dims)[d] + ") - 1" : std::string("0")) << "; "
+                    << (s.forRevert ? id + " >= 0" : id + " < (" + (*dims)[d] + ")") << "; "
+                    << (s.forRevert ? id + "--" : id + "++") << ") {\n";
+                depth++;
+            }
+            for (size_t d = 0; d < D; d++) {
+                indent(); out << "int " << s.forIdxVars[d] << " = (int)" << ids[d] << ";\n";
+            }
+            indent(); out << declTy << " " << s.forVar << " = ";
+            if (cast && vPtr > 0) out << "(" << declTy << ")&";
+            else if (cast) out << "(" << declTy << ")";
+            emitExpr(*s.forColl, true);
+            for (size_t d = 0; d < D; d++) out << "[" << ids[d] << "]";
+            out << ";\n";
+            emitForInBody(s, vBase, vPtr);
+            for (size_t d = 0; d < D; d++) { depth--; indent(); out << "}\n"; }
+            depth--; indent(); out << "}\n";
+            return;
+        }
+
+        if (kind == KRange || kind == KInt) {
+            // ---- 值序列：循环变量即迭代值 ----
+            std::string vty = cast ? cTypeOf(vBase, vPtr) : "int";
+            if (!cast) { vBase = "i4"; vPtr = 0; }
+            indent(); out << vty << " " << FLO << " = ";
+            if (kind == KInt) out << "0"; else emitExpr(*s.forRangeLo, true);
+            out << ";\n";
+            indent(); out << vty << " " << FHI << " = ";
+            if (kind == KInt) { out << "("; emitExpr(*s.forColl, true); out << ")"; }
+            else emitExpr(*s.forRangeHi, true);
+            out << ";\n";
+            const bool incl = (kind == KRange) ? s.forRangeIncl : false;  // 整数计数=半开
+            indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
+            indent(); out << "for (" << vty << " " << FI << " = ";
+            if (!s.forRevert) { out << FLO << " + "; emitOpt(s.forOffsetE, "0"); }
+            else { out << FHI << (incl ? "" : " - 1") << " - "; emitOpt(s.forOffsetE, "0"); }
+            out << "; ";
+            if (!s.forRevert) out << FI << (incl ? " <= " : " < ") << FHI;
+            else out << FI << " >= " << FLO;
+            if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+            out << "; " << FI << (s.forRevert ? " -= " : " += "); emitOpt(s.forStepE, "1");
+            out << ", " << FC << "++) {\n";
+            depth++;
+            indent(); out << vty << " " << s.forVar << " = ";
+            if (cast) { out << "(" << vty << ")"; }
+            out << FI << ";\n";
+            emitIdx(FI + " - " + FLO);          // 索引=0 基位置（revert 时倒序，v==coll[i] 恒等）
+            emitForInBody(s, vBase, vPtr);
+            depth--; indent(); out << "}\n";
+        } else if (kind == KArray || kind == KString) {
+            // ---- 索引序列：基址指针 + 整型下标 ----
+            std::string elemBase; int elemPtr;
+            if (kind == KString) { elemBase = "char"; elemPtr = 0; }
+            else { elemBase = ct.name; elemPtr = ct.ptr; }
+            std::string baseTy = cTypeOf(elemBase, elemPtr + 1);
+            indent(); out << baseTy << " " << FB << " = "; emitExpr(*s.forColl, true); out << ";\n";
+            indent(); out << "long " << FE << " = ";
+            if (kind == KString) out << "0";
+            else {
+                const std::vector<std::string>* dims =
+                    (s.forColl->kind == Expr::Ident) ? knownDims(s.forColl->text) : nullptr;
+                if (!dims || dims->empty()) throw CompileError{"for-in 数组需编译期已知长度", s.line};
+                out << (*dims)[0];
+            }
+            out << ";\n";
+            if (kind == KString) {  // 扫描字符串长度（'\0' 终止）
+                indent(); out << "while (" << FB << "[" << FE << "] != '\\0') " << FE << "++;\n";
+            }
+            indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
+            indent(); out << "for (long " << FI << " = ";
+            if (!s.forRevert) { emitOpt(s.forOffsetE, "0"); }
+            else { out << FE << " - 1 - "; emitOpt(s.forOffsetE, "0"); }
+            out << "; ";
+            out << (s.forRevert ? FI + " >= 0" : FI + " < " + FE);
+            if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+            out << "; " << FI << (s.forRevert ? " -= " : " += "); emitOpt(s.forStepE, "1");
+            out << ", " << FC << "++) {\n";
+            depth++;
+            std::string declTy = cast ? cTypeOf(vBase, vPtr) : cTypeOf(elemBase, elemPtr);
+            if (!cast) { vBase = elemBase; vPtr = elemPtr; }
+            indent(); out << declTy << " " << s.forVar << " = ";
+            if (cast && vPtr > 0) out << "(" << declTy << ")&" << FB << "[" << FI << "]";
+            else if (cast)        out << "(" << declTy << ")" << FB << "[" << FI << "]";
+            else                  out << FB << "[" << FI << "]";
+            out << ";\n";
+            // 数组（可索引）→ 真实下标 FI（revert 时倒序，v==coll[i] 恒等）；
+            // 字符串（仅 next/'\0' 迭代）→ 递增计数 FC（0,1,2...，与 revert/offset 无关）。
+            emitIdx(kind == KString ? FC : FI);
+            emitForInBody(s, vBase, vPtr);
+            depth--; indent(); out << "}\n";
+        } else {
+            // ---- 链式序列：first/next 游标遍历（chain / 容器）----
+            const bool isChain = (kind == KChain);
+            const Decl* mFirst = findMethod(ct.name, s.forRevert ? "last" : "first");
+            if (!mFirst) throw CompileError{"for-in：集合缺少 " + std::string(s.forRevert ? "last" : "first") + " 方法", s.line};
+            const Decl* mAdv = isChain ? nullptr : findMethod(ct.name, s.forRevert ? "prev" : "next");
+            if (!isChain && !mAdv) throw CompileError{"for-in：容器缺少 " + std::string(s.forRevert ? "prev" : "next") + " 方法（revert 需 last/prev）", s.line};
+            // 接收者指针
+            std::string recvTy = cTypeOf(ct.name, 1);
+            indent(); out << recvTy << " " << FR << " = ";
+            if (ct.ptr == 0) out << "&";
+            emitExpr(*s.forColl, true); out << ";\n";
+            // 游标起点
+            indent(); out << "void *" << FI << " = (void *)" << mFirst->name << "(" << FR << ");\n";
+            // 前进表达式生成器（next/prev）
+            auto advExpr = [&]() {
+                if (isChain) {
+                    // chain：前进读注入的 _next（偏移 sizeof(void*)，链尾为 nil）；
+                    // 逆序用边界安全前驱 chain_prev（链头 _prev 指向 rear，须经契约判定 → nil）。
+                    if (!s.forRevert) out << "((void *)*(void **)((char *)" << FI << " + sizeof(void *)))";
+                    else { requireChain(s.line); out << "((void *)chain_prev(" << FI << "))"; }
+                } else {
+                    out << "((void *)" << mAdv->name << "(" << FR << ", " << FI << "))";
+                }
+            };
+            // offset 跳过
+            if (s.forOffsetE) {
+                indent(); out << "{ long _fo" << n << " = "; emitOpt(s.forOffsetE, "0");
+                out << "; while (_fo" << n << "-- > 0 && " << FI << " != (void *)0) " << FI << " = ";
+                advExpr(); out << "; }\n";
+            }
+            indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
+            indent(); out << "for (; " << FI << " != (void *)0";
+            if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+            out << "; ";
+            if (s.forStepE) {
+                out << "({ long _fk" << n << " = "; emitOpt(s.forStepE, "1");
+                out << "; while (_fk" << n << "-- > 0 && " << FI << " != (void *)0) " << FI << " = ";
+                advExpr(); out << "; })";
+            } else {
+                out << FI << " = "; advExpr();
+            }
+            out << ", " << FC << "++) {\n";
+            depth++;
+            // 循环变量：默认取 first 返回类型（chain=void&，容器=I&）；显式注解则下转
+            std::string declTy;
+            if (cast) declTy = cTypeOf(vBase, vPtr);
+            else {
+                const TypeRef* rt = mFirst->structCommon.type.get();
+                std::string rb = rt ? rt->name : "";
+                int rp = rt ? rt->ptr : 1;
+                declTy = cTypeOf(rb, rp);
+                vBase = rb; vPtr = rp;
+            }
+            indent(); out << declTy << " " << s.forVar << " = (" << declTy << ")" << FI << ";\n";
+            emitIdx(FC);                        // 链/容器（仅 next 迭代）→ 递增计数 0,1,2...
+            emitForInBody(s, vBase, vPtr);
+            depth--; indent(); out << "}\n";
+        }
+        depth--; indent(); out << "}\n";
+    }
+
+    // for-in 体：登记循环变量轻量类型（供体内方法糖/成员访问解析），发出体语句，再还原。
+    void emitForInBody(const Stmt& s, const std::string& vBase, int vPtr) {
+        auto& tbl = inFunc ? localsT : globalsT;
+        bool had = tbl.count(s.forVar);
+        VType old; if (had) old = tbl[s.forVar];
+        tbl[s.forVar] = VType{vBase, vPtr, 0};
+        // 索引/坐标变量：登记为 i4（整型计数）
+        std::vector<std::pair<bool, VType>> savedIdx;
+        for (auto& iv : s.forIdxVars) {
+            bool h = tbl.count(iv);
+            savedIdx.push_back({h, h ? tbl[iv] : VType{}});
+            tbl[iv] = VType{"i4", 0, 0};
+        }
+        emitLoopBody(s.body);
+        for (size_t i = 0; i < s.forIdxVars.size(); i++) {
+            if (savedIdx[i].first) tbl[s.forIdxVars[i]] = savedIdx[i].second;
+            else tbl.erase(s.forIdxVars[i]);
+        }
+        if (had) tbl[s.forVar] = old; else tbl.erase(s.forVar);
+    }
+
     // 分身/切片句柄变量名 → 实体类型 T 名（非句柄返回空串）
     std::string projEntityOf(const std::string& name) const {
         if (inFunc) { auto it = projVarsL.find(name); if (it != projVarsL.end()) return it->second; }
@@ -2503,6 +2808,7 @@ struct CGen {
                 out << ");\n";
                 break;
             case Stmt::ForS:
+                if (s.forIn) { emitForIn(s); break; }
                 indent();
                 out << "for (";
                 if (s.forInit) emitExpr(*s.forInit, true);
@@ -3758,6 +4064,11 @@ struct CGen {
         // 枚举类型名集合（string 格式化按整数）
         for (auto& d : prog.decls)
             if (d->kind == Decl::EnumD) enums.insert(d->name);
+
+        // 容器类型名集合：def T: <C, I> 的 C（含外部模块声明），供 t[key,...] → find 糖识别
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::StructD && !d->adtColl.empty())
+                adtColls.insert(resolveAliasName(d->adtColl));
 
         // 自动指针 T@：收集被当作胖目标的类型名（决定生成 T__new_ref 带头分配辅助）
         for (auto& d : prog.decls) {

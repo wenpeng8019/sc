@@ -106,6 +106,21 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::ForS: {
             std::vector<std::string> c;
             for (auto& b : s.body) c.push_back(stmtNode(*b));
+            if (s.forIn) {
+                std::string d = s.forVar;
+                if (s.forVarHasType) d += ": " + typeToStr(s.forVarType);
+                for (auto& iv : s.forIdxVars) d += ", " + iv;
+                d += " in ";
+                if (s.forIsRange)
+                    d += "[" + exprToStr(*s.forRangeLo) + ", " + exprToStr(*s.forRangeHi)
+                       + (s.forRangeIncl ? "]" : ")");
+                else d += exprToStr(*s.forColl);
+                if (s.forRevert) d += " revert";
+                if (s.forStepE)   d += " step " + exprToStr(*s.forStepE);
+                if (s.forOffsetE) d += " offset " + exprToStr(*s.forOffsetE);
+                if (s.forNumE)    d += " num " + exprToStr(*s.forNumE);
+                return node("for-in", "", d, s.line, c);
+            }
             std::string d = (s.forInit ? exprToStr(*s.forInit) : "") + "; " +
                             (s.forCond ? exprToStr(*s.forCond) : "") + "; " +
                             (s.forStep ? exprToStr(*s.forStep) : "");
