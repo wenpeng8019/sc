@@ -10,6 +10,7 @@
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
 | m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
+| env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
 | op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）、stringify（类型 JSON 格式化关键字，选项类型 `stringify_t` 见 `op.h`）；platform.h 的 sc 侧入口 |
 
 另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
@@ -433,6 +434,62 @@ print("E: 错误 code=%d", -1)        # 前缀 "X:" 设级别
   未 `inc io.sc` 而使用会编译报错。
 - 相比 stdc 完整日志系统，省略了 tag/UDP 上报/缓冲模式等机制，保留接口
   风格以便后续扩展。
+
+## env —— 运行环境 / 系统路径子项目
+
+`inc env.sc` 引入。提供跨平台的系统路径查询，全部为 **C 侧实现的自由函数**
+（`@fnc name::` 无函数体，链接期由 `env_impl.c` 注入）。平台适配统一经由
+`platform.h`（`P_WIN`/`P_DARWIN`/`P_BSD`/`P_LINUX`），实现内不散落平台分支。
+
+目录结构（`builtins/env/`）：env.sc（sc 侧声明）、env.h（C ABI 契约 +
+返回码）、env_impl.c（默认实现）。
+
+### 调用约定
+
+所有函数把结果路径写入调用方提供的 `buf`（NUL 结尾），`size` 为字节容量，
+返回 `ret`（即 i4 语义别名）：
+
+| 返回码 | 含义 |
+|--------|------|
+| `0` | 成功 |
+| `-1` | 系统调用失败（`ENV_ERR`） |
+| `-2` | `buf` 容量不足（`ENV_ERR_CAPACITY`） |
+
+建议 `buf` 至少 `PATH_MAX`（4096）字节；`download_dir`/`exe_file` 在部分平台
+要求 `buf >= PATH_MAX`，过小返回 `-2`。
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| env_work_dir | `ret, buf: char&, size: u4` | 当前工作目录（cwd） |
+| env_home_dir | `ret, buf: char&, size: u4` | 用户 home：POSIX 优先 `$HOME`，回退 `getpwuid_r`；Windows 取用户配置目录 |
+| env_download_dir | `ret, buf: char&, size: u4` | 下载目录：Win 已知文件夹 / macOS sysdir / Linux `$XDG_DOWNLOAD_DIR` 回退 `~/Downloads` |
+| env_exe_file | `ret, buf: char&, size: u4` | 当前可执行文件的规范化绝对路径 |
+| env_tmp_file | `ret, buf: char&, size: u4` | 在系统临时目录**创建**一个唯一空临时文件并返回路径（调用方负责删除） |
+
+实现移植自 stdc 的 `P_*` 同名函数，并修正若干健壮性问题：work_dir 在
+Windows 补全缓冲不足判定；home_dir 改用线程安全的 `getpwuid_r` 并优先
+`$HOME`；download_dir 在 macOS 用 `PATH_MAX` 局部缓冲承接 `sysdir` 写入以
+避免越界；exe_file 未知平台优雅返回错误（不再 `#error`）；tmp_file 两端
+统一「真实创建唯一空文件」语义（Windows 用 `GetTempFileNameA`）。
+
+> Windows 链接：`SHGetKnownFolderPath` / `CoTaskMemFree` 依赖 `shell32` 与
+> `ole32`。MSVC 已由 `#pragma comment(lib, ...)` 自动链接；MinGW/clang 需
+> 自行追加 `-lshell32 -lole32`。
+
+### 使用示例
+
+```sc
+inc stdio.h
+inc env.sc
+
+fnc main: i4
+    var b[4096]: char
+    if env_work_dir(b, 4096) == 0
+        printf("cwd = %s\n", b)
+    if env_exe_file(b, 4096) == 0
+        printf("exe = %s\n", b)
+    return 0
+```
 
 ## platform.h —— 跨平台基础头
 
