@@ -1,0 +1,2 @@
+member_bad.sc:10: [1;31m错误[0m: 结构体 'point' 没有成员 'z'，是否想用 'x'？
+  |      return p.z

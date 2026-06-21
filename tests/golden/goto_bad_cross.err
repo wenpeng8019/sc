@@ -1,2 +1,2 @@
-goto_bad_cross.sc:13: [1;31m错误[0m: goto 跨非包含作用域跳转：目标标签 'a' 不在当前活动作用域链上，存在待清理的自动指针/final/栈哨兵，无法保证内存安全（请避免跨分支或跳入更深作用域的 goto）
-  |      goto a
+goto_bad_cross.sc:14: [1;31m错误[0m: 不可达代码：此语句位于 return/break/continue/goto 之后
+  |      return 0

@@ -1,0 +1,2 @@
+dead_code_bad.sc:4: [1;31m错误[0m: 不可达代码：此语句位于 return/break/continue/goto 之后
+  |      var x: i4 = 5

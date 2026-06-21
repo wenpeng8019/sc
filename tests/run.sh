@@ -90,6 +90,22 @@ NEGATIVE=(
     tests/cases/goto_bad_cross.sc
     tests/cases/abi_fat_bad.sc
     tests/cases/fat_array_bad.sc
+    tests/cases/undef_func_bad.sc
+    tests/cases/undef_var_bad.sc
+    tests/cases/arg_count_bad.sc
+    tests/cases/member_bad.sc
+    tests/cases/typo_hint_bad.sc
+    tests/cases/type_mismatch_bad.sc
+    tests/cases/bad_op_bad.sc
+    tests/cases/div_zero_bad.sc
+    tests/cases/let_reassign_bad.sc
+    tests/cases/dup_def_bad.sc
+    tests/cases/dead_code_bad.sc
+    tests/cases/assign_lvalue_bad.sc
+    tests/cases/missing_return_bad.sc
+    tests/cases/cross_module_bad.sc
+    tests/cases/int_range_bad.sc
+    tests/cases/case_exhaustive_bad.sc
 )
 
 # 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。

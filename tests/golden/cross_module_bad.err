@@ -1,0 +1,3 @@
+cross_module_dep_bad.sc:1: [1;31m错误[0m: 非 void 函数 'helper_compute' 可能在结尾缺少 return（返回类型为 'i4'）
+  |  @fnc helper_compute: i4, n: i4
+  [1;36m提示[0m: 跨模块导入链：cross_module_bad.sc → cross_module_dep_bad.sc

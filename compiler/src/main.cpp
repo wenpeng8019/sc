@@ -815,11 +815,31 @@ static void mergeOpModule(Program& prog, const std::filesystem::path& srcPath) {
     }
 }
 
-// 从项目入口文件加载模块图，递归解析依赖，检查语义；成功返回 true，失败返回 false 和错误信息
+// 从源码文本提取第 n 行（1-based），去掉行尾空白；越界/无效返回空串。
+static std::string nthSourceLine(const std::string& src, int n) {
+    if (n <= 0) return {};
+    int curLine = 1;
+    for (size_t i = 0; i < src.size(); i++) {
+        if (curLine == n) {
+            size_t end = src.find('\n', i);
+            if (end == std::string::npos) end = src.size();
+            std::string line = src.substr(i, end - i);
+            while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                line.pop_back();
+            return line;
+        }
+        if (src[i] == '\n') curLine++;
+    }
+    return {};
+}
+
+// 从项目入口文件加载模块图，递归解析依赖，检查语义；成功返回 true，失败返回 false 和错误信息。
+// importChain 记录「自入口起逐级 inc 进来的祖先模块」（规范路径），用于跨模块错误链展示。
 static bool loadUnitGraph(const std::filesystem::path& srcPath,
                           std::unordered_map<std::string, UnitInfo>& units,
                           std::unordered_set<std::string>& visiting,
-                          std::string& errMsg) {
+                          std::string& errMsg,
+                          const std::vector<std::string>& importChain = {}) {
 
     // 循环依赖检测：已加载的模块直接返回，正在访问的模块再次访问则报错
     const auto canon = std::filesystem::weakly_canonical(srcPath);
@@ -846,14 +866,33 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
 
     UnitInfo u;
     u.path = canon;
-    u.prog = parse(lex(src));                   // 解析源代码为 AST
-    u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
-    mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
-    semanticCheck(u.prog);                      // 再检查：导入类型/方法可见
+    try {
+        u.prog = parse(lex(src));                   // 解析源代码为 AST
+        u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
+        mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
+        semanticCheck(u.prog);                      // 再检查：导入类型/方法可见 + 本模块函数体语义复检
+    } catch (CompileError& e) {
+        // 跨模块错误链完整展示：把错误准确归属到出错模块文件、补全该模块的源代码行，
+        // 避免被顶层 catch 误挂到入口文件（错误的文件名与不匹配的源码行）；
+        // 并在提示里附上自入口起的 inc 导入链，定位错误是经哪条路径引入的。
+        if (e.file.empty()) e.file = key;
+        if (e.srcLine.empty() && e.line > 0) e.srcLine = nthSourceLine(src, e.line);
+        if (e.hint.empty() && !importChain.empty()) {
+            std::string chain;
+            for (auto& c : importChain)
+                chain += std::filesystem::path(c).filename().string() + " → ";
+            chain += canon.filename().string();
+            e.hint = "跨模块导入链：" + chain;
+        }
+        visiting.erase(key);
+        throw;
+    }
 
-    // 递归加载依赖模块
+    // 递归加载依赖模块（向下传递扩展后的导入链）
+    std::vector<std::string> childChain = importChain;
+    childChain.push_back(key);
     for (auto& dep : u.deps) {
-        if (!loadUnitGraph(dep, units, visiting, errMsg)) {
+        if (!loadUnitGraph(dep, units, visiting, errMsg, childChain)) {
             visiting.erase(key);
             return false;
         }
@@ -1394,7 +1433,9 @@ int main(int argc, char** argv) {
         auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
                : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h
-                     ? emitC(prog, "", "stringify.h", &sofHeaderSrc)
+                     // 源文件输入时以源路径作 #line srcFile：导出的 .c 自带回 .sc 的行号映射，
+                     // 用户自行 -g 编译即可源码级调试（断点/单步/堆栈落在 .sc）；stdin 输入无源路径则留空
+                     ? emitC(prog, input == "-" ? std::string{} : input, "stringify.h", &sofHeaderSrc)
                      : emitC(prog);                                 // run/stdout：内联自包含
 
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
@@ -1528,25 +1569,7 @@ int main(int argc, char** argv) {
 
         // 从源码中提取指定行的文本，为编译错误添加源代码行诊断信息
         if (e.file.empty()) e.file = input;
-        if (e.srcLine.empty() && e.line > 0) { int curLine = 1;
-
-            for (size_t i = 0; i < src.size(); i++) {
-
-                if (curLine == e.line) {
-
-                    // 定位到行首，提取该行文本（不包含行尾换行符）
-                    size_t end = src.find('\n', i);
-                    if (end == std::string::npos) end = src.size();
-                    e.srcLine = src.substr(i, end - i);
-                    
-                    // 去掉行尾空白
-                    while (!e.srcLine.empty() && (e.srcLine.back() == '\r' || e.srcLine.back() == '\n'))
-                        e.srcLine.pop_back();
-                    break;
-                }
-                if (src[i] == '\n') curLine++;
-            }
-        }
+        if (e.srcLine.empty() && e.line > 0) e.srcLine = nthSourceLine(src, e.line);
 
         // 详细诊断输出：文件:行号: 错误: 消息 + 上下文代码 + 修复建议
         std::cerr << (e.file.empty() ? input : e.file) << ":" << e.line 

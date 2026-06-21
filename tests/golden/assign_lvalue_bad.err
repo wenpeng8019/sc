@@ -1,0 +1,2 @@
+assign_lvalue_bad.sc:1: [1;31m错误[0m: 非 void 函数 'main' 可能在结尾缺少 return（返回类型为 'i4'）
+  |  @fnc main: i4

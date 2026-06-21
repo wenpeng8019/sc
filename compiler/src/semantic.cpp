@@ -18,12 +18,113 @@
 #include "semantic.h"
 #include "error.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <cctype>
+#include <cerrno>
 #include <functional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace {
+
+// 文件名是否以 .sc 结尾（区分 .sc 模块 inc 与 C 头 inc）
+bool endsWithSc(const std::string& n) {
+    return n.size() >= 3 && n.compare(n.size() - 3, 3, ".sc") == 0;
+}
+
+// 两字符串的 Levenshtein 编辑距离（用于 typo 近似名提示）。
+int editDistance(const std::string& a, const std::string& b) {
+    const size_t m = a.size(), n = b.size();
+    std::vector<int> prev(n + 1), cur(n + 1);
+    for (size_t j = 0; j <= n; j++) prev[j] = static_cast<int>(j);
+    for (size_t i = 1; i <= m; i++) {
+        cur[0] = static_cast<int>(i);
+        for (size_t j = 1; j <= n; j++) {
+            int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+            cur[j] = std::min({ prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost });
+        }
+        std::swap(prev, cur);
+    }
+    return prev[n];
+}
+
+// 在候选名集合里寻找与 nm 编辑距离最小且在阈值内的名字；无合适项返回空串。
+// 阈值随名字长度递增（短名容错小，避免把毫不相干的短名误判为 typo）。
+std::string closestName(const std::string& nm,
+                        const std::vector<std::string>& cands) {
+    if (nm.empty()) return {};
+    const int maxDist = nm.size() <= 3 ? 1 : (nm.size() <= 6 ? 2 : 3);
+    int best = maxDist + 1;
+    std::string hit;
+    for (const auto& c : cands) {
+        if (c.empty() || c == nm) continue;
+        // 长度差已超阈值则无需计算
+        int dl = static_cast<int>(c.size()) - static_cast<int>(nm.size());
+        if (dl < 0) dl = -dl;
+        if (dl > maxDist) continue;
+        int d = editDistance(nm, c);
+        if (d < best) { best = d; hit = c; }
+    }
+    return best <= maxDist ? hit : std::string{};
+}
+
+// platform.h 预置头：scc 生成的 C 始终 #include 这些标准头，故其符号无需 inc 即可见。
+// 程序若 inc 了「不在此集合」的额外 C 头（编译/run 模式下未做 libclang 枚举），
+// 则无法确定该头提供的符号，需放宽未定义检查（见 lenientCalls）。
+const std::unordered_set<std::string>& preludeHeaders() {
+    static const std::unordered_set<std::string> s = {
+        "stdint.h", "stddef.h", "stdbool.h", "stdarg.h",
+        "stdio.h", "stdlib.h", "string.h", "time.h",
+        "assert.h", "inttypes.h",
+    };
+    return s;
+}
+
+// 预置头（preludeHeaders）暴露的常用 libc 函数 / 宏 / 常量白名单：
+// 这些名字始终可作为「已知可调用」与「已知标识符」，避免对合法 C 互操作误报未定义。
+const std::unordered_set<std::string>& libcSymbols() {
+    static const std::unordered_set<std::string> s = {
+        // stdio.h 函数
+        "printf", "fprintf", "sprintf", "snprintf",
+        "vprintf", "vfprintf", "vsprintf", "vsnprintf",
+        "scanf", "fscanf", "sscanf", "vscanf", "vfscanf", "vsscanf",
+        "puts", "fputs", "putchar", "fputc", "putc",
+        "getchar", "getc", "fgetc", "fgets",
+        "fopen", "freopen", "fclose", "fread", "fwrite",
+        "fseek", "ftell", "rewind", "fflush", "feof", "ferror",
+        "perror", "remove", "rename", "tmpfile", "tmpnam",
+        "setbuf", "setvbuf", "ungetc", "clearerr", "fgetpos", "fsetpos",
+        // stdlib.h 函数
+        "malloc", "calloc", "realloc", "free", "aligned_alloc",
+        "abort", "exit", "_Exit", "atexit", "quick_exit", "at_quick_exit",
+        "getenv", "system", "qsort", "bsearch",
+        "rand", "srand", "atoi", "atol", "atoll", "atof",
+        "strtol", "strtoll", "strtoul", "strtoull",
+        "strtod", "strtof", "strtold",
+        "abs", "labs", "llabs", "div", "ldiv", "lldiv",
+        // string.h 函数
+        "memcpy", "memmove", "memset", "memcmp", "memchr",
+        "strcpy", "strncpy", "strcat", "strncat",
+        "strcmp", "strncmp", "strcoll", "strxfrm",
+        "strchr", "strrchr", "strspn", "strcspn", "strpbrk",
+        "strstr", "strtok", "strlen", "strerror", "strdup",
+        // time.h 函数
+        "time", "clock", "difftime", "mktime",
+        "asctime", "ctime", "gmtime", "localtime", "strftime",
+        // stdarg.h
+        "va_start", "va_arg", "va_end", "va_copy",
+        // assert.h
+        "assert", "static_assert",
+        // 常用宏 / 常量（作为标识符出现）
+        "NULL", "EOF", "stdin", "stdout", "stderr",
+        "EXIT_SUCCESS", "EXIT_FAILURE", "RAND_MAX", "BUFSIZ",
+        "SEEK_SET", "SEEK_CUR", "SEEK_END", "CLOCKS_PER_SEC",
+    };
+    return s;
+}
 
 // ---------------- 内部类型表示 ----------------
 // 轻量级类型描述，比完整的 TypeRef 更紧凑、便于比较。
@@ -36,6 +137,7 @@ struct Ty {
     bool isNil = false; // 字面量 nil，只能赋给指针/数组
     bool project = false; // 分身/切片句柄 T[...]：可整体被赋值为本体或 nil（语法糖）
     bool fat = false;   // 自动指针 T@（胖指针）：指针类，可与 T()/T@/nil 互赋
+    bool immutable = false; // let 不可变绑定：禁止再赋值 / 自增自减
 };
 
 // ---------------- 运算符辅助函数 ----------------
@@ -49,6 +151,76 @@ bool isAssignOp(const std::string& op) {
 
 // 指针或数组：均可解引用（胖指针 T@ 亦视为指针类）
 bool isPointerLike(const Ty& t) { return t.ptr > 0 || t.arr > 0 || t.fat; }
+
+// 把内部 Ty 渲染成可读类型串（用于诊断信息）：基名 + @/& 指针 + [] 数组。
+std::string tyStr(const Ty& t) {
+    if (t.isNil) return "nil";
+    std::string s = t.name.empty() ? "void" : t.name;
+    if (t.fat) s += "@";
+    for (int i = 0; i < t.ptr; i++) s += "&";
+    for (int i = 0; i < t.arr; i++) s += "[]";
+    return s;
+}
+
+// 算术/取模类二元运算符（用于非法运算检测；不含比较、逻辑、位移与赋值）
+bool isArithOp(const std::string& op) {
+    return op == "+" || op == "*" || op == "/" || op == "%";
+}
+
+// 浮点基类型名
+bool isFloatName(const std::string& n) { return n == "f4" || n == "f8"; }
+
+// 表达式是否为「值为 0 的整数字面量」（含 0 / 0x0 / 0b0 等各进制，忽略后缀）。
+bool isIntZeroLit(const Expr& e) {
+    if (e.kind != Expr::IntLit) return false;
+    char* end = nullptr;
+    long long v = std::strtoll(e.text.c_str(), &end, 0);
+    return end != e.text.c_str() && v == 0;
+}
+
+// ---------------- 整数字面量越界检查辅助 ----------------
+
+// 固定宽整型 → 位宽（8/16/32/64）；非固定宽（char/浮点/未知）返回 0 → 跳过检查。
+// char 故意不纳入：其有无符号属性随平台而定，纳入会引入误报。
+int intTypeBits(const std::string& name) {
+    if (name == "i1" || name == "u1" || name == "bool") return 8;
+    if (name == "i2" || name == "u2") return 16;
+    if (name == "i4" || name == "u4" || name == "ret") return 32;
+    if (name == "i8" || name == "u8") return 64;
+    return 0;
+}
+
+// 固定宽整型是否有符号（iN / ret 有符号；uN / bool 无符号）。
+bool isSignedIntName(const std::string& name) {
+    return name == "i1" || name == "i2" || name == "i4" || name == "i8" || name == "ret";
+}
+
+// 解析整数字面量文本为无符号数值（剥离后缀，按进制解析）。
+// 返回 false 表示无法可靠解析（含超 64 位 ERANGE）→ 调用方跳过检查（宁可漏报）。
+// 回传 isHex：十六进制字面量常作位模式（0xFF→i1 视作 -1），后续对有符号目标放宽边界。
+bool parseIntLiteral(const std::string& t, unsigned long long& mag, bool& isHex) {
+    isHex = false;
+    std::string digits;
+    if (t.size() >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
+        isHex = true;
+        size_t i = 2;
+        while (i < t.size() && std::isxdigit((unsigned char)t[i])) i++;
+        if (i == 2) return false;
+        digits = t.substr(0, i);                 // 含 0x 前缀，交 strtoull base 16
+    } else {
+        size_t i = 0;
+        while (i < t.size() && std::isdigit((unsigned char)t[i])) i++;
+        if (i == 0) return false;
+        digits = t.substr(0, i);                 // base 0：支持前导 0 八进制
+    }
+    errno = 0;
+    char* end = nullptr;
+    mag = std::strtoull(digits.c_str(), &end, isHex ? 16 : 0);
+    if (end == digits.c_str()) return false;
+    if (errno == ERANGE) return false;           // 超 64 位：保守跳过
+    return true;
+}
+
 
 // TypeRef → Ty 转换
 Ty fromTypeRef(const TypeRef& t) {
@@ -78,6 +250,15 @@ struct Checker {
     std::unordered_map<std::string, Ty> globals;            // 全局 var/let/tls 的类型
     // 容器类型 C（def T: <C, I>）→ 元素节点类型 I：下标糖 t[key] → find 结果为 I&
     std::unordered_map<std::string, std::string> containerItem;
+
+    // ---- 未定义符号诊断用符号表（本地 + 外部，含 C 头/模块合并的描述符）----
+    std::unordered_map<std::string, const Decl*> funcSigs;  // 非方法函数名 → 声明（实参检查取签名）
+    std::unordered_set<std::string> enumConsts;             // 枚举常量名（作为标识符已知）
+    std::unordered_set<std::string> declNames;              // 所有顶层声明名（catch-all：类型/全局/外部模块符号）
+    std::unordered_map<std::string, std::unordered_set<std::string>> structMethods;  // 结构名 → 成员函数名集
+    // 放宽门控：存在「未枚举的额外 C 头」或 add 外部实现/库 → 可能引入未知符号，
+    // 此时整体关闭未定义函数/标识符检查（宁可漏报不可误报）。实参个数/类型、成员检查不受影响。
+    bool lenientCalls = false;
 
     explicit Checker(const Program& p) : prog(p) {}
 
@@ -235,11 +416,16 @@ struct Checker {
                 if (it != locals.end()) return it->second;
                 it = globals.find(e.text);
                 if (it != globals.end()) return it->second;
-                return Ty{};  // 未找到 = C 宏/未登记符号，跳过检查
+                // 既非局部也非全局：若非已知标识符（函数/类型/枚举常量/libc/外部符号）则报未定义
+                if (!lenientCalls && !isKnownIdent(e.text, locals))
+                    err(e.line, "未定义的标识符 '" + e.text + "'" + hintIdent(e.text, locals));
+                return Ty{};  // 已知但类型未跟踪（如 C 宏/外部符号）→ 跳过后续检查
             }
             // -- 一元运算：* 解引用 → ptr/arr-1; & 取地址 → ptr+1 ----------------
             case Expr::Unary: {
                 Ty a = inferExpr(*e.a, locals, line);
+                if ((e.op == "++" || e.op == "--") && e.a)
+                    checkNotImmutable(*e.a, locals, e.line, "自增/自减");
                 if (e.op == "*") {
                     if (a.valid && !isPointerLike(a)) err(e.line, "非法解引用：操作数不是指针/数组");
                     if (a.valid) {
@@ -285,6 +471,14 @@ struct Checker {
                 if (sd->linked && (fn == "prev" || fn == "next")) fn = "_" + fn;
                 for (auto& f : sd->structCommon.fields) {
                     if (f.name == fn) return fromTypeRef(f.type);
+                }
+                // 字段未命中：在「成员集完整可判定」的本地朴素结构体上，且非成员函数 → 报成员不存在
+                if (memberCheckable(*sd, base)) {
+                    auto mit = structMethods.find(sd->name);
+                    const bool isMethod = mit != structMethods.end() && mit->second.count(e.text);
+                    if (!isMethod)
+                        err(e.line, std::string(sd->kind == Decl::UnionD ? "联合 '" : "结构体 '")
+                            + base.name + "' 没有成员 '" + e.text + "'" + hintMember(*sd, e.text));
                 }
                 return Ty{};
             }
@@ -337,7 +531,20 @@ struct Checker {
                     if (e.args.size() == 3) return Ty{"char", 1, 0, true, false};
                     return Ty{"string", 0, 0, true, false};
                 }
-                // 普通函数调用
+                // 普通函数调用：直接 name(...) 形态 → 未定义/实参检查
+                if (e.a->kind == Expr::Ident) {
+                    const std::string& nm = e.a->text;
+                    const bool known = isKnownCallable(nm, locals);
+                    if (!known && !lenientCalls)
+                        err(e.line, "未定义的函数 '" + nm + "'" + hintCallable(nm, locals));
+                    // 遍历实参（检查其内部表达式），收集类型供个数/类型校验
+                    std::vector<Ty> ats;
+                    ats.reserve(e.args.size());
+                    for (auto& a : e.args) ats.push_back(inferExpr(*a, locals, line));
+                    if (known) checkCallArgs(e, nm, ats, locals);
+                    return Ty{};
+                }
+                // 间接调用（obj.m() / 函数指针表达式等）：推导被调表达式类型
                 Ty callee = inferExpr(*e.a, locals, line);
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                 if (callee.valid && callee.name == "v" && callee.ptr == 0 && callee.arr == 0)
@@ -349,6 +556,7 @@ struct Checker {
             }
             // -- 后缀 ++/--：类型不变 -------------------------------------------
             case Expr::PostUnary:
+                if (e.a) checkNotImmutable(*e.a, locals, e.line, "自增/自减");
                 return inferExpr(*e.a, locals, line);
             // -- 三元条件 a ? b : c：取第一个有类型的边 -------------------------
             case Expr::Ternary: {
@@ -363,10 +571,31 @@ struct Checker {
                 Ty l = inferExpr(*e.a, locals, line);
                 Ty r = inferExpr(*e.b, locals, line);
                 if (isAssignOp(e.op)) {
+                    // 赋值目标必须是左值（变量/成员/下标/解引用）
+                    if (e.a) checkAssignTarget(*e.a, e.line);
+                    // 不可变 let 绑定不能再赋值
+                    if (e.a) checkNotImmutable(*e.a, locals, e.line, "给");
                     // 分身/切片句柄：s = 本体 / s = nil 均为语法糖，跳过常规赋值兼容检查
                     if (!l.project) checkAssignable(l, r, e.line);
+                    // 整数字面量越界目标类型（仅纯赋值 =，复合赋值语义不同故不查）
+                    if (e.op == "=" && e.b) checkIntLiteralRange(l, *e.b, e.line);
                     return l;
                 }
+                // 非法算术运算诊断（缺失操作符/类型不匹配）：
+                //   两个指针/数组用 + * / %（C 中恒非法；指针求差 - 合法故已排除）
+                //   取模 % 的操作数为浮点
+                if (l.valid && r.valid && isArithOp(e.op)) {
+                    if (isPointerLike(l) && isPointerLike(r))
+                        err(e.line, "类型不匹配：两个指针/数组不能用 '" + e.op
+                            + "' 运算" + fixHintPtrArith(*e.a, *e.b, e.op));
+                    if (e.op == "%" && (isFloatName(l.name) || isFloatName(r.name))
+                        && !isPointerLike(l) && !isPointerLike(r))
+                        err(e.line, "类型不匹配：取模 '%' 的操作数必须为整数，实际为浮点");
+                }
+                // 除零诊断：整数字面量 0 作为 / 或 % 的除数（C 中为未定义行为）
+                if ((e.op == "/" || e.op == "%") && e.b && isIntZeroLit(*e.b))
+                    err(e.line, std::string("除数为零：") + (e.op == "%" ? "取模" : "除法")
+                        + " '" + e.op + "' 的右操作数是字面量 0");
                 return l.valid ? l : r;
             }
             // -- 类型强转 (T)x：返回声明类型 -----------------------------------
@@ -392,11 +621,256 @@ struct Checker {
         const bool rp = isPointerLike(rhs);
 
         if (rhs.isNil) {
-            if (!lp) err(line, "nil 只能赋给指针/数组类型");
+            if (!lp) err(line, "nil 只能赋给指针/数组类型（目标类型为 '" + tyStr(lhs) + "'）");
             return;
         }
-        if (lp && !rp) err(line, "指针/数组不能赋值为非指针标量");
-        if (!lp && rp) err(line, "标量不能赋值为指针/数组");
+        if (lp && !rp)
+            err(line, "类型不匹配：不能把非指针标量 '" + tyStr(rhs)
+                + "' 赋给指针/数组 '" + tyStr(lhs) + "'");
+        if (!lp && rp)
+            err(line, "类型不匹配：不能把指针/数组 '" + tyStr(rhs)
+                + "' 赋给标量 '" + tyStr(lhs) + "'");
+    }
+
+    // ---- 整数字面量越界检查 ----
+    // 编译期可定的整数字面量赋给固定宽整型，若超出目标范围则报错。
+    // 严格零误报：仅处理纯整数字面量（可含一元 +/-）、目标为固定宽标量整型；
+    //   - 有符号目标：十进制按有符号范围 [-2^(n-1), 2^(n-1)-1]；
+    //     十六进制按位模式放宽到无符号上限（0xFF→i1 = -1 等全置位惯用法合法）；
+    //   - 无符号目标：范围 [0, 2^n-1]；负字面量一律放行（-1 全置位惯用法常见）。
+    void checkIntLiteralRange(const Ty& lhs, const Expr& rhs, int line) {
+        if (!lhs.valid || lhs.ptr > 0 || lhs.arr > 0 || lhs.fat) return;
+        const int bits = intTypeBits(lhs.name);
+        if (bits == 0) return;                          // 非固定宽整型 → 跳过
+
+        // 剥离一元 +/- 前缀，记录正负
+        const Expr* lit = &rhs;
+        bool neg = false;
+        while (lit && lit->kind == Expr::Unary &&
+               (lit->op == "-" || lit->op == "+") && lit->a) {
+            if (lit->op == "-") neg = !neg;
+            lit = lit->a.get();
+        }
+        if (!lit || lit->kind != Expr::IntLit) return;  // 非整数字面量 → 跳过
+
+        unsigned long long mag = 0; bool isHex = false;
+        if (!parseIntLiteral(lit->text, mag, isHex)) return;
+
+        const unsigned long long umax = (bits == 64) ? ~0ull : ((1ull << bits) - 1);
+        const std::string what = lit->text;             // 原始字面量串（含进制/后缀）
+
+        if (isSignedIntName(lhs.name)) {
+            const unsigned long long smax = (1ull << (bits - 1)) - 1;   // 2^(n-1)-1
+            const unsigned long long minMag = 1ull << (bits - 1);       // |最小负值|
+            if (neg) {
+                if (mag > minMag)
+                    err(line, "整数字面量 -" + what + " 超出有符号类型 '" + lhs.name
+                        + "' 的范围 [-" + std::to_string(minMag) + ", "
+                        + std::to_string(smax) + "]");
+            } else if (isHex) {
+                if (mag > umax)
+                    err(line, "整数字面量 " + what + " 超出类型 '" + lhs.name
+                        + "' 的位宽（" + std::to_string(bits) + " 位）所能表示的范围");
+            } else {
+                if (mag > smax)
+                    err(line, "整数字面量 " + what + " 超出有符号类型 '" + lhs.name
+                        + "' 的范围 [-" + std::to_string(minMag) + ", "
+                        + std::to_string(smax) + "]");
+            }
+        } else {
+            if (neg) return;                            // 负字面量赋无符号：放行
+            if (mag > umax)
+                err(line, "整数字面量 " + what + " 超出无符号类型 '" + lhs.name
+                    + "' 的范围 [0, " + std::to_string(umax) + "]");
+        }
+    }
+
+
+    // ---- 未定义符号诊断辅助 ----
+
+    // 名字是否解析为「可调用」：局部/全局（函数指针变量）、自由函数（本地/外部）、
+    // 类型名（T() 构造糖）、libc 白名单、catch-all 外部描述符。
+    bool isKnownCallable(const std::string& nm,
+                         const std::unordered_map<std::string, Ty>& locals) const {
+        if (locals.count(nm) || globals.count(nm)) return true;       // 函数指针变量
+        if (funcSigs.count(nm)) return true;                          // 自由函数
+        if (resolveStruct(nm)) return true;                           // T() 构造糖
+        if (aliases.count(nm)) return true;                           // 别名 → 可能是构造糖
+        if (libcSymbols().count(nm)) return true;                     // libc 函数
+        if (declNames.count(nm)) return true;                         // catch-all 外部/本地声明名
+        return false;
+    }
+
+    // 名字是否解析为「已知标识符」（作为值使用）：在可调用基础上再加枚举常量。
+    bool isKnownIdent(const std::string& nm,
+                      const std::unordered_map<std::string, Ty>& locals) const {
+        if (enumConsts.count(nm)) return true;
+        return isKnownCallable(nm, locals);
+    }
+
+    // 结构体是否「成员集完整可判定」（可安全报成员不存在）：
+    // 排除外部模块/ C 头结构、数组整体、ADT 容器、分身/切片句柄、标签联合、含匿名内嵌成员者。
+    bool memberCheckable(const Decl& sd, const Ty& base) const {
+        if (sd.external) return false;                  // 外部模块/ C 头：成员集可能不全
+        if (base.arr > 0) return false;                 // 数组整体不做成员检查
+        if (!sd.adtColl.empty()) return false;          // ADT 容器：注入合成成员 + 内建操作糖
+        if (!sd.projectSelf.empty() || !sd.projectEntity.empty()) return false;  // 分身/切片句柄
+        if (sd.tagged) return false;                    // 标签联合：变体构造/解构走专门语法
+        // 匿名内嵌成员（name 空）：其内部成员可被直接访问，无法据顶层字段名判定 → 跳过
+        for (auto& f : sd.structCommon.fields)
+            if (f.name.empty()) return false;
+        return true;
+    }
+
+    // typo 近似名提示：在「可调用名」候选集合里找最接近 nm 的名字。
+    // 返回形如 "，是否想用 'x'？" 的尾缀；无合适候选返回空串。
+    std::string hintCallable(const std::string& nm,
+                             const std::unordered_map<std::string, Ty>& locals) const {
+        std::vector<std::string> cands;
+        for (auto& kv : funcSigs) cands.push_back(kv.first);
+        for (auto& n : declNames) cands.push_back(n);
+        for (auto& kv : structs) cands.push_back(kv.first);
+        for (auto& kv : locals) cands.push_back(kv.first);
+        for (auto& kv : globals) cands.push_back(kv.first);
+        std::string c = closestName(nm, cands);
+        return c.empty() ? std::string{} : "，是否想用 '" + c + "'？";
+    }
+
+    // typo 近似名提示：标识符（值）位置，在可调用名基础上再加枚举常量候选。
+    std::string hintIdent(const std::string& nm,
+                          const std::unordered_map<std::string, Ty>& locals) const {
+        std::vector<std::string> cands;
+        for (auto& kv : funcSigs) cands.push_back(kv.first);
+        for (auto& n : declNames) cands.push_back(n);
+        for (auto& n : enumConsts) cands.push_back(n);
+        for (auto& kv : locals) cands.push_back(kv.first);
+        for (auto& kv : globals) cands.push_back(kv.first);
+        std::string c = closestName(nm, cands);
+        return c.empty() ? std::string{} : "，是否想用 '" + c + "'？";
+    }
+
+    // typo 近似名提示：结构体成员位置，候选为该结构体的字段名 + 成员函数名。
+    std::string hintMember(const Decl& sd, const std::string& nm) const {
+        std::vector<std::string> cands;
+        for (auto& f : sd.structCommon.fields)
+            if (!f.name.empty()) cands.push_back(f.name);
+        auto mit = structMethods.find(sd.name);
+        if (mit != structMethods.end())
+            for (auto& m : mit->second) cands.push_back(m);
+        std::string c = closestName(nm, cands);
+        return c.empty() ? std::string{} : "，是否想用 '" + c + "'？";
+    }
+
+    // 若表达式是「指向不可变 let 绑定的裸标识符」，报对应的修改错误。
+    // 仅对裸 Ident 生效：*p/p[i]/p.f 等通过 let 指针的间接写入仍合法。
+    void checkNotImmutable(const Expr& target,
+                           const std::unordered_map<std::string, Ty>& locals,
+                           int line, const char* action) {
+        if (target.kind != Expr::Ident) return;
+        const Ty* t = nullptr;
+        auto it = locals.find(target.text);
+        if (it != locals.end()) t = &it->second;
+        else { auto g = globals.find(target.text); if (g != globals.end()) t = &g->second; }
+        if (t && t->immutable)
+            err(line, std::string("不能") + action + "不可变绑定 '" + target.text
+                + "'（由 let 声明的常量）");
+    }
+
+    // 赋值左侧若是「确定不可寻址」的值（字面量、运算结果等）则报错。
+    // 保守策略：仅对绝无可能成为左值的种类报告；Ident/Member/Index/*解引用/Cast/Call
+    // 等可能是左值或语义糖（如 base()/分身句柄）的形式一律放行，以确保零误报。
+    void checkAssignTarget(const Expr& t, int line) {
+        const char* what = nullptr;
+        switch (t.kind) {
+            case Expr::IntLit: case Expr::FloatLit:
+            case Expr::StrLit: case Expr::CharLit: what = "字面量"; break;
+            case Expr::Binary:   what = "二元运算结果"; break;
+            case Expr::Ternary:  what = "三元表达式结果"; break;
+            case Expr::PostUnary: what = "自增/自减表达式结果"; break;
+            case Expr::Sizeof:   what = "sizeof 结果"; break;
+            case Expr::Offsetof: what = "offsetof 结果"; break;
+            case Expr::InitList: what = "初始化列表"; break;
+            case Expr::FncLit:   what = "匿名函数字面量"; break;
+            case Expr::Unary:
+                // *p 解引用是左值；-x / !x / ~x / &x 不是
+                if (t.op != "*") what = "一元运算结果";
+                break;
+            default: break;
+        }
+        if (what)
+            err(line, std::string("赋值目标不是左值：不能给") + what
+                + "赋值（赋值左侧必须是变量、成员、下标或解引用）");
+    }
+
+    // 还原表达式的简短源码文本，用于在诊断里给出可操作的修复补丁建议。
+    // 仅覆盖能稳定还原的叶子/链式形式（标识符、成员、下标、一元）；其余返回空，
+    // 调用方据此回退到通用提示，避免生成误导性的补丁。
+    std::string exprBrief(const Expr& e) const {
+        switch (e.kind) {
+            case Expr::Ident: return e.text;
+            case Expr::Member:
+                if (!e.a) return "";
+                { std::string b = exprBrief(*e.a); return b.empty() ? "" : b + e.op + e.text; }
+            case Expr::Index:
+                if (!e.a || !e.b) return "";
+                { std::string a = exprBrief(*e.a), b = exprBrief(*e.b);
+                  return (a.empty() || b.empty()) ? "" : a + "[" + b + "]"; }
+            case Expr::Unary:
+                if (!e.a) return "";
+                { std::string a = exprBrief(*e.a); return a.empty() ? "" : e.op + a; }
+            default:
+                return "";
+        }
+    }
+
+    // 为「两个指针/数组做非法算术运算」生成具体修复补丁建议。
+    // 若两端都能还原为简短源码文本，给出逐元素改写补丁（解引用 / 下标）；否则回退通用提示。
+    std::string fixHintPtrArith(const Expr& a, const Expr& b, const std::string& op) const {
+        std::string la = exprBrief(a), rb = exprBrief(b);
+        if (la.empty() || rb.empty())
+            return "（缺失操作符或应先解引用/取下标？）";
+        return "（缺失操作符？若想逐元素运算可改写为 '*" + la + " " + op + " *" + rb
+            + "' 或 '" + la + "[i] " + op + " " + rb + "[i]'）";
+    }
+
+    // 取自由函数的规范签名 Decl（展开 fnc name -> func_type 引用）；无则返回 nullptr。
+    const Decl* resolveCallSig(const Decl* d) const {
+        if (!d) return nullptr;
+        if (!d->funcTypeName.empty()) {
+            auto it = funcTypes.find(d->funcTypeName);
+            return it != funcTypes.end() ? it->second : nullptr;
+        }
+        return d;
+    }
+
+    // 自由函数调用的实参个数 / 类型检查（仅对签名完整、非可变参数、非 rpc 的本地函数）。
+    // ats 为调用方已预先求得的各实参类型（避免重复推导）。
+    void checkCallArgs(const Expr& call, const std::string& nm,
+                       const std::vector<Ty>& ats,
+                       const std::unordered_map<std::string, Ty>& locals) {
+        // 仅当 nm 唯一解析到一个自由函数、且不是被局部/全局变量遮蔽（函数指针）时才检查
+        if (locals.count(nm) || globals.count(nm)) return;
+        auto fit = funcSigs.find(nm);
+        if (fit == funcSigs.end()) return;
+        const Decl* sig = resolveCallSig(fit->second);
+        if (!sig) return;
+        if (sig->external) return;                 // 外部模块函数：签名可能含 ABI 细节，跳过
+        if (sig->structCommon.variadic) return;    // 可变参数：不校验个数/尾部类型
+        if (sig->isRpc) return;                    // rpc：通过 run/<< 语法糖调用，参数语义特殊
+
+        const auto& params = sig->structCommon.fields;
+        const size_t np = params.size(), na = ats.size();
+        // sc 允许省略尾部实参（缺参自动补 0/nil，见 feature2 §实参默认自动补 0）；
+        // 故仅「实参过多」才是错误，过少合法。
+        if (na > np) {
+            err(call.line, "函数 '" + nm + "' 期望至多 " + std::to_string(np) +
+                " 个实参（缺省自动补 0），实际传入 " + std::to_string(na) + " 个");
+        }
+        // 逐位实参类型兼容（沿用保守的指针/标量混用规则）
+        for (size_t i = 0; i < na && i < np; i++) {
+            Ty pt = fromTypeRef(params[i].type);
+            checkAssignable(pt, ats[i], call.line);
+        }
     }
 
     // ---- 逃逸分析辅助函数 ----
@@ -461,13 +935,22 @@ struct Checker {
 
     // var/let/tls 多变量声明：逐项推导类型、检查初值兼容、登记到 locals
     void checkVarDecls(const std::vector<Field>& ds,
-                       std::unordered_map<std::string, Ty>& locals) {
+                       std::unordered_map<std::string, Ty>& locals,
+                       bool isLet = false) {
         for (auto& f : ds) {
             Ty lhs = declaredOrInferredType(f, locals);
             if (f.init) {
                 Ty rhs = inferExpr(*f.init, locals, f.line);
                 checkAssignable(lhs, rhs, f.line);
+                // 仅当有显式目标类型时查越界：无类型声明的 lhs 由字面量自身推断
+                // （含后缀/大值），按构造必然容纳，且 inferExpr 对字面量统一记 i4
+                // 会误判，故跳过。
+                const bool declared = f.type.hasInline || !f.type.name.empty() ||
+                                      f.type.ptr > 0 || !f.type.arrayDims.empty() ||
+                                      f.type.fnKind != TypeRef::FncKind::None;
+                if (declared) checkIntLiteralRange(lhs, *f.init, f.line);
             }
+            lhs.immutable = isLet;            // let 绑定标记为不可变
             locals[f.name] = lhs;
         }
     }
@@ -517,7 +1000,7 @@ struct Checker {
             case Stmt::VarS:
             case Stmt::LetS:
             case Stmt::TlsS:
-                checkVarDecls(s.decls, locals);
+                checkVarDecls(s.decls, locals, s.kind == Stmt::LetS);
                 break;
             // -- return：检查返回类型兼容 + 禁止返回局部地址 --------------------
             case Stmt::ReturnS:
@@ -610,6 +1093,28 @@ struct Checker {
                 const Decl* tu = (st.valid && st.ptr == 0 && st.arr == 0)
                                  ? resolveStruct(st.name) : nullptr;
                 if (tu && tu->kind == Decl::UnionD && tu->tagged) {
+                    // 穷尽性检查：无 default 分支时必须覆盖全部变体（缺失即报错）。
+                    // 零误报前提：case 表达式已确定解析到标签联合；default 分支（labels
+                    // 为空）存在即视为穷尽；逐 arm 收集 Ident 标签为「已覆盖变体」。
+                    bool hasDefault = false;
+                    std::unordered_set<std::string> covered;
+                    for (auto& arm : s.caseArms) {
+                        if (arm.labels.empty()) { hasDefault = true; continue; }
+                        for (auto& lab : arm.labels)
+                            if (lab->kind == Expr::Ident) covered.insert(lab->text);
+                    }
+                    if (!hasDefault) {
+                        std::string missing;
+                        for (auto& f : tu->structCommon.fields)
+                            if (!covered.count(f.name)) {
+                                if (!missing.empty()) missing += ", ";
+                                missing += f.name;
+                            }
+                        if (!missing.empty())
+                            err(s.line, "标签联合 '" + tu->name
+                                + "' 的 case 未覆盖全部变体（缺少 " + missing
+                                + "），请补充对应分支或添加 default ':' 分支");
+                    }
                     for (auto& arm : s.caseArms) {
                         auto a = locals;
                         if (!arm.binding.empty() && !arm.labels.empty()
@@ -690,6 +1195,42 @@ struct Checker {
             if (d->kind == Decl::StructD && !d->adtColl.empty())
                 containerItem[resolveAliasToName(d->adtColl)] = d->adtItem;
 
+        // 未定义符号诊断：登记可调用名/枚举常量/成员函数/catch-all 声明名，并计算放宽门控
+        for (auto& d : prog.decls) {
+            switch (d->kind) {
+                case Decl::FuncD:
+                case Decl::FuncTypeD:
+                    if (!d->methodOwner.empty())               // 成员函数：按 obj.m() 调用，单列
+                        structMethods[d->methodOwner].insert(
+                            d->methodName.empty() ? d->name : d->methodName);
+                    else
+                        funcSigs.emplace(d->name, d.get());    // 自由函数：本地优先（emplace 不覆盖已有）
+                    declNames.insert(d->name);
+                    break;
+                case Decl::EnumD:
+                    declNames.insert(d->name);
+                    for (auto& it : d->structCommon.fields)
+                        if (!it.name.empty()) enumConsts.insert(it.name);
+                    break;
+                case Decl::IncD: {
+                    if (endsWithSc(d->name)) break;            // .sc 模块：描述符已合并，跳过
+                    std::string bare = d->name;
+                    if (!bare.empty() && (bare.front() == '<' || bare.front() == '"'))
+                        bare = bare.substr(1, bare.size() >= 2 ? bare.size() - 2 : 0);
+                    // 非预置头且未被 libclang 枚举 → 其符号未知，放宽未定义检查
+                    if (!preludeHeaders().count(bare) && !d->externAnalyzed)
+                        lenientCalls = true;
+                    break;
+                }
+                case Decl::AddD:
+                    lenientCalls = true;                       // add 外部实现/库：可能引入未声明的 C 符号
+                    break;
+                default:
+                    if (!d->name.empty()) declNames.insert(d->name);
+                    break;
+            }
+        }
+
         // 第二遍：检查全局 var/let/tls 声明
         for (auto& d : prog.decls) {            
             if (d->kind != Decl::VarD && d->kind != Decl::LetD && d->kind != Decl::TlsD)
@@ -707,6 +1248,7 @@ struct Checker {
                     Ty rhs = inferExpr(*f.init, globals, f.line);
                     checkAssignable(lhs, rhs, f.line);
                 }
+                lhs.immutable = (d->kind == Decl::LetD);   // 全局 let 常量不可再赋值
                 globals[f.name] = lhs;
             }
         }
@@ -854,11 +1396,211 @@ struct Checker {
         }
     }
 
+    // ---- 同名顶层符号重复定义检测 ---------------------------
+    // sc 无用户级前向声明（定义顺序无关，C 前置声明由编译器自动生成），故非外部的
+    // 同名定义即真冲突。保守起见仅在「确定的完整定义」类别内、且两者均非外部时报错：
+    //   类型（struct/union/enum/alias）/ 自由函数 / 成员函数（按 owner::method）/ 全局量。
+    void checkDuplicateDefs() {
+        std::unordered_map<std::string, int> types, funcs, methods, gvars;
+
+        auto report = [&](std::unordered_map<std::string, int>& seen,
+                          const std::string& key, const std::string& what,
+                          const std::string& disp, int line) {
+            auto it = seen.find(key);
+            if (it != seen.end())
+                err(line, "重复定义" + what + " '" + disp + "'（已在第 "
+                    + std::to_string(it->second) + " 行定义）");
+            else
+                seen[key] = line;
+        };
+
+        for (auto& d : prog.decls) {
+            if (d->external) continue;                 // 外部模块/ C 头合并符号：跳过
+            switch (d->kind) {
+                case Decl::StructD:
+                case Decl::UnionD:
+                case Decl::EnumD:
+                case Decl::AliasD:
+                    if (!d->name.empty())
+                        report(types, d->name, "类型", d->name, d->line);
+                    break;
+                case Decl::FuncD:
+                    if (d->name.empty() && d->methodName.empty()) break;
+                    if (!d->methodOwner.empty()) {
+                        std::string mn = d->methodName.empty() ? d->name : d->methodName;
+                        report(methods, d->methodOwner + "::" + mn, "成员函数",
+                               d->methodOwner + "." + mn, d->line);
+                    } else {
+                        report(funcs, d->name, "函数", d->name, d->line);
+                    }
+                    break;
+                case Decl::VarD:
+                case Decl::LetD:
+                case Decl::TlsD:
+                    for (auto& f : d->structCommon.fields)
+                        if (!f.name.empty())
+                            report(gvars, f.name, "全局变量/常量", f.name,
+                                   f.line ? f.line : d->line);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
+    // ---- 死代码（不可达语句）检测 ---------------------------
+    // 在一个语句块内，return/break/continue/goto 之后、下一个标签之前的语句不可达。
+    // 保守策略（宁可漏报不可误报）：只把这四种「确定终止」语句视为终止符；
+    // if/while 等复合语句即便所有分支都终止也不视为终止符。标签语句重置可达（潜在 goto 目标）。
+    static bool isTerminatorStmt(const Stmt& s) {
+        return s.kind == Stmt::ReturnS || s.kind == Stmt::BreakS
+            || s.kind == Stmt::ContinueS || s.kind == Stmt::GotoS;
+    }
+
+    void checkDeadCodeChildren(const Stmt& s) {
+        checkDeadCodeBlock(s.body);
+        checkDeadCodeBlock(s.elseBody);
+        for (auto& arm : s.caseArms) checkDeadCodeBlock(arm.body);
+    }
+
+    void checkDeadCodeBlock(const std::vector<StmtPtr>& body) {
+        bool reachable = true;
+        for (auto& sp : body) {
+            const Stmt& s = *sp;
+            if (!reachable) {
+                if (s.kind == Stmt::LabelS) {
+                    reachable = true;                  // 标签：潜在 goto 目标，恢复可达
+                } else if (s.kind == Stmt::DeclS) {
+                    continue;                          // 内嵌类型定义不产生执行代码，跳过
+                } else {
+                    err(s.line, "不可达代码：此语句位于 return/break/continue/goto 之后");
+                    break;                             // 每块仅报首条，避免连环误导
+                }
+            }
+            checkDeadCodeChildren(s);
+            if (isTerminatorStmt(s)) reachable = false;
+        }
+    }
+
+    void checkDeadCode() {
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncD)
+                checkDeadCodeBlock(d->body);
+    }
+
+    // ---- 非 void 函数缺少 return 检测 -------------------------
+    // 报错条件：非 void 函数体不能「保证终止」（可能从结尾自然落出而无返回值）。
+    // 保守策略（零误报优先）：blockTerminates/stmtTerminates 宽松地认定「会终止」——
+    // 只要存在任何无法排除的终止路径就视为已终止，从而绝不对合法代码误报；
+    // 代价是可能漏报部分确有缺失的路径（可接受）。
+
+    // 调用是否为「确定不返回」的 libc 终止函数（abort/exit/_Exit/quick_exit/longjmp）。
+    static bool isNoreturnCall(const Expr& e) {
+        if (e.kind != Expr::Call || !e.a || e.a->kind != Expr::Ident) return false;
+        const std::string& n = e.a->text;
+        return n == "abort" || n == "exit" || n == "_Exit" || n == "_exit"
+            || n == "quick_exit" || n == "longjmp" || n == "siglongjmp";
+    }
+
+    // 表达式是否为恒真常量（while/for 无限循环条件）。
+    static bool exprIsTrueConst(const Expr& e) {
+        if (e.kind == Expr::Ident) return e.text == "true";
+        if (e.kind == Expr::IntLit) {
+            const char* p = e.text.c_str();
+            return std::strtoll(p, nullptr, 0) != 0;
+        }
+        return false;
+    }
+
+    // 块内是否存在「跳出本层循环」的 break（不下钻到内层循环/switch，那里的 break 另有所属）。
+    bool loopHasBreak(const std::vector<StmtPtr>& body) const {
+        for (auto& sp : body) {
+            const Stmt& s = *sp;
+            switch (s.kind) {
+                case Stmt::BreakS: return true;
+                case Stmt::IfS:
+                    if (loopHasBreak(s.body) || loopHasBreak(s.elseBody)) return true;
+                    break;
+                case Stmt::LabelS: case Stmt::FinalS:
+                    if (loopHasBreak(s.body)) return true;
+                    break;
+                // 内层 while/do/for/case 自带 break 作用域，不计入本层
+                default: break;
+            }
+        }
+        return false;
+    }
+
+    // 执行该语句是否「保证不落到下一条语句」（return/goto/break/continue/无限循环/noreturn 调用，
+    // 或 if-else 两分支均终止）。无法确定时返回 false（保守：视为会落出）。
+    bool stmtTerminates(const Stmt& s) const {
+        switch (s.kind) {
+            case Stmt::ReturnS: case Stmt::GotoS:
+            case Stmt::BreakS:  case Stmt::ContinueS:
+                return true;
+            case Stmt::ExprS:
+                return s.expr && isNoreturnCall(*s.expr);
+            case Stmt::IfS:
+                // 必须有 else 分支，且两分支都终止
+                return !s.elseBody.empty()
+                    && blockTerminates(s.body) && blockTerminates(s.elseBody);
+            case Stmt::WhileS:
+                return s.expr && exprIsTrueConst(*s.expr) && !loopHasBreak(s.body);
+            case Stmt::DoWhileS:
+                return s.expr && exprIsTrueConst(*s.expr) && !loopHasBreak(s.body);
+            case Stmt::ForS:
+                // 经典 for（非 for-in）：无条件或恒真条件，且体内无 break → 无限循环
+                return !s.forIn && (!s.forCond || exprIsTrueConst(*s.forCond))
+                    && !loopHasBreak(s.body);
+            case Stmt::CaseS: {
+                // 保守：只要所有分支都终止则视为终止（覆盖标签联合穷尽解构等
+                // 无 default 但实际穷尽的常见形式）；宁可漏报不误报。
+                if (s.caseArms.empty()) return false;
+                for (auto& arm : s.caseArms)
+                    if (!blockTerminates(arm.body)) return false;
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    // 块是否保证终止：取最后一条「有执行意义」的语句（跳过内嵌类型定义）判定。
+    bool blockTerminates(const std::vector<StmtPtr>& body) const {
+        for (auto it = body.rbegin(); it != body.rend(); ++it) {
+            const Stmt& s = **it;
+            if (s.kind == Stmt::DeclS) continue;   // 类型定义不产生执行代码
+            return stmtTerminates(s);
+        }
+        return false;                              // 空块自然落出
+    }
+
+    void checkMissingReturn() {
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::FuncD || d->external) continue;
+            if (d->isRpc) continue;                // rpc 实为 void，经出参结构返回
+            Ty rt = funcRetType(*d);
+            if (!rt.valid || rt.name == "v" || rt.name == "void" || rt.name.empty())
+                continue;                          // void 或未知返回类型不查
+            if (d->body.empty()) continue;
+            if (!blockTerminates(d->body)) {
+                std::string nm = d->methodOwner.empty()
+                    ? d->name
+                    : d->methodOwner + "." + (d->methodName.empty() ? d->name : d->methodName);
+                err(d->line, "非 void 函数 '" + nm + "' 可能在结尾缺少 return（返回类型为 '"
+                    + tyStr(rt) + "'）");
+            }
+        }
+    }
+
     // ---- 主入口：三阶段检查 ---------------------------------
     void run() {
         collectTop();                   // 1. 收集顶层符号 + 检查全局初值
+        checkDuplicateDefs();           // 1.5 同名顶层符号重复定义检测
         checkAggregateByValueCycles();  // 2. 按值包含环检测
         checkFatBoundaries();           // 2.5 自动指针 T@ 边界检查
+        checkDeadCode();                // 2.6 不可达（死）代码检测
+        checkMissingReturn();           // 2.7 非 void 函数缺少 return 检测
         checkFunctions();               // 3. 遍历所有函数体
     }
 };

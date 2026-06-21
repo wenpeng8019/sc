@@ -1,0 +1,2 @@
+case_exhaustive_bad.sc:4: [1;31m错误[0m: 标签联合 'Shape' 的 case 未覆盖全部变体（缺少 Rect），请补充对应分支或添加 default ':' 分支
+  |      case s:
