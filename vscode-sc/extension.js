@@ -329,6 +329,371 @@ function lineToPos(doc, oneBasedLine) {
     return new vscode.Position(l - 1, 0);
 }
 
+// ================= IDE 语义增强：引用/重命名/工作区符号/调用层次 =================
+// 共用基础：基于 AST 的符号分类 + 作用域感知的源码标识符扫描（跳过注释/字符串）。
+// 设计取向与本扩展其它能力一致：能精确处就精确（局部变量按函数体范围、顶层符号按
+// 全局命名空间），不能精确处保守宁缺（成员/字段仅当前文件，未知符号拒绝重命名）。
+
+const KW_SET = new Set(KEYWORDS.map(k => k[0]).concat(LITERALS.map(l => l[0])));
+const TYPE_SET = new Set(TYPES.map(t => t[0]));
+
+// 行内标识符位置（跳过 # 行注释、"..." 字符串、'...' 字符字面量）。
+// 返回 [{ start, name }]，start 为 0-based 列。
+function identPositionsInLine(text) {
+    const out = [];
+    let i = 0;
+    const n = text.length;
+    while (i < n) {
+        const ch = text[i];
+        if (ch === '#') break;                          // 行注释直到行尾
+        if (ch === '"' || ch === "'") {                 // 跳过字符串/字符字面量
+            const q = ch; i++;
+            while (i < n) {
+                if (text[i] === '\\') { i += 2; continue; }
+                if (text[i] === q) { i++; break; }
+                i++;
+            }
+            continue;
+        }
+        if (/[A-Za-z_]/.test(ch)) {
+            let j = i + 1;
+            while (j < n && /\w/.test(text[j])) j++;
+            out.push({ start: i, name: text.slice(i, j) });
+            i = j; continue;
+        }
+        i++;
+    }
+    return out;
+}
+
+// 在 [startLine, endLine]（0-based，含端点）内查找名为 name 的标识符，返回 Range 列表。
+function findOccurrenceRanges(lines, name, startLine, endLine) {
+    const out = [];
+    for (let ln = startLine; ln <= endLine; ln++) {
+        const text = lines[ln];
+        if (text === undefined) continue;
+        if (text.indexOf(name) === -1) continue;
+        for (const id of identPositionsInLine(text))
+            if (id.name === name)
+                out.push(new vscode.Range(ln, id.start, ln, id.start + name.length));
+    }
+    return out;
+}
+
+// 收集函数节点内所有参数/局部变量名（不按行过滤；sc 无嵌套函数，整体递归即可）。
+function allScopeVarNames(fn) {
+    const names = new Set();
+    const walk = (node) => {
+        for (const ch of node.c || []) {
+            if (ch.k === 'param') names.add(ch.n);
+            else if (ch.k === 'var' || ch.k === 'let' || ch.k === 'tls')
+                for (const it of ch.c || []) names.add(it.n);
+            walk(ch);
+        }
+    };
+    walk(fn);
+    return names;
+}
+
+// 光标行所在的非外部顶层函数及其行范围（1-based 起始，0-based 行范围）。
+function enclosingFuncSpan(ast, lineCount, line1) {
+    const tops = (ast.c || []).filter(n => !n.x && n.l).slice().sort((a, b) => a.l - b.l);
+    for (let i = 0; i < tops.length; i++) {
+        const nd = tops[i];
+        if (nd.k !== 'fnc' && nd.k !== 'rpc') continue;
+        const start = nd.l;
+        const end = (i + 1 < tops.length) ? tops[i + 1].l - 1 : lineCount;
+        if (line1 >= start && line1 <= end)
+            return { node: nd, startLine: start - 1, endLine: end - 1 };
+    }
+    return null;
+}
+
+// 是否为某类型的字段名（跨所有已知类型）。
+function isFieldName(idx, name) {
+    for (const [, t] of idx.types)
+        if ((t.c || []).some(f => f.k === 'field' && f.n === name)) return true;
+    return false;
+}
+
+// 符号分类：返回 { name, scope, globalKind, startLine?, endLine?, word }。
+//   scope: 'local' | 'global'
+//   globalKind: 'top'（顶层全局：类型/函数/全局变量/枚举项，跨文件） |
+//               'member'（字段/方法，仅当前文件） | 'unknown'（拒绝重命名）
+function classifySymbol(doc, pos, ast) {
+    const w = getWordAt(doc, pos);
+    if (!w) return null;
+    const idx = buildIndex(ast);
+    const name = w.word;
+    const span = enclosingFuncSpan(ast, doc.lineCount, pos.line + 1);
+    if (span && allScopeVarNames(span.node).has(name))
+        return { name, scope: 'local', globalKind: 'local',
+                 startLine: span.startLine, endLine: span.endLine, word: w };
+    if (idx.types.has(name) || idx.funcs.has(name) || idx.globals.has(name))
+        return { name, scope: 'global', globalKind: 'top', word: w };
+    const isMethod = [...idx.methods.keys()].some(k => k.endsWith('::' + name));
+    if (isMethod || isFieldName(idx, name))
+        return { name, scope: 'global', globalKind: 'member', word: w };
+    return { name, scope: 'global', globalKind: 'unknown', word: w };
+}
+
+// ---- 工作区文件扫描（含顶层声明解析），缓存按磁盘 mtime；打开的脏文档用实时内容 ----
+const fileScanCache = new Map();   // fsPath -> { mtime, text, lines, decls }
+
+// 顶层声明（列 0 起，sc 顶层不缩进）解析，含跨到下一顶层声明的行范围。
+function parseTopDecls(lines) {
+    const heads = [];
+    for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(/^@?(def|fnc|rpc|var|let|tls|inc|add)\b\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)?/);
+        if (m) heads.push({ i, kw: m[1], name: m[2] || '' });
+    }
+    const decls = [];
+    for (let h = 0; h < heads.length; h++) {
+        const start = heads[h].i;
+        const end = (h + 1 < heads.length) ? heads[h + 1].i - 1 : lines.length - 1;
+        decls.push({ kind: heads[h].kw, name: heads[h].name, start, end });
+    }
+    return decls;
+}
+
+function liveDocFor(uri) {
+    const s = uri.toString();
+    return vscode.workspace.textDocuments.find(
+        d => d.uri.toString() === s && d.languageId === 'sc') || null;
+}
+
+async function scanFile(uri) {
+    const live = liveDocFor(uri);
+    if (live) {
+        const text = live.getText();
+        const lines = text.split('\n');
+        return { text, lines, decls: parseTopDecls(lines), uri };
+    }
+    let stat;
+    try { stat = await vscode.workspace.fs.stat(uri); } catch { return null; }
+    const cached = fileScanCache.get(uri.fsPath);
+    if (cached && cached.mtime === stat.mtime) return Object.assign({ uri }, cached);
+    let buf;
+    try { buf = await vscode.workspace.fs.readFile(uri); } catch { return null; }
+    const text = Buffer.from(buf).toString('utf8');
+    const lines = text.split('\n');
+    const rec = { mtime: stat.mtime, text, lines, decls: parseTopDecls(lines) };
+    fileScanCache.set(uri.fsPath, rec);
+    return Object.assign({ uri }, rec);
+}
+
+function allScFiles() {
+    return vscode.workspace.findFiles('**/*.sc', '**/node_modules/**');
+}
+
+// 收集引用：局部仅函数体内；顶层全局跨工作区；成员仅当前文件。
+async function collectReferences(doc, info) {
+    const out = [];
+    if (info.scope === 'local') {
+        const lines = doc.getText().split('\n');
+        for (const r of findOccurrenceRanges(lines, info.name, info.startLine, info.endLine))
+            out.push(new vscode.Location(doc.uri, r));
+        return out;
+    }
+    let uris;
+    if (info.globalKind === 'top') {
+        uris = await allScFiles();
+        const set = new Map(uris.map(u => [u.toString(), u]));
+        set.set(doc.uri.toString(), doc.uri);   // 含当前（可能未保存）文档
+        uris = [...set.values()];
+    } else {
+        uris = [doc.uri];                        // 成员：仅当前文件，限制误改范围
+    }
+    for (const uri of uris) {
+        const rec = await scanFile(uri);
+        if (!rec || rec.text.indexOf(info.name) === -1) continue;
+        for (const r of findOccurrenceRanges(rec.lines, info.name, 0, rec.lines.length - 1))
+            out.push(new vscode.Location(uri, r));
+    }
+    return out;
+}
+
+// 调用名归一化：去掉 T:: 方法前缀（源码里方法调用以短名出现）。
+function callKey(name) {
+    const i = name.indexOf('::');
+    return i >= 0 ? name.slice(i + 2) : name;
+}
+
+// 工作区函数索引：callKey -> [{ uri, decl, rec }]。
+async function buildFuncIndex() {
+    const map = new Map();
+    for (const uri of await allScFiles()) {
+        const rec = await scanFile(uri);
+        if (!rec) continue;
+        for (const d of rec.decls) {
+            if (d.kind !== 'fnc' && d.kind !== 'rpc') continue;
+            const k = callKey(d.name);
+            if (!map.has(k)) map.set(k, []);
+            map.get(k).push({ uri, decl: d, rec });
+        }
+    }
+    return map;
+}
+
+// 某行范围内形如 IDENT( 的调用点：返回 [{ name, range }]。
+function callsInSpan(lines, start, end) {
+    const out = [];
+    for (let ln = start; ln <= end; ln++) {
+        const text = lines[ln];
+        if (text === undefined) continue;
+        const ids = identPositionsInLine(text);
+        for (const id of ids) {
+            const after = text.slice(id.start + id.name.length);
+            if (/^\s*\(/.test(after))
+                out.push({ name: id.name,
+                           range: new vscode.Range(ln, id.start, ln, id.start + id.name.length) });
+        }
+    }
+    return out;
+}
+
+// 构造 CallHierarchyItem（选择范围取声明头行中的名字）。
+function makeCallItem(uri, decl, headLine) {
+    const range = new vscode.Range(decl.start, 0, decl.end, 0);
+    const idxName = headLine ? headLine.indexOf(decl.name) : -1;
+    const sel = idxName >= 0
+        ? new vscode.Range(decl.start, idxName, decl.start, idxName + decl.name.length)
+        : new vscode.Range(decl.start, 0, decl.start, 0);
+    const kind = decl.kind === 'rpc' ? vscode.SymbolKind.Event : vscode.SymbolKind.Function;
+    return new vscode.CallHierarchyItem(kind, decl.name, decl.kind, uri, range, sel);
+}
+
+// 注册四项语义增强提供器。
+function registerSemanticProviders(context) {
+    // 查找引用
+    context.subscriptions.push(vscode.languages.registerReferenceProvider('sc', {
+        async provideReferences(doc, pos) {
+            const ast = await getAst(doc, -1);
+            if (!ast) return null;
+            const info = classifySymbol(doc, pos, ast);
+            if (!info) return null;
+            return collectReferences(doc, info);
+        }
+    }));
+
+    // 重命名
+    context.subscriptions.push(vscode.languages.registerRenameProvider('sc', {
+        prepareRename(doc, pos) {
+            const w = getWordAt(doc, pos);
+            if (!w) throw new Error('此处无可重命名的符号');
+            if (KW_SET.has(w.word) || TYPE_SET.has(w.word))
+                throw new Error('不能重命名关键字或内置类型');
+            return w.range;
+        },
+        async provideRenameEdits(doc, pos, newName) {
+            if (!/^[A-Za-z_]\w*$/.test(newName)) throw new Error('无效的标识符名');
+            const ast = await getAst(doc, -1);
+            if (!ast) throw new Error('源码暂时无法解析，无法重命名');
+            const info = classifySymbol(doc, pos, ast);
+            if (!info || info.globalKind === 'unknown')
+                throw new Error('无法确定该符号的定义，已避免误改');
+            const locs = await collectReferences(doc, info);
+            if (!locs.length) throw new Error('未找到该符号的任何出现');
+            const edit = new vscode.WorkspaceEdit();
+            for (const loc of locs) edit.replace(loc.uri, loc.range, newName);
+            return edit;
+        }
+    }));
+
+    // 工作区符号索引（跨文件）
+    context.subscriptions.push(vscode.languages.registerWorkspaceSymbolProvider({
+        async provideWorkspaceSymbols(query) {
+            const K = vscode.SymbolKind;
+            const kindFor = (kw) => kw === 'fnc' || kw === 'rpc' ? K.Function
+                : kw === 'def' ? K.Class
+                : kw === 'let' ? K.Constant : K.Variable;
+            const ql = (query || '').toLowerCase();
+            const out = [];
+            for (const uri of await allScFiles()) {
+                const rec = await scanFile(uri);
+                if (!rec) continue;
+                for (const d of rec.decls) {
+                    if (!d.name) continue;
+                    if (!['def', 'fnc', 'rpc', 'var', 'let', 'tls'].includes(d.kind)) continue;
+                    if (ql && !d.name.toLowerCase().includes(ql)) continue;
+                    const p = new vscode.Position(d.start, Math.max(0, rec.lines[d.start].indexOf(d.name)));
+                    out.push(new vscode.SymbolInformation(
+                        d.name, kindFor(d.kind), '', new vscode.Location(uri, p)));
+                }
+            }
+            return out;
+        }
+    }));
+
+    // 调用层次
+    context.subscriptions.push(vscode.languages.registerCallHierarchyProvider('sc', {
+        async prepareCallHierarchy(doc, pos) {
+            const w = getWordAt(doc, pos);
+            if (!w) return null;
+            const funcIndex = await buildFuncIndex();
+            let cands = (funcIndex.get(callKey(w.word)) || []).slice();
+            // 同名函数可能遍布多文件：优先当前文件，再优先光标所在声明体
+            const sameFile = cands.filter(c => c.uri.toString() === doc.uri.toString());
+            if (sameFile.length) cands = sameFile;
+            const onDecl = cands.filter(c => pos.line >= c.decl.start && pos.line <= c.decl.end);
+            if (onDecl.length) cands = onDecl;
+            if (!cands.length) {
+                const rec = await scanFile(doc.uri);
+                const encl = rec && rec.decls.find(d =>
+                    (d.kind === 'fnc' || d.kind === 'rpc') && pos.line >= d.start && pos.line <= d.end);
+                if (encl) cands = [{ uri: doc.uri, decl: encl, rec }];
+            }
+            return cands.map(c => makeCallItem(c.uri, c.decl, c.rec.lines[c.decl.start]));
+        },
+        async provideCallHierarchyIncomingCalls(item) {
+            const target = callKey(item.name);
+            const results = [];
+            for (const uri of await allScFiles()) {
+                const rec = await scanFile(uri);
+                if (!rec || rec.text.indexOf(target) === -1) continue;
+                for (const d of rec.decls) {
+                    if (d.kind !== 'fnc' && d.kind !== 'rpc') continue;
+                    const ranges = callsInSpan(rec.lines, d.start, d.end)
+                        .filter(c => c.name === target).map(c => c.range);
+                    if (ranges.length)
+                        results.push(new vscode.CallHierarchyIncomingCall(
+                            makeCallItem(uri, d, rec.lines[d.start]), ranges));
+                }
+            }
+            return results;
+        },
+        async provideCallHierarchyOutgoingCalls(item) {
+            const funcIndex = await buildFuncIndex();
+            const rec = await scanFile(item.uri);
+            if (!rec) return [];
+            const d = rec.decls.find(x =>
+                x.start === item.range.start.line && callKey(x.name) === callKey(item.name));
+            if (!d) return [];
+            const byCallee = new Map();
+            for (const c of callsInSpan(rec.lines, d.start, d.end)) {
+                if (!funcIndex.has(c.name)) continue;     // 仅解析到已知函数的调用
+                if (!byCallee.has(c.name)) byCallee.set(c.name, []);
+                byCallee.get(c.name).push(c.range);
+            }
+            const results = [];
+            for (const [k, ranges] of byCallee) {
+                const t = funcIndex.get(k)[0];            // 多候选取首个（无类型解析的歧义取舍）
+                results.push(new vscode.CallHierarchyOutgoingCall(
+                    makeCallItem(t.uri, t.decl, t.rec.lines[t.decl.start]), ranges));
+            }
+            return results;
+        }
+    }));
+
+    // 文件变更时失效扫描缓存
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(d => {
+        if (d.uri.scheme === 'file') fileScanCache.delete(d.uri.fsPath);
+    }));
+    context.subscriptions.push(vscode.workspace.onDidDeleteFiles(e => {
+        for (const f of e.files) fileScanCache.delete(f.fsPath);
+    }));
+}
+
 // ---------------- 补全提供器 ----------------
 function activate(context) {
     const K = vscode.CompletionItemKind;
@@ -560,6 +925,9 @@ function activate(context) {
             }
         }
     }));
+
+    // IDE 语义增强：查找引用 / 重命名 / 工作区符号 / 调用层次
+    registerSemanticProviders(context);
 
     // 实时诊断：在编辑时运行 scc --ast，失败时产出问题面板诊断
     const diagnostics = vscode.languages.createDiagnosticCollection('sc');
