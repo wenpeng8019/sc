@@ -130,8 +130,8 @@ struct CGen {
     // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量名，退块/return 时逆序 unbind
     std::vector<std::vector<std::string>> fatScopes;
     // 与 fatScopes 平行：每层本块内声明的 T@ 数组根变量（元素各为一条根边），退块/return 时
-    // 逐元素 unbind（覆盖整个引用图，避免泄漏）。仅局部一维 T@ 数组。
-    struct FatArrayVar { std::string name; std::string dim; };
+    // 逐元素 unbind（覆盖整个引用图，避免泄漏）。局部 T@ 数组（一维/多维）。
+    struct FatArrayVar { std::string name; std::vector<std::string> dims; };
     std::vector<std::vector<FatArrayVar>> fatArrayScopes;
     // 与 fatScopes 平行：每层本块内被 & 借出（须注入 sc_ref 头）的普通栈变量，
     // 退块时（拆边后）逐个 sc_ref_check 检测外部悬挂（§4.2/§7.3）。仅 --check=ref 开启时填充。
@@ -1965,9 +1965,16 @@ struct CGen {
         emitFatScopeCleanup(fatScopes[i], skip);                  // phase1：拆边
         if (i < fatArrayScopes.size())                           // phase1b：T@ 数组逐元素拆边
             for (auto it = fatArrayScopes[i].rbegin(); it != fatArrayScopes[i].rend(); ++it) {
+                // 多维：逐维嵌套 for 遍历全部标量元素，对每个 sc_fat 元素 unbind。
                 indent();
-                out << "for (size_t _k = (" << it->dim << "); _k-- > 0; ) sc_fat_unbind(&"
-                    << it->name << "[_k]);\n";
+                std::string sub;
+                for (size_t d = 0; d < it->dims.size(); d++) {
+                    std::string k = "_k" + std::to_string(d);
+                    out << "for (size_t " << k << " = (" << it->dims[d] << "); "
+                        << k << "-- > 0; ) ";
+                    sub += "[" + k + "]";
+                }
+                out << "sc_fat_unbind(&" << it->name << sub << ");\n";
             }
         if (i < fatStackScopes.size())                           // phase2：栈对象断言（带 site）
             for (auto it = fatStackScopes[i].rbegin(); it != fatStackScopes[i].rend(); ++it) {
@@ -2047,16 +2054,18 @@ struct CGen {
                 emitFatVarInit(f, asConst, isStatic);
                 continue;
             }
-            // 自动指针数组 T@（局部一维）：声明 sc_fat 数组并零初始化；元素经下标赋值绑定，
+            // 自动指针数组 T@（局部一维/多维）：声明 sc_fat 数组并零初始化；元素经下标赋值绑定，
             // 退域/return/break 处逐元素 unbind（整张引用图清理）。登记入当前 fat 数组作用域。
-            if (f.type.fat && f.type.arrayDims.size() == 1 && inFunc) {
+            if (f.type.fat && !f.type.arrayDims.empty() && inFunc) {
                 regVar(f);
                 indent();
                 if (isStatic) out << "static ";
                 if (asConst) out << "const ";
-                out << "sc_fat " << f.name << "[" << f.type.arrayDims[0] << "] = {0};\n";
+                out << "sc_fat " << f.name;
+                for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
+                out << " = {0};\n";
                 if (!fatArrayScopes.empty())
-                    fatArrayScopes.back().push_back({f.name, f.type.arrayDims[0]});
+                    fatArrayScopes.back().push_back({f.name, f.type.arrayDims});
                 continue;
             }
             // --check=mem：函数内栈数组 → 超额分配尾哨兵 + 退域校验，捕获栈数组越界写。
@@ -2861,6 +2870,9 @@ struct CGen {
                     // 自动指针：是否有待清理胖根变量
                     bool anyFat = false;
                     for (auto& sc : fatScopes) if (!sc.empty()) { anyFat = true; break; }
+                    // 自动指针 T@ 数组：任意活动作用域登记了 T@ 数组 → return 前须逐元素拆边
+                    bool anyFatArr = false;
+                    for (auto& fa : fatArrayScopes) if (!fa.empty()) { anyFatArr = true; break; }
                     // final 钩子：任意活动作用域登记了 final → return 也须先发出
                     bool anyFinal = false;
                     for (auto& fc : fatFinalScopes) if (!fc.empty()) { anyFinal = true; break; }
@@ -2877,7 +2889,7 @@ struct CGen {
                         skip = s.expr->text;
                     else if (s.expr && s.expr->kind == Expr::Ident)
                         skip = s.expr->text;
-                    if (!anyFat && !anyFinal && !anyCanary && !anyDrop) {
+                    if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }

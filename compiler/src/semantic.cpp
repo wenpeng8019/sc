@@ -758,16 +758,15 @@ struct Checker {
     }
 
     // ---- 自动指针 T@ 边界检查（§13.5）----
-    // T@ 数组：局部一维已实现（元素逐个根边、退域逐元素清理、下标赋值记账）→ 放行；
-    // 多维 / 非局部（字段/全局/参数/返回）仍未实现引用图清理 → 报错（静默会泄露）。
+    // T@ 数组：局部（一维/多维）已实现（元素逐个根边、退域逐元素嵌套清理、下标赋值记账）→ 放行；
+    // 非局部（字段/全局/参数/返回）仍未实现引用图清理 → 报错（静默会泄露）。
     void checkFatTypeRef(const TypeRef& t, int line, const char* where,
                          bool allowLocalArray = false) const {
         if (t.fat && !t.arrayDims.empty()) {
-            if (!(allowLocalArray && t.arrayDims.size() == 1))
+            if (!allowLocalArray)
                 err(line, std::string("暂不支持 T@ 数组（") + where +
-                    "）：" + (t.arrayDims.size() > 1 ? "多维 T@ 数组" : "该位置")
-                    + "的引用图清理与下标赋值记账尚未实现；"
-                    "如需指针数组请用裸指针 T& 数组，或改用局部一维 T@ 数组");
+                    "）：该位置的引用图清理与下标赋值记账尚未实现；"
+                    "如需指针数组请用裸指针 T& 数组，或改用局部 T@ 数组");
         }
         // 内联结构/联合字段递归
         if (t.hasInline)

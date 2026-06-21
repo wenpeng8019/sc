@@ -3,8 +3,6 @@
  * file(name, txt, read, write) 文件 com 设备：打开文件构造 com 端点。
  *   - txt：1=文本 / 0=二进制（"b" 后缀）；read/write：0=禁用 1=同步 2=异步(自动建 ioq)
  *   - 返回 struct com*（失败 NULL）；com 内嵌于设备结构首位，实现见 io_impl.c
- *
- * （print 日志输出已下沉至语言内核：声明见 op.h，实现见 op_impl.c）
  */
 #ifndef SC_IO_H
 #define SC_IO_H

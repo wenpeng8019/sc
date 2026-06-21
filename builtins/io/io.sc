@@ -6,8 +6,6 @@
 #
 # 用法：inc io.sc
 #
-# （print 日志输出已下沉至语言内核 op.sc，为语言关键字，无需 inc）
-#
 # file(...) —— 文件 com 设备（构造一个以文件为后端的 com 通讯端点）：
 #   var c: com& = file("a.txt", true, 1, 0)   # 文本只读、同步
 #   - name：文件路径
