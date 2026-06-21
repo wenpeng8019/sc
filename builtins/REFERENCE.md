@@ -11,6 +11,7 @@
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
 | m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
+| mem | `inc mem.sc` | 内存池：chunk/chunk0/chunk_array/chunk_aligned/refit/recycle（替代 malloc/calloc/realloc/free）、mem_usable、mem_trim（空闲页归还 OS）、mem_stat（统计快照含峰值）、mem_teardown、arena（竞技场批量分配）、shm（跨进程命名共享内存，支持只读/独占标志）；每线程 TLS 堆无锁、跨线程释放安全、线程退出堆自动回收复用 |
 | op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）、stringify（类型 JSON 格式化关键字，选项类型 `stringify_t` 见 `op.h`）；platform.h 的 sc 侧入口 |
 
 另有 `platform.h`（非模块）：面向用户的 C 跨平台基础头，默认 -I 可直接 inc，见末节。
@@ -488,6 +489,152 @@ fnc main: i4
         printf("cwd = %s\n", b)
     if env_exe_file(b, 4096) == 0
         printf("exe = %s\n", b)
+    return 0
+```
+
+## mem —— 内存池子项目
+
+`inc mem.sc` 引入。提供池化内存管理，作为 `malloc`/`calloc`/`realloc`/`free`
+的高性能替代：小对象走每线程 TLS 堆（无锁），大对象（>64KiB）直走系统分配；
+跨线程释放经无锁 MPSC 队列回收到属主线程。另提供 `arena` 竞技场用于批量同
+生命周期分配，以及 `shm` 跨进程命名共享内存。核心为 **C 侧自由函数**（`@fnc
+name::` 无函数体，链接期由 `mem_impl.c` 注入），平台适配经由 `platform.h`
+（`TLS` + `sc_*` 原子）。
+
+目录结构（`builtins/mem/`）：mem.sc（sc 侧声明）、mem.h（C ABI 契约）、
+mem_impl.c（默认实现）。
+
+### 自由函数
+
+| 函数 | 签名 | 对应 | 说明 |
+|------|------|------|------|
+| chunk | `&, size: u8` | malloc | 申请至少 `size` 字节；`size==0` 当 1 处理，永不返回 nil（除非内存耗尽） |
+| chunk0 | `&, size: u8` | calloc | 同 chunk 但内容清零 |
+| chunk_array | `&, count: u8, size: u8` | calloc(n,size) | 分配并清零 `count*size` 字节；`count*size` 溢出（超过 `SIZE_MAX`）返回 nil |
+| chunk_aligned | `&, size: u8, align: u8` | aligned_alloc | 起始地址对齐到 `align`（须 2 的幂）；`align<=16` 退化为 chunk，非 2 的幂返回 nil。块可 recycle/refit/mem_usable。用于 SIMD（32/64）、缓存行（64）、页对齐 |
+| refit | `&, p: &, size: u8` | realloc | 扩缩到 `size` 并保留旧内容；`p==nil` 等价 chunk；`size==0` 等价 recycle 并返回 nil；超对齐块 refit 保持原对齐 |
+| recycle | `p: &` | free | 归还内存到池；`p==nil` 安全；**可由任意线程调用**（跨线程释放安全） |
+| mem_usable | `u8, p: &` | malloc_usable_size | 返回该块实际可用字节数（≥ 申请值，因按尺寸档对齐） |
+| mem_trim | `u8` | malloc_trim | 归还**当前线程**空闲堆页回 OS，返回释放字节数；仅当本线程无存活分配（`count==0`）时生效，否则保守不动。适合工作线程闲暇时压缩驻留 |
+| mem_stat | `out: mem_stat_t&` | mallinfo | 填充统计快照（见下）；`out==nil` 安全空操作 |
+| mem_teardown | （无） | — | 归还所有池化页与线程堆，并清零全部统计；**仅在所有线程静止时调用**（通常进程退出前） |
+
+### 内存统计 mem_stat
+
+`mem_stat(&s)` 填充一个 `mem_stat_t` 快照：
+
+| 字段（`u8`） | 含义 |
+|------|------|
+| reserved | 向 OS 申请并仍持有的总字节（池化页 + 活跃大对象，含对象头），近似内存占用 |
+| live | 当前分配给用户的可用字节（usable 口径，小对象按尺寸档计） |
+| peak_live | `live` 历史峰值（最高水位）。**单线程精确**；多线程下为各线程峰值之和的上界 |
+| count | 当前活跃（未归还）分配块数 |
+| allocs | 累计成功分配次数 |
+| frees | 累计成功归还次数 |
+
+- 恒等式 `count == allocs - frees`（含在途的跨线程归还）；`reserved >= live`。
+- **快照口径**：小对象遍历各线程 TLS 堆累加（无锁），大对象走全局原子计数。
+  并发分配/释放时各线程堆计数为近似值；需精确一致请在所有线程静止时调用。
+- **跨线程归还延迟计入**：A 线程分配、B 线程 `recycle` 的块，在物主线程 A
+  下次分配并回之前仍计入 `live`/`count`，尚未计入 `frees`。
+- `arena` 走独立分配器，**不计入** `mem_stat`。
+- `mem_teardown` 会把全部统计清零（含累计 allocs/frees）。
+
+### arena 竞技场
+
+`arena` 用于批量、同生命周期的分配：逐块分配但整体释放，无需对每块调用
+`recycle`。适合「一次请求/一帧/一轮解析」内大量小对象的场景。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `cap: u8` | 初始化，`cap` 为每块底层页的建议容量（`0` 取默认 64KiB） |
+| chunk | `&, size: u8` | 从竞技场线性分配 `size` 字节（16 对齐）；容量不足时自动追加新页 |
+| reset | （无） | 重置游标复用已有页，**不释放内存**（快速重用） |
+| drop | （无） | 释放竞技场全部页，置 `h=nil` |
+
+### 设计与多线程语义
+
+- **分尺寸档空闲链**：1..65536 字节映射到 44 个 16 对齐尺寸档，回收即入对应
+  空闲链，再分配 O(1) 命中。对象头 16 字节（owner + info，按「已分配 / 空闲 /
+  跨线程」状态分时复用）。
+- **每线程 TLS 堆**：小对象分配/本线程释放全程无锁。唯一共享状态是堆注册表
+  与每堆的跨线程释放 MPSC 队列，均用 `sc_*` 原子（CAS 入队 + 单消费者
+  exchange 排空，ABA 安全）。已通过 TSan / ASan 200 万次跨线程分配/释放压测。
+- **线程退出堆回收**：线程结束时其私有堆被标记为「废弃」，新线程优先抢占复用
+  （CAS 标志 1→0，注册表只增不删故无 ABA），避免死线程堆永驻、其上未并回的
+  跨线程释放永不消费。POSIX 经 `pthread_key` 析构器、Windows 经 FLS 回调自动触发。
+- **保留语义与主动压缩**：底层页一经取得默认不归还 OS（换取分配热路径零 `mmap`）；
+  需要「用完即还」时调用 `mem_trim()`（当前线程无存活分配时释放其全部空闲页），
+  或对批量场景用 `arena` + `drop`，进程退出/测试用 `mem_teardown`。
+- **超对齐对象**：`chunk_aligned` 经独立哨兵路径（不进尺寸档），过量分配后回退
+  指针保存原始基址与对齐，故仍可 `recycle`/`refit`/`mem_usable`。
+- **大对象旁路**：>64KiB 直接 `malloc`/`free`，不进尺寸档。
+- **调试构建**：以 `-DMEM_DEBUG` 编译 `mem_impl.c` 时，对象头增设魔数守卫，
+  `recycle`/`refit` 校验，捕获双重释放、释放非本池/已损坏指针（best-effort，
+  缓冲区越界检测由编译器 `--check=mem` 负责）。默认关闭，零开销。
+- **ABI**：sc `u8` ↔ C `uint64_t`（精确匹配，内部转 `size_t`）；返回指针
+  恒 16 字节对齐（`max_align_t`）。
+
+### 使用示例
+
+```sc
+inc stdio.h
+inc mem.sc
+
+fnc main: i4
+    var p: & = chunk(100)
+    var s: char& = p: char&
+    sprintf(s, "pooled-%d", 42)
+    printf("usable=%llu text=%s\n", mem_usable(p), s)
+    p = refit(p, 5000)          # 扩容保留内容
+    recycle(p)
+
+    var a: arena                # 竞技场批量分配
+    a.init(0)
+    var i: i4 = 0
+    for i = 0; i < 1000; i++
+        var q: & = a.chunk(48)
+    a.drop()                    # 整体释放
+
+    mem_teardown()              # 进程退出前归还池
+    return 0
+```
+
+### shm 跨进程命名共享内存
+
+一块由 `name` 标识的命名内存区，可被多个进程映射到各自地址空间共享读写。
+跨平台：POSIX 用 `shm_open` + `mmap`；Windows 用 `CreateFileMapping` + `MapViewOfFile`。
+
+| 接口 | 类型/签名 | 说明 |
+|------|---------|------|
+| shm.make | `bool, name: char&, size: u8, flags: u4` | 创建或附着命名区，映射 `size` 字节（0 为 1，向上取整到页）；已存在则附着（要求容量足够，`size()` 回报真实容量）。`flags`：0 默认读写、1 只读（`SHM_RDONLY`，仅附着不创建）、2 独占创建（`SHM_EXCL`，已存在则失败），可按位或。成功 1 / 失败 0 |
+| shm.data | `&` | 本进程映射首地址；未映射返回 nil |
+| shm.size | `u8` | 实际映射字节数（附着已存在区时为其底层真实容量）；未映射返回 0 |
+| shm.drop | （无） | 解除映射 + 关闭句柄（不删除命名）；可重复调用 |
+| shm_remove | `bool, name: char&`（自由函数） | 删除命名区（POSIX `shm_unlink`）；Windows 无需删除返回 1 |
+
+- **标志**：`SHM_RDONLY`(1) 以只读保护映射（POSIX `PROT_READ` / Windows `FILE_MAP_READ`），
+  单独使用时仅附着已存在区、不创建；`SHM_EXCL`(2) 独占创建，区已存在则 `make` 失败
+  （POSIX `O_EXCL` / Windows `ERROR_ALREADY_EXISTS`），用于「确保自己是创建者」。
+
+- **命名约定**：用简单标记（字母/数字/下划线），勿含路径分隔符；POSIX 实现内部自动加前导 `/`。
+- **生命周期**：POSIX 命名区一经创建即持久，所有进程 `drop` 后仍需 `shm_remove(name)` 才真正销毁；
+  Windows 为内核对象引用计数，最后句柄关闭即销毁（`shm_remove` 空操作）。
+- **并发**：共享页内存一致（同一物理页），区内并发读写同步由调用方负责（可将 m 模块原语或 `sc_*` 原子置于区内）。
+- **链接**：较老 glibc 的 `shm_open`/`shm_unlink` 在 librt（需 `-lrt`）；glibc >= 2.34 已并入 libc；macOS/BSD 在 libc 内。
+
+```sc
+inc stdio.h
+inc mem.sc
+
+fnc main: i4
+    var nm: char& = "my_region"
+    var s: shm
+    if s.make(nm, 4096, 0)
+        var d: char& = s.data(): char&
+        sprintf(d, "hello from pid")   # 其他进程 make(nm, ..., 0) 后可读到
+        s.drop()                       # 解除本进程映射
+    shm_remove(nm)                      # 销毁命名区（POSIX）
     return 0
 ```
 

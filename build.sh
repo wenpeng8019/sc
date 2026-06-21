@@ -43,11 +43,15 @@ do_dist() {
 inc stdio.h
 inc adt.sc
 inc m.sc
+inc mem.sc
 fnc main: i4
     var s: string
     s.append("dist-ok")
     var mu: mutex
     mu.lock()
+    var p: & = chunk(128)
+    recycle(p)
+    mem_teardown()
     printf("%s\n", s.cstr())
     mu.unlock()
     mu.drop()
@@ -65,7 +69,7 @@ do_test() {
     echo "==> 端到端验证 examples/feature*.sc"
     # 可运行特性系列：默认模式（编译+执行）
     local f
-    for f in feature1 feature2 feature3 feature4 feature5 feature6 feature7 feature8 feature9 feature10 feature11 feature12 feature13 feature14 feature15 feature16 feature17 feature18 feature19 feature20 feature21 feature22 feature23 feature24 feature25 feature26 feature27 feature28 feature_forward; do
+    for f in feature1 feature2 feature3 feature4 feature5 feature6 feature7 feature8 feature9 feature10 feature11 feature12 feature13 feature14 feature15 feature16 feature17 feature18 feature19 feature20 feature21 feature22 feature23 feature24 feature25 feature26 feature27 feature28 feature29 feature_forward; do
         echo "--- $f.sc（默认模式）---"
         "$BUILD_DIR/scc" "$ROOT/examples/$f.sc"
     done
