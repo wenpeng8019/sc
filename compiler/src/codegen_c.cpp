@@ -24,6 +24,8 @@ namespace {
 
 // 自动指针 T@ 引用检查开关（--check=ref）：默认关闭，仅栈悬挂断言受其控制。
 bool g_refCheck = false;
+// 越界 canary 开关（--check=mem）：默认关闭，开启则 ref 头堆对象注入头尾哨兵，释放时校验。
+bool g_memCheck = false;
 // 栈悬挂断言 site 文案用的源码文件名（与 #line 的 srcFile 解耦，避免强制注入 #line）。
 std::string g_refSrcFile;
 
@@ -123,6 +125,9 @@ struct CGen {
     // 退块时（拆边后）逐个 sc_ref_check 检测外部悬挂（§4.2/§7.3）。仅 --check=ref 开启时填充。
     struct FatStackVar { std::string name; std::string site; };
     std::vector<std::vector<FatStackVar>> fatStackScopes;
+    // 与 fatScopes 平行：每层本块内登记的 final 域退出钩子（按源序）。退出点（正常落出/
+    // return/break/continue）先于本块胖边拆解，按 LIFO 逐块发出其 body（§16.2 defer 等价）。
+    std::vector<std::vector<const Stmt*>> fatFinalScopes;
     // 本函数内被 &var 借入胖指针的普通栈变量名集合（预扫描得出，决定声明处注入 ref 头）。
     std::set<std::string> fatBorrowVars;
     // 分身/切片句柄变量（var s: T[...]）：变量名 → 实体类型 T 名
@@ -349,12 +354,26 @@ struct CGen {
             out << "    }\n    return _p;\n}\n\n";
 
             // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
+            // _atom 参数（T<atom>() 传 SC_REF_ATOM）→ 头 flags 置原子位，引用计数走原子 RMW。
             if (fatTypeNames.count(tn)) {
-                out << "static inline " << tn << " *" << tn << "__new_ref(void) {\n"
-                    << "    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(" << tn << "));\n"
-                    << "    if (!_h) return 0;\n"
-                    << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->_pad = 0;\n"
-                    << "    " << tn << " *_p = (" << tn << " *)((char *)_h + SC_REF_HDR);\n";
+                out << "static inline " << tn << " *" << tn << "__new_ref(int32_t _atom) {\n";
+                if (g_memCheck) {
+                    // --check=mem：扩块为 [头哨兵|sc_ref 头|实体|尾哨兵]，头哨兵存{魔数,实体字节数}。
+                    out << "    char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof("
+                        << tn << ") + SC_CANARY);\n"
+                        << "    if (!_b) return 0;\n"
+                        << "    sc_ref *_h = (sc_ref *)(_b + SC_CANARY);\n"
+                        << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom | SC_REF_CANARY;\n"
+                        << "    uintptr_t _m = sc_canary_magic(_b);\n"
+                        << "    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(" << tn << ");\n"
+                        << "    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tn << ")) = _m;\n"
+                        << "    " << tn << " *_p = (" << tn << " *)(_b + SC_CANARY + SC_REF_HDR);\n";
+                } else {
+                    out << "    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(" << tn << "));\n"
+                        << "    if (!_h) return 0;\n"
+                        << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;\n"
+                        << "    " << tn << " *_p = (" << tn << " *)((char *)_h + SC_REF_HDR);\n";
+                }
                 if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
                     out << "    *_p = " << tn << "__default();\n";
                 else
@@ -1207,6 +1226,11 @@ struct CGen {
                 }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
                 if (const Decl* td = typeCallee(e)) {
+                    // <atom> 仅用于自动指针 T@ 目标构造（赋给 T@ 变量/成员，经 emitFatBind）；
+                    // 此处是普通堆构造（赋给 T& 或表达式位）→ atom 无处安放，报错避免静默丢标记。
+                    if (e.ctorAtom)
+                        throw CompileError("atom 标记仅用于自动指针 T@ 目标构造，"
+                                           "普通堆构造 T() 不支持", e.line);
                     if (!e.futureId.empty()) {  // future<ID>(ctx?) → 打 id 标签 + 可选 ctx
                         out << td->name << "__new_tagged(" << e.futureId << ", ";
                         if (e.args.empty()) out << "(void *)0";
@@ -1547,7 +1571,8 @@ struct CGen {
         if (const Decl* td = typeCallee(init)) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
             indent();
-            out << td->name << " *" << tmp << " = " << td->name << "__new_ref();\n";
+            out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
+                << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             indent();
             out << "sc_fat_bind(&" << lv << ", " << tmp
                 << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own << ");\n";
@@ -1628,13 +1653,28 @@ struct CGen {
     }
 
     // 作用域退出两阶段（§5）：① 拆本块全部胖根边 ② 再对本块注入 ref 头的栈变量断言悬挂。
+    // 其前另有 phase0：发出本块登记的 final 钩子（LIFO），先于拆边/断言执行。
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
+        emitFinalScope(i);                                       // phase0：final 钩子
         emitFatScopeCleanup(fatScopes[i], skip);                  // phase1：拆边
         if (i < fatStackScopes.size())                           // phase2：栈对象断言（带 site）
             for (auto it = fatStackScopes[i].rbegin(); it != fatStackScopes[i].rend(); ++it) {
                 indent();
                 out << "sc_ref_check(&__scref_" << it->name << ", \"" << it->site << "\");\n";
             }
+    }
+
+    // final 钩子发出：本块登记的 final 块按 LIFO（逆源序）逐个发出 body，
+    // 每块包一层 C 花括号隔离其局部声明。
+    void emitFinalScope(size_t i) {
+        if (i >= fatFinalScopes.size()) return;
+        for (auto it = fatFinalScopes[i].rbegin(); it != fatFinalScopes[i].rend(); ++it) {
+            indent(); out << "{\n";
+            depth++;
+            emitStmts((*it)->body);
+            depth--;
+            indent(); out << "}\n";
+        }
     }
 
     // 跨全部活动作用域清理（return 时用，skip = 移动返回的变量）
@@ -1769,11 +1809,13 @@ struct CGen {
     void emitStmts(const std::vector<StmtPtr>& stmts) {
         fatScopes.emplace_back();
         fatStackScopes.emplace_back();
+        fatFinalScopes.emplace_back();
         for (auto& s : stmts) emitStmt(*s);
         // 块正常落出（非 return/break/... 收尾）：两阶段清理本块（拆胖边 + 栈对象断言）
         if (!lastTerminates(stmts)) emitScopeCleanupAt(fatScopes.size() - 1, "");
         fatScopes.pop_back();
         fatStackScopes.pop_back();
+        fatFinalScopes.pop_back();
     }
 
     // 循环体：登记 break/continue 边界（= 体作用域层）后发出语句
@@ -2131,11 +2173,14 @@ struct CGen {
                     // 自动指针：是否有待清理胖根变量
                     bool anyFat = false;
                     for (auto& sc : fatScopes) if (!sc.empty()) { anyFat = true; break; }
+                    // final 钩子：任意活动作用域登记了 final → return 也须先发出
+                    bool anyFinal = false;
+                    for (auto& fc : fatFinalScopes) if (!fc.empty()) { anyFinal = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
                     std::string skip;
                     if (s.expr && s.expr->kind == Expr::Ident && isFatExpr(*s.expr))
                         skip = s.expr->text;
-                    if (!anyFat) {
+                    if (!anyFat && !anyFinal) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
@@ -2258,6 +2303,10 @@ struct CGen {
                 break;
             case Stmt::DeclS:
                 emitTypeDecl(*s.decl);
+                break;
+            case Stmt::FinalS:
+                // final 钩子：登记入当前作用域，退出点（emitScopeCleanupAt phase0）发出 body。
+                if (!fatFinalScopes.empty()) fatFinalScopes.back().push_back(&s);
                 break;
             case Stmt::RunS:
                 emitRunStmt(s);
@@ -3639,6 +3688,8 @@ struct CGen {
 
 void setRefCheck(bool on) { g_refCheck = on; }
 bool getRefCheck() { return g_refCheck; }
+void setMemCheck(bool on) { g_memCheck = on; }
+bool getMemCheck() { return g_memCheck; }
 void setRefSrcFile(const std::string& path) { g_refSrcFile = path; }
 
 std::string emitC(const Program& prog, const std::string& srcFile) {

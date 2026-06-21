@@ -26,7 +26,24 @@ void sc_fat_on_zero(sc_fat *f) {
     sc_ref *r = (sc_ref *)f->tar;          /* in 为 sc_ref 首成员，故 &ref->in == ref == 块首 */
     if (!r) return;
     if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 仍持出边 → 报未清理，不释放 */
-    if (r->heap) free(r);                  /* 堆对象 in==0 && out==0 → 释放整块（含头） */
+    if (!r->heap) return;                  /* 栈/全局对象：不释放 */
+    if (r->flags & SC_REF_CANARY) { sc_canary_free(r); return; }  /* --check=mem：校验头尾哨兵 */
+    free(r);                               /* 堆对象 in==0 && out==0 → 释放整块（含头） */
+}
+
+/* --check=mem：ref 头堆对象带头尾 canary。块首 = (char*)r - SC_CANARY；
+ * 头哨兵 {魔数, 实体字节数}，尾哨兵在实体之后。校验越界损坏后释放整块。 */
+void sc_canary_free(sc_ref *r) {
+    char     *block = (char *)r - SC_CANARY;
+    uintptr_t *head = (uintptr_t *)block;          /* head[0]=魔数, head[1]=实体字节数 */
+    uintptr_t  want = sc_canary_magic(block);
+    uintptr_t  size = head[1];
+    uintptr_t *tail = (uintptr_t *)((char *)r + SC_REF_HDR + size);
+    if (head[0] != want)
+        fprintf(stderr, "sc: 越界：对象头哨兵被破坏（下溢/野写），地址 %p\n", (void *)r);
+    if (*tail != want)
+        fprintf(stderr, "sc: 越界：对象尾哨兵被破坏（缓冲区上溢），地址 %p\n", (void *)r);
+    free(block);
 }
 
 /* ---------------- chain：侵入式双向链表 ---------------- */

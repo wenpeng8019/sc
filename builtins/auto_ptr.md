@@ -86,6 +86,10 @@ var ptr: T@        # 胖指针，24 字节，参与引用图与释放点验证
 /* 追踪构建 */ typedef struct { int32_t in, out; const char* site; } sc_ref;  /* site=分配点 file:line */
 ```
 
+> 实现态（op.h）为定长 16 字节 `{ int32_t in, out, heap, flags; }`：`heap` 区分堆/栈对象，
+> `flags` 位 `SC_REF_ATOM`=该对象计数走原子 RMW（`T<atom>()` 构造）、`SC_REF_CANARY`=带越界哨兵
+> （`--check=mem`）。源码定位 site 不进头，由 `--check=ref` 在调用点以文案携带。
+
 ### 3.2 堆对象（`T()` 分配）
 
 ```
@@ -342,7 +346,7 @@ static inline void sc_unbind(T_fat* f){
 | 现有机制 | 对接方式 |
 |---|---|
 | `T()` / `init` / `drop` | `T@` 目标的 `T()` 带头分配；归零自动 free 前若有 `drop` 先调 |
-| `operand` 原子指令 | `in/out` 计数增减直接用 `sc_inc`/`sc_get_and_dec`，跨线程即 Arc 语义 |
+| `operand` 原子指令 | `in/out` 计数增减直接用 `sc_inc`/`sc_get_and_dec`，跨线程即 Arc 语义；实现态由 `T<atom>()` 构造的对象（头 `flags` 带 `SC_REF_ATOM`）走 `__atomic_*` RMW，普通 `T()` 走裸增减 |
 | slice `_self` 回指 | 与 own 回链同构，可复用「反查本体」代码思路 |
 | `chain`/容器 | 维持「不拥有元素」 = 存裸 `T&`（不计 in/out），避免环；对象生命周期由别处 `T@` 槽掌管 |
 | 现有静态检查（局部地址逃逸、nil 边界） | 作为编译期第一道防线保留；本机制做运行时释放点兜底 |
@@ -358,6 +362,10 @@ static inline void sc_unbind(T_fat* f){
   （「对象 alloc@a.sc:12 释放时仍被 p（声明于 c.sc:7）引用」）。
 - **关闭（默认）**：ARC 计数与自动 free 仍在（功能）；栈释放点断言可编译为 no-op 省开销。
 - 极端关闭（纯 C）：若工程不要 ARC，可整套计数编译掉，`T@` 退化为裸指针布局（仅调试期用）。
+- **越界 canary `--check=mem`（或 `SCC_MEM_CHECK`）**：另一独立开关，给带头堆对象注入
+  `[头哨兵 | sc_ref 头 | 实体 | 尾哨兵]`，头尾哨兵存地址派生魔数（块首 ^ 盐，每块各异）；
+  释放点校验头尾，检出缓冲区上溢（尾哨兵坏）/下溢·野写（头哨兵坏）。`sc_ref` 头位置不变，
+  绑定/解绑路径零改动。与 `--check=ref` 正交，可分别或同时开启。
 
 ---
 
@@ -395,3 +403,5 @@ static inline void sc_unbind(T_fat* f){
 5. ✓ 边界报错：裸 base 写胖成员、跨 C ABI 含 `T@`、变参/数组。
 6. ✓ `--check=ref` 带 site 的源码级诊断；默认构建栈断言可编译掉（保留 ARC）。
 7. ✓ 文档：本文落盘 + syntax.md 新增正式章节（§4.1），§15 能力清单加一条。
+8. ✓ `T<atom>()` 原子计数：头 `flags` 标 `SC_REF_ATOM`，bind/unbind 逐对象派发 `__atomic_*` RMW（多线程安全）。
+9. ✓ `--check=mem` 越界 canary：带头堆对象头尾哨兵（地址派生魔数），释放点检出上溢/下溢。

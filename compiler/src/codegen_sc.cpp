@@ -115,6 +115,10 @@ struct SGen {
             case Stmt::DeclS:
                 emitDecl(*s.decl);
                 break;
+            case Stmt::FinalS:
+                ind(); out << "final\n";
+                depth++; emitStmts(s.body); depth--;
+                break;
             case Stmt::RunS:
                 ind();
                 out << "run";

@@ -37,6 +37,9 @@ std::string emitC(const Program& prog, const std::string& srcFile = "");
 //   关闭（默认）：栈断言编译掉，省开销；堆对象 ARC（in→0 自动 free / out>0 报错）始终保留。
 void setRefCheck(bool on);
 bool getRefCheck();
+// 越界 canary 开关（--check=mem）：开启则 ref 头堆对象注入头尾哨兵，释放点校验越界损坏。
+void setMemCheck(bool on);
+bool getMemCheck();
 // 栈悬挂断言 site 文案使用的源码文件名（独立于 #line 的 srcFile）。
 void setRefSrcFile(const std::string& path);
 

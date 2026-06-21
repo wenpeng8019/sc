@@ -213,6 +213,10 @@ struct Expr {
     //   codegen 生成 future__new_tagged(ID) 为该 future 设 id，供 async_loop 按 id 派发。
     std::string futureId;
 
+    // T<atom>() 自动指针原子构造标记（仅 Call 且 callee 为类型名的胖目标构造时有效）；
+    // + 置位 → T__new_ref 把对象头标记为原子，sc_fat_bind/unbind 对该对象 in/out 用原子 RMW。
+    bool ctorAtom = false;
+
     int line = 0;               // 表达式起始行号（用于错误报告）
 
     // 匿名函数字面量（FncLit）专用
@@ -243,6 +247,8 @@ struct Stmt {
         LabelS,     // 标签定义
 
         DeclS,      // 内嵌类型声明     函数体内用 def 定义局部类型（不常见但允许）
+        FinalS,     // final 域退出钩子  final \n body...（本作用域每个退出点运行 body，
+                    //                先于自动胖边拆解/断言；body 存于 body 字段）
         RunS,       // run 线程语句    run[<opt:v,...>] rpc调用 [, thread出参地址]
                     //                > expr=rpc 调用（Expr::Call）
                     //                > forInit=可选出参（&t，t 为 thread&）

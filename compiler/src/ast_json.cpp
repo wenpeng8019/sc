@@ -140,6 +140,11 @@ std::string stmtNode(const Stmt& s) {
         }
         case Stmt::DeclS:
             return declNode(*s.decl);
+        case Stmt::FinalS: {
+            std::vector<std::string> c;
+            for (auto& b : s.body) c.push_back(stmtNode(*b));
+            return node("final", "", "", s.line, c);
+        }
         case Stmt::RunS: {
             std::string opts;
             for (size_t i = 0; i < s.runOpts.size(); i++) {

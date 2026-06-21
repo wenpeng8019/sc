@@ -574,6 +574,12 @@ struct Checker {
             // -- def（内嵌类型声明）：无需检查 ---------------------------------
             case Stmt::DeclS:
                 break;
+            // -- final 域退出钩子：体在独立作用域检查 ---------------------------
+            case Stmt::FinalS: {
+                auto a = locals;
+                for (auto& x : s.body) checkStmt(*x, a, retTy);
+                break;
+            }
             // -- run：rpc 线程创建调用的实参与 thread 出参 ----------------------
             case Stmt::RunS:
                 (void)inferExpr(*s.expr, locals, s.line);

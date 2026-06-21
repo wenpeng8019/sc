@@ -43,6 +43,7 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"async", Tok::KwAsync},
     {"await", Tok::KwAwait},
     {"done", Tok::KwDone},
+    {"final", Tok::KwFinal},
     {"print", Tok::KwPrint},
     {"sizeof", Tok::KwSizeof},
     {"offsetof", Tok::KwOffsetof},

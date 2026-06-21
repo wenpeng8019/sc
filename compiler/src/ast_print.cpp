@@ -32,6 +32,7 @@ std::string rec(const Expr& e, bool top) {
         case Expr::Call: {
             std::string s = rec(*e.a, false);
             if (!e.futureId.empty()) s += "<" + e.futureId + ">";  // future<ID>() 构造糖
+            else if (e.ctorAtom) s += "<atom>";                    // T<atom>() 原子计数构造糖
             s += "(";
             for (size_t i = 0; i < e.args.size(); i++) {
                 if (i) s += ", ";

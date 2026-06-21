@@ -57,6 +57,14 @@ POSITIVE=(
     tests/cases/cast.sc
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc
+    tests/cases/final.sc
+    tests/cases/atom.sc
+)
+
+# --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物
+# （golden 后缀 .mem.c，独立于默认 emit-c，证明头尾哨兵注入路径稳定）
+CHECKMEM=(
+    tests/cases/auto_ptr.sc
 )
 
 # 负向用例（预期编译失败，比对 stderr 错误信息）
@@ -107,6 +115,15 @@ for src in "${POSITIVE[@]}"; do
         snapshot "$name (emit-sc)" "$GOLDEN/$name.sc" "$s"
     else
         echo "  ✗ $name (emit-sc)：scc 失败"; fail=$((fail + 1))
+    fi
+done
+
+for src in "${CHECKMEM[@]}"; do
+    name="$(basename "$src" .sc)"
+    if c="$("$SCC" "$src" --emit-c --check=mem 2>/dev/null)"; then
+        snapshot "$name (emit-c --check=mem)" "$GOLDEN/$name.mem.c" "$c"
+    else
+        echo "  ✗ $name (emit-c --check=mem)：scc 失败"; fail=$((fail + 1))
     fi
 done
 

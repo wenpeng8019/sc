@@ -959,6 +959,16 @@ struct Parser {
             if (std::find(futureIds.begin(), futureIds.end(), pendingFutureId) == futureIds.end())
                 futureIds.push_back(pendingFutureId);
         }
+        // T<atom>() 自动指针原子构造：类型名后紧跟 `< atom > (` 的精确四 token 形态时触发
+        // （`atom` 为上下文标记，此位置不可能是比较表达式）。标记附到 Call 节点。
+        bool pendingAtom = false;
+        if (e->kind == Expr::Ident && atOp("<") &&
+            peek().kind == Tok::Ident && peek().text == "atom" &&
+            peek(2).kind == Tok::Op && peek(2).text == ">" &&
+            peek(3).kind == Tok::LParen) {
+            advance(); advance(); advance();   // 消费 `< atom >`
+            pendingAtom = true;
+        }
         for (;;) {
             if (accept(Tok::LParen)) { // 函数调用：expr(args)
                 exprBracket++;
@@ -966,6 +976,7 @@ struct Parser {
                 call->a = std::move(e);  // a = 被调函数表达式
                 if (hasSofOpts) { call->sofOpts = std::move(pendingSofOpts); hasSofOpts = false; }
                 if (hasFutureId) { call->futureId = std::move(pendingFutureId); hasFutureId = false; }
+                if (pendingAtom) { call->ctorAtom = true; pendingAtom = false; }
                 skipNlInBracket();
                 if (!at(Tok::RParen)) {
                     for (;;) {
@@ -1410,6 +1421,16 @@ struct Parser {
                 auto s = mkStmt(Stmt::ContinueS);
                 advance();
                 expect(Tok::Newline, "换行");
+                return s;
+            }
+
+            // final 域退出钩子：final \n body...
+            //   登记本作用域的退出钩子，在每个退出点（正常落出/return/break/continue）
+            //   先于自动胖边拆解执行 body（body 存于 s->body）。
+            case Tok::KwFinal: {
+                auto s = mkStmt(Stmt::FinalS);
+                advance();                  // 跳过 final 关键字
+                parseBlock(s->body);
                 return s;
             }
 

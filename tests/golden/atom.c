@@ -8,7 +8,6 @@ typedef struct node {
     sc_fat child;
 } node;
 
-sc_fat make(int32_t val);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -33,42 +32,32 @@ static inline node *node__new_ref(int32_t _atom) {
     return _p;
 }
 
-sc_fat make(int32_t val) {
-    /* line 10 */
-    sc_fat n = {0};
-    node *_fat0 = node__new_ref(0);
-    sc_fat_bind(&n, _fat0, (sc_ref *)((char *)_fat0 - SC_REF_HDR), SC_OWN_ROOT);
-    /* line 11 */
-    ((node *)(n).p)->v = val;
-    /* line 12 */
-    {
-        sc_fat _ret = n;
-        return _ret;
-    }
-}
-
 int32_t main(void) {
-    /* line 15 */
+    /* line 10 */
     sc_fat root = {0};
-    root = make(1);
-    /* line 16 */
+    node *_fat0 = node__new_ref(SC_REF_ATOM);
+    sc_fat_bind(&root, _fat0, (sc_ref *)((char *)_fat0 - SC_REF_HDR), SC_OWN_ROOT);
+    /* line 11 */
+    ((node *)(root).p)->v = 1;
+    /* line 12 */
     sc_fat_unbind(&((node *)(root).p)->child);
-    node *_fat1 = node__new_ref(0);
+    node *_fat1 = node__new_ref(SC_REF_ATOM);
     sc_fat_bind(&((node *)(root).p)->child, _fat1, (sc_ref *)((char *)_fat1 - SC_REF_HDR), &((sc_ref *)(root).tar)->out);
-    /* line 17 */
+    /* line 13 */
     ((node *)(((node *)(root).p)->child).p)->v = 2;
-    /* line 19 */
+    /* line 15 */
     sc_fat alias = {0};
     sc_fat_bind(&alias, (root).p, (sc_ref *)(root).tar, SC_OWN_ROOT);
-    /* line 21 */
-    sc_fat sub = {0};
-    sc_fat_bind(&sub, &(((node *)(root).p)->child), (sc_ref *)(root).tar, SC_OWN_ROOT);
-    /* line 23 */
+    /* line 17 */
+    sc_fat plain = {0};
+    node *_fat2 = node__new_ref(0);
+    sc_fat_bind(&plain, _fat2, (sc_ref *)((char *)_fat2 - SC_REF_HDR), SC_OWN_ROOT);
+    /* line 19 */
     sc_fat_unbind(&((node *)(root).p)->child);
-    /* line 24 */
+    /* line 20 */
     {
         int32_t _ret = 0;
-        sc_fat_unbind(&sub);
+        sc_fat_unbind(&plain);
         sc_fat_unbind(&alias);
         sc_fat_unbind(&root);
         return _ret;

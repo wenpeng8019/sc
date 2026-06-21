@@ -25,10 +25,14 @@ static inline node *node__new(void) {
 }
 
 static inline node *node__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(node));
-    if (!_h) return 0;
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
-    node *_p = (node *)((char *)_h + SC_REF_HDR);
+    char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof(node) + SC_CANARY);
+    if (!_b) return 0;
+    sc_ref *_h = (sc_ref *)(_b + SC_CANARY);
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom | SC_REF_CANARY;
+    uintptr_t _m = sc_canary_magic(_b);
+    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(node);
+    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(node)) = _m;
+    node *_p = (node *)(_b + SC_CANARY + SC_REF_HDR);
     memset(_p, 0, sizeof(node));
     return _p;
 }
