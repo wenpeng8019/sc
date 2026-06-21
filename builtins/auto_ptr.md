@@ -253,8 +253,13 @@ a = nil                  # A.in→0 && out==0 → 自动 free ✓
 
 ### 7.6 数组
 ```sc
-var arr[10]: T@          # 退域遍历 10 个 dec；sizeof(arr)=10*24，与 C 指针数组不同
+var arr[10]: T@          # 局部一维：sc_fat[10] 零初始化；退域逐元素 sc_fat_unbind 清理整张引用图
+arr[i] = T()             # 下标赋值：带头分配 + 绑根边（own=SC_OWN_ROOT）
+arr[i]->child = T()      # 元素成员出边（own=&((sc_ref*)arr[i].tar)->out）；释放前须显式断该出边
+var p: T@ = arr[1]       # 元素借用绑定（arr[1] 目标 in++）；sizeof(arr)=10*24，与 C 指针数组不同
 ```
+仅支持**局部一维**；多维 / 字段 / 全局 / 参数 / 返回位置的 `T@` 数组引用图记账未实现 → 编译期报错
+（改用裸指针 `T&` 数组）。元素的嵌套出边与标量同理无自动递归清理，须在释放前显式置 `nil`。
 
 ### 7.7 函数传参 / 返回
 
@@ -365,7 +370,16 @@ static inline void sc_unbind(T_fat* f){
 - **越界 canary `--check=mem`（或 `SCC_MEM_CHECK`）**：另一独立开关，给带头堆对象注入
   `[头哨兵 | sc_ref 头 | 实体 | 尾哨兵]`，头尾哨兵存地址派生魔数（块首 ^ 盐，每块各异）；
   释放点校验头尾，检出缓冲区上溢（尾哨兵坏）/下溢·野写（头哨兵坏）。`sc_ref` 头位置不变，
-  绑定/解绑路径零改动。与 `--check=ref` 正交，可分别或同时开启。
+  绑定/解绑路径零改动。同时覆盖**栈侧**：
+  - 栈数组 `var buf[N]: T`（含多维 `var m[R][C]: T`）超额分配尾哨兵元素，声明后 `sc_stack_canary_fill`
+    填地址派生模式，退域/`return`/`break` 处 `sc_stack_canary_check` 校验尾区（紧贴有效元素，越界
+    就地拦截、不波及邻接对象，报错带源码定位）。`sizeof(buf)` 回报逻辑大小，`memset(buf,0,sizeof buf)`
+    不误触哨兵。**全局栈数组**同样超额分配，填充/校验改由 `constructor`/`destructor` 钩子托管；`const` 数组不覆盖。
+  - 托管目标编译注入 `-fstack-protector-strong`，保护函数返回跳转地址（裸机跳过）。
+  与 `--check=ref` 正交，可分别或同时开启。
+- **指针/下标守卫 `--check=ptr`（或 `SCC_PTR_CHECK`）**：又一独立开关，在裸指针解引用（`*p`/`p->m`）
+  与裸指针下标处注入 `nil` 校验、在编译期已知维度的数组下标处注入越界校验，命中即报 `stderr` 并 `abort`
+  （`__sc_ptr_check`/`__sc_bound_check`，`SC_PTRCHK` 用 `__typeof__` 保型单次求值）。胖指针 `T@` 走独立绑定路径不重复拦截。
 
 ---
 
@@ -388,7 +402,8 @@ static inline void sc_unbind(T_fat* f){
 3. **禁止经裸 base 写胖成员**；导出到 op.h、会跨 C ABI 的结构体**禁含 `T@`**
    （含 `T@` 成员的结构体被 C 侧 memcpy/fread 会让 tar 成垃圾地址 → 下次赋值写坏内存）。
 4. **胖目标地址稳定**：不得把按值塞进可扩容容器的对象当胖目标。
-5. **`T@` 数组**退域遍历逐个 dec；`sizeof` 按 24B/元素，与 C 指针数组不同（已认）。
+5. **`T@` 数组**：仅局部一维已实现（退域逐元素 `sc_fat_unbind`、下标赋值绑根边、元素成员出边）；
+   `sizeof` 按 24B/元素，与 C 指针数组不同（已认）。多维/字段/全局/参数/返回位置仍报错。
 
 ---
 
@@ -405,3 +420,10 @@ static inline void sc_unbind(T_fat* f){
 7. ✓ 文档：本文落盘 + syntax.md 新增正式章节（§4.1），§15 能力清单加一条。
 8. ✓ `T<atom>()` 原子计数：头 `flags` 标 `SC_REF_ATOM`，bind/unbind 逐对象派发 `__atomic_*` RMW（多线程安全）。
 9. ✓ `--check=mem` 越界 canary：带头堆对象头尾哨兵（地址派生魔数），释放点检出上溢/下溢。
+10. ✓ `--check=mem` 栈侧扩展：栈数组尾哨兵（含**多维**：外层超额「行」覆盖 16B 尾区；退域/`return`/`break`
+    校验，带 site；`sizeof` 回报逻辑大小）+ **全局栈数组**（`constructor` 填充 / `destructor` 退出校验）
+    + 托管目标 `-fstack-protector-strong` 返回地址保护。
+11. ✓ `--check=ptr` 运行时守卫：裸指针解引用/下标 `nil` 校验 + 编译期已知维度数组下标越界校验（命中 `abort`，带 site）。
+12. ✓ `goto` 跨作用域清理：跳转前清理被跳过的 `T@`/`final`/栈哨兵；不在活动作用域链上的跨分支跳转编译期报错。
+13. ✓ 含 `T@` 成员结构体跨 C ABI 守卫：直接 `T@`（rpc/cImpl 拒）、按值内嵌 `T@`（导出/rpc/cImpl 拒）。
+14. ✓ 局部一维 `T@` 数组：`sc_fat[N]` 零初始化、下标赋值绑根边、退域逐元素清理引用图。

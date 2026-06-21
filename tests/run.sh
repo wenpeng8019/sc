@@ -57,19 +57,32 @@ POSITIVE=(
     tests/cases/cast.sc
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc
+    tests/cases/fat_array.sc
     tests/cases/final.sc
     tests/cases/atom.sc
+    tests/cases/stack_canary.sc
+    tests/cases/goto_scope.sc
+    tests/cases/ptr_check.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物
 # （golden 后缀 .mem.c，独立于默认 emit-c，证明头尾哨兵注入路径稳定）
 CHECKMEM=(
     tests/cases/auto_ptr.sc
+    tests/cases/stack_canary.sc
+)
+
+# --check=ptr 运行时守卫用例：比对 ptr-check 下的 emit-c 产物（golden 后缀 .ptr.c）
+CHECKPTR=(
+    tests/cases/ptr_check.sc
 )
 
 # 负向用例（预期编译失败，比对 stderr 错误信息）
 NEGATIVE=(
     examples/feature_bad_value_cycle.sc
+    tests/cases/goto_bad_cross.sc
+    tests/cases/abi_fat_bad.sc
+    tests/cases/fat_array_bad.sc
 )
 
 pass=0 fail=0 upd=0
@@ -124,6 +137,15 @@ for src in "${CHECKMEM[@]}"; do
         snapshot "$name (emit-c --check=mem)" "$GOLDEN/$name.mem.c" "$c"
     else
         echo "  ✗ $name (emit-c --check=mem)：scc 失败"; fail=$((fail + 1))
+    fi
+done
+
+for src in "${CHECKPTR[@]}"; do
+    name="$(basename "$src" .sc)"
+    if c="$("$SCC" "$src" --emit-c --check=ptr 2>/dev/null)"; then
+        snapshot "$name (emit-c --check=ptr)" "$GOLDEN/$name.ptr.c" "$c"
+    else
+        echo "  ✗ $name (emit-c --check=ptr)：scc 失败"; fail=$((fail + 1))
     fi
 done
 

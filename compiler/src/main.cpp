@@ -87,8 +87,11 @@ static void usage() {
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
               << "  --check=ref  开启自动指针 T@ 栈悬挂检查：注入栈对象引用头并在退域处\n"
               << "             断言悬挂（含源码定位）；默认关闭（堆 ARC 自动回收始终生效）\n"
-              << "  --check=mem  开启越界 canary：ref 头堆对象注入头尾哨兵（地址派生魔数），\n"
-              << "             释放时校验上溢/下溢损坏并报告；默认关闭\n"
+              << "  --check=mem  开启越界 canary：ref 头堆对象注入头尾哨兵（地址派生魔数）、\n"
+              << "             一维栈数组注入尾哨兵、托管目标注入 -fstack-protector-strong\n"
+              << "             保护返回地址；越界损坏报告并定位，默认关闭\n"
+              << "  --check=ptr  开启运行时指针/下标守卫：解引用与指针下标处校验 nil、\n"
+              << "             编译期已知维度的栈数组下标处校验越界；命中报告并 abort，默认关闭\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
               << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
               << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
@@ -354,6 +357,12 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     }
     tc.threadsLib = pp.threads;
     tc.debugTool  = pp.known ? pp.debug : "none";
+
+    // --check=mem：为托管目标注入 -fstack-protector-strong，由 C 编译器在局部缓冲与
+    // 返回地址之间插入栈哨兵，捕获栈溢出破坏返回跳转地址这类最难追踪的随机崩溃。
+    // 裸机（freestanding）跳过：通常无 __stack_chk_guard/__stack_chk_fail 运行时支持。
+    if (getMemCheck() && !tc.freestanding)
+        tc.cflags += " -fstack-protector-strong";
 
     // host≠target（平台族不同）：不能在本机直接运行
     tc.crossRun = !tc.triple.empty() &&
@@ -1235,6 +1244,8 @@ int main(int argc, char** argv) {
         setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     if (const char* mc = std::getenv("SCC_MEM_CHECK"); mc && *mc && std::string(mc) != "0")
         setMemCheck(true);                    // 环境变量开启越界 canary（等价 --check=mem）
+    if (const char* pc = std::getenv("SCC_PTR_CHECK"); pc && *pc && std::string(pc) != "0")
+        setPtrCheck(true);                    // 环境变量开启运行时指针/下标守卫（等价 --check=ptr）
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--") {                                     // 其后全部为程序参数
@@ -1272,6 +1283,10 @@ int main(int argc, char** argv) {
         else if (a == "--check=mem") setMemCheck(true);      // 越界 canary（ref 头堆对象头尾哨兵）
         else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "mem") {
             ++i; setMemCheck(true);                          // --check mem 分写形式
+        }
+        else if (a == "--check=ptr") setPtrCheck(true);      // 运行时指针/下标守卫（nil 解引用 + 数组越界）
+        else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "ptr") {
+            ++i; setPtrCheck(true);                          // --check ptr 分写形式
         }
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (input.empty()) input = a;                   // 第一个非选项参数 = 输入文件
@@ -1375,7 +1390,7 @@ int main(int argc, char** argv) {
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
-        if (getRefCheck()) setRefSrcFile(input);                    // T@ 栈悬挂断言 site 用源码文件名
+        if (getRefCheck() || getMemCheck() || getPtrCheck()) setRefSrcFile(input);  // T@ 栈悬挂/栈数组越界/指针下标守卫 site 用源码文件名
         auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
                : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h

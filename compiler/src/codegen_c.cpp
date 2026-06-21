@@ -26,6 +26,9 @@ namespace {
 bool g_refCheck = false;
 // 越界 canary 开关（--check=mem）：默认关闭，开启则 ref 头堆对象注入头尾哨兵，释放时校验。
 bool g_memCheck = false;
+// 运行时指针/下标守卫开关（--check=ptr）：默认关闭，开启则在解引用/指针下标处注入 nil 校验、
+// 在编译期已知维度的栈数组下标处注入越界校验（命中即 abort）。
+bool g_ptrCheck = false;
 // 栈悬挂断言 site 文案用的源码文件名（与 #line 的 srcFile 解耦，避免强制注入 #line）。
 std::string g_refSrcFile;
 
@@ -121,10 +124,20 @@ struct CGen {
     std::set<std::string> fatTypeNames;
     // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量名，退块/return 时逆序 unbind
     std::vector<std::vector<std::string>> fatScopes;
+    // 与 fatScopes 平行：每层本块内声明的 T@ 数组根变量（元素各为一条根边），退块/return 时
+    // 逐元素 unbind（覆盖整个引用图，避免泄漏）。仅局部一维 T@ 数组。
+    struct FatArrayVar { std::string name; std::string dim; };
+    std::vector<std::vector<FatArrayVar>> fatArrayScopes;
     // 与 fatScopes 平行：每层本块内被 & 借出（须注入 sc_ref 头）的普通栈变量，
     // 退块时（拆边后）逐个 sc_ref_check 检测外部悬挂（§4.2/§7.3）。仅 --check=ref 开启时填充。
     struct FatStackVar { std::string name; std::string site; };
     std::vector<std::vector<FatStackVar>> fatStackScopes;
+    // 与 fatScopes 平行：每层本块内一维栈数组（超额分配尾哨兵），退块/return/break 处校验
+    // 尾区是否被破坏，捕获栈数组越界写。仅 --check=mem 开启时填充。
+    struct MemCanaryVar { std::string name; std::string elemTy; std::vector<std::string> dims; std::string site; };
+    std::vector<std::vector<MemCanaryVar>> memCanaryScopes;
+    // 全局栈数组（文件作用域）尾哨兵：超额分配后由 constructor 填充、destructor 退出时校验。
+    std::vector<MemCanaryVar> globalCanaries;
     // 与 fatScopes 平行：每层本块内登记的 final 域退出钩子（按源序）。退出点（正常落出/
     // return/break/continue）先于本块胖边拆解，按 LIFO 逐块发出其 body（§16.2 defer 等价）。
     std::vector<std::vector<const Stmt*>> fatFinalScopes;
@@ -1108,6 +1121,13 @@ struct CGen {
                 else out << e.text;                        // true/false 由 stdbool.h 提供
                 break;
             case Expr::Unary:
+                // --check=ptr：裸指针解引用 *p → *SC_PTRCHK(p, site)（nil 校验，胖指针走独立路径不拦）
+                if (g_ptrCheck && e.op == "*" && e.a && !isFatExpr(*e.a)) {
+                    out << "*SC_PTRCHK(";
+                    emitExpr(*e.a);
+                    out << ", \"" << ptrSite(e, "解引用") << "\")";
+                    break;
+                }
                 out << e.op;
                 out << "(";
                 emitExpr(*e.a);
@@ -1386,6 +1406,27 @@ struct CGen {
                 break;
             }
             case Expr::Index:
+                // --check=ptr：已知维度的栈数组下标 → SC_BOUNDCHK 越界校验；裸指针下标 → SC_PTRCHK nil 校验。
+                if (g_ptrCheck) {
+                    const std::vector<std::string>* dims =
+                        (e.a && e.a->kind == Expr::Ident) ? knownDims(e.a->text) : nullptr;
+                    if (dims && !dims->empty()) {
+                        emitExpr(*e.a);
+                        out << "[SC_BOUNDCHK(";
+                        emitExpr(*e.b, true);
+                        out << ", " << (*dims)[0] << ", \"" << ptrSite(e, "数组下标") << "\")]";
+                        break;
+                    }
+                    VType bt;
+                    if (e.a && exprVType(*e.a, bt) && bt.ptr > 0 && !bt.fat && bt.arr == 0) {
+                        out << "SC_PTRCHK(";
+                        emitExpr(*e.a);
+                        out << ", \"" << ptrSite(e, "指针下标") << "\")[";
+                        emitExpr(*e.b, true);
+                        out << "]";
+                        break;
+                    }
+                }
                 emitExpr(*e.a);
                 out << "[";
                 emitExpr(*e.b, true);
@@ -1416,7 +1457,15 @@ struct CGen {
                         }
                     }
                 }
-                emitExpr(*e.a);
+                // --check=ptr：裸指针成员访问 p->m → SC_PTRCHK(p, site)->m（nil 校验；
+                // 胖指针已在上方走独立路径，prev/next 链表导航自带边界处理，均不重复拦）。
+                if (g_ptrCheck && e.op == "->") {
+                    out << "SC_PTRCHK(";
+                    emitExpr(*e.a);
+                    out << ", \"" << ptrSite(e, "成员访问") << "\")";
+                } else {
+                    emitExpr(*e.a);
+                }
                 std::string fn = e.text;
                 if (e.text == "next") {
                     // 上下文关键字：链表结构体上 next 映射到内置 _next（rear 的 _next=NULL 自然终止）
@@ -1430,6 +1479,14 @@ struct CGen {
                 break;
             }
             case Expr::Sizeof: {
+                // --check=mem：栈数组超额分配了尾哨兵，sizeof(数组变量) 须回报「逻辑大小」
+                // （原维度×元素），否则 memset(buf,0,sizeof buf) 会抹掉尾哨兵造成误报。
+                if (g_memCheck && e.a && e.a->kind == Expr::Ident) {
+                    if (const MemCanaryVar* mc = findCanary(e.a->text)) {
+                        out << "((" << canaryElems(mc->dims) << ") * sizeof(" << mc->elemTy << "))";
+                        break;
+                    }
+                }
                 out << "sizeof(";
                 // 若内层是单纯标识符且是 sc 内置类型名，做类型映射再输出
                 if (e.a && e.a->kind == Expr::Ident) {
@@ -1504,6 +1561,19 @@ struct CGen {
     int fatTmpSeq = 0;  // 胖指针建头临时变量编号
     std::vector<size_t> fatBreakBoundary;     // break 目标处的 fatScopes 层数（循环/switch）
     std::vector<size_t> fatContinueBoundary;  // continue 目标处的 fatScopes 层数（循环）
+    // goto 目标标签 → 其所在作用域索引（仅含「当前活动作用域链」上的标签：进域登记、退域注销）。
+    // goto 跨域时据此从最内层清理到「标签所在作用域的子层」（含被跳过的胖根/final/栈哨兵）。
+    std::unordered_map<std::string, size_t> labelDepth;
+
+    // 当前活动作用域链上是否存在待清理项（胖根/借用栈对象/栈哨兵/final）。
+    bool hasActiveCleanup() const {
+        for (auto& v : fatScopes)       if (!v.empty()) return true;
+        for (auto& v : fatArrayScopes)  if (!v.empty()) return true;
+        for (auto& v : fatStackScopes)  if (!v.empty()) return true;
+        for (auto& v : memCanaryScopes) if (!v.empty()) return true;
+        for (auto& v : fatFinalScopes)  if (!v.empty()) return true;
+        return false;
+    }
 
     // 把表达式发到字符串（临时换出 out），用于构造 C 左值/own 子表达式
     std::string captureExpr(const Expr& e) {
@@ -1525,6 +1595,15 @@ struct CGen {
             lv = lhs.text;
             own = "SC_OWN_ROOT";
             return true;
+        }
+        // T@ 数组元素 arr[i]：base 为 T@ 数组（fat && arr>=1）⇒ 元素是独立根边（own=ROOT）。
+        if (lhs.kind == Expr::Index && lhs.a) {
+            VType at;
+            if (exprVType(*lhs.a, at) && at.fat && at.arr >= 1) {
+                lv = captureExpr(lhs);
+                own = "SC_OWN_ROOT";
+                return true;
+            }
         }
         if (lhs.kind == Expr::Member && lhs.a) {
             std::string tt;
@@ -1643,6 +1722,30 @@ struct CGen {
         return true;
     }
 
+    // 栈数组哨兵：逻辑元素数表达式 `(d0) * (d1) * ...`（一维即 `(d0)`）。
+    static std::string canaryElems(const std::vector<std::string>& dims) {
+        std::string s;
+        for (size_t i = 0; i < dims.size(); i++) { if (i) s += " * "; s += "(" + dims[i] + ")"; }
+        return s;
+    }
+    // 内层维度积表达式 `(d1) * (d2) * ...`（外层维度之外的各维），一维返回 "1"。
+    static std::string canaryInner(const std::vector<std::string>& dims) {
+        if (dims.size() <= 1) return "1";
+        std::string s;
+        for (size_t i = 1; i < dims.size(); i++) { if (i > 1) s += " * "; s += "(" + dims[i] + ")"; }
+        return s;
+    }
+
+    // 活动作用域内（内层优先）查找已登记的栈数组 canary 变量，供 sizeof 回报逻辑大小用。
+    const MemCanaryVar* findCanary(const std::string& name) const {
+        for (auto sit = memCanaryScopes.rbegin(); sit != memCanaryScopes.rend(); ++sit)
+            for (auto& mc : *sit)
+                if (mc.name == name) return &mc;
+        for (auto& mc : globalCanaries)
+            if (mc.name == name) return &mc;
+        return nullptr;
+    }
+
     // 作用域退出：对本块内胖根变量逆序 unbind（skip = 被移动返回的变量名，跳过）
     void emitFatScopeCleanup(const std::vector<std::string>& scope, const std::string& skip) {
         for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
@@ -1657,10 +1760,27 @@ struct CGen {
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
         emitFinalScope(i);                                       // phase0：final 钩子
         emitFatScopeCleanup(fatScopes[i], skip);                  // phase1：拆边
+        if (i < fatArrayScopes.size())                           // phase1b：T@ 数组逐元素拆边
+            for (auto it = fatArrayScopes[i].rbegin(); it != fatArrayScopes[i].rend(); ++it) {
+                indent();
+                out << "for (size_t _k = (" << it->dim << "); _k-- > 0; ) sc_fat_unbind(&"
+                    << it->name << "[_k]);\n";
+            }
         if (i < fatStackScopes.size())                           // phase2：栈对象断言（带 site）
             for (auto it = fatStackScopes[i].rbegin(); it != fatStackScopes[i].rend(); ++it) {
                 indent();
                 out << "sc_ref_check(&__scref_" << it->name << ", \"" << it->site << "\");\n";
+            }
+        if (i < memCanaryScopes.size())                          // phase3：栈数组尾哨兵校验
+            for (auto it = memCanaryScopes[i].rbegin(); it != memCanaryScopes[i].rend(); ++it) {
+                indent();
+                std::string len = it->dims.size() == 1
+                    ? "SC_CANARY_ELEMS(" + it->elemTy + ") * sizeof(" + it->elemTy + ")"
+                    : "SC_CANARY";
+                out << "sc_stack_canary_check((unsigned char*)" << it->name
+                    << " + (" << canaryElems(it->dims) << ") * sizeof(" << it->elemTy << "), "
+                    << len << ", "
+                    << it->name << ", \"" << it->site << "\");\n";
             }
     }
 
@@ -1722,6 +1842,85 @@ struct CGen {
             // 胖左值=绑定借用）；登记入当前作用域，退域/return 处自动 unbind。
             if (f.type.fat && f.type.arrayDims.empty() && inFunc) {
                 emitFatVarInit(f, asConst, isStatic);
+                continue;
+            }
+            // 自动指针数组 T@（局部一维）：声明 sc_fat 数组并零初始化；元素经下标赋值绑定，
+            // 退域/return/break 处逐元素 unbind（整张引用图清理）。登记入当前 fat 数组作用域。
+            if (f.type.fat && f.type.arrayDims.size() == 1 && inFunc) {
+                regVar(f);
+                indent();
+                if (isStatic) out << "static ";
+                if (asConst) out << "const ";
+                out << "sc_fat " << f.name << "[" << f.type.arrayDims[0] << "] = {0};\n";
+                if (!fatArrayScopes.empty())
+                    fatArrayScopes.back().push_back({f.name, f.type.arrayDims[0]});
+                continue;
+            }
+            // --check=mem：函数内栈数组 → 超额分配尾哨兵 + 退域校验，捕获栈数组越界写。
+            // 一维与多维均支持（多维仅外层超额若干「行」覆盖尾哨兵区，内层维度不变）；
+            // 非 const/static/tls/分身/胖/内联/函数指针；尾哨兵紧贴有效元素就地拦截。
+            if (g_memCheck && inFunc && !asConst && !isStatic && !isTls
+                && !f.type.project && !f.type.fat && !f.type.hasInline
+                && f.type.fnKind == TypeRef::FncKind::None
+                && !f.type.arrayDims.empty()) {
+                regVar(f);
+                std::string base; int ptr; resolveType(f.type, base, ptr);
+                std::string elemTy = base;
+                for (int i = 0; i < ptr; i++) elemTy += "*";
+                const auto& dims = f.type.arrayDims;
+                const std::string& d0 = dims[0];
+                indent();
+                if (dims.size() == 1) {
+                    out << elemTy << " " << f.name
+                        << "[(" << d0 << ") + SC_CANARY_ELEMS(" << elemTy << ")]";
+                } else {
+                    // 多维：外层维度加 SC_CANARY_OUTER 行（覆盖尾哨兵区），内层维度原样保留。
+                    out << elemTy << " " << f.name
+                        << "[(" << d0 << ") + SC_CANARY_OUTER(" << elemTy
+                        << ", " << canaryInner(dims) << ")]";
+                    for (size_t i = 1; i < dims.size(); i++) out << "[" << dims[i] << "]";
+                }
+                if (f.init) { out << " = "; emitExpr(*f.init, true); }
+                out << ";\n";
+                indent();
+                std::string len = dims.size() == 1
+                    ? "SC_CANARY_ELEMS(" + elemTy + ") * sizeof(" + elemTy + ")"
+                    : "SC_CANARY";
+                out << "sc_stack_canary_fill((unsigned char*)" << f.name
+                    << " + (" << canaryElems(dims) << ") * sizeof(" << elemTy << "), "
+                    << len << ", "
+                    << f.name << ");\n";
+                if (!memCanaryScopes.empty())
+                    memCanaryScopes.back().push_back({f.name, elemTy, dims, fatStackSite(f)});
+                continue;
+            }
+            // --check=mem：全局（文件作用域）栈数组 → 同样超额分配尾哨兵，但填充/校验改由
+            // constructor（启动）/destructor（退出）钩子托管（全局无退域时机）。一维与多维均支持；
+            // 非 const/tls/分身/胖/内联/函数指针。捕获持续到退出的全局缓冲区上溢。
+            if (g_memCheck && !inFunc && !asConst && !isTls
+                && !f.type.project && !f.type.fat && !f.type.hasInline
+                && f.type.fnKind == TypeRef::FncKind::None
+                && !f.type.arrayDims.empty()) {
+                regVar(f);
+                std::string base; int ptr; resolveType(f.type, base, ptr);
+                std::string elemTy = base;
+                for (int i = 0; i < ptr; i++) elemTy += "*";
+                const auto& dims = f.type.arrayDims;
+                const std::string& d0 = dims[0];
+                indent();
+                if (isStatic) out << "static ";
+                if (dims.size() == 1) {
+                    out << elemTy << " " << f.name
+                        << "[(" << d0 << ") + SC_CANARY_ELEMS(" << elemTy << ")]";
+                } else {
+                    out << elemTy << " " << f.name
+                        << "[(" << d0 << ") + SC_CANARY_OUTER(" << elemTy
+                        << ", " << canaryInner(dims) << ")]";
+                    for (size_t i = 1; i < dims.size(); i++) out << "[" << dims[i] << "]";
+                }
+                if (f.init) { out << " = "; emitExpr(*f.init, true); }
+                out << ";\n";
+                globalCanaries.push_back({f.name, elemTy, dims, fatStackSite(f)});
                 continue;
             }
             // 无类型 var/let（var x: = 初值）：依据初值字面量推断默认类型；
@@ -1791,6 +1990,23 @@ struct CGen {
         return s;
     }
 
+    // --check=ptr 守卫 site 文案：what@文件名:行（含源码定位，便于命中定位）。
+    std::string ptrSite(const Expr& e, const char* what) const {
+        std::string s = what;
+        if (!g_refSrcFile.empty() && e.line > 0) {
+            std::string base = std::filesystem::path(g_refSrcFile).filename().string();
+            s += "@" + base + ":" + std::to_string(e.line);
+        }
+        return s;
+    }
+
+    // 标识符的编译期已知数组维度（局部优先，再全局）；非数组返回 nullptr。
+    const std::vector<std::string>* knownDims(const std::string& name) const {
+        if (inFunc) { auto it = varDimsL.find(name); if (it != varDimsL.end()) return &it->second; }
+        auto it = varDimsG.find(name);
+        return it != varDimsG.end() ? &it->second : nullptr;
+    }
+
     // 记录变量的轻量类型（函数内→局部表，否则→全局表）
     void regVar(const Field& f) {
         VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
@@ -1808,13 +2024,23 @@ struct CGen {
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
         fatScopes.emplace_back();
+        fatArrayScopes.emplace_back();
         fatStackScopes.emplace_back();
+        memCanaryScopes.emplace_back();
         fatFinalScopes.emplace_back();
+        // 本作用域直接子标签登记入 labelDepth（进域可见、退域注销），供 goto 跨域清理定位。
+        size_t scopeIdx = fatScopes.size() - 1;
+        for (auto& s : stmts)
+            if (s->kind == Stmt::LabelS) labelDepth[s->text] = scopeIdx;
         for (auto& s : stmts) emitStmt(*s);
         // 块正常落出（非 return/break/... 收尾）：两阶段清理本块（拆胖边 + 栈对象断言）
         if (!lastTerminates(stmts)) emitScopeCleanupAt(fatScopes.size() - 1, "");
+        for (auto& s : stmts)
+            if (s->kind == Stmt::LabelS) labelDepth.erase(s->text);
         fatScopes.pop_back();
+        fatArrayScopes.pop_back();
         fatStackScopes.pop_back();
+        memCanaryScopes.pop_back();
         fatFinalScopes.pop_back();
     }
 
@@ -2176,11 +2402,14 @@ struct CGen {
                     // final 钩子：任意活动作用域登记了 final → return 也须先发出
                     bool anyFinal = false;
                     for (auto& fc : fatFinalScopes) if (!fc.empty()) { anyFinal = true; break; }
+                    // --check=mem 栈数组尾哨兵：任意活动作用域登记了栈数组 → return 前须校验
+                    bool anyCanary = false;
+                    for (auto& mc : memCanaryScopes) if (!mc.empty()) { anyCanary = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
                     std::string skip;
                     if (s.expr && s.expr->kind == Expr::Ident && isFatExpr(*s.expr))
                         skip = s.expr->text;
-                    if (!anyFat && !anyFinal) {
+                    if (!anyFat && !anyFinal && !anyCanary) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
@@ -2294,11 +2523,26 @@ struct CGen {
                 depth--;
                 indent(); out << "}\n";
                 break;
-            case Stmt::GotoS:
+            case Stmt::GotoS: {
+                // goto 跨域清理：目标标签若在当前活动作用域链上，则从最内层清理到「标签
+                // 所在作用域的子层」（含被跳过的胖根/final/栈哨兵；回跳同时拆解标签体使其重入干净）。
+                auto it = labelDepth.find(s.text);
+                if (it != labelDepth.end()) {
+                    emitFatCleanupTo(it->second + 1);
+                } else if (hasActiveCleanup()) {
+                    // 目标不在活动链上（跨分支/跳入更深作用域）：无法安全清理被跳过的自动指针/final。
+                    throw CompileError{
+                        "goto 跨非包含作用域跳转：目标标签 '" + s.text +
+                        "' 不在当前活动作用域链上，存在待清理的自动指针/final/栈哨兵，"
+                        "无法保证内存安全（请避免跨分支或跳入更深作用域的 goto）",
+                        s.line};
+                }
                 indent(); out << "goto " << s.text << ";\n";
                 break;
+            }
             case Stmt::LabelS:
-                indent(); out << s.text << ":\n";
+                // 标签后接空语句，使「标签紧跟声明」合法（C 中 label 后须为语句，声明非语句）。
+                indent(); out << s.text << ":;\n";
                 depth++; emitStmts(s.body); depth--;
                 break;
             case Stmt::DeclS:
@@ -3614,6 +3858,28 @@ struct CGen {
         emitSofHelpers();
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
+        // --check=mem：全局栈数组尾哨兵的启动填充 / 退出校验钩子（在全局声明之后）。
+        if (g_memCheck && !globalCanaries.empty()) {
+            auto canaryLen = [](const MemCanaryVar& mc) -> std::string {
+                return mc.dims.size() == 1
+                    ? "SC_CANARY_ELEMS(" + mc.elemTy + ") * sizeof(" + mc.elemTy + ")"
+                    : std::string("SC_CANARY");
+            };
+            out << "\nstatic void __sc_gcanary_init(void) __attribute__((constructor));\n";
+            out << "static void __sc_gcanary_init(void) {\n";
+            for (auto& mc : globalCanaries)
+                out << "    sc_stack_canary_fill((unsigned char*)" << mc.name
+                    << " + (" << canaryElems(mc.dims) << ") * sizeof(" << mc.elemTy << "), "
+                    << canaryLen(mc) << ", " << mc.name << ");\n";
+            out << "}\n";
+            out << "static void __sc_gcanary_fini(void) __attribute__((destructor));\n";
+            out << "static void __sc_gcanary_fini(void) {\n";
+            for (auto& mc : globalCanaries)
+                out << "    sc_stack_canary_check((unsigned char*)" << mc.name
+                    << " + (" << canaryElems(mc.dims) << ") * sizeof(" << mc.elemTy << "), "
+                    << canaryLen(mc) << ", " << mc.name << ", \"" << mc.site << "\");\n";
+            out << "}\n";
+        }
         return out.str();
     }
 
@@ -3690,6 +3956,8 @@ void setRefCheck(bool on) { g_refCheck = on; }
 bool getRefCheck() { return g_refCheck; }
 void setMemCheck(bool on) { g_memCheck = on; }
 bool getMemCheck() { return g_memCheck; }
+void setPtrCheck(bool on) { g_ptrCheck = on; }
+bool getPtrCheck() { return g_ptrCheck; }
 void setRefSrcFile(const std::string& path) { g_refSrcFile = path; }
 
 std::string emitC(const Program& prog, const std::string& srcFile) {

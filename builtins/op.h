@@ -74,6 +74,25 @@ static inline uintptr_t sc_canary_magic(const void *block) { return (uintptr_t)b
 /* 带 canary 的 ref 头堆对象释放：校验头/尾哨兵（越界损坏则报 stderr），再 free 整块（含哨兵区）。 */
 void sc_canary_free(sc_ref *r);
 
+/* --check=mem 栈数组尾哨兵：函数内一维栈数组 `T buf[N]` 超额分配 SC_CANARY_ELEMS(T) 个尾元素，
+ * 声明后 fill 填入地址派生模式，退域/return/break 处 check 校验尾区未被越界写破坏（报 stderr）。
+ * 尾区紧贴有效元素，溢出先撞尾哨兵、就地拦截、不波及邻接对象；魔数随 buf 地址变化不可伪造。 */
+#define SC_CANARY_ELEMS(T) ((SC_CANARY + sizeof(T) - 1) / sizeof(T))   /* 覆盖 SC_CANARY 字节所需的 T 元素数 */
+/* 多维栈数组：仅外层维度超额若干「行」以覆盖 SC_CANARY 字节，INNER=内层各维元素积（一维取 1）。 */
+#define SC_CANARY_OUTER(T, INNER) ((SC_CANARY + (INNER) * sizeof(T) - 1) / ((INNER) * sizeof(T)))
+void sc_stack_canary_fill(unsigned char *p, size_t n, const void *anchor);
+void sc_stack_canary_check(const unsigned char *p, size_t n, const void *anchor, const char *who);
+
+/* --check=ptr 运行时指针/下标守卫：在解引用（*p / p->m）与指针下标处对裸指针做 nil 校验，
+ * 在编译期已知维度的栈数组下标处做越界校验。命中即报 stderr 并 abort（致命，防 UB 继续扩散）。
+ *   · __sc_ptr_check：p==NULL 时报「空指针解引用」并 abort，否则原样返回 p。
+ *   · __sc_bound_check：idx<0 || idx>=len 时报「数组下标越界」并 abort，否则返回 idx。
+ * SC_PTRCHK 用 __typeof__ 保型且仅求值一次（__typeof__ 操作数不求值，gcc/clang 通用）。 */
+const void *__sc_ptr_check(const void *p, const char *who);
+long        __sc_bound_check(long idx, long len, const char *who);
+#define SC_PTRCHK(p, who)      ((__typeof__(p))__sc_ptr_check((const void *)(p), (who)))
+#define SC_BOUNDCHK(i, n, who) (__sc_bound_check((long)(i), (long)(n), (who)))
+
 /* 绑定一条边：目标.in++、持有者.out++（哨兵 own 跳过 out 记账）。
  * 原子性逐对象判定：读对象头 flags 的 SC_REF_ATOM 位选原子/普通 RMW（混合图天然正确）。 */
 static inline void sc_fat_bind(sc_fat *f, void *tgt, sc_ref *tr, int32_t *ow) {

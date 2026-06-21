@@ -46,6 +46,42 @@ void sc_canary_free(sc_ref *r) {
     free(block);
 }
 
+/* --check=mem 栈数组尾哨兵：anchor 派生逐字节模式（地址异或盐的字节循环），
+ * 填入紧贴有效元素之后的 n 字节尾区；check 处逐字节比对，破坏即报越界（不中止，沿 sc_ref_check 约定）。 */
+void sc_stack_canary_fill(unsigned char *p, size_t n, const void *anchor) {
+    uintptr_t m = sc_canary_magic(anchor);
+    for (size_t i = 0; i < n; i++)
+        p[i] = (unsigned char)(m >> ((i % sizeof(uintptr_t)) * 8));
+}
+
+void sc_stack_canary_check(const unsigned char *p, size_t n, const void *anchor, const char *who) {
+    uintptr_t m = sc_canary_magic(anchor);
+    for (size_t i = 0; i < n; i++)
+        if (p[i] != (unsigned char)(m >> ((i % sizeof(uintptr_t)) * 8))) {
+            fprintf(stderr, "sc: 越界：栈数组 %s 尾哨兵被破坏（缓冲区上溢）\n", who ? who : "对象");
+            return;
+        }
+}
+
+/* --check=ptr 运行时守卫：解引用前的裸指针 nil 校验、已知维度数组下标的越界校验。
+ * 命中即报 stderr 并 abort —— 解引用空指针 / 越界访问属未定义行为，放行只会让破坏继续扩散。 */
+const void *__sc_ptr_check(const void *p, const char *who) {
+    if (!p) {
+        fprintf(stderr, "sc: 空指针解引用：%s\n", who ? who : "(未知位置)");
+        abort();
+    }
+    return p;
+}
+
+long __sc_bound_check(long idx, long len, const char *who) {
+    if (idx < 0 || idx >= len) {
+        fprintf(stderr, "sc: 数组下标越界：%s（下标 %ld，长度 %ld）\n",
+                who ? who : "(未知位置)", idx, len);
+        abort();
+    }
+    return idx;
+}
+
 /* ---------------- chain：侵入式双向链表 ---------------- */
 /* 元素首部内嵌 _prev/_next（sc 编译器注入），偏移固定在结构体最前面。
  * 约定：首元素 _prev = 尾元素（rear），尾元素 _next = NULL。 */

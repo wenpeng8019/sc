@@ -40,6 +40,10 @@ bool getRefCheck();
 // 越界 canary 开关（--check=mem）：开启则 ref 头堆对象注入头尾哨兵，释放点校验越界损坏。
 void setMemCheck(bool on);
 bool getMemCheck();
+// 运行时指针/下标守卫开关（--check=ptr / SCC_PTR_CHECK）：开启则在解引用、指针下标处注入
+// nil 校验，在编译期已知维度的栈数组下标处注入越界校验（命中即报 stderr 并 abort）。
+void setPtrCheck(bool on);
+bool getPtrCheck();
 // 栈悬挂断言 site 文案使用的源码文件名（独立于 #line 的 srcFile）。
 void setRefSrcFile(const std::string& path);
 

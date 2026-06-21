@@ -285,7 +285,7 @@ int32_t main(void) {
     /* line 246 */
     int32_t cnt = 0;
     /* line 247 */
-    again:
+    again:;
         /* line 248 */
         cnt++;
         /* line 249 */

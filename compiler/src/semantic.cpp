@@ -681,20 +681,77 @@ struct Checker {
     }
 
     // ---- 自动指针 T@ 边界检查（§13.5）----
-    // 当前未实现：T@ 数组（元素引用图清理/下标赋值记账缺失，静默会泄露）→ 直接报错。
-    void checkFatTypeRef(const TypeRef& t, int line, const char* where) const {
-        if (t.fat && !t.arrayDims.empty())
-            err(line, std::string("暂不支持 T@ 数组（") + where +
-                "）：元素的引用图清理与下标赋值记账尚未实现；如需指针数组请用裸指针 T& 数组");
+    // T@ 数组：局部一维已实现（元素逐个根边、退域逐元素清理、下标赋值记账）→ 放行；
+    // 多维 / 非局部（字段/全局/参数/返回）仍未实现引用图清理 → 报错（静默会泄露）。
+    void checkFatTypeRef(const TypeRef& t, int line, const char* where,
+                         bool allowLocalArray = false) const {
+        if (t.fat && !t.arrayDims.empty()) {
+            if (!(allowLocalArray && t.arrayDims.size() == 1))
+                err(line, std::string("暂不支持 T@ 数组（") + where +
+                    "）：" + (t.arrayDims.size() > 1 ? "多维 T@ 数组" : "该位置")
+                    + "的引用图清理与下标赋值记账尚未实现；"
+                    "如需指针数组请用裸指针 T& 数组，或改用局部一维 T@ 数组");
+        }
         // 内联结构/联合字段递归
         if (t.hasInline)
             for (auto& f : t.structCommon.fields)
                 checkFatTypeRef(f.type, f.line ? f.line : line, "内联字段");
     }
 
+    // 类型按值是否内嵌自动指针 T@（直接 T@ 字段，或按值聚合/内联结构递归含 T@）。
+    // 用于跨 C ABI 守卫：含 T@ 的结构体按值跨边界（C 侧/传输）会破坏胖指针引用图与 ARC。
+    bool typeEmbedsFat(const TypeRef& t, std::unordered_set<std::string>& visited) const {
+        if (t.fnKind != TypeRef::FncKind::None) return false;   // 函数指针固定大小，不内嵌
+        if (t.fat) return true;                                 // T@ 字段：内嵌 sc_fat
+        if (t.hasInline)
+            for (auto& f : t.structCommon.fields)
+                if (typeEmbedsFat(f.type, visited)) return true;
+        // 按值聚合（非指针/非数组）：递归其字段
+        if (t.ptr == 0 && t.arrayDims.empty() && !t.name.empty()) {
+            const std::string base = resolveAliasToName(t.name);
+            if (!visited.insert(base).second) return false;     // 环：已访问
+            const Decl* sd = resolveStruct(base);
+            if (sd && (sd->kind == Decl::StructD || sd->kind == Decl::UnionD))
+                for (auto& f : sd->structCommon.fields)
+                    if (typeEmbedsFat(f.type, visited)) return true;
+        }
+        return false;
+    }
+
+    // 跨 C ABI 守卫：检查导出/rpc/C 实现函数的单个参数/返回类型。
+    //   · 直接 T@：仅 rpc / cImpl 拒绝（导出 @fnc 允许以 T@ 移交所有权）。
+    //   · 按值结构体内嵌 T@：导出 / rpc / cImpl 一律拒绝（C 侧无法维护 ARC）。
+    void checkAbiFatType(const TypeRef& t, int line, const Decl& fn, const char* slot) const {
+        const bool transport = fn.isRpc || fn.cImpl;   // 跨传输 / 跨 C 实现
+        if (t.fat) {
+            if (transport)
+                err(line, std::string(fn.isRpc ? "rpc '" : "C 实现接口 '") + fn.name +
+                    "' 的" + slot + "为自动指针 T@：跨传输/跨 C ABI 无法维护胖指针引用图与 ARC，"
+                    "请改用裸指针 T& 或值类型");
+            return;   // 导出 @fnc 直接 T@：允许（所有权移交）
+        }
+        if (t.ptr == 0 && t.arrayDims.empty()) {
+            std::unordered_set<std::string> visited;
+            if (typeEmbedsFat(t, visited))
+                err(line, std::string("'") + fn.name + "' 的" + slot +
+                    "（按值聚合 '" + t.name + "'）内嵌自动指针 T@ 成员：不能跨 C ABI 传递"
+                    "（C 侧无法维护胖指针 ARC），请改用裸指针 T& 或移除该成员后传递");
+        }
+    }
+
+    // 对一个导出/rpc/cImpl 函数声明做参数与返回类型的跨 C ABI 守卫。
+    void checkAbiFatFn(const Decl& d) const {
+        for (auto& p : d.structCommon.fields)
+            checkAbiFatType(p.type, p.line ? p.line : d.line, d, ("参数 '" + p.name + "'").c_str());
+        if (d.structCommon.type)
+            checkAbiFatType(*d.structCommon.type, d.line, d, "返回类型");
+    }
+
+
     void checkFatBoundariesStmt(const Stmt& s) const {
         for (auto& d : s.decls)
-            checkFatTypeRef(d.type, d.line ? d.line : s.line, "局部变量/常量");
+            checkFatTypeRef(d.type, d.line ? d.line : s.line, "局部变量/常量",
+                            /*allowLocalArray*/ true);
         for (auto& b : s.body) checkFatBoundariesStmt(*b);
         for (auto& b : s.elseBody) checkFatBoundariesStmt(*b);
         for (auto& arm : s.caseArms)
@@ -714,6 +771,10 @@ struct Checker {
                 checkFatTypeRef(*d->structCommon.type, d->line, "返回类型");
             if (d->kind == Decl::FuncD)
                 for (auto& s : d->body) checkFatBoundariesStmt(*s);
+            // 跨 C ABI 守卫：导出 / rpc / C 实现函数的参数/返回不得跨边界携带 T@（详见 §18）
+            if ((d->kind == Decl::FuncD || d->kind == Decl::FuncTypeD)
+                && (d->exported || d->isRpc || d->cImpl))
+                checkAbiFatFn(*d);
         }
     }
 

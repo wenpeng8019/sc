@@ -1,0 +1,2 @@
+abi_fat_bad.sc:8: [1;31m错误[0m: 'take' 的参数 'b'（按值聚合 'node'）内嵌自动指针 T@ 成员：不能跨 C ABI 传递（C 侧无法维护胖指针 ARC），请改用裸指针 T& 或移除该成员后传递
+  |  @fnc take: i4, b: node
