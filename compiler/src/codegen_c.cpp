@@ -12,6 +12,7 @@
 // ============================================================
 #include "codegen_c.h"
 #include "error.h"
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <map>
@@ -71,11 +72,15 @@ bool inferLiteralType(const Expr& init, std::string& base, int& ptr) {
             const std::string& t = e->text;
             bool uns = t.find_first_of("uU") != std::string::npos;
             bool lng = t.find_first_of("lL") != std::string::npos;
-            std::string digits = t.substr(0, t.find_first_of("uUlL"));
+            bool byte = t.find_first_of("bB") != std::string::npos;   // 扩展：单字节 i1/u1
+            bool word = t.find_first_of("wW") != std::string::npos;   // 扩展：双字节 i2/u2
+            std::string digits = t.substr(0, t.find_first_of("uUlLbBwW"));
             unsigned long long mag = 0;
             try { mag = std::stoull(digits, nullptr, 0); } catch (...) { mag = 0; }
-            if (uns) base = (lng || mag > 0xFFFFFFFFull) ? "u8" : "u4";
-            else     base = (lng || mag > 0x7FFFFFFFull) ? "i8" : "i4";
+            if (byte)      base = uns ? "u1" : "i1";
+            else if (word) base = uns ? "u2" : "i2";
+            else if (uns)  base = (lng || mag > 0xFFFFFFFFull) ? "u8" : "u4";
+            else           base = (lng || mag > 0x7FFFFFFFull) ? "i8" : "i4";
             ptr = 0; return true;
         }
         default: return false;
@@ -156,6 +161,7 @@ struct CGen {
     int forSeq = 0;             // for-in 临时变量序号（生成唯一 _fi/_fb/... 名）
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
     const Decl* curFnSig = nullptr;  // 当前普通函数签名（return 临时变量取返回类型用）
+    bool retDollarDeclared = false;  // ret 调用语法糖：当前函数是否已声明 $（_sc_ret）
 
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
@@ -1151,12 +1157,21 @@ struct CGen {
     // ---------------- 表达式 ----------------
     void emitExpr(const Expr& e, bool top = false) {
         switch (e.kind) {
-            case Expr::IntLit: case Expr::FloatLit:
+            case Expr::IntLit: {
+                // b/w 为 sc 扩展后缀（单/双字节），C 不识别，输出时剥离；保留 u/l
+                std::string lit = e.text;
+                lit.erase(std::remove_if(lit.begin(), lit.end(),
+                    [](char c){ return c=='b'||c=='B'||c=='w'||c=='W'; }), lit.end());
+                out << lit;
+                break;
+            }
+            case Expr::FloatLit:
             case Expr::StrLit: case Expr::CharLit:
                 out << e.text;
                 break;
             case Expr::Ident:
                 if (e.text == "this") out << "_this";      // 方法内接收者
+                else if (e.text == "$") out << "_sc_ret";  // ret 调用语法糖结果变量（$ 非 C99 合法名，映射）
                 else if (e.text == "self" && !localsT.count("self") && !globalsT.count("self"))
                     out << "(_this->_self)";  // 分身/切片内上下文关键字：回指本体实体
                                               // （无同名局部时；MethodPtr 实现可用 self 作接收者参数名）
@@ -2792,6 +2807,37 @@ struct CGen {
                     }
                 } else out << "\n";
                 break;
+            case Stmt::RetCallS: {
+                // ret 调用语法糖：首次出现自动声明函数级 $（_sc_ret），随后复用。
+                if (!retDollarDeclared) {
+                    indent(); out << "int32_t _sc_ret;\n";   // ret == i4
+                    retDollarDeclared = true;
+                }
+                if (s.retOp == "!!") {
+                    // !! f() → _sc_ret = f(); if (_sc_ret != 0) assert(false);
+                    indent(); out << "_sc_ret = ";
+                    emitExpr(*s.expr, true);
+                    out << ";\n";
+                    indent(); out << "if (_sc_ret != 0) assert(false);\n";
+                    break;
+                }
+                // ! f()  → if (!((_sc_ret = f())))      { body }
+                // OP f() → if (((_sc_ret = f())) OP 0)  { body }（OP ∈ > < >= <=）
+                indent(); out << "if (";
+                if (s.retOp == "!") {
+                    out << "!((_sc_ret = ";
+                    emitExpr(*s.expr, true);
+                    out << "))";
+                } else {
+                    out << "((_sc_ret = ";
+                    emitExpr(*s.expr, true);
+                    out << ") " << s.retOp << " 0)";
+                }
+                out << ") {\n";
+                depth++; emitStmts(s.body); depth--;
+                indent(); out << "}\n";
+                break;
+            }
             case Stmt::WhileS:
                 indent();
                 out << "while (";
@@ -3317,6 +3363,7 @@ struct CGen {
         varDimsL.clear();
         projVarsL.clear();
         inFunc = true;
+        retDollarDeclared = false;
         const Decl* sig = &d;
         if (!d.funcTypeName.empty()) {
             auto it = funcTypes.find(d.funcTypeName);
@@ -3348,6 +3395,7 @@ struct CGen {
         // 干净的函数作用域
         localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
         inFunc = true;
+        retDollarDeclared = false;
         depth = 0;
 
         Decl sigDecl;                                   // 仅承载返回类型给 emitRetType
@@ -3527,6 +3575,7 @@ struct CGen {
         varDimsL.clear();
         projVarsL.clear();
         inFunc = true;
+        retDollarDeclared = false;
         for (auto& p : d.structCommon.fields) regVar(p);
         curRpc = &d;
         rpcParams.clear();
@@ -3928,6 +3977,7 @@ struct CGen {
         std::vector<const Field*> locals = collectAsyncLocals(d);
         localsT.clear(); fnVarsL.clear(); varDimsL.clear();
         inFunc = true;
+        retDollarDeclared = false;
         for (auto& p : d.structCommon.fields) regVar(p);
         for (auto& f : locals) regVar(*f);
         curRpc = &d;
@@ -3989,6 +4039,7 @@ struct CGen {
             static const std::unordered_set<std::string> kPlatformHdrs = {
                 "stdint.h", "stddef.h", "stdbool.h", "stdarg.h",
                 "stdio.h", "stdlib.h", "string.h", "time.h",
+                "assert.h", "inttypes.h",
             };
             std::string bare = h;
             if (!bare.empty() && (bare.front() == '<' || bare.front() == '"'))

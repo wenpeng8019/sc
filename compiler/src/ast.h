@@ -285,6 +285,14 @@ struct Stmt {
                     //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
                     //                  false 时为拼接糖：字符串字面量=纯文本；其余=按静态类型自动
                     //                  补说明符的变量；Cast(castIsFmt)=显式格式覆盖 (expr: "%fmt")
+        RetCallS,   // ret 调用语法糖   retOp func()[ \n body]
+                    //                > expr=被调用的函数表达式（Expr::Call）
+                    //                > retOp ∈ {"!",">","<",">=","<=","!!"}
+                    //                > body=条件成立时执行的块（"!!" 形态无块）
+                    //                  首次出现自动声明函数级 ret 变量 $，每次复用：
+                    //                    ! f()   等价 if (!($=f())) { body }
+                    //                    > f()   等价 if (($=f()) >  0) { body }（< <= >= 类推）
+                    //                    !! f()  等价 $=f(); if ($ != ok) assert(false)
     } kind;
 
     ExprPtr expr;                       // ExprS: 表达式的值
@@ -320,6 +328,8 @@ struct Stmt {
     std::string printChn;               // PrintS: <chn> 通道的 C 表达式文本（默认 "0"）
     std::vector<ExprPtr> printArgs;     // PrintS: 拼接实参列表（顺序）
     bool printCompat = false;           // PrintS: 括号形式 print(...) → C printf 兼容模式（实参原样传递）
+
+    std::string retOp;                  // RetCallS: 语法糖操作符（"!" ">" "<" ">=" "<=" "!!"）
 
     struct CaseArm {
         std::vector<ExprPtr> labels;    // 空=default 分支

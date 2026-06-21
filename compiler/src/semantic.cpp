@@ -538,6 +538,14 @@ struct Checker {
                 for (auto& x : s.elseBody) checkStmt(*x, b, retTy);
                 break;
             }
+            // -- ret 调用语法糖：登记函数级 $（ret），检查被调用表达式与体 -------
+            case Stmt::RetCallS: {
+                locals["$"] = Ty{"ret", 0, 0, true, false};   // $ 为 ret 类型结果变量
+                (void)inferExpr(*s.expr, locals, s.line);
+                auto a = locals;
+                for (auto& x : s.body) checkStmt(*x, a, retTy);
+                break;
+            }
             // -- while：条件检查，体在独立作用域 ---------------------------------
             case Stmt::WhileS: {
                 (void)inferExpr(*s.expr, locals, s.line);

@@ -88,6 +88,7 @@ struct Token {
     Tok kind;           // token 种类
     std::string text;   // 源码文本（标识符名/字面量值/运算符拼写/关键字拼写）
     int line = 0;       // 所在行号（1-based），用于编译错误定位
+    bool spaceBefore = false;  // 该 token 前是否存在空白（用于 ret 调用语法糖的空格消歧）
 };
 
 // 对外接口：输入源码字符串，输出 token 序列

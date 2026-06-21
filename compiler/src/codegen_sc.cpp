@@ -68,6 +68,11 @@ struct SGen {
                 depth++; emitStmts(s.body); depth--;
                 emitElse(s.elseBody);
                 break;
+            case Stmt::RetCallS:
+                // ret 调用语法糖：retOp func()[ \n body]
+                ind(); out << s.retOp << " " << exprToStr(*s.expr) << "\n";
+                if (s.retOp != "!!") { depth++; emitStmts(s.body); depth--; }
+                break;
             case Stmt::WhileS:
                 ind(); out << "while " << exprToStr(*s.expr) << "\n";
                 depth++; emitStmts(s.body); depth--;

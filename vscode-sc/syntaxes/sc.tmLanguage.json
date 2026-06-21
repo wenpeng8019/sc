@@ -12,6 +12,7 @@
         { "include": "#for-in" },
         { "include": "#var-decl" },
         { "include": "#label-decl" },
+        { "include": "#ret-call-sugar" },
         { "include": "#qualified-type" },
         { "include": "#keywords" },
         { "include": "#builtins" },
@@ -146,8 +147,18 @@
                 {
                     "name": "constant.language.sc",
                     "match": "\\b(true|false|nil|ok)\\b"
+                },
+                {
+                    "name": "variable.language.ret-result.sc",
+                    "match": "\\$"
                 }
             ]
+        },
+        "ret-call-sugar": {
+            "match": "^\\s*(!!|>=|<=|!|>|<)\\s+(?=[A-Za-z_])",
+            "captures": {
+                "1": { "name": "keyword.operator.ret-sugar.sc" }
+            }
         },
         "types": {
             "patterns": [
@@ -191,9 +202,9 @@
         },
         "numbers": {
             "patterns": [
-                { "name": "constant.numeric.hex.sc", "match": "\\b0[xX][0-9a-fA-F]+[uUlL]*\\b" },
+                { "name": "constant.numeric.hex.sc", "match": "\\b0[xX][0-9a-fA-F]+[uUlLbBwW]*\\b" },
                 { "name": "constant.numeric.float.sc", "match": "\\b[0-9]+\\.[0-9]+[fFlL]?\\b" },
-                { "name": "constant.numeric.integer.sc", "match": "\\b[0-9]+[uUlL]*\\b" }
+                { "name": "constant.numeric.integer.sc", "match": "\\b[0-9]+[uUlLbBwW]*\\b" }
             ]
         },
         "function-call": {

@@ -93,6 +93,11 @@ std::string stmtNode(const Stmt& s) {
             }
             return node("if", "", exprToStr(*s.expr), s.line, c);
         }
+        case Stmt::RetCallS: {
+            std::vector<std::string> c;
+            for (auto& b : s.body) c.push_back(stmtNode(*b));
+            return node("retcall", s.retOp, exprToStr(*s.expr), s.line, c);
+        }
         case Stmt::WhileS: {
             std::vector<std::string> c;
             for (auto& b : s.body) c.push_back(stmtNode(*b));

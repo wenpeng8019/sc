@@ -1438,6 +1438,42 @@ struct Parser {
         return s;
     }
 
+    // ret 调用语法糖：
+    //   !! func()                失败即断言中止：$=func(); if ($ != ok) assert(false)
+    //   ! func() \n body         if (!($=func())) { body }
+    //   > / < / >= / <= func() \n body   if (($=func()) OP 0) { body }
+    // 操作符与函数调用之间须有空格（用于与普通取反表达式 !foo() 消歧）。
+    StmtPtr tryParseRetCall() {
+        if (cur().kind != Tok::Op) return nullptr;
+        const std::string op = cur().text;
+
+        // !! func() —— 两个相邻的 '!'（中间无空格）
+        if (op == "!" && peek().kind == Tok::Op && peek().text == "!" && !peek().spaceBefore) {
+            advance(); advance();                       // 跳过两个 '!'
+            if (!cur().spaceBefore) err("'!!' 与函数调用之间须有空格");
+            auto s = mkStmt(Stmt::RetCallS);
+            s->retOp = "!!";
+            s->expr = parseExpr();
+            expect(Tok::Newline, "换行");
+            return s;
+        }
+
+        // ! / > / < / >= / <= func() \n body
+        const bool isCmp = (op == ">" || op == "<" || op == ">=" || op == "<=");
+        if (op == "!" || isCmp) {
+            // '!' 必须带空格才作糖（无空格视为普通取反表达式）；比较运算符开头必为糖
+            if (op == "!" && !peek().spaceBefore) return nullptr;
+            advance();                                  // 跳过操作符
+            if (!cur().spaceBefore) err("ret 调用语法糖的操作符与函数调用之间须有空格");
+            auto s = mkStmt(Stmt::RetCallS);
+            s->retOp = op;
+            s->expr = parseExpr();
+            parseBlock(s->body);
+            return s;
+        }
+        return nullptr;
+    }
+
     // 单条语句解析 —— 按首 token 分派
     StmtPtr parseStmt() {
 
@@ -1445,6 +1481,9 @@ struct Parser {
         // + 因为需要和普通表达式语句（如函数调用）区分
         if (at(Tok::Ident) && peek().kind == Tok::Colon && peek(2).kind == Tok::Newline)
             return parseLabelStmt();
+
+        // ret 调用语法糖：!! / ! / > / < / >= / <= 开头（操作符与函数名间须有空格）
+        if (StmtPtr rc = tryParseRetCall()) return rc;
 
         switch (cur().kind) {
 

@@ -21,6 +21,7 @@
 #include <cctype>
 #include <cstring>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 
@@ -49,6 +50,25 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"offsetof", Tok::KwOffsetof},
 };
 
+// 校验字面量后缀是否为合法组合（限制为 C 标准后缀 + b/w 扩展）。
+//   整数：可选无符号 u/U，可选大小 l/L/ll/LL/b/B/w/W（顺序不限，二者可组合）
+//         b/B → 单字节（i1/u1），w/W → 双字节（i2/u2），l/ll → long/long long
+//   浮点：可选单个 f/F（float）或 l/L（long double）
+static bool validLiteralSuffix(const std::string& sfx, bool isFloat) {
+    std::string low;
+    for (char c : sfx) low += (char)std::tolower((unsigned char)c);
+    if (isFloat) return low == "f" || low == "l";
+    // 整数：无符号 u 可置于大小后缀之前或之后；大小后缀 l/ll/b/w 至多一种。
+    static const std::unordered_set<std::string> kIntSuffix = {
+        "", "u",
+        "l",  "ul",  "lu",
+        "ll", "ull", "llu",
+        "b",  "ub",  "bu",
+        "w",  "uw",  "wu",
+    };
+    return kIntSuffix.count(low) != 0;
+}
+
 // Lexer 内部类 —— 封装所有词法分析状态
 struct Lexer {
     const std::string& s;         // 源码引用（不拷贝）
@@ -64,7 +84,11 @@ struct Lexer {
 
     char peek(size_t off = 0) const { return i + off < s.size() ? s[i + off] : '\0'; }
     char get() { return i < s.size() ? s[i++] : '\0'; }
-    void push(Tok k, std::string t = "") { out.push_back({k, std::move(t), line}); }
+    void push(Tok k, std::string t = "") {
+        out.push_back({k, std::move(t), line, pendingSpace});
+        pendingSpace = false;
+    }
+    bool pendingSpace = false;    // 自上个 token 以来是否跳过空白（供 spaceBefore 使用）
 
     [[noreturn]] void err(const std::string& m) { throw CompileError{m, line}; }
 
@@ -143,9 +167,18 @@ struct Lexer {
             }
         }
 
-        // 字面量后缀：整数 u/U/l/L（如 1u, 100UL, 7LL），浮点 f/F/l/L（如 3.14f）
-        const char* sfx = isFloat ? "fFlL" : "uUlL";
-        while (peek() && std::strchr(sfx, peek())) v += get();
+        // 字面量后缀：
+        //   整数 u/U + l/L/ll/LL（C 标准），扩展 b/B（单字节 i1/u1）w/W（双字节 i2/u2）
+        //   浮点 f/F（float）或 l/L（long double）
+        // 贪婪收集所有可能的后缀字母，随后校验是否为合法组合（限制为 C 标准 + b/w 扩展）。
+        {
+            const char* charset = isFloat ? "fFlL" : "uUlLbBwW";
+            std::string sfx;
+            while (peek() && std::strchr(charset, peek())) sfx += get();
+            if (!sfx.empty() && !validLiteralSuffix(sfx, isFloat))
+                err("非法字面量后缀: " + sfx);
+            v += sfx;
+        }
 
         push(isFloat ? Tok::Float : Tok::Int, v);
     }
@@ -246,15 +279,18 @@ struct Lexer {
             }
 
             // ---- 空白字符：跳过 ----
-            if (c == ' ' || c == '\t' || c == '\r') { get(); continue; }
+            if (c == ' ' || c == '\t' || c == '\r') { get(); pendingSpace = true; continue; }
 
             // ---- 注释：# 到行尾 ----
-            if (c == '#') { while (peek() && peek() != '\n') get(); continue; }
+            if (c == '#') { while (peek() && peek() != '\n') get(); pendingSpace = true; continue; }
 
             // ---- 字面量 ----
             if (c == '"' || c == '\'') { lexString(c); continue; }
             if (isdigit((unsigned char)c)) { lexNumber(); continue; }
             if (isalpha((unsigned char)c) || c == '_') { lexIdent(); continue; }
+
+            // ---- ret 调用语法糖的结果变量 $（独立标识符 token）----
+            if (c == '$') { get(); push(Tok::Ident, "$"); continue; }
 
             // ---- 分隔符（括号需追踪深度）----
             switch (c) {

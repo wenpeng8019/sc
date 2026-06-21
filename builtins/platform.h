@@ -14,11 +14,12 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
+#include <assert.h>     /* assert：ret 调用语法糖 !! func() 的失败中止 */
 #include <inttypes.h>   /* PRId64 / PRIu64：64 位整数 printf 说明符跨平台适配（print 关键字用） */
 
 typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
