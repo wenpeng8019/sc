@@ -53,6 +53,8 @@ POSITIVE=(
     examples/feature21.sc
     examples/feature22.sc
     examples/feature23.sc
+    examples/feature24.sc
+    examples/feature25.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     tests/cases/cast.sc
@@ -85,6 +87,17 @@ NEGATIVE=(
     tests/cases/goto_bad_cross.sc
     tests/cases/abi_fat_bad.sc
     tests/cases/fat_array_bad.sc
+)
+
+# 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。
+# 证明三套内存保护在运行期真正拦截，而非仅产物快照：
+#   ptr 空指针/越界（致命 abort）、mem 栈缓冲上溢（报告）、ref 悬挂引用（报告）。
+# 每项格式 "源文件 检查档"。
+RUNTIME_TRAP=(
+    "tests/cases/trap_ptr_nil.sc ptr"
+    "tests/cases/trap_ptr_oob.sc ptr"
+    "tests/cases/trap_mem_overflow.sc mem"
+    "tests/cases/trap_ref_dangle.sc ref"
 )
 
 pass=0 fail=0 upd=0
@@ -159,6 +172,17 @@ for src in "${NEGATIVE[@]}"; do
     fi
     err="$(printf '%s' "$err" | norm_err)"
     snapshot "$name (err)" "$GOLDEN/$name.err" "$err"
+done
+
+# 运行时守卫：编译并运行带 --check 的程序，捕获其 stderr 报错并比对 .trap 黄金。
+# （致命类 abort 退出码非 0、报告类退出 0；统一以 stderr 报错文本为准，足证拦截发生）
+for entry in "${RUNTIME_TRAP[@]}"; do
+    set -- $entry
+    src=$1; flag=$2
+    name="$(basename "$src" .sc)"
+    trap_err="$("$SCC" "$src" --check="$flag" 2>&1 1>/dev/null)"
+    trap_err="$(printf '%s' "$trap_err" | norm_err)"
+    snapshot "$name (trap --check=$flag)" "$GOLDEN/$name.trap" "$trap_err"
 done
 
 echo
