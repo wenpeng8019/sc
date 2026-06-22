@@ -13,11 +13,16 @@ inc stdlib.h
 
 #-------------- def：枚举 / 结构 / 联合 / 别名 -----------------
 
+def macro: p1, p2, p3, ...
+    var p1\b: i4 = 2
+
+
 # 枚举（支持显式赋值与自动递增）
-def color: i1
+def color: [
     Red = 0
     Green
     Blue
+] : i4
 
 # 结构体
 def point: {

@@ -71,7 +71,7 @@ ln -s "$(pwd)/vscode-sc" ~/.vscode/extensions/sc-lang-0.1.0
 - 缩进表示结构（Tab 或 4 空格为一级），`#` 行注释
 - `name&` 指针、`name&&` 指针的指针、`name[x][y]` 多维数组；无类型对象默认 `char*`，无类型指针默认 `void*`
 - `inc stdio.h` 引入头文件（对齐 C 的 `#include`）；`inc x.sc` 导入 sc 模块（单元编译+链接）
-- 无预处理器设计：sc 不提供宏/条件编译，平台适配写在 C 头文件里，`inc` 导入后直接用适配结果（C 宏常量/函数式宏可直接使用）
+- 结构化宏：`def NAME: = v` / `def name: p... \n <体>` 映射到 C `#define`（粘贴 `\`→`##`、串化 `` `x` ``→`#`、可变参 `...`→`__VA_ARGS__`），`mix name(args)` 展开；但**不提供** `#if/#ifdef` 条件编译，平台适配写在 C 头文件里，`inc` 导入后直接用适配结果（C 宏常量/函数式宏可直接使用）
 - `@def`/`@fnc`/`@var`/`@let` 导出对象：`--emit-c -o x.c` 时额外生成 `x.h` 声明；未导出顶层符号默认 C `static`
 - 基本类型：`i1/i2/i4/i8`、`u1/u2/u4/u8`、`f4/f8`、`bool`、`char`；省略返回类型即 void
 - 强转 `expr: type&` 等价 C 的 `(type*)(expr)`，右值位置免括号（后续 `->` 操作需括号）；初始化列表 `{1, 2, 3}`；十六进制 `0xFF` 与字面量后缀 `1u/100UL/3.14f`

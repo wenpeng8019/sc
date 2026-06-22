@@ -14,8 +14,9 @@ std::string rec(const Expr& e, bool top) {
     switch (e.kind) {
         case Expr::IntLit: case Expr::FloatLit:
         case Expr::StrLit: case Expr::CharLit:
-        case Expr::Ident:
             return e.text;
+        case Expr::Ident:
+            return e.cBridge ? "::" + e.text : e.text;   // C 桥接 ::name 回写
         case Expr::Unary:
             return e.op + rec(*e.a, false);
         case Expr::PostUnary:
@@ -176,6 +177,8 @@ std::string fieldDetail(const Field& f, bool withInit) {
         s += "]";
     } else {
         s += ":";
+        // C 桥接绑定 name:: type：尾置第二个冒号
+        if (f.cBridge) s += ":";
         // 类型侧限定符 const/volatile 写在类型名前
         if (f.type.qConst) s += " const";
         if (f.type.qVolatile) s += " volatile";

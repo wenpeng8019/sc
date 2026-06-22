@@ -131,6 +131,7 @@ struct CGen {
     std::string structOwnerTag; // 正在 emit 字段的属主聚合标签（如 "struct com"）：
                                 //   供 MethodPtr 字段前置隐式接收者 T* 之用
     std::string srcFile;        // 非空时输出 #line 指令，调试器映射回 .sc 源码
+    bool inMacro = false;       // 正在 emit def 宏体：抑制 #line 指令（#define 行内不可含 #line）
     std::unordered_map<std::string, const Decl*> funcTypes;  // 函数类型名→Decl 映射
     std::unordered_map<std::string, const Decl*> rpcs;       // rpc 名→Decl（run 语句查询）
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
@@ -1276,6 +1277,7 @@ struct CGen {
                 out << e.text;
                 break;
             case Expr::Ident:
+                if (e.cBridge) { out << e.text; break; }    // C 桥接 ::name：原样 emit C 符号
                 if (e.text == "this") out << "_this";      // 方法内接收者
                 else if (e.text == "$") out << "_sc_ret";  // ret 调用语法糖结果变量（$ 非 C99 合法名，映射）
                 else if (e.text == "self" && !localsT.count("self") && !globalsT.count("self"))
@@ -1322,6 +1324,16 @@ struct CGen {
                 if (!top) out << ")";
                 break;
             case Expr::Call: {
+                // C 桥接调用 ::name(args)：原样 emit C 函数/宏调用，跳过所有 sc 调用糖
+                if (e.a && e.a->kind == Expr::Ident && e.a->cBridge) {
+                    out << e.a->text << "(";
+                    for (size_t i = 0; i < e.args.size(); i++) {
+                        if (i) out << ", ";
+                        emitExpr(*e.args[i], true);
+                    }
+                    out << ")";
+                    break;
+                }
                 // base/prev/next 内置函数：链表结构体字段导航
                 if (e.a && e.a->kind == Expr::Ident && !localsT.count(e.a->text) &&
                     !globalsT.count(e.a->text) && !funcs.count(e.a->text)) {
@@ -2075,6 +2087,16 @@ struct CGen {
     void emitVarDecls(const std::vector<Field>& decls, bool asConst,
                       bool isStatic = false, bool isTls = false) {
         for (auto& f : decls) {
+            // C 桥接绑定 name:: type（let/var X:: T）：声明 extern，认领 C 侧已定义符号
+            // （不分配存储、无初值）。let/var 之别仅作用于 sc 侧可变性检查，C 端恒为 extern T。
+            if (f.cBridge) {
+                regVar(f);
+                indent();
+                out << "extern ";
+                emitDeclarator(f, false);
+                out << ";\n";
+                continue;
+            }
             // 分身/切片句柄 var s: T[a, b]：展开为 struct T__project s = {a, b, NULL};
             if (f.type.project) {
                 (inFunc ? projVarsL : projVarsG)[f.name] = f.type.name;
@@ -2852,7 +2874,7 @@ struct CGen {
     void emitStmt(const Stmt& s) {
         // 行号映射：指定了源文件时输出 #line 指令（调试器断点/单步/堆栈
         // 直接落在 .sc 源码）；否则输出注释供人工对照
-        if (s.line > 0) {
+        if (!inMacro && s.line > 0) {
             if (!srcFile.empty()) {
                 out << "#line " << s.line << " \"" << srcFile << "\"\n";
             } else {
@@ -3116,6 +3138,12 @@ struct CGen {
                 break;
             case Stmt::DeclS:
                 emitTypeDecl(*s.decl);
+                break;
+            case Stmt::MixS:
+                // mix 宏展开（函数体内）：展开为 C 宏调用，宏体自含分号，不再包裹
+                indent();
+                if (s.expr) emitExpr(*s.expr);
+                out << "\n";
                 break;
             case Stmt::FinalS:
                 // final 钩子：登记入当前作用域，退出点（emitScopeCleanupAt phase0）发出 body。
@@ -3714,6 +3742,81 @@ struct CGen {
         fatBreakBoundary.pop_back();
         depth--;
         indent(); out << "}\n";
+    }
+
+    // 宏体拼写翻译：sc 的 \ 粘贴 → C 的 ##；`name` 串化 → C 的 #name。
+    // 跳过字符串/字符字面量内部（其中的 \ 与 ` 原样保留，避免误伤 "\n" 等）。
+    static std::string macroSpellToC(const std::string& s) {
+        std::string r;
+        for (size_t i = 0; i < s.size();) {
+            char c = s[i];
+            if (c == '"' || c == '\'') {                // 跳过字面量
+                char q = c; r += c; i++;
+                while (i < s.size()) {
+                    if (s[i] == '\\' && i + 1 < s.size()) { r += s[i]; r += s[i + 1]; i += 2; continue; }
+                    r += s[i];
+                    if (s[i] == q) { i++; break; }
+                    i++;
+                }
+                continue;
+            }
+            if (c == '\\') { r += "##"; i++; continue; }  // token 粘贴
+            if (c == '`') {                               // `name` 串化
+                size_t j = i + 1; std::string inner;
+                while (j < s.size() && s[j] != '`') inner += s[j++];
+                r += "#"; r += inner;
+                i = (j < s.size()) ? j + 1 : j;
+                continue;
+            }
+            r += c; i++;
+        }
+        return r;
+    }
+
+    // def 宏 → C #define
+    //   对象宏 def NAME: = value      → #define NAME value
+    //   函数宏 def name: p1,... \n body → #define name(p1,...) \ <body 逐句续行>
+    void emitMacroDef(const Decl& d) {
+        if (d.macroObject) {
+            std::ostringstream save = std::move(out); out = std::ostringstream();
+            if (d.expr) emitExpr(*d.expr, true);
+            std::string val = out.str(); out = std::move(save);
+            out << "#define " << d.name << " " << macroSpellToC(val) << "\n";
+            return;
+        }
+        // 函数宏头部：name(p1, p2, ..., ...)
+        std::string header = "#define " + d.name + "(";
+        bool first = true;
+        for (auto& p : d.structCommon.fields) {
+            if (!first) header += ", ";
+            header += p.name; first = false;
+        }
+        if (d.structCommon.variadic) header += first ? "..." : ", ...";
+        header += ")";
+        // 宏体：逐句 emit 到暂存流，再以反斜线续行拼接
+        std::ostringstream save = std::move(out); out = std::ostringstream();
+        int saveDepth = depth; depth = 1;
+        bool saveMacro = inMacro; inMacro = true;
+        for (auto& s : d.body) emitStmt(*s);
+        inMacro = saveMacro; depth = saveDepth;
+        std::string body = macroSpellToC(out.str()); out = std::move(save);
+        out << header;
+        std::string line;
+        auto flush = [&](const std::string& ln) {
+            if (ln.find_first_not_of(" \t") == std::string::npos) return;  // 跳过空白行
+            out << " \\\n" << ln;
+        };
+        for (char c : body) {
+            if (c == '\n') { flush(line); line.clear(); }
+            else line += c;
+        }
+        flush(line);
+        out << "\n";
+    }
+
+    // 顶层 mix → 宏调用展开（产生声明；宏体自含分号，不再包裹）
+    void emitMixExpand(const Decl& d) {
+        if (d.expr) { emitExpr(*d.expr, true); out << "\n"; }
     }
 
     void emitTypeDecl(const Decl& d) {
@@ -4864,6 +4967,12 @@ struct CGen {
                 case Decl::IncD: break;  // 已在顶部输出
                 case Decl::AddD: break;  // 构建指令，不产生 C 输出
                 case Decl::TestD: break;  // tst 用例：普通编译忽略；测试模式由第二遍 + runner 处理
+                case Decl::MacroD:
+                    emitMacroDef(*d);    // def 宏 → #define
+                    break;
+                case Decl::MixD:
+                    emitMixExpand(*d);   // 顶层 mix → 宏调用展开（声明）
+                    break;
             }
         }
         out << "\n";

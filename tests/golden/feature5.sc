@@ -2,9 +2,10 @@
 
 inc stdio.h
 
-@def Color: i1
+@def Color: [
     Red = 0
     Green
+] : i1
 
 @def Point: {
     x: i4

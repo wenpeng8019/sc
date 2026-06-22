@@ -150,6 +150,10 @@ struct Field {
 
     bool        synthetic = false;      // 编译器注入的隐藏成员（如链表 _prev/_next，emit-sc 不输出）
 
+    bool        cBridge = false;        // C 桥接绑定（仅 var/let/tls 项）：源码以 name:: type 书写。
+                                        // + 认领一个 C 侧已定义的全局符号，转 C 生成 extern T name;
+                                        //   不分配存储、无初值；仅把名字与类型登记进 sc 符号表。
+
     int         line = 0;               // 声明所在行号
 };
 
@@ -245,6 +249,11 @@ struct Expr {
     // + 置位 → T__new_ref 把对象头标记为原子，sc_fat_bind/unbind 对该对象 in/out 用原子 RMW。
     bool ctorAtom = false;
 
+    // C 桥接标记（仅 Ident）：源码以 :: 前缀书写（::name）。
+    // + name 是 C 侧的函数/宏/符号，不参与 sc 符号解析（跳过未定义检查），
+    //   转 C 时原样 emit。后接 (...) 即 C 函数/宏调用；裸写即取 C 符号值。
+    bool cBridge = false;
+
     int line = 0;               // 表达式起始行号（用于错误报告）
 
     // 匿名函数字面量（FncLit）专用
@@ -275,6 +284,7 @@ struct Stmt {
         LabelS,     // 标签定义
 
         DeclS,      // 内嵌类型声明     函数体内用 def 定义局部类型（不常见但允许）
+        MixS,       // 函数体内 mix 展开  mix name(args)；调用表达式存 expr（Expr::Call）
         FinalS,     // final 域退出钩子  final \n body...（本作用域每个退出点运行 body，
                     //                先于自动胖边拆解/断言；body 存于 body 字段）
         RunS,       // run 线程语句    run[<opt:v,...>] rpc调用 [, thread出参地址]
@@ -397,6 +407,14 @@ struct Decl {
         AddD,       // 添加实现/库文件到工程  add impl.c → 编译并链接
                     //              add libfoo.a / libfoo.so → 直接链接
                     //              纯构建指令，不产生 C 输出，name 为文件文本
+
+        // -- def 定义的宏 / mix 展开 --
+        MacroD,     // 结构化宏  def name: p1,p2,... \n\tbody → #define name(p1,...) \ body
+                    //            对象宏 def NAME: = value → #define NAME value（macroObject=true）
+                    //            函数宏参数存 structCommon.fields(+variadic)，body 存语句；
+                    //            对象宏值存 expr。
+        MixD,       // 顶层 mix 展开  mix name(args) → 输出 name(args)（无分号，宏体自含）
+                    //            调用表达式存 expr（Expr::Call）
     } kind;
 
     std::string name;               // 类型名 / 函数名；IncD 时为头文件文本
@@ -444,6 +462,9 @@ struct Decl {
     std::string methodOwner;        // 方法所属结构名：结构体内实现的成员函数（FuncD）
                                     // 或 fnc obj::m 仅声明形态（FuncTypeD，C 侧实现）
     std::string methodName;         // 方法名（name 为修饰名 owner_method）
+
+    bool macroObject = false;       // MacroD: true=对象宏 def NAME: = value（无参）；false=函数宏
+    ExprPtr expr;                   // MacroD(对象宏): 值表达式；MixD: mix 调用（Expr::Call）
 
     //---------
 

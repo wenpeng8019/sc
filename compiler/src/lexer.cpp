@@ -33,6 +33,7 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"tls", Tok::KwTls},
     {"inc", Tok::KwInc},
     {"add", Tok::KwAdd},
+    {"mix", Tok::KwMix},
     {"return", Tok::KwReturn}, {"if", Tok::KwIf},
     {"else", Tok::KwElse}, {"while", Tok::KwWhile},
     {"do", Tok::KwDo},
@@ -294,6 +295,20 @@ struct Lexer {
 
             // ---- ret 调用语法糖的结果变量 $（独立标识符 token）----
             if (c == '$') { get(); push(Tok::Ident, "$"); continue; }
+
+            // ---- 宏体内：token 粘贴 \（中缀，a\b → C a##b）----
+            if (c == '\\') { get(); push(Tok::Backslash, "\\"); continue; }
+
+            // ---- 宏体内：参数串化 `name`（反引号包裹，→ C #name）----
+            if (c == '`') {
+                get();  // 吃掉左反引号
+                std::string inner;
+                while (peek() && peek() != '`' && peek() != '\n') inner += get();
+                if (peek() != '`') { err("未闭合的反引号串化 `name`"); }
+                else get();  // 吃掉右反引号
+                push(Tok::Backtick, inner);
+                continue;
+            }
 
             // ---- 分隔符（括号需追踪深度）----
             switch (c) {

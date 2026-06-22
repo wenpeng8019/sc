@@ -407,6 +407,7 @@ struct Checker {
             }
             // -- 标识符：查找 locals → globals，nil/true/false 特殊处理 ----------
             case Expr::Ident: {
+                if (e.cBridge) return Ty{};  // C 桥接 ::name：C 侧符号，类型不跟踪，跳过解析
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
                 if (e.text == "true" || e.text == "false") return Ty{"bool", 0, 0, true, false};
                 if (e.text == "ok" && locals.find("ok") == locals.end()
@@ -491,6 +492,11 @@ struct Checker {
                 return Ty{"u8", 0, 0, true, false};
             // -- 函数调用：多种内建伪调用优先，然后是普通函数调用 ----------------
             case Expr::Call: {
+                // C 桥接调用 ::name(args)：C 函数/宏，跳过未定义检查；仅递归检查实参
+                if (e.a && e.a->kind == Expr::Ident && e.a->cBridge) {
+                    for (auto& a : e.args) (void)inferExpr(*a, locals, line);
+                    return Ty{};
+                }
                 // base(x) 伪函数：等价于 *(T*)&x，结果类型为 T*+1 层指针
                 if (e.a && e.a->kind == Expr::Ident && e.a->text == "base"
                     && !locals.count("base") && !globals.count("base")) {
@@ -1150,6 +1156,9 @@ struct Checker {
                 break;
             // -- def（内嵌类型声明）：无需检查 ---------------------------------
             case Stmt::DeclS:
+                break;
+            // -- mix（宏展开）：实参为宏形参/C 名，无 sc 类型，跳过检查 -----------
+            case Stmt::MixS:
                 break;
             // -- final 域退出钩子：体在独立作用域检查 ---------------------------
             case Stmt::FinalS: {

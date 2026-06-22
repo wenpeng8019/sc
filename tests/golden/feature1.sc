@@ -4,10 +4,14 @@ inc stdio.h
 
 inc stdlib.h
 
-def color: i1
+def macro: p1, p2, p3, ...
+    var p1\b: i4 = 2
+
+def color: [
     Red = 0
     Green
     Blue
+] : i4
 
 def point: {
     x: i4

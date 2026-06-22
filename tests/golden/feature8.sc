@@ -6,10 +6,11 @@ inc adt.sc
 
 inc io.sc
 
-def color: i1
+def color: [
     Red = 0
     Green
     Blue
+] : i1
 
 def point: {
     x: i4

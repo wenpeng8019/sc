@@ -7,9 +7,10 @@ inc stdio.h
 #-------------- @ 导出标记 -----------------------------------
 # @ 标记的类型/变量/函数在 --emit-c -o 时生成同名 .h 头文件
 
-@def Color: i1
+@def Color: [
     Red = 0
     Green
+] : i1
 
 @def Point: {
     x: i4

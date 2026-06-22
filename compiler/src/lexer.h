@@ -39,6 +39,7 @@ enum class Tok {
     KwTls,      // tls  — 定义线程局部变量（static 存储期，每线程独立实例）
     KwInc,      // inc  — 引入头文件/模块（对齐 C 的 #include，后跟行尾文本）
     KwAdd,      // add  — 添加实现/库文件到工程（.c/.o/.a/.so...，后跟行尾文本）
+    KwMix,      // mix  — 展开宏（def 宏的调用点；顶层展开声明 / 函数体展开语句）
     KwReturn,   // return
     KwIf,       // if
     KwElse,     // else
@@ -76,6 +77,8 @@ enum class Tok {
     Colon,      // :
     DColon,     // ::
     Arrow,      // ->    (特殊处理，区别于普通 Op)
+    Backslash,  // \     宏体内：token 粘贴（a\b → C a##b）
+    Backtick,   // `name` 宏体内：参数串化（`name` → C #name）；text 存内部标识符
 
     // ---- 运算符（由 lexOp() 最长匹配产生）----
     Op,         // 其余运算符，具体拼写保存在 Token::text 中

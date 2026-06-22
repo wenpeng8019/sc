@@ -142,6 +142,9 @@ struct SGen {
             case Stmt::DeclS:
                 emitDecl(*s.decl);
                 break;
+            case Stmt::MixS:
+                ind(); out << "mix " << (s.expr ? exprToStr(*s.expr) : "") << "\n";
+                break;
             case Stmt::FinalS:
                 ind(); out << "final\n";
                 depth++; emitStmts(s.body); depth--;
@@ -218,7 +221,7 @@ struct SGen {
                 ind(); out << "add " << d.name << "\n";
                 break;
             case Decl::EnumD:
-                ind(); out << X << "def " << d.name << ": " << typeToStr(d.structCommon.type) << "\n";
+                ind(); out << X << "def " << d.name << ": [\n";
                 depth++;
                 for (auto& f : d.structCommon.fields) {
                     ind();
@@ -227,6 +230,7 @@ struct SGen {
                     out << "\n";
                 }
                 depth--;
+                ind(); out << "] : " << typeToStr(d.structCommon.type) << "\n";
                 break;
             case Decl::StructD:
             case Decl::UnionD: {
@@ -304,6 +308,25 @@ struct SGen {
                 depth++;
                 emitStmts(d.body);
                 depth--;
+                break;
+            case Decl::MacroD:
+                if (d.macroObject) {
+                    ind(); out << X << "def " << d.name << ": = "
+                               << (d.expr ? exprToStr(*d.expr) : "") << "\n";
+                } else {
+                    ind(); out << X << "def " << d.name << ":";
+                    for (size_t i = 0; i < d.structCommon.fields.size(); i++)
+                        out << (i ? ", " : " ") << d.structCommon.fields[i].name;
+                    if (d.structCommon.variadic)
+                        out << (d.structCommon.fields.empty() ? " ..." : ", ...");
+                    out << "\n";
+                    depth++;
+                    emitStmts(d.body);
+                    depth--;
+                }
+                break;
+            case Decl::MixD:
+                ind(); out << "mix " << (d.expr ? exprToStr(*d.expr) : "") << "\n";
                 break;
         }
     }

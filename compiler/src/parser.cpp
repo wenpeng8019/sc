@@ -69,6 +69,7 @@ struct Parser {
     size_t p = 0;                                   // 当前读位置（指向下一个待消费的 token）
     int exprBracket = 0;                            // 表达式括号深度：>0 时括号内的换行/缩进 token 被 skip 跳过
 
+    bool inMacroBody = false;                       // 正在解析 def 宏体：名字/标识符位置折叠 \ 粘贴与 `串化`
     // 活动三目运算的括号深度栈：其分支内（同括号层）禁用裸强转，
     // + 保证 '?' 之后有且只有一个 ':' 归三目；强转需加括号
     std::vector<int> ternDepth;
@@ -411,13 +412,45 @@ struct Parser {
         if (inParen) exprBracket--;
     }
 
+    // 宏体内的拼写折叠：把 token 粘贴 a\b 与串化 `x` 折叠进单一标识符串，
+    // 保留原始 sc 拼写（\ 与 `）。emit-sc 原样回放；codegen_c 在 emit 点翻译为 ## / #。
+    // first 已读入（首段标识符或空）。仅在 inMacroBody 时消费后续 \ / ` 段。
+    std::string foldMacroSpelling(std::string s) {
+        if (!inMacroBody) return s;
+        for (;;) {
+            if (at(Tok::Backslash)) {
+                advance(); s += "\\";
+                if (at(Tok::Ident))         s += advance().text;
+                else if (at(Tok::Backtick)) s += "`" + advance().text + "`";
+                else err("'\\' 粘贴后期望标识符或 `串化`");
+            } else if (at(Tok::Backtick)) {
+                s += "`" + advance().text + "`";
+            } else break;
+        }
+        return s;
+    }
+
     // 解析 var/let/tls 声明项：与字段类似，但额外支持 = 初值表达式和内联类型
     Field parseVarItem() { Field f;
 
         f.line = cur().line;                    // 须在（发生）报错前记录行号
         if (!at(Tok::Ident)) err("期望变量名");  // 当前 token 必须是标识符（变量名）
-        f.name = advance().text;                // 消费当前 token（作为变量名）并前进到下一个 token
+        f.name = foldMacroSpelling(advance().text); // 消费变量名；宏体内折叠 \ 粘贴
         parseMeta(f.type);                      // 解析名字后的 [] 数组元类型（name[10]: 表示数组；指针写在类型侧 name: type&）
+
+        // C 桥接绑定 name:: type —— 尾置 :: 表示「认领一个 C 侧已定义的全局符号」：
+        // 转 C 生成 extern T name;（不分配存储、无初值），仅把名字与类型登记进 sc 符号表。
+        if (accept(Tok::DColon)) {
+            f.cBridge = true;
+            if (!atTypeStart()) err("C 桥接绑定 '::' 后期望类型名");
+            TypeRef ty = parseTypeRef();
+            ty.arrayDims.insert(ty.arrayDims.end(),
+                                f.type.arrayDims.begin(),
+                                f.type.arrayDims.end());
+            f.type = std::move(ty);
+            return f;                           // C 桥接绑定无初值
+        }
+
         if (accept(Tok::Colon)) {               // 验证并消费 ':'，冒号后为显式类型（可选：省略时由代码生成推断默认类型）
 
             // 如果冒号后是 fnc
@@ -601,26 +634,56 @@ struct Parser {
             return d;
         }
 
-        // 4. 对于枚举：def name: base_type \n\tItem1, Item2 ...
-        d->kind = Decl::EnumD;
-        d->structCommon.type = std::make_shared<TypeRef>(parseTypeRef());                           // 枚举的底层整数类型
-        expect(Tok::Newline, "换行");
-        expect(Tok::Indent, "缩进的枚举项");
-        while (!at(Tok::Dedent) && !at(Tok::End)) {
-            skipNewlines();
-            if (at(Tok::Dedent)) break;
-
+        // 4. 枚举新形：def name: [ Item1 = 0, Item2 ... ] : base_type
+        //    用 [] 包裹枚举项，与函数宏（裸标识符形参列表）区分。
+        if (at(Tok::LBracket)) {
+            d->kind = Decl::EnumD;
+            advance();                                      // '['
             for (;;) {
+                while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance();
+                if (at(Tok::RBracket)) break;
                 Field item;
                 item.line = cur().line;
                 if (!at(Tok::Ident)) err("期望枚举项名");
                 item.name = advance().text;                 // 枚举项名
                 if (acceptOp("=")) item.init = parseExpr(); // 可选的显式值
                 d->structCommon.fields.push_back(std::move(item));
-                if (!accept(Tok::Comma)) break;             // 逗号分隔多项
+                while (at(Tok::Newline) || at(Tok::Indent) || at(Tok::Dedent)) advance();
+                accept(Tok::Comma);                         // 逗号或换行分隔，均可
             }
+            expect(Tok::RBracket, "']'");
+            expect(Tok::Colon, "枚举底层类型前的 ':'");
+            d->structCommon.type = std::make_shared<TypeRef>(parseTypeRef());  // 枚举底层整数类型
             expect(Tok::Newline, "换行");
+            return d;
         }
+
+        // 5. 对象宏：def NAME: = value  → #define NAME value
+        if (acceptOp("=")) {
+            d->kind = Decl::MacroD;
+            d->macroObject = true;
+            d->expr = parseExpr();
+            expect(Tok::Newline, "换行");
+            return d;
+        }
+
+        // 6. 函数宏：def name: p1, p2, ... \n\tbody  → #define name(p1,...) \ body
+        d->kind = Decl::MacroD;
+        d->macroObject = false;
+        if (!at(Tok::Newline)) {                            // 形参：裸标识符，逗号分隔，末尾可 ...
+            for (;;) {
+                if (accept(Tok::Ellipsis)) { d->structCommon.variadic = true; break; }
+                if (!at(Tok::Ident)) err("期望宏形参名");
+                Field pf; pf.line = cur().line; pf.name = advance().text;
+                d->structCommon.fields.push_back(std::move(pf));
+                if (!accept(Tok::Comma)) break;
+            }
+        }
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "缩进的宏体");
+        { bool save = inMacroBody; inMacroBody = true;
+          parseStmts(d->body);
+          inMacroBody = save; }
         accept(Tok::Dedent);
         return d;
     }
@@ -832,6 +895,13 @@ struct Parser {
     ExprPtr parsePrimary() {
         skipNlInBracket();                  // 跳过括号内的换行和缩进（允许括号内跨行书写）
 
+        // 宏体内的参数串化 `name`（→ C #name）：作为标识符原子，保留原始 ` 拼写
+        if (at(Tok::Backtick)) {
+            auto e = mk(Expr::Ident);
+            e->text = foldMacroSpelling("`" + advance().text + "`");
+            return e;
+        }
+
         // 字面量：整数、浮点、字符串、字符
 
         // 对于字符串字面量
@@ -859,7 +929,7 @@ struct Parser {
         // 对于标识符
         if (at(Tok::Ident)) {
             auto e = mk(Expr::Ident);
-            e->text = advance().text;
+            e->text = foldMacroSpelling(advance().text);
             return e;
         }
 
@@ -1578,6 +1648,15 @@ struct Parser {
                 return s;
             }
 
+            // mix 宏展开语句：mix name(args) → 展开为 C 宏调用（无分号包裹，宏体自含）
+            case Tok::KwMix: {
+                auto s = mkStmt(Stmt::MixS);
+                advance();                          // 跳过 mix
+                s->expr = parseExpr();              // 宏调用表达式（Expr::Call）
+                expect(Tok::Newline, "换行");
+                return s;
+            }
+
             case Tok::KwFnc:
                 err("暂不支持嵌套函数定义");  // 限制：函数只能在顶层定义
 
@@ -1917,9 +1996,22 @@ struct Parser {
                     break;
                 }
 
+                // mix 宏展开（顶层）：mix name(args) → 展开宏，产生声明
+                case Tok::KwMix: {
+                    if (exported) err("mix 不支持 @ 导出");
+                    auto d = std::make_unique<Decl>();
+                    d->line = cur().line;
+                    d->kind = Decl::MixD;
+                    advance();                          // 跳过 mix
+                    d->expr = parseExpr();              // 宏调用表达式（Expr::Call）
+                    expect(Tok::Newline, "换行");
+                    prog.decls.push_back(std::move(d));
+                    break;
+                }
+
                 default:
                     // 顶层只允许程序结构对象的几种关键字
-                    err("顶层只允许 inc/def/fnc/rpc/var/let/tls，得到 '" + cur().text + "'");
+                    err("顶层只允许 inc/def/fnc/rpc/var/let/tls/mix，得到 '" + cur().text + "'");
             }
         }
 
