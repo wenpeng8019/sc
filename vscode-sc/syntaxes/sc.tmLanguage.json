@@ -21,6 +21,7 @@
         { "include": "#types" },
         { "include": "#strings" },
         { "include": "#chars" },
+        { "include": "#macro-op" },
         { "include": "#numbers" },
         { "include": "#function-call" },
         { "include": "#meta-suffix" },
@@ -122,6 +123,10 @@
                     "match": "\\b(print|stringify|assert)\\b"
                 },
                 {
+                    "name": "keyword.control.expand.sc",
+                    "match": "^\\s*(mix)\\b"
+                },
+                {
                     "name": "keyword.declaration.sc",
                     "match": "\\b(def|fnc|rpc|var|let|tls|inc|add|tst)\\b"
                 },
@@ -203,6 +208,18 @@
             "end": "'",
             "patterns": [
                 { "name": "constant.character.escape.sc", "match": "\\\\." }
+            ]
+        },
+        "macro-op": {
+            "patterns": [
+                {
+                    "name": "string.interpolated.stringify.sc",
+                    "match": "`[A-Za-z_][A-Za-z0-9_]*`"
+                },
+                {
+                    "name": "keyword.operator.paste.sc",
+                    "match": "(?<=[A-Za-z0-9_])\\\\(?=[A-Za-z0-9_`])"
+                }
             ]
         },
         "numbers": {

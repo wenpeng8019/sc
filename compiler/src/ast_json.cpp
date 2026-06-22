@@ -191,6 +191,8 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::AssertS:
             return node("assert", "", s.text +
                         (s.assertMsg ? ", " + exprToStr(*s.assertMsg) : ""), s.line);
+        case Stmt::MixS:
+            return node("mix", "", s.expr ? exprToStr(*s.expr) : "", s.line);
     }
     return "{}";
 }
@@ -281,6 +283,19 @@ std::string declNode(const Decl& d) {
             return nodeExt("tst", d.name, d.testSkip ? ".skip" : "", d.line,
                            false, d.origin, false, c);
         }
+        case Decl::MacroD: {
+            if (d.macroObject)
+                return nodeExt("macro", d.name, X + "= " + (d.expr ? exprToStr(*d.expr) : ""),
+                               d.line, d.external, d.origin, d.used);
+            std::vector<std::string> c;
+            for (auto& f : d.structCommon.fields)
+                c.push_back(node("param", f.name, "", f.line));
+            if (d.structCommon.variadic) c.push_back(node("param", "...", "", d.line));
+            for (auto& s : d.body) c.push_back(stmtNode(*s));
+            return nodeExt("macro", d.name, X, d.line, d.external, d.origin, d.used, c);
+        }
+        case Decl::MixD:
+            return node("mix", "", d.expr ? exprToStr(*d.expr) : "", d.line);
     }
     return "{}";
 }

@@ -39,6 +39,7 @@ const ICONS = {
     add: 'file-binary',
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
     alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', rpc: 'symbol-event',
+    macro: 'symbol-snippet', mix: 'expand-all',
     var: 'symbol-variable', let: 'symbol-constant', tls: 'symbol-variable',
     param: 'symbol-parameter', field: 'symbol-field', item: 'symbol-enum-member',
     case: 'list-selection', arm: 'list-flat', through: 'arrow-right',
