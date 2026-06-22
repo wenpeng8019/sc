@@ -35,6 +35,9 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_io_init(void); void sc_mod_io_drop(void);
+void sc_mod_async_init(void); void sc_mod_async_drop(void);
+
 static void on_pair_rpc(struct on_pair *_p) {
     /* line 14 */
     printf("  rpc 反序列化: a=%d b=%d\n", _p->a, _p->b);
@@ -146,6 +149,8 @@ static void async_read_rpc(struct async_read *_p) {
 }
 
 int32_t main(void) {
+    sc_mod_io_init();
+    sc_mod_async_init();
     /* line 51 */
     char *path = "/tmp/sc_feature22.bin";
     /* line 52 */
@@ -153,7 +158,12 @@ int32_t main(void) {
     /* line 53 */
     if (sync_roundtrip(path) != 0) {
         /* line 54 */
-        return 1;
+        {
+            int32_t _ret = 1;
+            sc_mod_async_drop();
+            sc_mod_io_drop();
+            return _ret;
+        }
     }
     /* line 56 */
     printf("== 异步读 ==\n");
@@ -183,5 +193,10 @@ int32_t main(void) {
     /* line 67 */
     printf("done\n");
     /* line 68 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_async_drop();
+        sc_mod_io_drop();
+        return _ret;
+    }
 }

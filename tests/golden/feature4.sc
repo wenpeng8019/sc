@@ -4,6 +4,8 @@ inc stdio.h
 
 inc stdlib.h
 
+inc feature4_lib.sc
+
 def point: {
     x: i4
     y: i4
@@ -23,7 +25,12 @@ def obj: {
     fnc calc::: i4, a: i4, b: i4
 }
 
+var g_origin: point
+
 fnc main: i4
+    printf("global: x=%d y=%d\n", g_origin.x, g_origin.y)
+    lib_audit()
+    lib_audit()
     var pt: point
     printf("init: x=%d y=%d\n", pt.x, pt.y)
     printf("pt.sum(3,4) = %d\n", pt.sum(3, 4))

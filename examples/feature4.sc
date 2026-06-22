@@ -9,6 +9,7 @@
 
 inc stdio.h
 inc stdlib.h
+inc feature4_lib.sc                  # 附属模块：演示其他模块的静态全局对象生命周期注入
 
 #-------------- 结构体 + 成员函数 = 伪类 ----------------------
 
@@ -32,7 +33,21 @@ def obj: {
     fnc calc:: i4, a: i4, b: i4          # C 侧实现 obj_calc(obj *_this, a, b)
 }
 
+# 静态全局对象：类型含 init/drop → main 序言自动构造、main 尾声自动析构
+var g_origin: point
+
 fnc main: i4
+
+    #-------------- 静态全局对象生命周期 -------------------
+    # g_origin 在进入 main 前已被 point_init 构造（x=1,y=2）；
+    # main 返回时自动 point_drop（最后一行输出 point(1,2) dropped）
+    printf("global: x=%d y=%d\n", g_origin.x, g_origin.y)
+
+    # 附属模块 feature4_lib 的静态全局 g_audit 同样已被
+    # sc_mod_feature4_lib_init 自动构造（程序最开头打印 [lib.init]）；
+    # 此处经导出函数驱动其状态，程序结尾由 sc_mod_feature4_lib_drop 自动析构。
+    lib_audit()
+    lib_audit()
 
     #-------------- 声明即构造 + 方法调用糖 + 析构 -------------------
 

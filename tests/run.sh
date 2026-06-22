@@ -61,6 +61,7 @@ POSITIVE=(
     examples/feature29.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
+    examples/feature4_lib.sc
     tests/cases/cast.sc
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc

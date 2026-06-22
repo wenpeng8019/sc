@@ -81,7 +81,7 @@ char -> char
 ret  -> int32_t
 ```
 
-其中 `ret` 是 `i4` 的语义别名，用作 ADT 接口返回码（`ok`=0 成功，非 0
+其中 `ret` 是 `i4` 的语义别名，用作 fnc/rpc 的返回码（`ok`=0 成功，非 0
 失败）。此外还有内置字面量常量：
 
 - `true`
@@ -89,10 +89,9 @@ ret  -> int32_t
 - `nil`
 - `ok`（值为 `0`）
 
-其中 `bool` 是布尔类型（u1 的语义别名），`char` 用于与 C 字符串
-字面量/接口互操作（`s: char&` 即 `char *s`，区别于 i1/u1：C 中
-char/signed char/unsigned char 是三个不同类型），`nil` 用于空指针/空值判断。
-此外，这里没有 void 类型：函数省略返回类型即无返回值（见 §8），void 指针用
+其中 `bool` 是布尔类型（u1 的语义别名），`char` 即 C 中的 char 类型（`s: char&` 即 `char *s`）
+注意，char 和 i1/u1 是不完全等价的。C 中 char 在不同平台下可能是 signed char 也可能是 unsigned char。
+`nil` 用于空指针/空值判断。此外，这里没有 void 类型：函数省略返回类型即无返回值（见 §8），void 指针用
 省略类型名的裸指针表示（字段 `p: &`，返回类型裸 `&`）。
 
 ## 4. 指针与数组
@@ -700,12 +699,14 @@ p->add(1, 2)    # → obj_add(p, 1, 2)
 
 - `init`（无参）：**声明即构造**。函数内 `var x: T` 且无显式初值、
   非指针非数组时，转 C 会自动插入 `T_init(&x)`。
-  全局变量不自动构造（C 静态初始化限制），需手动调用。
+  **静态全局对象**（文件作用域 `var g: T`，非指针/数组/`tls`）若 `T` 含无参
+  `init`，由编译器在 `main` 序言自动构造（详见下文「静态全局对象生命周期」）。
 - `drop`：析构。**栈值对象退域时自动调用**（RAII）：函数内 `var x: T`
   且 `T` 含无参 `drop` 时，作用域结束（含 `return`/`break`/`continue`/`goto`
   跨域跳转）会按声明逆序自动插入 `x.drop()`。已显式 `x.drop()` 或取过址
   `&x`（可能转移所有权）的变量不再重复析构；`return x` 走移动语义，不析构。
-  指针对象（`T&`/`T@`）与全局变量不在此列，仍需手动调用。
+  指针对象（`T&`/`T@`）不在此列，仍需手动调用；**静态全局对象**的 `drop`
+  由编译器在 `main` 尾声自动调用（详见下文）。
 
 ```sc
 fnc main: i4
@@ -713,6 +714,66 @@ fnc main: i4
     s.append("hi")
     return 0           # 退域自动 string_drop(&s)
 ```
+
+#### 静态全局对象生命周期
+
+文件作用域的可变全局对象（`var g: T`，非指针/数组/`tls`/胖指针/句柄/函数指针）
+若类型 `T` 具备无参 `init`，编译器在 `main` **开头**注入 `T_init(&g)`；若 `T`
+具备 `drop`，在 `main` **结尾**（含任意 `return` 路径）逆序注入 `T_drop(&g)`。
+免去 C 静态初始化只能用常量表达式的限制，全局对象与栈值对象享有一致的
+构造/析构语义。
+
+模块（被 `inc x.sc` 递归依赖的每个 sc 单元）各自生成一对模块级生命周期
+函数 `sc_mod_<模块名>_init` / `sc_mod_<模块名>_drop`，封装该模块自有全局对象
+的构造/析构，并递归调用其直接依赖的同名函数。`main` 在序言按依赖顺序调用各
+直接依赖模块的 `sc_mod_*_init`，在尾声逆序调用 `sc_mod_*_drop`。两函数均带
+幂等哨兵（菱形依赖只执行一次），构造为「依赖优先、自有其后」，析构为
+「自有优先、依赖其后」。模块名取源文件去扩展名后的文件名（净化为合法 C 标识符）。
+
+适用判定（构造侧）：文件作用域 `var`（**非** `let`/`tls`/`const`），标量结构
+变量（非指针/数组/胖指针 `T@`/句柄 `T[...]`/函数指针/内联类型），且类型具
+**无参** `init`。析构侧只要类型具 `drop` 即注入（不论是否有显式初值）。
+
+```sc
+# greeter.sc（库模块）
+@def greeter: {
+    n: i4
+    init: fnc
+        this->n = 0
+    drop: fnc
+        printf("dropped n=%d\n", this->n)
+}
+@var g_mod: greeter        # 由 sc_mod_greeter_init/drop 托管
+
+# app.sc（入口）
+inc greeter.sc
+var g_app: greeter         # 由 main 序言 init、尾声 drop
+fnc main: i4
+    # 进入此处前：sc_mod_greeter_init()（构造 g_mod）→ greeter_init(&g_app)
+    return 0
+    # 离开前：greeter_drop(&g_app) → sc_mod_greeter_drop()（析构 g_mod）
+```
+
+完整生命周期顺序（入口 + 一个依赖模块）：
+
+```
+进入 main 体之前：
+    sc_mod_<dep>_init()      # 依赖模块全局（递归，依赖优先）
+    <入口自有全局 init...>    # 源序
+  ── main 函数体 ──
+离开 main（含任意 return）：
+    <入口自有全局 drop...>    # 逆源序
+    sc_mod_<dep>_drop()      # 依赖模块全局（递归，逆序）
+```
+
+> 说明：单文件 `--emit-c`（输出到 stdout）为自包含转译，不带模块 token，故不
+> 单独发出库模块的 `sc_mod_*` 定义；实际构建（项目模式 / `--emit-c -o`）按单元
+> 路径生成模块 token，各单元正常发出并由入口链接调用。
+
+可运行示例见 [examples/feature4.sc](examples/feature4.sc)（入口自有全局
+`g_origin` + `inc feature4_lib.sc`）与其附属模块
+[examples/feature4_lib.sc](examples/feature4_lib.sc)（模块全局 `g_audit`，
+由 `sc_mod_feature4_lib_init/drop` 托管）。
 
 #### 堆构造：T() 类型伪调用
 

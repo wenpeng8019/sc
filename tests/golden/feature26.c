@@ -43,6 +43,8 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
+
 static void slist_init(slist *_this) {
     /* line 32 */
     _this->head = NULL;
@@ -117,6 +119,7 @@ static tnode * slist_prev(slist *_this, tnode *item) {
 }
 
 int32_t main(void) {
+    sc_mod_adt_init();
     /* line 76 */
     printf("闭区间[1,5]:");
     /* line 77 */
@@ -443,5 +446,9 @@ int32_t main(void) {
     /* line 192 */
     printf("\n");
     /* line 194 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_adt_drop();
+        return _ret;
+    }
 }

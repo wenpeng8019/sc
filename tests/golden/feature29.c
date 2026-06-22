@@ -9,7 +9,10 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_mem_init(void); void sc_mod_mem_drop(void);
+
 int32_t main(void) {
+    sc_mod_mem_init();
     /* line 31 */
     void *p = chunk(100);
     /* line 32 */
@@ -174,5 +177,9 @@ int32_t main(void) {
     /* line 130 */
     printf("mem feature ok\n");
     /* line 131 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_mem_drop();
+        return _ret;
+    }
 }

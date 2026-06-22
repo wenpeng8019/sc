@@ -91,6 +91,8 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_m_init(void); void sc_mod_m_drop(void);
+
 static void work_rpc(struct work *_p) {
     /* line 31 */
     int32_t i = 0;
@@ -168,6 +170,7 @@ static void bwork_rpc(struct bwork *_p) {
 }
 
 int32_t main(void) {
+    sc_mod_m_init();
     /* line 90 */
     ctx c = {0};
     /* line 91 */
@@ -372,5 +375,9 @@ int32_t main(void) {
     /* line 184 */
     mutex_drop(&bc.mu);
     /* line 185 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_m_drop();
+        return _ret;
+    }
 }

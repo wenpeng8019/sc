@@ -22,6 +22,8 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_async_init(void); void sc_mod_async_drop(void);
+
 static int32_t dev_read(com *_this, void *data, uint32_t *size) {
     /* line 20 */
     char *p = ((char*)(data));
@@ -92,6 +94,7 @@ static void handler_rpc(struct handler *_p) {
 }
 
 int32_t main(void) {
+    sc_mod_async_init();
     /* line 53 */
     async_init();
     /* line 55 */
@@ -109,5 +112,9 @@ int32_t main(void) {
     /* line 63 */
     async_final();
     /* line 64 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_async_drop();
+        return _ret;
+    }
 }

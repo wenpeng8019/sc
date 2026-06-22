@@ -18,6 +18,8 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
+
 static inline string *string__new(void) {
     string *_p = (string *)malloc(sizeof(string));
     if (_p) {
@@ -45,6 +47,7 @@ static int32_t str_cmp(void *a, void *b) {
 }
 
 int32_t main(void) {
+    sc_mod_adt_init();
     /* line 29 */
     counter c = {0};
     counter_init(&c);
@@ -109,5 +112,9 @@ int32_t main(void) {
     /* line 66 */
     free(hs);
     /* line 67 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_adt_drop();
+        return _ret;
+    }
 }

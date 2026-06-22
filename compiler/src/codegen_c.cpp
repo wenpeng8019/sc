@@ -115,6 +115,18 @@ struct CGen {
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见；stringify_t 在 op.h 默认带入）
 
+    // ---- 静态全局对象 / 模块级生命周期（init/drop）支撑 ----
+    // 入口单元（含非外部 main）：main 序言注入全局/模块 init，尾声注入 drop。
+    // 库模块（无 main）：emit 模块级 sc_mod_<token>_init/drop，由 main 与父模块递归调用。
+    bool isEntryUnit = false;       // 本单元定义了非外部 main
+    bool inMainFunc = false;        // 当前正在 emit main 函数体（lambda 内须置回 false）
+    bool mainHasTeardown = false;   // 入口 main 有待注入的尾声（全局 drop 或模块 drop）
+    std::string modToken;           // 本单元模块 token（文件名 stem 经 C 标识符净化）
+    std::vector<std::string> depTokens;  // 直接依赖 .sc 模块 token（去重、按声明序）
+    struct GLife { std::string var; std::string fn; };  // 全局对象名 + init/drop 方法 C 名
+    std::vector<GLife> gInits;      // 本单元自有全局 init（源序，逆序 drop）
+    std::vector<GLife> gDrops;      // 本单元自有全局 drop（源序登记，发出时逆序）
+
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
     std::unordered_map<std::string, std::string> aliases;  // 别名 → 目标类型名
@@ -1992,6 +2004,8 @@ struct CGen {
                     << len << ", "
                     << it->name << ", \"" << it->site << "\");\n";
             }
+        // phase4：入口 main 函数体作用域（i==0）退出 → 注入全局/模块尾声 drop（最末）。
+        if (inMainFunc && i == 0) emitMainEpilogue();
     }
 
     // final 钩子发出：本块登记的 final 块按 LIFO（逆源序）逐个发出 body，
@@ -2889,7 +2903,8 @@ struct CGen {
                         skip = s.expr->text;
                     else if (s.expr && s.expr->kind == Expr::Ident)
                         skip = s.expr->text;
-                    if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop) {
+                    if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop
+                        && !(inMainFunc && mainHasTeardown)) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
@@ -3649,7 +3664,11 @@ struct CGen {
         preScanFatBorrows(d.body);   // Step4b：预扫描被 & 借出的栈变量，决定注入 ref 头
         scanManualDrops(d.body);     // RAII：预扫描显式 drop 的变量（move 语义抑制自动 drop）
         depth++;
+        // 入口 main：序言注入全局/模块 init；inMainFunc 使 scope0 清理注入尾声 drop。
+        const bool isMain = (d.name == "main" && !d.external);
+        if (isMain) { inMainFunc = true; emitMainPrologue(); }
         emitStmts(d.body);
+        if (isMain) inMainFunc = false;
         depth--;
         inFunc = false;
         curFnSig = nullptr;
@@ -3664,6 +3683,7 @@ struct CGen {
         auto savedFnVarsL  = std::move(fnVarsL);
         auto savedVarDimsL = std::move(varDimsL);
         const bool savedInFunc = inFunc;
+        const bool savedInMain = inMainFunc;   // lambda 体非 main：禁用尾声注入
         const int  savedDepth  = depth;
         std::ostringstream savedOut = std::move(out);
         out = std::ostringstream();
@@ -3671,6 +3691,7 @@ struct CGen {
         // 干净的函数作用域
         localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
         inFunc = true;
+        inMainFunc = false;
         retDollarDeclared = false;
         depth = 0;
         auto savedManualDrops = std::move(manualDropVars);   // RAII：lambda 独立预扫描
@@ -3699,6 +3720,7 @@ struct CGen {
         fnVarsL  = std::move(savedFnVarsL);
         varDimsL = std::move(savedVarDimsL);
         inFunc = savedInFunc;
+        inMainFunc = savedInMain;
         depth  = savedDepth;
         manualDropVars = std::move(savedManualDrops);
         dropScopes     = std::move(savedDropScopes);
@@ -4355,11 +4377,122 @@ struct CGen {
     // 第一遍：类型定义 + 全局变量 + 函数原型声明（forward declaration）
     // 第二遍：函数体实现
     // 这样做的目的是支持函数间的任意引用顺序（包括递归/互递归）
+
+    // 模块 token：取路径文件名 stem（去最后扩展名），净化为合法 C 标识符片段。
+    // 不可用绝对路径（golden 快照须可移植；emit-c 模式 srcFile 为相对路径而项目模式为
+    // canonical）——stem 在「引用方（inc 名）」与「被引方（自身 srcFile）」两侧一致。
+    // 空输入（stdout emit-c 无 srcFile）返回空串：此时本单元不产出自身 sc_mod 定义。
+    static std::string modStemToken(const std::string& raw) {
+        if (raw.empty()) return "";
+        std::string s = raw;
+        auto isDelim = [](char c){ return c == '"' || c == '<' || c == '>' || c == '\''; };
+        while (!s.empty() && isDelim(s.front())) s.erase(s.begin());
+        while (!s.empty() && isDelim(s.back())) s.pop_back();
+        std::string stem = std::filesystem::path(s).stem().string();
+        std::string t;
+        for (unsigned char c : stem) t += std::isalnum(c) ? (char)c : '_';
+        return t;
+    }
+
+    // 采集本单元生命周期信息：入口判定、直接 .sc 依赖、自有全局对象 init/drop。
+    // 须在 methods/aliases 注册表填充后调用（findMethod 依赖之）。
+    void collectLifecycle() {
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncD && !d->external && !d->isRpc && d->name == "main")
+                isEntryUnit = true;
+        modToken = modStemToken(srcFile);
+
+        auto endsSc = [](const std::string& s) {
+            return s.size() >= 3 && s.compare(s.size() - 3, 3, ".sc") == 0;
+        };
+        std::set<std::string> seen;
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::IncD || !endsSc(d->origin)) continue;
+            std::string tok = modStemToken(d->name);
+            if (tok == modToken) continue;              // 不自调
+            if (seen.insert(tok).second) depTokens.push_back(tok);
+        }
+
+        // 自有全局对象：仅可变（var，非 let/tls/const）标量结构变量。
+        //   init：无显式初值且类型有零参 init 方法 → 注入构造。
+        //   drop：类型有 drop 方法 → 注入析构（不论是否显式初值，对象存在即析构）。
+        for (auto& d : prog.decls) {
+            if (d->external || d->kind != Decl::VarD) continue;
+            for (auto& f : d->structCommon.fields) {
+                if (f.type.ptr != 0 || !f.type.arrayDims.empty() || f.type.hasInline
+                    || f.type.fat || f.type.project
+                    || f.type.fnKind != TypeRef::FncKind::None)
+                    continue;
+                if (!f.init) {
+                    const Decl* im = findMethod(f.type.name, "init");
+                    if (im && im->structCommon.fields.empty())
+                        gInits.push_back({f.name, im->name});
+                }
+                const Decl* dm = findMethod(f.type.name, "drop");
+                if (dm) gDrops.push_back({f.name, dm->name});
+            }
+        }
+        mainHasTeardown = isEntryUnit && (!gDrops.empty() || !depTokens.empty());
+    }
+
+    // 第一遍原型区：依赖模块 sc_mod_* 前向声明 + 本库模块自身 sc_mod_* 前向声明。
+    // 库模块自身 sc_mod 仅在有真实模块 token（srcFile 非空）时产出。
+    void emitLifecycleDecls() {
+        bool any = false;
+        for (auto& t : depTokens) {
+            out << "void sc_mod_" << t << "_init(void); void sc_mod_" << t << "_drop(void);\n";
+            any = true;
+        }
+        if (!isEntryUnit && !modToken.empty()) {
+            out << "void sc_mod_" << modToken << "_init(void); void sc_mod_"
+                << modToken << "_drop(void);\n";
+            any = true;
+        }
+        if (any) out << "\n";
+    }
+
+    // 库模块（无 main）：定义 sc_mod_<token>_init/drop。幂等（菱形依赖只执行一次）：
+    //   init：先递归各直接依赖 init，再构造自有全局（源序）。
+    //   drop：先析构自有全局（逆序），再递归各直接依赖 drop（逆序）。
+    void emitLifecycleDefs() {
+        if (isEntryUnit || modToken.empty()) return;
+        out << "void sc_mod_" << modToken << "_init(void) {\n";
+        out << "    static int _done = 0; if (_done) return; _done = 1;\n";
+        for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
+        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << ");\n";
+        out << "}\n";
+        out << "void sc_mod_" << modToken << "_drop(void) {\n";
+        out << "    static int _done = 0; if (_done) return; _done = 1;\n";
+        for (auto it = gDrops.rbegin(); it != gDrops.rend(); ++it)
+            out << "    " << it->fn << "(&" << it->var << ");\n";
+        for (auto it = depTokens.rbegin(); it != depTokens.rend(); ++it)
+            out << "    sc_mod_" << *it << "_drop();\n";
+        out << "}\n\n";
+    }
+
+    // main 序言：递归各直接依赖模块 init，再构造入口自有全局（源序）。
+    void emitMainPrologue() {
+        for (auto& t : depTokens) { indent(); out << "sc_mod_" << t << "_init();\n"; }
+        for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << ");\n"; }
+    }
+
+    // main 尾声：析构入口自有全局（逆序），再递归各直接依赖模块 drop（逆序）。
+    // 由 emitScopeCleanupAt（i==0 且 inMainFunc）在所有现有清理 phase 之后发出。
+    void emitMainEpilogue() {
+        for (auto it = gDrops.rbegin(); it != gDrops.rend(); ++it) {
+            indent(); out << it->fn << "(&" << it->var << ");\n";
+        }
+        for (auto it = depTokens.rbegin(); it != depTokens.rend(); ++it) {
+            indent(); out << "sc_mod_" << *it << "_drop();\n";
+        }
+    }
+
     std::string run() {
         // 标准 C 头统一由 builtins/platform.h 提供（该目录默认在 -I 路径），
         // 同时带入 TLS 宏等跨平台适配
         out << "/* 由 scc 生成，请勿手工修改 */\n"
             << "#include \"platform.h\"\n";
+
 
         // future<ID> 聚合枚举 future_id：头文件模式下由独立 type.h 提供，.c 在此 #include
         //（无依赖，置于最前）。内联模式则随 decls 就地输出，无需此包含。
@@ -4387,6 +4520,9 @@ struct CGen {
                 funcs[d->name] = d.get();  // 顶层函数（缺参补全查签名）
             if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
+
+        // 静态全局对象 / 模块级生命周期采集（依赖 methods/aliases 注册表已填充）
+        collectLifecycle();
 
         // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run/print/string
         heapNews.clear();
@@ -4513,6 +4649,9 @@ struct CGen {
             }
         }
         out << "\n";
+        // 模块级生命周期前向声明（依赖模块 sc_mod_* + 本库模块自身 sc_mod_*）：
+        // 须早于 main 函数体（其序言/尾声调用依赖模块 sc_mod_*）与本模块 sc_mod 定义。
+        emitLifecycleDecls();
         // 堆构造辅助函数（T() 伪调用糖使用）
         emitNewHelpers();
         // 第二遍：函数定义先写入暂存流（string 格式化调用点按需登记格式化请求），
@@ -4526,6 +4665,8 @@ struct CGen {
         emitSofHelpers();
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
+        // 库模块（无 main）：sc_mod_<token>_init/drop 定义（在方法/全局声明之后）。
+        emitLifecycleDefs();
         // --check=mem：全局栈数组尾哨兵的启动填充 / 退出校验钩子（在全局声明之后）。
         if (g_memCheck && !globalCanaries.empty()) {
             auto canaryLen = [](const MemCanaryVar& mc) -> std::string {

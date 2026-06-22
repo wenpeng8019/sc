@@ -37,6 +37,9 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
+void sc_mod_io_init(void); void sc_mod_io_drop(void);
+
 /* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */
 static inline void sc__sof_i64(string *_o, long long _v) {
     char _b[24]; snprintf(_b, sizeof(_b), "%lld", _v); string_append(_o, _b); }
@@ -192,6 +195,8 @@ static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t 
 }
 
 int32_t main(void) {
+    sc_mod_adt_init();
+    sc_mod_io_init();
     /* line 36 */
     int32_t nn = 42;
     /* line 37 */
@@ -293,5 +298,10 @@ int32_t main(void) {
     /* line 99 */
     print((uint8_t)(0), "缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (stringify_t){ .compact = 1 }));
     /* line 101 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_io_drop();
+        sc_mod_adt_drop();
+        return _ret;
+    }
 }

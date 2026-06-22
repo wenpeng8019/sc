@@ -87,6 +87,8 @@ struct session {
 static void session_rpc(struct session *_p);
 static future *session__async(com *c);
 
+void sc_mod_async_init(void); void sc_mod_async_drop(void);
+
 static int32_t mb_write(com *_this, void *buf, uint32_t *size) {
     /* line 26 */
     membuf *m = ((membuf*)(_this->dev));
@@ -326,6 +328,7 @@ static void session_rpc(struct session *_p) {
 }
 
 int32_t main(void) {
+    sc_mod_async_init();
     /* line 124 */
     async_init();
     /* line 126 */
@@ -357,5 +360,9 @@ int32_t main(void) {
     /* line 142 */
     async_final();
     /* line 143 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_async_drop();
+        return _ret;
+    }
 }

@@ -59,6 +59,9 @@ typedef struct com__project {
 } com__project;
 
 
+void sc_mod_m_init(void); void sc_mod_m_drop(void);
+void sc_mod_async_init(void); void sc_mod_async_drop(void);
+
 static inline future *future__new(void) {
     future *_p = (future *)malloc(sizeof(future));
     if (_p) {
@@ -177,6 +180,8 @@ static void compute_rpc(struct compute *_p) {
 }
 
 int32_t main(void) {
+    sc_mod_m_init();
+    sc_mod_async_init();
     /* line 184 */
     async_init();
     /* line 188 */
@@ -204,5 +209,10 @@ int32_t main(void) {
     /* line 208 */
     async_final();
     /* line 209 */
-    return 0;
+    {
+        int32_t _ret = 0;
+        sc_mod_async_drop();
+        sc_mod_m_drop();
+        return _ret;
+    }
 }
