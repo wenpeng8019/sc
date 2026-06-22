@@ -122,12 +122,21 @@ RUNTIME_TRAP=(
     "tests/cases/trap_ref_dangle.sc ref"
 )
 
+# 单元测试框架用例：--test 编译并运行 tst 用例，比对归一化后的 TAP 报告（golden .tap）。
+# 覆盖 通过 / 软失败（assert 值回显）/ tst.skip 三态与汇总行；退出码=失败用例数。
+TEST_RUN=(
+    examples/test_demo.sc
+)
+
 pass=0 fail=0 upd=0
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
 # 归一化错误输出：去掉源文件路径前缀（绝对/相对差异 → 仅留 文件名.sc）
 norm_err() { sed -E 's#^([^ ]*/)?([A-Za-z0-9_]+\.sc):#\2:#'; }
+
+# 归一化 TAP 报告：把行内任意绝对/相对路径前缀压成 文件名.sc（assert 失败定位行用）
+norm_tap() { sed -E 's#(/[^ ]*/)?([A-Za-z0-9_]+\.sc:)#\2#g'; }
 
 # 比对或更新一个快照。 $1=标签  $2=黄金文件  $3=实际内容
 snapshot() {
@@ -205,6 +214,14 @@ for entry in "${RUNTIME_TRAP[@]}"; do
     trap_err="$("$SCC" "$src" --check="$flag" 2>&1 1>/dev/null)"
     trap_err="$(printf '%s' "$trap_err" | norm_err)"
     snapshot "$name (trap --check=$flag)" "$GOLDEN/$name.trap" "$trap_err"
+done
+
+# 单元测试框架：--test 运行 tst 用例，捕获 TAP 报告（含失败用例非零退出码）并归一化比对。
+for src in "${TEST_RUN[@]}"; do
+    name="$(basename "$src" .sc)"
+    tap="$("$SCC" "$src" --test 2>&1)"
+    tap="$(printf '%s' "$tap" | norm_tap)"
+    snapshot "$name (test)" "$GOLDEN/$name.tap" "$tap"
 done
 
 echo

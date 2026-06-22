@@ -49,6 +49,9 @@ SCC_LIB=/opt/homebrew/lib ./build/scc app.sc -l curl -lm
 ./build/scc ../examples/feature1.sc --emit-c -o feature1.c
 cc feature1.c -o feature1 && ./feature1
 
+# 单元测试：编译并运行目标文件的 tst 用例（见 syntax.md §11.8），退出码=失败用例数
+./build/scc ../examples/test_demo.sc --test
+
 # 交叉编译：把工具链整套换成目标工具链，配置写进 .target 目标档（详见 cross-compile.md）
 ./build/scc app.sc --build -o app --target ../examples/targets/aarch64-linux.target
 ./build/scc fw.sc  --build -o fw.bin --target ../examples/targets/cortex-m4.target \

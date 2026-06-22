@@ -56,6 +56,8 @@ enum class Tok {
     KwDone,     // done — 标记 future 就绪并唤醒等待者：done future[, result]（异步特性）
     KwFinal,    // final — 域退出钩子：本作用域每个退出点运行其块（先于自动胖边清理）
     KwPrint,    // print — 日志输出关键字（拼接糖 + <chn> 通道，依赖 io 模块）
+    KwTst,      // tst  — 定义单元测试用例块（tst "名字"，--test 模式收集运行）
+    KwAssert,   // assert — 测试断言（assert 表达式[, "消息"]，失败记录并中止当前用例）
     KwSizeof,   // sizeof
     KwOffsetof, // offsetof
 

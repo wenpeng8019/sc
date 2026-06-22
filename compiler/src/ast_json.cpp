@@ -188,6 +188,9 @@ std::string stmtNode(const Stmt& s) {
             if (s.printCompat) d = "(" + d + ")";
             return node("print", s.printChn != "0" ? "<" + s.printChn + ">" : "", d, s.line);
         }
+        case Stmt::AssertS:
+            return node("assert", "", s.text +
+                        (s.assertMsg ? ", " + exprToStr(*s.assertMsg) : ""), s.line);
     }
     return "{}";
 }
@@ -271,6 +274,12 @@ std::string declNode(const Decl& d) {
             return nodeExt(d.kind == Decl::VarD ? "var"
                          : d.kind == Decl::LetD ? "let" : "tls", "", X, d.line,
                            d.external, d.origin, d.used, c);
+        }
+        case Decl::TestD: {
+            std::vector<std::string> c;
+            for (auto& s : d.body) c.push_back(stmtNode(*s));
+            return nodeExt("tst", d.name, d.testSkip ? ".skip" : "", d.line,
+                           false, d.origin, false, c);
         }
     }
     return "{}";

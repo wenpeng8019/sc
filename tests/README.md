@@ -12,6 +12,7 @@
 | 转译 C 源码 | `scc x.sc --emit-c` | `golden/<名>.c` |
 | 规范化 sc 源码 | `scc x.sc --emit-sc` | `golden/<名>.sc` |
 | 负向用例错误信息 | `scc x.sc`（预期失败，比对 stderr） | `golden/<名>.err` |
+| 单元测试报告 | `scc x.sc --test`（TAP 输出，路径归一化） | `golden/<名>.tap` |
 
 > 运行时不确定的输出（多线程顺序、`stringify` 指针地址等）不做 stdout 快照，
 > 故选择 emit-c / emit-sc 这类纯函数产物作为回归基线。

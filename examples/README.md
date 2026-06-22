@@ -30,6 +30,7 @@
 | feature_forward.sc | 定义顺序无关（前置声明 + 函数原型，互递归） | 可直接运行 |
 | feature_export_inc.sc | `@inc` 导出到生成头文件 | 仅 `--emit-c -o`（无 main） |
 | feature_bad_value_cycle.sc | 按值互相包含的语义报错 | 负向用例，预期编译失败 |
+| test_demo.sc | 单元测试框架 `tst` / `assert` / `tst.skip`（含值回显与软失败） | 仅 `--test`（无 main，含故意失败用例，退出码非零） |
 
 ## 维护引用清单：增删 / 重排 / 改名 feature 时要连带改的地方
 

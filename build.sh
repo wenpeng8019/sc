@@ -76,6 +76,9 @@ do_test() {
     # 根模块标记（@@）子目录示例：feature30 与其消费单元同目录
     echo "--- feature30/feature30.sc（默认模式）---"
     "$BUILD_DIR/scc" "$ROOT/examples/feature30/feature30.sc"
+    # 单元测试框架：--test 运行 tst 用例（含故意失败，退出码非零属预期，不中断脚本）
+    echo "--- test_demo.sc（--test 模式）---"
+    "$BUILD_DIR/scc" "$ROOT/examples/test_demo.sc" --test || true
     # emit-c 模式：转译 C 后手动编译运行
     echo "--- feature1.sc（--emit-c 模式）---"
     local tmp

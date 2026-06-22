@@ -186,6 +186,12 @@ struct SGen {
                 }
                 out << "\n";
                 break;
+            case Stmt::AssertS:
+                ind();
+                out << "assert " << exprToStr(*s.expr);
+                if (s.assertMsg) out << ", " << exprToStr(*s.assertMsg);
+                out << "\n";
+                break;
         }
     }
 
@@ -292,6 +298,13 @@ struct SGen {
             case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.structCommon.fields); break;
             case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.structCommon.fields); break;
             case Decl::TlsD: emitVarLine("tls", d.structCommon.fields); break;
+            case Decl::TestD:
+                ind();
+                out << (d.testSkip ? "tst.skip \"" : "tst \"") << d.name << "\"\n";
+                depth++;
+                emitStmts(d.body);
+                depth--;
+                break;
         }
     }
 

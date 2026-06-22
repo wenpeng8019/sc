@@ -92,6 +92,9 @@ static void usage() {
               << "             保护返回地址；越界损坏报告并定位，默认关闭\n"
               << "  --check=ptr  开启运行时指针/下标守卫：解引用与指针下标处校验 nil、\n"
               << "             编译期已知维度的栈数组下标处校验越界；命中报告并 abort，默认关闭\n"
+              << "  --test     单元测试模式：编译目标文件的 tst 用例为测试 runner 并运行；\n"
+              << "             逐用例隔离执行（assert 失败软中止本例继续下一例），\n"
+              << "             汇总 通过/失败/跳过，退出码为失败用例数\n"
               << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
               << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
               << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
@@ -1038,7 +1041,8 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                                  std::string* extraLd = nullptr,
                                  const std::string& rootKey = "",
                                  const std::string& rootPreludeHeader = "",
-                                 const std::unordered_set<std::string>* preludeSkip = nullptr) {
+                                 const std::unordered_set<std::string>* preludeSkip = nullptr,
+                                 const std::string& testKey = "") {
     struct UnitArtifact {
         std::filesystem::path cpath;
         std::filesystem::path hpath;
@@ -1066,7 +1070,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             && !isBuiltinUnit(kv.second.path)
             && !(preludeSkip && preludeSkip->count(kv.first)))
             rph = rootPreludeHeader;
+        const bool unitTest = !testKey.empty() && kv.first == testKey;
+        if (unitTest) setTestMode(true);
         const std::string csrc = emitC(kv.second.prog, kv.first, sofName, &sofSrc, rph);  // 带 #line 源码映射
+        if (unitTest) setTestMode(false);
         if (!writeTextFile(cpath, csrc)) return 1;
         if (!sofSrc.empty() && !writeTextFile(tmpDir / sofName, sofSrc)) return 1;
 
@@ -1350,7 +1357,8 @@ static int buildProject(const std::filesystem::path& rootPath,
 // 从项目入口文件加载，编译为（临时）可执行文件并运行；程序参数透传，运行结束产物删除
 static int compileAndRunProject(const std::filesystem::path& rootPath,
                                 const std::vector<std::string>& progArgs,
-                                const ToolConfig& tc) {
+                                const ToolConfig& tc,
+                                const std::string& testKey = "") {
 
     // 根模块导出注入：扫描入口所在目录寻找 @@ 标注的根模块（显式开启条件）；run 模式恒为 EXE。
     const std::filesystem::path rootModule = findRootModule(unitDirOf(rootPath));
@@ -1400,7 +1408,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     std::string extraLd;
     if (compileUnitsToObjects(units, tc, "", tmpDir, objects, &extraLd,
                               rootKey, rootPreludeHeader,
-                              enableRP ? &preludeSkip : nullptr) != 0) {
+                              enableRP ? &preludeSkip : nullptr, testKey) != 0) {
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
@@ -1507,6 +1515,7 @@ int main(int argc, char** argv) {
         else if (a == "--emit-c") mode = "c";                // 转译 C 模式
         else if (a == "--ast") mode = "ast";                 // AST JSON 模式
         else if (a == "--emit-sc") mode = "sc";              // 再生 sc 模式
+        else if (a == "--test") mode = "test";               // 单元测试模式
         else if (a == "--check=ref") setRefCheck(true);      // 自动指针 T@ 栈悬挂检查（带源码定位）
         else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "ref") {
             ++i; setRefCheck(true);                          // --check ref 分写形式
@@ -1650,6 +1659,19 @@ int main(int argc, char** argv) {
             
             if (input == "-") return compileAndRunSource(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);
+        }
+
+        // 3d''. test 模式：编译目标文件的 tst 用例为测试 runner 并运行（仅文件输入）
+        if (mode == "test") {
+            if (input == "-") {
+                std::cerr << "错误: 测试模式需要源文件输入（不支持 stdin）\n";
+                return 1;
+            }
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            addBuiltinsInclude(tc, input);
+            const std::string testKey =
+                std::filesystem::weakly_canonical(std::filesystem::path(input)).string();
+            return compileAndRunProject(std::filesystem::path(input), progArgs, tc, testKey);
         }
 
         // 3d'. build 模式：编译链接为持久产物（类型按 -o 后缀决定）

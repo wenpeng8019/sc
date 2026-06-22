@@ -1174,6 +1174,11 @@ struct Checker {
                     (void)inferExpr(*v, locals, s.line);
                 }
                 break;
+            // -- assert：检查断言表达式与可选消息表达式 --------------------------
+            case Stmt::AssertS:
+                (void)inferExpr(*s.expr, locals, s.line);
+                if (s.assertMsg) (void)inferExpr(*s.assertMsg, locals, s.line);
+                break;
         }
     }
 
@@ -1296,6 +1301,14 @@ struct Checker {
 
             Ty ret = funcRetType(*d);
             for (auto& s : d->body) checkStmt(*s, locals, ret);
+        }
+
+        // tst 测试用例体：以空局部环境 + void 返回类型做语义检查（同普通 void 函数体）。
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::TestD) continue;
+            std::unordered_map<std::string, Ty> locals;
+            const Ty voidRet{"v", 0, 0, true, false};
+            for (auto& s : d->body) checkStmt(*s, locals, voidRet);
         }
     }
 

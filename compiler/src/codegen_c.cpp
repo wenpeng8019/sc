@@ -33,6 +33,27 @@ bool g_ptrCheck = false;
 // 栈悬挂断言 site 文案用的源码文件名（与 #line 的 srcFile 解耦，避免强制注入 #line）。
 std::string g_refSrcFile;
 
+// 单元测试模式开关（--test）：本单元为测试目标 → tst 编译为测试函数 + 合成 runner main，
+// 屏蔽用户 main。默认关闭：tst/assert 不产出运行代码。
+bool g_testMode = false;
+
+// C 字符串字面量转义：包裹引号并转义 \ " 及控制符，供 assert 表达式源码回显等用。
+std::string cStrLit(const std::string& s) {
+    std::string r = "\"";
+    for (unsigned char c : s) {
+        switch (c) {
+            case '\\': r += "\\\\"; break;
+            case '"':  r += "\\\""; break;
+            case '\n': r += "\\n"; break;
+            case '\r': r += "\\r"; break;
+            case '\t': r += "\\t"; break;
+            default:   r += (char)c;
+        }
+    }
+    r += "\"";
+    return r;
+}
+
 // sc 内置基本类型 → C 标准类型映射
 std::string mapBase(const std::string& n) {
     static const std::unordered_map<std::string, std::string> m = {
@@ -126,6 +147,10 @@ struct CGen {
     struct GLife { std::string var; std::string fn; };  // 全局对象名 + init/drop 方法 C 名
     std::vector<GLife> gInits;      // 本单元自有全局 init（源序，逆序 drop）
     std::vector<GLife> gDrops;      // 本单元自有全局 drop（源序登记，发出时逆序）
+
+    // ---- 单元测试（--test）支撑 ----
+    struct TestCase { const Decl* d; std::string cname; };  // tst 用例 + 生成的 C 函数名
+    std::vector<TestCase> testCases;  // 本单元 tst 用例（源序），测试目标时填充
 
     // ---- 伪 class 支撑：类型注册表与变量类型跟踪 ----
     std::unordered_map<std::string, const Decl*> aggrs;    // struct/union 名 → Decl
@@ -3105,6 +3130,9 @@ struct CGen {
             case Stmt::PrintS:
                 emitPrintStmt(s);
                 break;
+            case Stmt::AssertS:
+                emitAssertStmt(s);
+                break;
         }
     }
 
@@ -3311,6 +3339,176 @@ struct CGen {
             out << pv.post;
         }
         out << ");\n";
+    }
+
+    // ---------------- 单元测试（--test）----------------
+    static bool isCmpOp(const std::string& op) {
+        return op == "==" || op == "!=" || op == "<" || op == ">"
+            || op == "<=" || op == ">=";
+    }
+
+    // assert 失败诊断用源码文件名（优先 #line 的 srcFile，回退 ref site / 占位）。
+    std::string testSrcName() const {
+        if (!srcFile.empty()) return srcFile;
+        if (!g_refSrcFile.empty()) return g_refSrcFile;
+        return "test";
+    }
+
+    // 普通函数调用 f(...) 的返回类型解析（assert 值回显专用；exprVType 出于
+    // 保护 print golden 仅对 T@ 胖返回解析，此处补足标量返回类型用于诊断显示）。
+    bool assertCallVType(const Expr& e, VType& vt) const {
+        if (e.kind != Expr::Call || !e.a || e.a->kind != Expr::Ident) return false;
+        auto fit = funcs.find(e.a->text);
+        if (fit == funcs.end()) return false;
+        const Decl* sig = fit->second;
+        if (!sig->funcTypeName.empty()) {
+            auto ft = funcTypes.find(sig->funcTypeName);
+            if (ft != funcTypes.end()) sig = ft->second;
+        }
+        const auto& rt = sig->structCommon.type;
+        if (!rt || (rt->name.empty() && rt->ptr == 0)) return false;
+        vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+        vt.fat = rt->fat;
+        return true;
+    }
+
+    // 单个标量/指针/串值的 printf 说明符（spec 或 macro 二选一）与 cast 前后缀。
+    // 取自 print 的按静态类型自动格式逻辑；无法格式化（结构体等）→ false。
+    bool autoFmtScalar(const Expr& arg, std::string& spec, std::string& macro,
+                       std::string& pre, std::string& post) const {
+        VType vt;
+        if (!exprVType(arg, vt) && !assertCallVType(arg, vt)) return false;
+        std::string nm = resolveAliasName(vt.name);
+        char cls = scalarClass(vt.name);
+        spec.clear(); macro.clear(); pre.clear(); post.clear();
+        if (vt.arr == 0 && vt.ptr == 0 && nm == "string" && aggrOf("string")) {
+            spec = "s"; pre = "string_cstr(&("; post = "))";
+        } else if (vt.arr == 0 && vt.ptr == 1 && nm == "string" && aggrOf("string")) {
+            spec = "s"; pre = "string_cstr("; post = ")";
+        } else if (cls == 'c' && (vt.ptr >= 1 || vt.arr >= 1)) {
+            spec = "s";
+        } else if (vt.ptr >= 1 || vt.arr >= 1) {
+            spec = "p"; pre = "(void *)("; post = ")";
+        } else {
+            switch (cls) {
+                case 'i':
+                    if (nm == "i8") { macro = "PRId64"; pre = "(int64_t)("; post = ")"; }
+                    else { spec = "d"; pre = "(int)("; post = ")"; }
+                    break;
+                case 'u':
+                    if (nm == "u8") { macro = "PRIu64"; pre = "(uint64_t)("; post = ")"; }
+                    else { spec = "u"; pre = "(unsigned)("; post = ")"; }
+                    break;
+                case 'f': spec = "f"; pre = "(double)("; post = ")"; break;
+                case 'b': spec = "d"; pre = "(int)("; post = ")"; break;
+                case 'c': spec = "c"; pre = "(int)("; post = ")"; break;
+                default: return false;
+            }
+        }
+        return true;
+    }
+
+    // 比较断言失败时回显单侧操作数的值（不可自动格式化则静默跳过该行）。
+    void emitAssertValue(const char* label, const Expr& e) {
+        std::string spec, macro, pre, post;
+        if (!autoFmtScalar(e, spec, macro, pre, post)) return;
+        indent();
+        if (!macro.empty())
+            out << "printf(\"  #   " << label << " = %\" " << macro << " \"\\n\", ";
+        else
+            out << "printf(\"  #   " << label << " = %" << spec << "\\n\", ";
+        out << pre;
+        emitExpr(e, true);
+        out << post << ");\n";
+    }
+
+    // assert 语句 → if (!(表达式)) { 记录失败头 + 可选值显示 + 中止当前用例 }
+    void emitAssertStmt(const Stmt& s) {
+        indent(); out << "if (!(";
+        emitExpr(*s.expr, true);
+        out << ")) {\n";
+        depth++;
+        indent();
+        out << "sc__fail_head(" << cStrLit(testSrcName()) << ", " << s.line << ", "
+            << cStrLit(s.text) << ", ";
+        if (s.assertMsg) emitExpr(*s.assertMsg, true);
+        else out << "(const char *)0";
+        out << ");\n";
+        // 比较表达式（== != < > <= >=）：回显左右操作数实际值，便于定位
+        if (s.expr->kind == Expr::Binary && isCmpOp(s.expr->op)) {
+            emitAssertValue("左值", *s.expr->a);
+            emitAssertValue("右值", *s.expr->b);
+        }
+        indent(); out << "sc__fail_done();\n";
+        depth--;
+        indent(); out << "}\n";
+    }
+
+    // tst 用例 → static void <cname>(void)（仿 emitFunc 的作用域设置；可见本单元非导出符号）
+    void emitTestFunc(const Decl& d, const std::string& cname) {
+        if (!srcFile.empty() && d.line > 0)
+            out << "#line " << d.line << " \"" << srcFile << "\"\n";
+        out << "static void " << cname << "(void) {\n";
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
+        inFunc = true;
+        retDollarDeclared = false;
+        curFnSig = nullptr;
+        preScanFatBorrows(d.body);
+        scanManualDrops(d.body);
+        depth++;
+        emitStmts(d.body);
+        depth--;
+        inFunc = false;
+        out << "}\n\n";
+    }
+
+    // 测试运行时：setjmp 隔离 + TAP 风格报告辅助（须早于测试函数体，供 assert 调用）。
+    void emitTestRuntime() {
+        out << "/* --- sc 单元测试运行时（--test 注入） --- */\n"
+            << "#include <setjmp.h>\n"
+            << "static jmp_buf sc__test_jmp;\n"
+            << "static int sc__test_failed;\n"
+            << "static int sc__test_no;\n"
+            << "static int sc__pass_total;\n"
+            << "static int sc__fail_total;\n"
+            << "static int sc__skip_total;\n"
+            << "static const char *sc__test_name;\n"
+            << "static void sc__fail_head(const char *file, int line, const char *expr, const char *msg) {\n"
+            << "    printf(\"not ok %d - %s\\n\", sc__test_no, sc__test_name);\n"
+            << "    printf(\"  # %s:%d: assert %s\\n\", file, line, expr);\n"
+            << "    if (msg && msg[0]) printf(\"  #   %s\\n\", msg);\n"
+            << "    sc__test_failed = 1;\n"
+            << "}\n"
+            << "static void sc__fail_done(void) { longjmp(sc__test_jmp, 1); }\n"
+            << "static void sc__run_case(const char *name, void (*fn)(void), int skip) {\n"
+            << "    sc__test_no++;\n"
+            << "    sc__test_name = name;\n"
+            << "    sc__test_failed = 0;\n"
+            << "    if (skip) { printf(\"ok %d - %s  # SKIP\\n\", sc__test_no, name); sc__skip_total++; return; }\n"
+            << "    if (setjmp(sc__test_jmp) == 0) fn();\n"
+            << "    if (sc__test_failed) sc__fail_total++;\n"
+            << "    else { printf(\"ok %d - %s\\n\", sc__test_no, name); sc__pass_total++; }\n"
+            << "}\n\n";
+    }
+
+    // 测试 runner main：模块 init → 逐个 tst 用例 → 模块 drop → 汇总；失败数即退出码。
+    void emitTestRunnerMain() {
+        out << "int main(int argc, char **argv) {\n";
+        out << "    (void)argc; (void)argv;\n";
+        for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
+        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << ");\n";
+        for (auto& tc : testCases)
+            out << "    sc__run_case(\"" << tc.d->name << "\", &" << tc.cname
+                << ", " << (tc.d->testSkip ? 1 : 0) << ");\n";
+        for (auto it = gDrops.rbegin(); it != gDrops.rend(); ++it)
+            out << "    " << it->fn << "(&" << it->var << ");\n";
+        for (auto it = depTokens.rbegin(); it != depTokens.rend(); ++it)
+            out << "    sc_mod_" << *it << "_drop();\n";
+        out << "    printf(\"1..%d\\n\", sc__pass_total + sc__fail_total + sc__skip_total);\n";
+        out << "    printf(\"==> 测试通过 %d，失败 %d，跳过 %d\\n\", "
+               "sc__pass_total, sc__fail_total, sc__skip_total);\n";
+        out << "    return sc__fail_total ? 1 : 0;\n";
+        out << "}\n";
     }
 
     // 对象 → &(对象)，指针 → 原样（按轻量类型推断；不可推断时默认按对象取地址）
@@ -4404,6 +4602,8 @@ struct CGen {
         for (auto& d : prog.decls)
             if (d->kind == Decl::FuncD && !d->external && !d->isRpc && d->name == "main")
                 isEntryUnit = true;
+        // 测试目标：合成 runner main 取代用户 main，本单元即入口（不再产出自身 sc_mod_*）。
+        if (g_testMode) isEntryUnit = true;
         modToken = modStemToken(srcFile);
 
         auto endsSc = [](const std::string& s) {
@@ -4531,6 +4731,16 @@ struct CGen {
         // 静态全局对象 / 模块级生命周期采集（依赖 methods/aliases 注册表已填充）
         collectLifecycle();
 
+        // 单元测试目标：收集 tst 用例并分配 C 函数名（源序）。
+        if (g_testMode) {
+            int i = 0;
+            for (auto& d : prog.decls)
+                if (d->kind == Decl::TestD && !d->external)
+                    testCases.push_back({d.get(),
+                        "sc_test_" + (modToken.empty() ? std::string("u") : modToken)
+                        + "_" + std::to_string(i++)});
+        }
+
         // 预扫描 T() 伪调用（仅本单元代码，外部合并声明不扫），顺带标记 run/print/string
         heapNews.clear();
         for (auto& d : prog.decls) {
@@ -4653,20 +4863,30 @@ struct CGen {
                     break;
                 case Decl::IncD: break;  // 已在顶部输出
                 case Decl::AddD: break;  // 构建指令，不产生 C 输出
+                case Decl::TestD: break;  // tst 用例：普通编译忽略；测试模式由第二遍 + runner 处理
             }
         }
         out << "\n";
         // 模块级生命周期前向声明（依赖模块 sc_mod_* + 本库模块自身 sc_mod_*）：
         // 须早于 main 函数体（其序言/尾声调用依赖模块 sc_mod_*）与本模块 sc_mod 定义。
         emitLifecycleDecls();
+        // 单元测试运行时（--test）：setjmp 隔离 + TAP 报告辅助，须早于测试函数体。
+        if (g_testMode) emitTestRuntime();
         // 堆构造辅助函数（T() 伪调用糖使用）
         emitNewHelpers();
         // 第二遍：函数定义先写入暂存流（string 格式化调用点按需登记格式化请求），
         // 随后回填支撑代码（原语/格式化器/包装）再拼接函数体
         std::ostringstream mainOut = std::move(out);
         out = std::ostringstream();
-        for (auto& d : prog.decls)
-            if (d->kind == Decl::FuncD && !d->external) emitFunc(*d);
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::FuncD || d->external) continue;
+            // 测试模式：屏蔽用户 main（由合成 runner main 取代）
+            if (g_testMode && !d->isRpc && d->name == "main") continue;
+            emitFunc(*d);
+        }
+        // 测试模式：tst 用例 → static 测试函数
+        if (g_testMode)
+            for (auto& tc : testCases) emitTestFunc(*tc.d, tc.cname);
         std::string funcsPart = out.str();
         out = std::move(mainOut);
         emitSofHelpers();
@@ -4674,6 +4894,8 @@ struct CGen {
         out << funcsPart;
         // 库模块（无 main）：sc_mod_<token>_init/drop 定义（在方法/全局声明之后）。
         emitLifecycleDefs();
+        // 测试 runner main（--test）：串起模块 init / 各 tst 用例 / drop，失败数即退出码。
+        if (g_testMode) emitTestRunnerMain();
         // --check=mem：全局栈数组尾哨兵的启动填充 / 退出校验钩子（在全局声明之后）。
         if (g_memCheck && !globalCanaries.empty()) {
             auto canaryLen = [](const MemCanaryVar& mc) -> std::string {
@@ -4749,6 +4971,7 @@ struct CGen {
                     emitInclude(*d);
                     break;
                 case Decl::AddD: break;  // 构建指令，不产生 C 输出
+                case Decl::TestD: break;  // tst 用例不导出
             }
         }
         out << "\n#endif /* " << guard << " */\n";
@@ -4775,6 +4998,8 @@ bool getMemCheck() { return g_memCheck; }
 void setPtrCheck(bool on) { g_ptrCheck = on; }
 bool getPtrCheck() { return g_ptrCheck; }
 void setRefSrcFile(const std::string& path) { g_refSrcFile = path; }
+void setTestMode(bool on) { g_testMode = on; }
+bool getTestMode() { return g_testMode; }
 
 std::string emitC(const Program& prog, const std::string& srcFile) {
     CGen g(prog);

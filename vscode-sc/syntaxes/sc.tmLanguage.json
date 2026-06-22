@@ -119,11 +119,11 @@
                 },
                 {
                     "name": "keyword.control.io.sc",
-                    "match": "\\b(print|stringify)\\b"
+                    "match": "\\b(print|stringify|assert)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|tls|inc|add)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|tls|inc|add|tst)\\b"
                 },
                 {
                     "name": "storage.modifier.qualifier.sc",

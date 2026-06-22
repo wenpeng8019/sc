@@ -47,6 +47,13 @@ bool getPtrCheck();
 // 栈悬挂断言 site 文案使用的源码文件名（独立于 #line 的 srcFile）。
 void setRefSrcFile(const std::string& path);
 
+// 单元测试模式开关（--test）：开启时本单元被视为测试目标。
+//   tst 用例编译为 static 测试函数；用户 main 被屏蔽；合成 runner main 串起
+//   模块 init/drop 与各用例（setjmp 隔离失败、TAP 风格报告、失败数即退出码）。
+//   关闭（默认）：tst 用例与 assert 不产出运行代码（普通编译忽略测试）。
+void setTestMode(bool on);
+bool getTestMode();
+
 // emitC 变体：程序使用 stringify(...) 时，将按类型生成的 JSON 格式化器写入独立头文件。
 //   stringifyHeaderName 非空且 stringifyHeaderOut 非空：格式化器写入 *stringifyHeaderOut
 //   （含 include guard），生成的 .c 在类型定义之后 #include 该头文件名；程序未使用

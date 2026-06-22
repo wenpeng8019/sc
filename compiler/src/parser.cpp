@@ -1460,6 +1460,31 @@ struct Parser {
         return s;
     }
 
+    // 由 token 序列 [from, to) 重建源码文本：按 spaceBefore 还原原始空白，
+    // 用于 assert 失败时回显断言表达式源码（保真度足够诊断，无需精确列号）。
+    std::string spanText(size_t from, size_t to) const {
+        std::string r;
+        for (size_t i = from; i < to && i < t.size(); i++) {
+            if (i > from && t[i].spaceBefore) r += ' ';
+            r += t[i].text;
+        }
+        return r;
+    }
+
+    // 解析 assert 语句：assert 表达式[, 消息表达式]
+    //   失败语义在 --test 模式由 codegen 注入（记录 file:line + 表达式源码后中止当前用例）。
+    //   表达式为比较运算（== != < > <= >=）时，codegen 额外回显左/右操作数的值。
+    StmtPtr parseAssertStmt() {
+        auto s = mkStmt(Stmt::AssertS);
+        advance();                          // 跳过 assert 关键字
+        size_t from = p;
+        s->expr = parseExpr();              // 布尔表达式（顶层逗号留给消息分隔）
+        s->text = spanText(from, p);        // 表达式源码串（失败回显）
+        if (accept(Tok::Comma)) s->assertMsg = parseExpr();  // 可选失败消息
+        expect(Tok::Newline, "换行");
+        return s;
+    }
+
     // 解析标签语句：
     // label:       
     //     body...  
@@ -1730,6 +1755,10 @@ struct Parser {
             case Tok::KwPrint:
                 return parsePrintStmt();
 
+            // assert 测试断言：assert 表达式[, 消息]（仅 --test 模式有运行语义）
+            case Tok::KwAssert:
+                return parseAssertStmt();
+
             // 默认：表达式语句（赋值、函数调用等）
             default: {
                 auto s = mkStmt(Stmt::ExprS);
@@ -1756,6 +1785,30 @@ struct Parser {
     // sc 程序的顶层结构：连续的 inc/def/fnc/var/let 声明
     // + 声明前可加 @ 前缀表示导出对象（--emit-c 时生成 .h 声明）
 
+    // 解析顶层测试用例：tst[.skip] "名字" \n\tbody
+    //   一等测试块，每文件可任意多个。普通编译忽略；--test 模式收集为 runner 入口。
+    DeclPtr parseTestDecl() {
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        d->kind = Decl::TestD;
+        advance();                          // 跳过 tst 关键字
+        if (atOp(".")) {                    // tst.skip 跳过形态
+            advance();
+            if (!(at(Tok::Ident) && cur().text == "skip"))
+                err("tst. 之后仅支持 skip（tst.skip \"...\"）");
+            advance();
+            d->testSkip = true;
+        }
+        if (!at(Tok::Str)) err("tst 后期望用例名（字符串字面量）");
+        const std::string raw = advance().text;          // 含引号的源码串
+        d->name = raw.size() >= 2 ? raw.substr(1, raw.size() - 2) : raw;  // 去外层引号，转义保留
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "tst 缩进块");
+        parseStmts(d->body);
+        accept(Tok::Dedent);
+        return d;
+    }
+
     Program parseProgram() { Program prog;
 
         for (;;) { skipNewlines();                                  // 跳过顶层连续空行
@@ -1773,6 +1826,13 @@ struct Parser {
             // @ 导出前缀：作用于紧随的 inc/def/fnc/var/let
             bool exported = acceptOp("@");
             switch (cur().kind) {
+
+                // tst 单元测试用例：顶层一等测试块（不可 @ 导出）
+                case Tok::KwTst: {
+                    if (exported) err("tst 测试用例不支持 @ 导出");
+                    prog.decls.push_back(parseTestDecl());
+                    break;
+                }
 
                 // inc 头文件引入：lexer 已将头文件名捕获为 Str token
                 case Tok::KwInc: {

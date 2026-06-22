@@ -290,6 +290,10 @@ struct Stmt {
                     //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
                     //                  false 时为拼接糖：字符串字面量=纯文本；其余=按静态类型自动
                     //                  补说明符的变量；Cast(castIsFmt)=显式格式覆盖 (expr: "%fmt")
+        AssertS,    // assert 测试断言  assert 表达式[, 消息表达式]
+                    //                > expr=布尔表达式（失败=假）
+                    //                > assertMsg=可选消息表达式（const char*），空=无
+                    //                > text=表达式源码串（失败报告回显，由 parser 据 token 重建）
         RetCallS,   // ret 调用语法糖   retOp func()[ \n body]
                     //                > expr=被调用的函数表达式（Expr::Call）
                     //                > retOp ∈ {"!",">","<",">=","<=","!!"}
@@ -339,6 +343,8 @@ struct Stmt {
     std::string retOp;                  // RetCallS: 语法糖操作符（"!" ">" "<" ">=" "<=" "!!"）
     bool retProp = false;               // RetCallS: 尾置 ? 错误传播糖（体后 return $）
 
+    ExprPtr assertMsg;                  // AssertS: 可选失败消息表达式（const char*）
+
     struct CaseArm {
         std::vector<ExprPtr> labels;    // 空=default 分支
         std::vector<StmtPtr> body;      // 分支体
@@ -367,6 +373,10 @@ struct Decl {
         StructD,    // 结构体     def name: { field:type, ... }
         UnionD,     // 联合体     def name: ( field:type, ... )
         AliasD,     // 类型别名   def name -> target_type
+
+        // -- tst 定义的单元测试用例 --
+        TestD,      // 测试用例   tst "名字" \n\tbody（--test 模式收集运行；普通编译忽略）
+                    //            name=显示名（字符串内文）；body=语句；testSkip=tst.skip 跳过
 
         // -- fnc 定义的函数 --
         FuncTypeD,  // 函数类型   fnc name: ret, p1:t1, p2:t2 \n（仅有签名，无函数体）
@@ -402,6 +412,8 @@ struct Decl {
     bool exported = false;          // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
     bool genTypeHeader = false;     // 编译器合成的 future_id 枚举：转译工程下写入 type.h（各 .c #include），
                                     //   emit-sc 不输出；stdout/内联模式则就地内联进 .c（自包含）
+    bool testSkip = false;          // TestD: tst.skip 形态（跳过执行，报告记 skipped）
+
     bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
     bool tagged = false;            // 标签联合 def T: @( v1 / v2:T / ... )：UnionD 加隐藏 tag，
