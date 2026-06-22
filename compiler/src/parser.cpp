@@ -1761,6 +1761,15 @@ struct Parser {
         for (;;) { skipNewlines();                                  // 跳过顶层连续空行
             if (at(Tok::End)) break;
 
+            // @@ 根模块标记：独立顶层声明，标注本单元为显式根模块（全局前奏提供者）。
+            // 其 @导出 由编译器默认注入所有依赖单元；语法插件据此静态识别根模块。
+            if (atOp("@@")) {
+                advance();
+                prog.isRoot = true;
+                expect(Tok::Newline, "换行");
+                continue;
+            }
+
             // @ 导出前缀：作用于紧随的 inc/def/fnc/var/let
             bool exported = acceptOp("@");
             switch (cur().kind) {

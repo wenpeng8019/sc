@@ -51,8 +51,10 @@ void setRefSrcFile(const std::string& path);
 //   stringifyHeaderName 非空且 stringifyHeaderOut 非空：格式化器写入 *stringifyHeaderOut
 //   （含 include guard），生成的 .c 在类型定义之后 #include 该头文件名；程序未使用
 //   stringify 时 *stringifyHeaderOut 为空。stringifyHeaderName 为空时回退为内联进 .c。
+//   rootPreludeHeader 非空时：在所有 inc 之后追加 #include 该接口头（根模块导出注入）。
 std::string emitC(const Program& prog, const std::string& srcFile,
-                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut);
+                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut,
+                  const std::string& rootPreludeHeader = "");
 
 // 生成 C 头文件内容：仅包含 @导出对象的声明
 //   导出类型 → 完整 typedef；导出变量/常量 → extern 声明；导出函数 → 原型

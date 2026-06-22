@@ -483,6 +483,10 @@ struct CGen {
     std::string typeHeaderName;
     bool usesFutureId = false;          // 出现 future<ID>() 构造：需生成 future__new_tagged 辅助
 
+    // 根模块导出注入：非空时本单元 .c 在所有 inc 之后追加 #include 该接口头（scm_<root>.h），
+    //   使根（集成单元）的 @导出 类型/操作在依赖单元 C 层可见。仅项目构建的非根单元设置。
+    std::string rootPreludeHeader;
+
     // 穿透别名得到最终类型名（最多 8 层防环）
     std::string resolveAliasName(std::string n) const {
         for (int i = 0; i < 8; i++) {
@@ -4502,6 +4506,9 @@ struct CGen {
         // 用户 inc 引入的头文件
         for (auto& d : prog.decls)
             if (d->kind == Decl::IncD) emitInclude(*d);
+        // 根模块导出接口头：作为末位 include（集成单元全局定义/操作对本依赖单元可见）
+        if (!rootPreludeHeader.empty())
+            out << "#include \"" << rootPreludeHeader << "\"\n";
         out << "\n";
 
         // 最简策略：默认为所有结构/联合输出前置声明，消除定义顺序依赖
@@ -4776,10 +4783,12 @@ std::string emitC(const Program& prog, const std::string& srcFile) {
 }
 
 std::string emitC(const Program& prog, const std::string& srcFile,
-                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut) {
+                  const std::string& stringifyHeaderName, std::string* stringifyHeaderOut,
+                  const std::string& rootPreludeHeader) {
     CGen g(prog);
     g.srcFile = srcFile;
     g.sofHeaderName = stringifyHeaderName;
+    g.rootPreludeHeader = rootPreludeHeader;  // 根模块导出接口头（末位 include）；空=禁用
     if (!prog.futureIds.empty()) g.typeHeaderName = "type.h";  // 文件模式：.c #include "type.h"
     std::string c = g.run();
     if (stringifyHeaderOut) *stringifyHeaderOut = g.sofHeaderOut;

@@ -316,6 +316,7 @@ struct SGen {
                 (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())))
                 methodImpls[d->methodOwner].push_back(d.get());
         out << "# 由 scc --emit-sc 从 AST 再生成\n\n";
+        if (prog.isRoot) out << "@@\n\n";              // 根模块标记（头部）
         for (auto& d : prog.decls) {
             // 编译器合成的 future_id 枚举不输出（源码无此声明，由 future<ID> 聚合而来）
             if (d->genTypeHeader) continue;

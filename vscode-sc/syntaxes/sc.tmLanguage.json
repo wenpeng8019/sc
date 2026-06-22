@@ -6,6 +6,7 @@
         { "include": "#comment" },
         { "include": "#inc-decl" },
         { "include": "#add-decl" },
+        { "include": "#root-marker" },
         { "include": "#export-prefix" },
         { "include": "#def-decl" },
         { "include": "#fnc-decl" },
@@ -47,6 +48,10 @@
         "export-prefix": {
             "name": "storage.modifier.export.sc",
             "match": "^\\s*(@)(?=inc|def|fnc|var|let)"
+        },
+        "root-marker": {
+            "name": "storage.modifier.root.sc",
+            "match": "^\\s*(@@)(?=\\s|#|$)"
         },
         "def-decl": {
             "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",

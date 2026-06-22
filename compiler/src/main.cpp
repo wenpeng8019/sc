@@ -833,13 +833,132 @@ static std::string nthSourceLine(const std::string& src, int n) {
     return {};
 }
 
+// 单元是否属 builtins 库（路径任一组件名为 "builtins"）：根模块导出注入须排除内置库。
+static bool isBuiltinUnit(const std::filesystem::path& p) {
+    for (const auto& comp : p) if (comp == "builtins") return true;
+    return false;
+}
+
+// 程序是否含可导出对象（@导出 且非 external）：决定根模块是否生成非空接口头 / 启用注入。
+static bool programHasExports(const Program& prog) {
+    for (auto& d : prog.decls) if (d->exported && !d->external) return true;
+    return false;
+}
+
+// 根模块导出注入（语义侧）：把根（入口/集成单元）的 @导出 声明以 external 并入消费单元，
+//   仅供跨模块语法/语义可见（类型/方法/全局），不发定义、不参与链接——C 层定义与 extern
+//   原型由注入的 scm_<root>.h 提供。与 resolveUnitDeps 的向下合并同构，源头固定为根模块。
+//   仅并入类型/函数/变量/别名声明，跳过 inc/add（避免污染消费单元的 include 与构建指令）。
+static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPath) {
+    const std::string origin = rootPath.string();
+    for (auto& d : prog.decls) if (d->origin == origin) return;  // 已并入：幂等
+    const std::string text = readWholeFile(rootPath);
+    if (text.empty()) return;
+    try {
+        Program mp = parse(lex(text));
+        for (auto& md : mp.decls) {
+            if (!md->exported) continue;
+            if (md->kind == Decl::IncD || md->kind == Decl::AddD) continue;
+            md->external = true;
+            md->origin = origin;
+            prog.decls.push_back(std::move(md));
+        }
+    } catch (...) {
+        // 根解析失败：留待根单元自身编译时报错
+    }
+}
+
+// 收集根模块「导出 inc 闭包」（规范路径集，含根自身）：沿 @inc（导出 include）边递归。
+//   根接口头 scm_<root>.h 会 #include 这些单元的 scm_<dep>.h（emitInclude 对 @inc 的处理），
+//   故不可把 scm_<root>.h 反向注入这些单元的 .c —— 否则该单元 .c 在自身类型定义前先 include
+//   引用了这些类型的根接口头，造成「未定义类型」编译错误（典型：根 @inc shared + 根导出引用
+//   shared 类型）。这些单元属根公共接口的「上游」，本就无需被注入。
+static void collectExportedIncClosure(const std::filesystem::path& unitPath,
+                                      std::unordered_set<std::string>& closure) {
+    const auto canon = std::filesystem::weakly_canonical(unitPath);
+    const std::string key = canon.string();
+    if (!closure.insert(key).second) return;  // 已访问
+    const std::string text = readWholeFile(canon);
+    if (text.empty()) return;
+    const auto baseDir = canon.has_parent_path() ? canon.parent_path()
+                                                 : std::filesystem::current_path();
+    try {
+        Program mp = parse(lex(text));
+        for (auto& d : mp.decls) {
+            if (d->kind != Decl::IncD || !d->exported) continue;  // 仅导出 inc 边
+            auto modPath = resolveModulePath(d->name, baseDir);
+            if (!modPath.empty() && endsWith(modPath.string(), ".sc"))
+                collectExportedIncClosure(modPath, closure);
+        }
+    } catch (...) {
+        // 解析失败：忽略（留待该单元自身编译报错）
+    }
+}
+
+// 文件中是否含独立 @@ 根标记（轻量文本扫描，避免对目录下每个文件做完整解析）。
+//   规则：某一行去除首尾空白后以 @@ 起始、且其后为空白/注释/行尾（排除 @@xxx 误匹配）即判为根。
+//   权威判定仍由解析器置 prog.isRoot；本扫描仅供「为其它单元定位根」的快速发现。
+static bool fileHasRootMarker(const std::filesystem::path& p) {
+    std::ifstream in(p);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t b = line.find_first_not_of(" \t\r");
+        if (b == std::string::npos || line[b] == '#') continue;     // 空行/注释行
+        if (line.compare(b, 2, "@@") == 0) {
+            const size_t after = b + 2;
+            if (after >= line.size()) return true;
+            const char c = line[after];
+            if (c == ' ' || c == '\t' || c == '\r' || c == '#') return true;
+        }
+        // 其它有效行：继续（允许 @@ 出现在若干 inc 之后；不强制为首个声明）
+    }
+    return false;
+}
+
+// 在目录中发现 @@ 标注的根模块（显式声明的全局前奏提供者）。返回其规范路径，未找到返回空。
+//   不递归；跳过点文件（含语法插件的临时 .sc_ast_*.tmp.sc）。多个 @@ 时按排序取首并告警（根应唯一）。
+//   该扫描是「编译器对接语法插件」的静态发现入口：编辑期间依赖单元据此并入根 @导出，符号不再未定义。
+static std::filesystem::path findRootModule(const std::filesystem::path& dir) {
+    std::error_code ec;
+    if (dir.empty() || !std::filesystem::is_directory(dir, ec) || ec) return {};
+    std::vector<std::filesystem::path> entries;
+    for (auto it = std::filesystem::directory_iterator(dir, ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const auto& p = it->path();
+        const std::string fn = p.filename().string();
+        if (!fn.empty() && fn[0] == '.') continue;                  // 跳过点文件（含插件临时文件）
+        if (!endsWith(fn, ".sc")) continue;
+        std::error_code fec;
+        if (!std::filesystem::is_regular_file(p, fec) || fec) continue;
+        entries.push_back(p);
+    }
+    std::sort(entries.begin(), entries.end());
+    std::vector<std::filesystem::path> roots;
+    for (auto& p : entries) if (fileHasRootMarker(p)) roots.push_back(p);
+    if (roots.empty()) return {};
+    if (roots.size() > 1)
+        std::cerr << "警告: 目录下存在多个 @@ 根模块，取 "
+                  << roots.front().filename().string() << "（根模块应唯一）\n";
+    return std::filesystem::weakly_canonical(roots.front());
+}
+
+// 取某源文件所在目录（用于根模块发现的扫描基准）。
+static std::filesystem::path unitDirOf(const std::filesystem::path& src) {
+    const auto canon = std::filesystem::weakly_canonical(src);
+    return canon.has_parent_path() ? canon.parent_path()
+                                   : std::filesystem::current_path();
+}
+
 // 从项目入口文件加载模块图，递归解析依赖，检查语义；成功返回 true，失败返回 false 和错误信息。
 // importChain 记录「自入口起逐级 inc 进来的祖先模块」（规范路径），用于跨模块错误链展示。
 static bool loadUnitGraph(const std::filesystem::path& srcPath,
                           std::unordered_map<std::string, UnitInfo>& units,
                           std::unordered_set<std::string>& visiting,
                           std::string& errMsg,
-                          const std::vector<std::string>& importChain = {}) {
+                          const std::vector<std::string>& importChain = {},
+                          const std::filesystem::path& rootPrelude = {},
+                          const std::unordered_set<std::string>* preludeSkip = nullptr) {
 
     // 循环依赖检测：已加载的模块直接返回，正在访问的模块再次访问则报错
     const auto canon = std::filesystem::weakly_canonical(srcPath);
@@ -870,6 +989,10 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
         u.prog = parse(lex(src));                   // 解析源代码为 AST
         u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
         mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
+        // 根模块导出注入（语义可见性）：非根、非内置、且不在根导出 inc 闭包内的单元并入根 @导出
+        if (!rootPrelude.empty() && canon != rootPrelude && !isBuiltinUnit(canon)
+            && !(preludeSkip && preludeSkip->count(key)))
+            mergeRootPrelude(u.prog, rootPrelude);
         semanticCheck(u.prog);                      // 再检查：导入类型/方法可见 + 本模块函数体语义复检
     } catch (CompileError& e) {
         // 跨模块错误链完整展示：把错误准确归属到出错模块文件、补全该模块的源代码行，
@@ -892,7 +1015,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     std::vector<std::string> childChain = importChain;
     childChain.push_back(key);
     for (auto& dep : u.deps) {
-        if (!loadUnitGraph(dep, units, visiting, errMsg, childChain)) {
+        if (!loadUnitGraph(dep, units, visiting, errMsg, childChain, rootPrelude, preludeSkip)) {
             visiting.erase(key);
             return false;
         }
@@ -912,7 +1035,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                                  const std::string& extraCFlags,
                                  const std::filesystem::path& tmpDir,
                                  std::vector<std::filesystem::path>& objects,
-                                 std::string* extraLd = nullptr) {
+                                 std::string* extraLd = nullptr,
+                                 const std::string& rootKey = "",
+                                 const std::string& rootPreludeHeader = "",
+                                 const std::unordered_set<std::string>* preludeSkip = nullptr) {
     struct UnitArtifact {
         std::filesystem::path cpath;
         std::filesystem::path hpath;
@@ -933,7 +1059,14 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         // 由本单元 .c 在类型定义之后 #include（-I tmpDir 使其可见）
         const std::string sofName = token + "_stringify.h";
         std::string sofSrc;
-        const std::string csrc = emitC(kv.second.prog, kv.first, sofName, &sofSrc);  // 带 #line 源码映射
+        // 根模块导出注入：非根、非内置、且不在根导出 inc 闭包内的单元，.c 末位追加
+        //   #include "scm_<root>.h"（根导出 inc 闭包单元由 scm_<root>.h 反向引用，注入会致循环）
+        std::string rph;
+        if (!rootPreludeHeader.empty() && kv.first != rootKey
+            && !isBuiltinUnit(kv.second.path)
+            && !(preludeSkip && preludeSkip->count(kv.first)))
+            rph = rootPreludeHeader;
+        const std::string csrc = emitC(kv.second.prog, kv.first, sofName, &sofSrc, rph);  // 带 #line 源码映射
         if (!writeTextFile(cpath, csrc)) return 1;
         if (!sofSrc.empty() && !writeTextFile(tmpDir / sofName, sofSrc)) return 1;
 
@@ -1145,11 +1278,33 @@ static int buildProject(const std::filesystem::path& rootPath,
                         const std::string& output,
                         const ToolConfig& tc) {
 
-    // 1. 加载模块图
+    const OutKind kind = outputKind(output);
+
+    // 根模块导出注入：扫描入口所在目录寻找 @@ 标注的根模块（显式开启条件，取代命令行选项）；
+    //   仅 EXE 构建生效（集成单元语义）。根可与入口不同（@@ 标注的「全局前奏提供者」）。
+    const std::filesystem::path rootModule =
+        kind == OutKind::Exe ? findRootModule(unitDirOf(rootPath)) : std::filesystem::path{};
+    const bool enableRP = !rootModule.empty();
+    const std::string rootKey = rootModule.string();
+
+    // 根导出 inc 闭包（含根自身）：这些单元不接受注入（避免与根接口头反向引用成环）
+    std::unordered_set<std::string> preludeSkip;
+    if (enableRP) collectExportedIncClosure(rootModule, preludeSkip);
+
+    // 1. 加载模块图（启用时把根 @导出 语义并入各依赖单元，闭包内单元除外）
     std::unordered_map<std::string, UnitInfo> units;
     std::unordered_set<std::string> visiting;
     std::string err;
-    if (!loadUnitGraph(rootPath, units, visiting, err)) {
+    if (!loadUnitGraph(rootPath, units, visiting, err, {},
+                       enableRP ? rootModule : std::filesystem::path{},
+                       enableRP ? &preludeSkip : nullptr)) {
+        std::cerr << "错误: " << err << "\n";
+        return 1;
+    }
+
+    // 根≠入口且未被 inc 进图时，补加载根模块单元，使其 @导出 的 C 定义参与编译/链接
+    if (enableRP && units.find(rootKey) == units.end()
+        && !loadUnitGraph(rootModule, units, visiting, err, {}, rootModule, &preludeSkip)) {
         std::cerr << "错误: " << err << "\n";
         return 1;
     }
@@ -1163,14 +1318,22 @@ static int buildProject(const std::filesystem::path& rootPath,
     }
     const std::filesystem::path tmpDir(dirC);
 
-    const OutKind kind = outputKind(output);
+    // 根接口头名（注入用）：仅当启用且根含 @导出 对象（否则接口头为空，注入无意义）
+    std::string rootPreludeHeader;
+    if (enableRP) {
+        auto it = units.find(rootKey);
+        if (it != units.end() && programHasExports(it->second.prog))
+            rootPreludeHeader = moduleFileToken(rootKey) + ".h";
+    }
 
     // 3. 编译所有单元为对象文件到临时目录
     std::vector<std::filesystem::path> objects;
     std::string extraLd;
     int rc = compileUnitsToObjects(units, tc,
                                    kind == OutKind::SharedLib ? " -fPIC" : "",
-                                   tmpDir, objects, &extraLd);
+                                   tmpDir, objects, &extraLd,
+                                   rootKey, rootPreludeHeader,
+                                   enableRP ? &preludeSkip : nullptr);
     if (rc == 0) {
 
         // 4. 链接所有对象文件为最终产物
@@ -1189,11 +1352,29 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
                                 const std::vector<std::string>& progArgs,
                                 const ToolConfig& tc) {
 
-    // 1. 加载模块图
+    // 根模块导出注入：扫描入口所在目录寻找 @@ 标注的根模块（显式开启条件）；run 模式恒为 EXE。
+    const std::filesystem::path rootModule = findRootModule(unitDirOf(rootPath));
+    const bool enableRP = !rootModule.empty();
+    const std::string rootKey = rootModule.string();
+
+    // 根导出 inc 闭包（含根自身）：这些单元不接受注入
+    std::unordered_set<std::string> preludeSkip;
+    if (enableRP) collectExportedIncClosure(rootModule, preludeSkip);
+
+    // 1. 加载模块图（启用时把根 @导出 语义并入各依赖单元，闭包内单元除外）
     std::unordered_map<std::string, UnitInfo> units;
     std::unordered_set<std::string> visiting;
     std::string err;
-    if (!loadUnitGraph(rootPath, units, visiting, err)) {
+    if (!loadUnitGraph(rootPath, units, visiting, err, {},
+                       enableRP ? rootModule : std::filesystem::path{},
+                       enableRP ? &preludeSkip : nullptr)) {
+        std::cerr << "错误: " << err << "\n";
+        return 1;
+    }
+
+    // 根≠入口且未被 inc 进图时，补加载根模块单元，使其 @导出 的 C 定义参与编译/链接
+    if (enableRP && units.find(rootKey) == units.end()
+        && !loadUnitGraph(rootModule, units, visiting, err, {}, rootModule, &preludeSkip)) {
         std::cerr << "错误: " << err << "\n";
         return 1;
     }
@@ -1206,9 +1387,20 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         return 1;
     }
     const std::filesystem::path tmpDir(dirC);
+
+    // 根接口头名（注入用）：仅当启用且根含 @导出 对象
+    std::string rootPreludeHeader;
+    if (enableRP) {
+        auto it = units.find(rootKey);
+        if (it != units.end() && programHasExports(it->second.prog))
+            rootPreludeHeader = moduleFileToken(rootKey) + ".h";
+    }
+
     std::vector<std::filesystem::path> objects;
     std::string extraLd;
-    if (compileUnitsToObjects(units, tc, "", tmpDir, objects, &extraLd) != 0) {
+    if (compileUnitsToObjects(units, tc, "", tmpDir, objects, &extraLd,
+                              rootKey, rootPreludeHeader,
+                              enableRP ? &preludeSkip : nullptr) != 0) {
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
@@ -1375,6 +1567,18 @@ int main(int argc, char** argv) {
             resolveUnitDeps(prog, unitPath);                        //   使插件实时编辑场景也能合并外部描述符
         mergeOpModule(prog, unitPath);                              // 默认导入 op.sc 语法机制声明（operand/chain 等）
 
+        // 根模块导出注入（单文件分析/转译）：扫描单元所在目录的 @@ 根模块，非根单元并入其 @导出。
+        //   使语法插件实时编辑（--ast/--emit-sc）时，依赖单元引用根注入的全局对象不再「未定义」。
+        if (!unitPath.empty() && !prog.isRoot) {
+            const auto uCanon = std::filesystem::weakly_canonical(unitPath);
+            const auto rootModule = findRootModule(unitDirOf(unitPath));
+            if (!rootModule.empty() && rootModule != uCanon) {
+                std::unordered_set<std::string> skip;
+                collectExportedIncClosure(rootModule, skip);        // 根导出 inc 闭包不接受注入
+                if (!skip.count(uCanon.string())) mergeRootPrelude(prog, rootModule);
+            }
+        }
+
         if (mode == "ast") {                                        // 仅 AST 模式采集 C 头外部描述符
             ClangOptions copt;                                      //   （避免编译/run 每次都解析系统头；保持其它模式行为不变）
 
@@ -1535,10 +1739,22 @@ int main(int argc, char** argv) {
             std::unordered_map<std::string, UnitInfo> depUnits;
             std::unordered_set<std::string> visiting;
             std::string depErr;
+            const std::string rootKey = std::filesystem::weakly_canonical(
+                std::filesystem::path(input)).string();
+            // 根模块导出注入开启时，依赖单元语义检查须并入根 @导出（与 build/run 一致），
+            // 否则引用根全局类型/操作的依赖会在此 loadUnitGraph 语义复检失败、跳过头生成。
+            // 根由 @@ 标记发现（扫描输入所在目录）；根导出 inc 闭包内单元不接受注入。
+            const std::filesystem::path rootModule =
+                findRootModule(unitDirOf(std::filesystem::path(input)));
+            const bool enableRP = !rootModule.empty();
+            std::unordered_set<std::string> preludeSkip;
+            if (enableRP) collectExportedIncClosure(rootModule, preludeSkip);
+            const std::filesystem::path rp =
+                enableRP ? rootModule : std::filesystem::path{};
             if (loadUnitGraph(std::filesystem::path(input),
-                              depUnits, visiting, depErr)) {
-                const std::string rootKey = std::filesystem::weakly_canonical(
-                    std::filesystem::path(input)).string();
+                              depUnits, visiting, depErr, {}, rp,
+                              enableRP ? &preludeSkip : nullptr)) {
+
                 const std::filesystem::path outPath = output;
                 const std::filesystem::path outDir =
                     outPath.has_parent_path() ? outPath.parent_path()

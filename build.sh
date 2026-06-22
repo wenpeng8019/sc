@@ -73,6 +73,9 @@ do_test() {
         echo "--- $f.sc（默认模式）---"
         "$BUILD_DIR/scc" "$ROOT/examples/$f.sc"
     done
+    # 根模块标记（@@）子目录示例：feature30 与其消费单元同目录
+    echo "--- feature30/feature30.sc（默认模式）---"
+    "$BUILD_DIR/scc" "$ROOT/examples/feature30/feature30.sc"
     # emit-c 模式：转译 C 后手动编译运行
     echo "--- feature1.sc（--emit-c 模式）---"
     local tmp

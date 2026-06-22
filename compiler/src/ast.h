@@ -448,6 +448,8 @@ struct Program {
     std::vector<std::string> externSymbols; // 当前单元引用到的外部符号（模块/头文件导入后汇总）
     std::vector<std::string> futureIds;     // future<ID>() 构造点收集的 ID（去重、首见序）；
                                             // 非空时由解析器合成 future_id 枚举插入 decls 首部，转译工程写出 type.h。
+    bool isRoot = false;                    // 头部含 @@ 标记：本单元为显式根模块（全局前奏提供者），
+                                            // 其 @导出 默认注入到所有依赖单元，供编译期对接语法插件静态发现。
 };
 
 // ---------- 诊断信息 ----------
