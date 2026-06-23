@@ -26,6 +26,14 @@
                 "language": "sc",
                 "scopeName": "source.sc",
                 "path": "./syntaxes/sc.tmLanguage.json"
+            },
+            {
+                "scopeName": "markdown.sc.codeblock",
+                "path": "./syntaxes/markdown-sc.tmLanguage.json",
+                "injectTo": ["text.html.markdown"],
+                "embeddedLanguages": {
+                    "meta.embedded.block.sc": "sc"
+                }
             }
         ],
         "breakpoints": [
