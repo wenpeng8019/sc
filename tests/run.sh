@@ -80,7 +80,7 @@ POSITIVE=(
     tests/cases/cbridge.sc
     tests/cases/macro.sc
     tests/cases/macro_fnc.sc
-    tests/cases/args_native.sc
+    tests/cases/args_native/args_native.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物

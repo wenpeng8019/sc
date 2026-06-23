@@ -68,8 +68,19 @@ int ARGS_ls_count(arg_var_st* var) {
 static arg_def_st*  g_args_def = NULL;
 static int          g_pos_count = 0;    // 位置参数数量
 static bool         g_has_req = false;  // 是否有必选选项
+static bool         g_parsed = false;   // ARGS_parse 幂等：已解析则直接返回缓存结果
 static const char*  g_pos_desc = NULL;  // 位置参数描述（如 "<subcommand>"）
 static const char*  g_usage_ex = NULL;  // 使用示例说明
+
+// 已声明参数的全局注册链表头（arg_def_st 构造时头插自注册；ARGS_parse 优先采用）。
+arg_def_st* arg_defs = NULL;
+
+// arg_def_st 构造：把自身挂入全局注册链表（头插）。由 sc 编译器对静态全局
+// arg_def_st「声明即构造」自动调用；多次解析前即在 main 序章里把全部定义登记完毕。
+void arg_def_st_init(arg_def_st* _this) {
+    _this->next = arg_defs;
+    arg_defs = _this;
+}
 
 void ARGS_usage(const char* pos_desc, const char* usage_ex) {
     g_pos_desc = pos_desc;
@@ -78,16 +89,26 @@ void ARGS_usage(const char* pos_desc, const char* usage_ex) {
 
 int ARGS_parse(int argc, char** argv, ...) {
 
-    if (g_args_def) return g_pos_count;
+    if (g_parsed) return g_pos_count;
+    g_parsed = true;
 
-    va_list args; va_start(args, argv);
-    arg_def_st* def; int req_count = 0;  // 必选参数计数
-    while ((def = va_arg(args, arg_def_st*)) != NULL) {
-        def->next = g_args_def;
-        g_args_def = def;
-        if (def->req) req_count++;
+    arg_def_st* def;
+    int req_count = 0;  // 必选参数计数
+    if (arg_defs) {
+        // 优先：构造期自注册的参数定义链（sc 路径）——不再分析 ... 变参。
+        g_args_def = arg_defs;
+        for (def = g_args_def; def != NULL; def = def->next)
+            if (def->req) req_count++;
+    } else {
+        // 回退：从 ... 变参构建（纯 C 调用方 / 显式列表）。
+        va_list args; va_start(args, argv);
+        while ((def = va_arg(args, arg_def_st*)) != NULL) {
+            def->next = g_args_def;
+            g_args_def = def;
+            if (def->req) req_count++;
+        }
+        va_end(args);
     }
-    va_end(args);
     g_has_req = (req_count > 0);
 
     int show_help = (argc == 1);

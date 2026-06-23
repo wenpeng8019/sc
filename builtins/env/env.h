@@ -92,6 +92,16 @@ typedef struct arg_def {
 	struct arg_def* next;
 } arg_def_st;
 
+/* 已声明参数的全局注册链表头：arg_def_st 构造（arg_def_st_init）时把自身挂入此链。
+ * sc 侧顶层 mix ARGS_* 展开为真实全局后，编译器「声明即构造」自动调用 arg_def_st_init
+ * 完成登记；ARGS_parse 优先采用本链（非 NULL 时忽略 ... 变参）。定义见 env_impl.c。 */
+extern arg_def_st* arg_defs;
+
+/* arg_def_st 构造函数：把 _this 挂入全局注册链表 arg_defs（头插）。
+ * 由 sc 编译器对静态全局 arg_def_st「声明即构造」自动调用；纯 C 调用方无此自动机制，
+ * 仍可经 ARGS_parse 的 ... 变参传入 &ARGS_DEF_xxx（回退路径）。 */
+void arg_def_st_init(arg_def_st* _this);
+
 #define ARGS_DEF(req, name, type, s_cmd, l_cmd, desc)   \
 extern arg_var_st ARGS_##name;                          \
 arg_var_st ARGS_##name;                                 \
@@ -143,6 +153,9 @@ void ARGS_usage(const char* pos_desc, const char* usage_ex);
  * @param argc      main() 的 argc
  * @param argv      main() 的 argv，解析后会重排：选项在前，位置参数在后
  * @param ...       参数定义列表，以 NULL 结尾，每项为 &ARGS_DEF_xxx
+ *                  仅当全局注册链表 arg_defs 为 NULL（纯 C 调用方）时才解析本变参；
+ *                  sc 侧 mix ARGS_* 已由构造自动登记，arg_defs 非 NULL，变参被忽略，
+ *                  可直接 ARGS_parse(argc, argv, NULL)
  * @return          位置参数数量（可通过 argv[argc - 返回值] 访问位置参数）
  *
  * @note 遇到 -h/--help 或无参数时自动打印帮助并退出

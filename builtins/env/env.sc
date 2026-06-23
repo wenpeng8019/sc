@@ -45,7 +45,7 @@
 #       return pos_count
 
 # 参数类型枚举（与 C ABI 对齐）
-def arg_type: [
+@def arg_type: [
     ARG_FLOAT = -3
     ARG_INT
     ARG_BOOL
@@ -56,7 +56,7 @@ def arg_type: [
 ] : i4
 
 # 参数值联合体
-def arg_var_st: (
+@def arg_var_st: (
     str: const char&
     i64: i8
     f64: f8
@@ -64,7 +64,7 @@ def arg_var_st: (
 )
 
 # 参数定义结构
-def arg_def_st: {
+@def arg_def_st: {
     name: const char&
     desc: const char&
     type: arg_type
@@ -73,7 +73,15 @@ def arg_def_st: {
     req: bool
     slot: arg_var_st&
     next: arg_def_st&
+
+    fnc init::    # 构造：把自身挂入全局注册链表 arg_defs（C 实现于 env_impl.c）
 }
+
+# 已声明参数的全局注册链表头：每个 arg_def_st 构造（init）时把自己挂入此链。
+#   sc 侧顶层 mix ARGS_* 展开为真实全局 ARGS_DEF_xxx 后，编译器「声明即构造」自动调用
+#   arg_def_st.init 完成登记；ARGS_parse 优先采用本链（非 nil 时忽略 ... 变参）。
+#   C 侧定义于 env_impl.c。
+let arg_defs:: arg_def_st&
 
 # 参数定义宏：生成 ARGS_<name> 与 ARGS_DEF_<name>
 def ARGS_DEF: req, name, type, s_cmd, l_cmd, desc
