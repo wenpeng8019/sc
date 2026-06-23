@@ -18,7 +18,7 @@ usage() {
   dist       构建发行版 scc（builtins 资源 + 预编译 adt.a 内嵌，单二进制免携带 builtins）
   test       构建 + examples 冒烟运行 + tests 黄金快照回归（--emit-c/--emit-sc 产物比对）
              加 --update 重新生成黄金文件：./build.sh test --update
-  install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图）
+  install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图 + Markdown 预览 sc 高亮）
   uninstall  卸载 scc 与 VSCode 插件
   clean      清理构建产物
 EOF
@@ -125,6 +125,17 @@ do_install() {
         ln -s "$ROOT/$src" "$EXT_BASE/$name"
         echo "    $src -> $EXT_BASE/$name"
     done
+    # Markdown Preview Enhanced：预览面板里的 sc 代码块高亮依赖本仓库 .crossnote/parser.js 钩子
+    echo "==> 安装 Markdown Preview Enhanced（预览面板 sc 代码块高亮）"
+    if command -v code >/dev/null 2>&1; then
+        if code --install-extension shd101wyy.markdown-preview-enhanced --force >/dev/null 2>&1; then
+            echo "    已就绪（.crossnote/parser.js 提供 sc 高亮，重载窗口后生效）"
+        else
+            echo "    跳过：安装失败，请在 VSCode 中手动安装 'Markdown Preview Enhanced'"
+        fi
+    else
+        echo "    跳过：未找到 code CLI，请在 VSCode 中手动安装 'Markdown Preview Enhanced'"
+    fi
     echo "==> 安装完成（重启 VSCode 后 .sc 文件生效高亮与 AST 视图）"
 }
 
