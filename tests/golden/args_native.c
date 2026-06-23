@@ -9,13 +9,13 @@ typedef struct com__project {
     limit *_;
 } com__project;
 
-arg_var_st ARGS_verbose = {0};
+uint8_t ARGS_verbose = false;
 static arg_def_st ARGS_DEF_verbose = {"verbose", "Enable verbose output", ARG_BOOL, 'v', "verbose", false, &(ARGS_verbose), NULL};
-arg_var_st ARGS_count = {0};
+int64_t ARGS_count = 0;
 static arg_def_st ARGS_DEF_count = {"count", "Number of iterations", ARG_INT, 'n', "count", false, &(ARGS_count), NULL};
-static arg_var_st ARGS_input = {.str = "stdin"};
+const char *ARGS_input = "stdin";
 static arg_def_st ARGS_DEF_input = {"input", "Input source", ARG_STR, 'i', "input", false, &(ARGS_input), NULL};
-arg_var_st ARGS_files = {0};
+const char **ARGS_files = NULL;
 static arg_def_st ARGS_DEF_files = {"files", "Input file list", ARG_LS, 'f', "files", false, &(ARGS_files), NULL};
 
 void sc_mod_env_init(void); void sc_mod_env_drop(void);
@@ -31,11 +31,11 @@ int32_t main(int32_t argc, char **argv) {
     /* line 20 */
     ARGS_usage("<paths...>", "demo: $0 -v -n 3 -f a b");
     /* line 23 */
-    int32_t pos_count = ARGS_parse(argc, argv, NULL);
+    int32_t pos_count = ARGS_parse(argc, argv);
     /* line 26 */
     args_report_verbose();
     /* line 28 */
-    printf("count=%lld input=%s files=%d pos=%d\n", ARGS_count.i64, ARGS_input.str, ARGS_ls_count(&(ARGS_files)), pos_count);
+    printf("count=%lld input=%s files=%d pos=%d\n", ARGS_count, ARGS_input, ARGS_ls_count(ARGS_files), pos_count);
     /* line 34 */
     {
         int32_t _ret = 0;

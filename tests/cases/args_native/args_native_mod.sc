@@ -12,5 +12,5 @@
 inc env.sc
 
 @fnc args_report_verbose:
-    if ARGS_verbose.i64             # 直接访问根注入的 ARGS_verbose 属性
+    if ARGS_verbose                # 直接访问根注入的 ARGS_verbose 属性（bool）
         printf("v=1\n")

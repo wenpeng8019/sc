@@ -654,8 +654,10 @@ sc 为它生成 `extern`，其本体由模块配套 C 提供。
 > `inc env.sc` 后写 `mix ARGS_B(abc, ...)`，该宏内部定义出全局 `ARGS_abc` 与 `ARGS_DEF_abc`，
 > 编译器展开 `mix` 时即把二者登记进 sc。其中 `ARGS_DEF_abc` 的类型 `arg_def_st` 带无参 `init`，
 > 由「声明即构造」在 `main` 序言自动把自身挂入全局注册链表 `arg_defs`；故只需
-> `ARGS_parse(argc, argv, nil)` 即可——`ARGS_parse` 优先遍历 `arg_defs`，无需再手工把
-> `&ARGS_DEF_abc` 逐个传入（纯 C 用户仍可走 `ARGS_DEF(...)` 变参回退路径）。
+> `ARGS_parse(argc, argv)` 即可——`ARGS_parse` 优先遍历 `arg_defs`，无需再手工把
+> `&ARGS_DEF_abc` 逐个传入，连结尾 `nil` 也可省（sc 路径下 `arg_defs` 非空，不读变参；
+> 仅当一个 `ARGS_*` 都没定义、回退纯 C 变参路径时才需显式 `nil` 终止符，而纯 C 用户
+> 本就走 `ARGS_DEF(...)` 变参回退路径）。
 
 > 关于编译选项、链接库、`.sc` 配置文件等工具链配置
 > 详见 [compiler.md](compiler.md) §4「工具链配置」。

@@ -60,9 +60,9 @@ static char* normalize_dir_path(char* path) {
     return result;
 }
 
-int ARGS_ls_count(arg_var_st* var) {
-    if (var->ls == NULL) return 0;
-    return *(int*)&var->ls[-1];
+int ARGS_ls_count(const char** ls) {
+    if (ls == NULL) return 0;
+    return *(int*)&ls[-1];
 }
 
 static arg_def_st*  g_args_def = NULL;
@@ -146,10 +146,10 @@ int ARGS_parse(int argc, char** argv, ...) {
             argv[w++] = arg;  // 前移选项
 
             if (def->type == ARG_BOOL) {
-                def->var->i64 = 1;
+                *(bool*)def->slot = true;
             } else if (def->type == ARG_PRE) {
                 typedef void (*pre_cb)(const char*);
-                pre_cb cb = (pre_cb)(uintptr_t)def->var;
+                pre_cb cb = (pre_cb)(uintptr_t)def->slot;
                 /* 可选参数值：下一个 argv 存在且不以 '-' 开头时视为参数 */
                 if (i + 1 < argc && argv[i + 1][0] != '-') {
                     argv[w++] = argv[++i];
@@ -164,7 +164,7 @@ int ARGS_parse(int argc, char** argv, ...) {
                 }
                 int count = 0;
                 for (int k = i + 1; k < argc && argv[k][0] != '-'; k++) count++;
-                def->var->ls = (const char**)&argv[w];
+                *(const char***)def->slot = (const char**)&argv[w];
                 *(int*)&argv[w - 1] = count;  // 重载选项位置为数量
                 for (int k = 0; k < count; k++) {
                     argv[w++] = argv[++i];
@@ -176,10 +176,10 @@ int ARGS_parse(int argc, char** argv, ...) {
                 }
                 argv[w++] = argv[++i];  // 前移选项值
                 switch (def->type) {
-                    case ARG_INT:   def->var->i64 = strtoll(argv[i], NULL, 10); break;
-                    case ARG_FLOAT: def->var->f64 = strtod(argv[i], NULL); break;
-                    case ARG_STR:   def->var->str = argv[i]; break;
-                    case ARG_DIR:   def->var->str = normalize_dir_path((char*)argv[i]); break;
+                    case ARG_INT:   *(int64_t*)def->slot = strtoll(argv[i], NULL, 10); break;
+                    case ARG_FLOAT: *(double*)def->slot = strtod(argv[i], NULL); break;
+                    case ARG_STR:   *(const char**)def->slot = argv[i]; break;
+                    case ARG_DIR:   *(const char**)def->slot = normalize_dir_path((char*)argv[i]); break;
                     default: break;
                 }
             }
@@ -200,10 +200,10 @@ int ARGS_parse(int argc, char** argv, ...) {
                 if (def->req) req_count--;
 
                 if (def->type == ARG_BOOL) {
-                    def->var->i64 = 1;
+                    *(bool*)def->slot = true;
                 } else if (def->type == ARG_PRE) {
                     typedef void (*pre_cb)(const char*);
-                    pre_cb cb = (pre_cb)(uintptr_t)def->var;
+                    pre_cb cb = (pre_cb)(uintptr_t)def->slot;
                     if (i + 1 < argc && argv[i + 1][0] != '-') {
                         argv[w++] = argv[++i];
                         cb(argv[i]);
@@ -218,7 +218,7 @@ int ARGS_parse(int argc, char** argv, ...) {
                     }
                     int count = 0;
                     for (int k = i + 1; k < argc && argv[k][0] != '-'; k++) count++;
-                    def->var->ls = (const char**)&argv[w];
+                    *(const char***)def->slot = (const char**)&argv[w];
                     *(int*)&argv[w - 1] = count;
                     for (int k = 0; k < count; k++) {
                         argv[w++] = argv[++i];
@@ -236,10 +236,10 @@ int ARGS_parse(int argc, char** argv, ...) {
                         exit(-1);
                     }
                     switch (def->type) {
-                        case ARG_INT:   def->var->i64 = strtoll(value, NULL, 10); break;
-                        case ARG_FLOAT: def->var->f64 = strtod(value, NULL); break;
-                        case ARG_STR:   def->var->str = value; break;
-                        case ARG_DIR:   def->var->str = normalize_dir_path((char*)value); break;
+                        case ARG_INT:   *(int64_t*)def->slot = strtoll(value, NULL, 10); break;
+                        case ARG_FLOAT: *(double*)def->slot = strtod(value, NULL); break;
+                        case ARG_STR:   *(const char**)def->slot = value; break;
+                        case ARG_DIR:   *(const char**)def->slot = normalize_dir_path((char*)value); break;
                         default: break;
                     }
                     break;
@@ -266,8 +266,8 @@ int ARGS_parse(int argc, char** argv, ...) {
                 bool missing = false;
                 switch (def->type) {
                     case ARG_STR:
-                    case ARG_DIR:   missing = (def->var->str == NULL); break;
-                    case ARG_LS:    missing = (def->var->ls == NULL); break;
+                    case ARG_DIR:   missing = (*(const char**)def->slot == NULL); break;
+                    case ARG_LS:    missing = (*(const char***)def->slot == NULL); break;
                     default:        missing = false; break;  // INT/FLOAT/BOOL 无法判断是否设置
                 }
                 if (missing) {

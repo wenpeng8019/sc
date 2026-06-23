@@ -23,12 +23,10 @@ extern "C" {
  *
  *   inc env.sc
  *   mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")
- *   let ARGS_verbose:: arg_var_st
- *   let ARGS_DEF_verbose:: arg_def_st
  *
  *   fnc main: i4, argc: i4, argv: char&&
- *       ARGS_parse(argc, argv, &ARGS_DEF_verbose, nil)
- *       return ARGS_verbose.i64
+ *       ARGS_parse(argc, argv)        // 自注册路径：无需变参列表，连 nil 也可省
+ *       return ARGS_verbose            // bool 全局，直读无需选字段
  *
  * // 定义参数（全局作用域）
  * ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output");
@@ -50,10 +48,10 @@ extern "C" {
  *         &ARGS_DEF_count,
  *         NULL);
  *
- *     // 使用参数
- *     if (ARGS_verbose.i64) printf("Verbose mode\n");
- *     printf("Input: %s\n", ARGS_input.str);
- *     printf("Count: %lld\n", ARGS_count.i64);
+ *     // 使用参数（按具体类型直读，取错类型即编译错）
+ *     if (ARGS_verbose) printf("Verbose mode\n");
+ *     printf("Input: %s\n", ARGS_input);
+ *     printf("Count: %lld\n", (long long)ARGS_count);
  *
  *     // 访问位置参数
  *     for (int i = 0; i < pos_count; i++) {
@@ -74,13 +72,11 @@ typedef enum arg_type {
 	ARG_PRE,
 } arg_type_e;
 
-typedef union arg_var {
-	const char*  str;
-	int64_t      i64;
-	double       f64;
-	const char** ls;
-} arg_var_st;
-
+/* 每个选项的值以其「自然具体类型」独立存储为全局 ARGS_<name>（选项即 app 属性，
+ * 带编译期默认值）；描述符 arg_def 的 slot 是指向该全局的 void*，解析器按 type 以
+ * 正确宽度写入。已去掉旧的 arg_var 联合体——读取端直接按具体类型访问 ARGS_<name>
+ * （bool / int64_t / double / const char* / const char**），取错类型即编译错，
+ * 不再有 .i64/.str 选字段的隐患。各 ARGS_<X> 宏因此各自声明具体类型的全局。 */
 typedef struct arg_def {
 	const char* name;
 	const char* desc;
@@ -88,7 +84,7 @@ typedef struct arg_def {
 	char        s;
 	const char* l;
 	bool        req;
-	arg_var_st* var;
+	void*       slot;          /* 指向具体类型全局 ARGS_<name>（PRE：存回调函数地址） */
 	struct arg_def* next;
 } arg_def_st;
 
@@ -102,41 +98,77 @@ extern arg_def_st* arg_defs;
  * 仍可经 ARGS_parse 的 ... 变参传入 &ARGS_DEF_xxx（回退路径）。 */
 void arg_def_st_init(arg_def_st* _this);
 
-#define ARGS_DEF(req, name, type, s_cmd, l_cmd, desc)   \
-extern arg_var_st ARGS_##name;                          \
-arg_var_st ARGS_##name;                                 \
-static arg_def_st ARGS_DEF_##name = {                   \
-	#name, desc, ARG_##type, s_cmd, l_cmd, req,         \
-	&ARGS_##name, NULL                                  \
+/* 选项定义宏：各自声明「具体类型」的全局 ARGS_<name>（值即 app 属性），并构造描述符
+ * ARGS_DEF_<name>，其 slot 为指向该全局的 void*。已去 union——故各宏独立、不再共用一个
+ * 通用 ARGS_DEF。无默认值的整型/浮点/布尔取静态零初值；指针型取 NULL。 */
+#define ARGS_B(req, name, s_cmd, l_cmd, desc)                                  \
+extern bool ARGS_##name; bool ARGS_##name = false;                            \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_BOOL, s_cmd, l_cmd, req, &ARGS_##name, NULL              \
 }
-#define ARGS_B(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, BOOL, s_cmd, l_cmd, desc)
-#define ARGS_I(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, INT, s_cmd, l_cmd, desc)
-#define ARGS_F(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, FLOAT, s_cmd, l_cmd, desc)
-#define ARGS_S(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, STR, s_cmd, l_cmd, desc)
-#define ARGS_D(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, DIR, s_cmd, l_cmd, desc)
-#define ARGS_L(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, LS, s_cmd, l_cmd, desc)
-
-#define ARGS_DFT(init, name, type, s_cmd, l_cmd, desc)  \
-extern arg_var_st ARGS_##name;                          \
-arg_var_st ARGS_##name = init;                          \
-static arg_def_st ARGS_DEF_##name = {                   \
-	#name, desc, ARG_##type, s_cmd, l_cmd, false,       \
-	&ARGS_##name, NULL                                  \
+#define ARGS_I(req, name, s_cmd, l_cmd, desc)                                  \
+extern int64_t ARGS_##name; int64_t ARGS_##name = 0;                          \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_INT, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
 }
-#define ARGS_Bv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.i64=(dft)}, name, BOOL, s_cmd, l_cmd, desc)
-#define ARGS_Iv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.i64=(dft)}, name, INT, s_cmd, l_cmd, desc)
-#define ARGS_Fv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.f64=(dft)}, name, FLOAT, s_cmd, l_cmd, desc)
-#define ARGS_Sv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.str=(dft)}, name, STR, s_cmd, l_cmd, desc)
-#define ARGS_Dv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.str=(dft)}, name, DIR, s_cmd, l_cmd, desc)
-#define ARGS_Lv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.ls=(dft)}, name, LS, s_cmd, l_cmd, desc)
-
-#define ARGS_PRE(cb_pre, name, s_cmd, l_cmd, desc)      \
-static arg_def_st ARGS_DEF_##name = {                   \
-	#name, desc, ARG_PRE, s_cmd, l_cmd, false,          \
-	(arg_var_st*)cb_pre, NULL                           \
+#define ARGS_F(req, name, s_cmd, l_cmd, desc)                                  \
+extern double ARGS_##name; double ARGS_##name = 0;                            \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_FLOAT, s_cmd, l_cmd, req, &ARGS_##name, NULL             \
+}
+#define ARGS_S(req, name, s_cmd, l_cmd, desc)                                  \
+extern const char* ARGS_##name; const char* ARGS_##name = NULL;               \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_STR, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
+}
+#define ARGS_D(req, name, s_cmd, l_cmd, desc)                                  \
+extern const char* ARGS_##name; const char* ARGS_##name = NULL;               \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_DIR, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
+}
+#define ARGS_L(req, name, s_cmd, l_cmd, desc)                                  \
+extern const char** ARGS_##name; const char** ARGS_##name = NULL;             \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_LS, s_cmd, l_cmd, req, &ARGS_##name, NULL                \
 }
 
-#define ARGS(name) extern arg_var_st ARGS_##name
+/* 带默认值变体：default 即属性初值。 */
+#define ARGS_Bv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern bool ARGS_##name; bool ARGS_##name = (dft);                            \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_BOOL, s_cmd, l_cmd, false, &ARGS_##name, NULL            \
+}
+#define ARGS_Iv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern int64_t ARGS_##name; int64_t ARGS_##name = (dft);                      \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_INT, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
+}
+#define ARGS_Fv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern double ARGS_##name; double ARGS_##name = (dft);                        \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_FLOAT, s_cmd, l_cmd, false, &ARGS_##name, NULL           \
+}
+#define ARGS_Sv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern const char* ARGS_##name; const char* ARGS_##name = (dft);              \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_STR, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
+}
+#define ARGS_Dv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern const char* ARGS_##name; const char* ARGS_##name = (dft);              \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_DIR, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
+}
+#define ARGS_Lv(dft, name, s_cmd, l_cmd, desc)                                 \
+extern const char** ARGS_##name; const char** ARGS_##name = (dft);            \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_LS, s_cmd, l_cmd, false, &ARGS_##name, NULL              \
+}
+
+/* 预处理回调：无值全局，回调地址直接存入 slot（void*）。 */
+#define ARGS_PRE(cb_pre, name, s_cmd, l_cmd, desc)                             \
+static arg_def_st ARGS_DEF_##name = {                                         \
+	#name, desc, ARG_PRE, s_cmd, l_cmd, false, (void*)cb_pre, NULL            \
+}
 
 /**
  * 设置命令行帮助信息
@@ -177,7 +209,7 @@ int ARGS_print(const char* arg0);
  * @param var       ARGS_L 定义的参数变量指针
  * @return          列表元素数量，若未设置返回 0
  */
-int ARGS_ls_count(arg_var_st* var);
+int ARGS_ls_count(const char** ls);
 
 ///////////////////////////////////////////////////////////////////////////////
 

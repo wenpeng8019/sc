@@ -173,8 +173,9 @@ struct Parser {
             else if (at(Tok::Ident) && cur().text == "volatile") { c->castVolatile = true; advance(); }
             else break;
         }
-        if (!at(Tok::Ident)) err("强转期望类型名");
-        c->op = advance().text;     // 目标类型名存于 op（转换去向，非被操作主体）
+        if (at(Tok::Ident)) c->op = advance().text;   // 命名类型存于 op（转换去向，非被操作主体）
+        // 裸 & / &&（无名类型）即 void* / void**：op 留空，由 codegen 输出 void
+        else if (!(atOp("&") || atOp("&&"))) err("强转期望类型名");
         while (atOp("&") || atOp("&&"))
             c->castPtr += advance().text == "&&" ? 2 : 1;
         if (at(Tok::Ident) && cur().text == "restrict") {
@@ -1030,10 +1031,10 @@ struct Parser {
                     exprBracket--;
                     return e;
                 }
-                if (!at(Tok::Ident)) err("强转期望类型名");
+                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&")) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
-                parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]
+                parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]（类型名可省=void*）
                 c->a = std::move(e);
                 e = std::move(c);
                 skipNlInBracket();

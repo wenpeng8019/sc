@@ -1767,7 +1767,7 @@ struct CGen {
                 out << "((";
                 if (e.castConst) out << "const ";
                 if (e.castVolatile) out << "volatile ";
-                out << mapBase(e.op);
+                out << (e.op.empty() ? "void" : mapBase(e.op));   // op 为空 → 裸 &/&&（void*/void**）
                 for (int i = 0; i < e.castPtr; i++) out << "*";
                 if (e.castRestrict) out << " restrict";
                 out << ")(";
