@@ -60,6 +60,9 @@ POSITIVE=(
     examples/feature28.sc
     examples/feature29.sc
     examples/feature31.sc
+    examples/feature32.sc
+    examples/feature33.sc
+    examples/feature34.sc
     examples/feature30/feature30.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
@@ -76,6 +79,8 @@ POSITIVE=(
     tests/cases/qualifiers.sc
     tests/cases/cbridge.sc
     tests/cases/macro.sc
+    tests/cases/macro_fnc.sc
+    tests/cases/args_native.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物

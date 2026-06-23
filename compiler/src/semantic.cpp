@@ -256,6 +256,7 @@ struct Checker {
     std::unordered_set<std::string> enumConsts;             // 枚举常量名（作为标识符已知）
     std::unordered_set<std::string> declNames;              // 所有顶层声明名（catch-all：类型/全局/外部模块符号）
     std::unordered_map<std::string, std::unordered_set<std::string>> structMethods;  // 结构名 → 成员函数名集
+    std::unordered_map<std::string, const Decl*> macros;    // 宏名 → 宏定义（供顶层 mix 展开登记声明）
     // 放宽门控：存在「未枚举的额外 C 头」或 add 外部实现/库 → 可能引入未知符号，
     // 此时整体关闭未定义函数/标识符检查（宁可漏报不可误报）。实参个数/类型、成员检查不受影响。
     bool lenientCalls = false;
@@ -1191,6 +1192,121 @@ struct Checker {
         }
     }
 
+    // ---- 宏展开：顶层 mix 声明登记（通用能力，不针对任何特定宏） --------------
+    //
+    // 宏体不在 sc 语义层展开（仅作为 C #define 透传），故宏体里声明的符号本不可见。
+    // 顶层 mix 实例化一个宏时，这里做一次轻量展开（形参替换 + `\` 粘贴解析，并递归
+    // 处理宏体内的嵌套 mix），把宏体声明出的全局符号（var/let/tls、def 内嵌类型、
+    // fnc/rpc 函数）登记进语义层，使下游代码可直接引用，无需手写 let X:: 认领。
+
+    // 渲染宏实参为单个 token 文本：标识符若在形参表中则替换为绑定值，否则取其原文；
+    // 字面量取其拼写文本。仅用于推导宏体里 `\` 粘贴出的声明名。
+    std::string renderMacroArg(const Expr& e,
+                               const std::unordered_map<std::string, std::string>& pm) const {
+        if (e.kind == Expr::Ident) {
+            auto it = pm.find(e.text);
+            return it != pm.end() ? it->second : e.text;
+        }
+        return e.text;   // IntLit/StrLit/CharLit 等：text 持有拼写
+    }
+
+    // 解析宏体声明名里的 `\` 粘贴：按 '\\' 切分，逐段在形参表中替换后拼接。
+    // 例：raw="ARGS_\\name", pm={name:verbose} → "ARGS_verbose"；
+    //     raw="get_\\fld",   pm={fld:x}        → "get_x"。
+    std::string substMacroSpelling(const std::string& raw,
+                                   const std::unordered_map<std::string, std::string>& pm) const {
+        std::string out, seg;
+        auto flush = [&](const std::string& s) {
+            auto it = pm.find(s);
+            out += (it != pm.end()) ? it->second : s;
+        };
+        for (char ch : raw) {
+            if (ch == '\\') { flush(seg); seg.clear(); }
+            else seg += ch;
+        }
+        flush(seg);
+        return out;
+    }
+
+    // 登记宏体内 def 内嵌类型 / fnc / rpc 声明出的符号（名字经 `\` 粘贴替换）。
+    void registerMixDecl(const Decl& d, const std::unordered_map<std::string, std::string>& pm) {
+        std::string nm = substMacroSpelling(d.name, pm);
+        if (nm.empty()) return;
+        switch (d.kind) {
+            case Decl::FuncD:
+            case Decl::FuncTypeD:
+                if (!d.methodOwner.empty())
+                    structMethods[d.methodOwner].insert(
+                        d.methodName.empty() ? nm : d.methodName);
+                else
+                    funcSigs.emplace(nm, &d);
+                declNames.insert(nm);
+                break;
+            case Decl::EnumD:
+                declNames.insert(nm);
+                for (auto& it : d.structCommon.fields)
+                    if (!it.name.empty()) enumConsts.insert(substMacroSpelling(it.name, pm));
+                break;
+            case Decl::MacroD:
+                macros[nm] = &d;       // 宏定义出的宏：纳入索引，供后续 mix 展开
+                break;
+            default:
+                declNames.insert(nm);  // struct/union/alias 等：catch-all 放宽未定义诊断
+                break;
+        }
+    }
+
+    // 展开顶层 mix（及宏体内嵌套 mix），仅登记宏体声明出的符号名与可解析类型。
+    // depth 限深防止宏相互递归导致死循环。
+    void expandMixDecls(const std::string& macroName,
+                        const std::vector<std::string>& argToks, int depth) {
+        if (depth > 64) return;
+        auto mit = macros.find(macroName);
+        if (mit == macros.end()) return;
+        const Decl* m = mit->second;
+
+        // 形参 → 实参 token 绑定（泛型宏：先类型参数 <T,...>，再文本名参数）
+        std::unordered_map<std::string, std::string> pm;
+        size_t ai = 0;
+        for (const auto& tp : m->macroTypeParams)
+            if (ai < argToks.size()) pm[tp] = argToks[ai++];
+        const auto& params = m->structCommon.fields;
+        for (size_t i = 0; i < params.size() && ai < argToks.size(); i++, ai++)
+            if (!params[i].name.empty()) pm[params[i].name] = argToks[ai];
+
+        for (auto& s : m->body) {
+            switch (s->kind) {
+                case Stmt::VarS:
+                case Stmt::LetS:
+                case Stmt::TlsS:
+                    for (auto& f : s->decls) {
+                        std::string nm = substMacroSpelling(f.name, pm);
+                        if (nm.empty()) continue;
+                        declNames.insert(nm);
+                        Ty t = fromTypeRef(f.type);
+                        if (t.valid && !(t.name.empty() && t.ptr == 0 && t.arr == 0))
+                            globals.emplace(nm, t);
+                    }
+                    break;
+                case Stmt::DeclS:
+                    if (s->decl) registerMixDecl(*s->decl, pm);
+                    break;
+                case Stmt::MixS: {
+                    if (!s->expr || s->expr->kind != Expr::Call) break;
+                    const Expr& c = *s->expr;
+                    if (!c.a || c.a->kind != Expr::Ident) break;
+                    std::vector<std::string> sub;
+                    sub.reserve(c.args.size());
+                    for (auto& a : c.args)
+                        sub.push_back(a ? renderMacroArg(*a, pm) : std::string{});
+                    expandMixDecls(c.a->text, sub, depth + 1);
+                    break;
+                }
+                default: break;
+            }
+        }
+    }
+
     // ---- 顶层遍历：收集符号 + 检查全局变量初值 -------------------------------
     void collectTop() {
 
@@ -1208,6 +1324,11 @@ struct Checker {
         for (auto& d : prog.decls)
             if (d->kind == Decl::StructD && !d->adtColl.empty())
                 containerItem[resolveAliasToName(d->adtColl)] = d->adtItem;
+
+        // 宏定义索引：供顶层 mix 展开登记其声明出的符号（见 collectTop 末尾）
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::MacroD)
+                macros[d->name] = d.get();
 
         // 未定义符号诊断：登记可调用名/枚举常量/成员函数/catch-all 声明名，并计算放宽门控
         for (auto& d : prog.decls) {
@@ -1243,6 +1364,22 @@ struct Checker {
                     if (!d->name.empty()) declNames.insert(d->name);
                     break;
             }
+        }
+
+        // 顶层 mix 展开：把宏体里 var/let/tls 声明出的全局符号登记进语义层（宏的通用能力，
+        // 不针对任何特定宏）。宏展开不在 sc 语义层执行，故这些符号本不可见；这里做一次轻量
+        // 展开（形参替换 + `\` 粘贴解析，递归处理宏体内的嵌套 mix），仅收集「声明名及可解析
+        // 的类型」，使下游代码可直接引用，无需手写 let X:: 认领。
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::MixD || !d->expr) continue;
+            if (d->macroConsumed) continue;     // 泛型 mix 已单态化为具体声明，无需轻量登记
+            const Expr& c = *d->expr;
+            if (c.kind != Expr::Call || !c.a || c.a->kind != Expr::Ident) continue;
+            std::unordered_map<std::string, std::string> none;
+            std::vector<std::string> toks;
+            toks.reserve(c.args.size());
+            for (auto& a : c.args) toks.push_back(a ? renderMacroArg(*a, none) : std::string{});
+            expandMixDecls(c.a->text, toks, 0);
         }
 
         // 第二遍：检查全局 var/let/tls 声明

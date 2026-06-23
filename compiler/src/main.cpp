@@ -19,6 +19,7 @@
 // 所有编译错误通过 CompileError 异常传播，在此统一捕获并格式化输出。
 // ============================================================
 #include "ast_json.h"
+#include "ast_print.h"
 #include "codegen_c.h"
 #include "codegen_sc.h"
 #include "error.h"
@@ -755,14 +756,16 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
         }
     }
     // 合并直接依赖的 @导出声明（external 标记）：供跨模块语法糖
-    //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成
+    //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成。
+    // 宏定义（def 宏）一律并入（无论是否 @导出）：宏经 C #define 由模块头透传，
+    // 跨模块可用；语义层据此展开顶层 mix、登记宏体声明出的符号（external 不再 emit）。
     for (auto& dep : deps) {
         const std::string text = readWholeFile(dep);
         if (text.empty()) continue;
         try {
             Program mp = parse(lex(text));
             for (auto& md : mp.decls) {
-                if (!md->exported) continue;
+                if (!md->exported && md->kind != Decl::MacroD) continue;
                 md->external = true;
                 md->origin = dep.string();
                 prog.decls.push_back(std::move(md));
@@ -869,6 +872,115 @@ static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPat
     } catch (...) {
         // 根解析失败：留待根单元自身编译时报错
     }
+}
+
+// ============================================================
+// 泛型宏单态化（语言级泛型）
+// ============================================================
+// 带 <T,...> 类型参数的宏是「语言级模板」：与文本 #define 不同，编译器对每个 mix 实例
+//   克隆宏体 → 文本替换类型/名参数 → 重新解析为「具体的 sc 声明」→ 追加进程序，
+//   随后这些具体声明参与正常语义检查与 C 代码生成（i4/f8 等类型映射、类型校验均生效）。
+// 该 pass 在解析后、语义检查前执行；仅在实际编译路径（emit-c / run / build）生效，
+//   --emit-sc / --ast 模式保留原始 def/mix 以便源码回写。
+
+// 宏体文本替换：把类型/名参数名（整词）替换为实参，并消解 `\` 粘贴（拼接相邻段）。
+//   跳过字符串/字符字面量与 # 注释，避免误替换其中文本。
+static std::string substGenericText(const std::string& text,
+                                    const std::map<std::string, std::string>& binds) {
+    std::string out;
+    const size_t n = text.size();
+    for (size_t i = 0; i < n; ) {
+        char c = text[i];
+        if (c == '"' || c == '\'') {                 // 字符串/字符字面量：原样拷贝
+            char q = c; out += c; i++;
+            while (i < n) {
+                if (text[i] == '\\' && i + 1 < n) { out += text[i]; out += text[i + 1]; i += 2; continue; }
+                char dch = text[i]; out += dch; i++;
+                if (dch == q) break;
+            }
+            continue;
+        }
+        if (c == '#') {                              // 注释：到行尾原样拷贝
+            while (i < n && text[i] != '\n') out += text[i++];
+            continue;
+        }
+        if (c == '\\') { i++; continue; }            // 粘贴运算符：丢弃（相邻段拼接）
+        if (std::isalpha((unsigned char)c) || c == '_') {
+            size_t s = i;
+            while (i < n && (std::isalnum((unsigned char)text[i]) || text[i] == '_')) i++;
+            std::string id = text.substr(s, i - s);
+            auto it = binds.find(id);
+            out += (it != binds.end()) ? it->second : id;
+            continue;
+        }
+        out += c; i++;
+    }
+    return out;
+}
+
+// 渲染 mix 实参为类型/名参数的文本 token（泛型单态化绑定用）。
+static std::string genericArgText(const Expr& a) {
+    if (a.kind == Expr::Ident) return a.text;
+    return exprToStr(a);
+}
+
+static void expandGenericMixes(Program& prog) {
+    // 收集泛型宏（带类型参数）按名索引
+    std::unordered_map<std::string, const Decl*> generics;
+    for (auto& d : prog.decls)
+        if (d->kind == Decl::MacroD && !d->macroTypeParams.empty())
+            generics[d->name] = d.get();
+    if (generics.empty()) return;
+
+    std::vector<DeclPtr> generated;
+    std::unordered_set<std::string> seen;   // 实例去重键
+
+    for (auto& d : prog.decls) {
+        if (d->kind != Decl::MixD || !d->expr) continue;
+        const Expr& call = *d->expr;
+        if (call.kind != Expr::Call || !call.a || call.a->kind != Expr::Ident) continue;
+        auto git = generics.find(call.a->text);
+        if (git == generics.end()) continue;     // 普通文本宏：保持 #define 行为
+        const Decl* m = git->second;
+
+        const size_t nTy = m->macroTypeParams.size();
+        const size_t nName = m->structCommon.fields.size();
+        if (call.args.size() != nTy + nName) {
+            CompileError e("泛型宏 '" + m->name + "' 需要 " + std::to_string(nTy + nName)
+                           + " 个实参（" + std::to_string(nTy) + " 类型 + "
+                           + std::to_string(nName) + " 名），实际传入 "
+                           + std::to_string(call.args.size()) + " 个", d->line);
+            throw e;
+        }
+        d->macroConsumed = true;       // 标记消费（codegen 跳过该 mix 与泛型 #define）
+
+        // 绑定：类型参数 + 名参数 → 实参文本；并构造实例去重键
+        std::map<std::string, std::string> binds;
+        std::string key = m->name + "<";
+        for (size_t k = 0; k < call.args.size(); k++) {
+            std::string at = call.args[k] ? genericArgText(*call.args[k]) : std::string{};
+            const std::string& pn = (k < nTy) ? m->macroTypeParams[k]
+                                              : m->structCommon.fields[k - nTy].name;
+            binds[pn] = at;
+            key += (k ? "," : "") + at;
+        }
+        key += ">";
+        if (!seen.insert(key).second) continue;   // 同一实例已生成，跳过
+
+        // 渲染宏体 → 文本替换 → 重新解析为具体声明
+        std::string bodyText = emitMacroBodySc(m->body);
+        std::string specialized = substGenericText(bodyText, binds);
+        try {
+            Program sp = parse(lex(specialized));
+            for (auto& nd : sp.decls)
+                generated.push_back(std::move(nd));
+        } catch (CompileError& e) {
+            if (e.hint.empty())
+                e.hint = "泛型宏 '" + m->name + "' 实例化 " + key + " 时其特化体解析失败";
+            throw;
+        }
+    }
+    for (auto& g : generated) prog.decls.push_back(std::move(g));
 }
 
 // 收集根模块「导出 inc 闭包」（规范路径集，含根自身）：沿 @inc（导出 include）边递归。
@@ -996,6 +1108,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
         if (!rootPrelude.empty() && canon != rootPrelude && !isBuiltinUnit(canon)
             && !(preludeSkip && preludeSkip->count(key)))
             mergeRootPrelude(u.prog, rootPrelude);
+        expandGenericMixes(u.prog);                 // 泛型宏单态化：克隆宏体+替换类型参数→具体声明
         semanticCheck(u.prog);                      // 再检查：导入类型/方法可见 + 本模块函数体语义复检
     } catch (CompileError& e) {
         // 跨模块错误链完整展示：把错误准确归属到出错模块文件、补全该模块的源代码行，
@@ -1638,6 +1751,8 @@ int main(int argc, char** argv) {
             gatherCHeaderDescriptors(prog, baseDir, copt, collectExternalRefs(prog));
         }
         auto warnings = analyzeExternalUsage(prog);                 // 外部描述符使用统计（标记 used）+ 导入未使用警告
+        // 泛型宏单态化：仅实际编译路径生效；--emit-sc/--ast 保留原始 def/mix 以便源码回写。
+        if (mode != "sc" && mode != "ast") expandGenericMixes(prog);
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）

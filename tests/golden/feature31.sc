@@ -16,14 +16,10 @@ def logf: fmt, ...
     printf(fmt, __VA_ARGS__)
 
 def gpair: pfx
-    var pfx\_lo: i4 = 10
+    @var pfx\_lo: i4 = 10
     var pfx\_hi: i4 = 20
 
 mix gpair(cfg)
-
-let cfg_lo:: i4
-
-let cfg_hi:: i4
 
 fnc main: i4
     var count: i4 = CAP
@@ -32,6 +28,6 @@ fnc main: i4
     mix dump(count)
     printf("paste:\n")
     mix tally(item)
-    printf("variadic + claimed globals:\n")
+    printf("variadic + macro globals:\n")
     mix logf("  sum=%d range=[%d,%d]\n", count + cfg_lo, cfg_lo, cfg_hi)
     return 0

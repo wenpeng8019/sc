@@ -52,8 +52,8 @@ struct SGen {
                     depth++; emitStmts(fl->fncBody); depth--;
                 }
                 break;
-            case Stmt::VarS: emitVarLine("var", s.decls); break;
-            case Stmt::LetS: emitVarLine("let", s.decls); break;
+            case Stmt::VarS: emitVarLine(s.exported ? "@var" : "var", s.decls); break;
+            case Stmt::LetS: emitVarLine(s.exported ? "@let" : "let", s.decls); break;
             case Stmt::TlsS: emitVarLine("tls", s.decls); break;
             case Stmt::ReturnS:
                 ind();
@@ -313,12 +313,33 @@ struct SGen {
                 if (d.macroObject) {
                     ind(); out << X << "def " << d.name << ": = "
                                << (d.expr ? exprToStr(*d.expr) : "") << "\n";
-                } else {
-                    ind(); out << X << "def " << d.name << ":";
+                } else if (d.cImpl) {
+                    // C 宏桥接：def name:: p1, ... \n\t<fnc::/let:: 映射体>
+                    ind(); out << "def " << d.name << "::";
                     for (size_t i = 0; i < d.structCommon.fields.size(); i++)
                         out << (i ? ", " : " ") << d.structCommon.fields[i].name;
                     if (d.structCommon.variadic)
                         out << (d.structCommon.fields.empty() ? " ..." : ", ...");
+                    out << "\n";
+                    depth++;
+                    emitStmts(d.body);
+                    depth--;
+                } else {
+                    ind(); out << X << "def " << d.name << ":";
+                    if (!d.macroTypeParams.empty()) {
+                        out << " <";                                // 泛型宏类型参数 <T,...>
+                        for (size_t i = 0; i < d.macroTypeParams.size(); i++)
+                            out << (i ? ", " : "") << d.macroTypeParams[i];
+                        out << ">";
+                        for (auto& f : d.structCommon.fields)       // 其后文本名参数（逗号分隔）
+                            out << ", " << f.name;
+                        if (d.structCommon.variadic) out << ", ...";
+                    } else {
+                        for (size_t i = 0; i < d.structCommon.fields.size(); i++)
+                            out << (i ? ", " : " ") << d.structCommon.fields[i].name;
+                        if (d.structCommon.variadic)
+                            out << (d.structCommon.fields.empty() ? " ..." : ", ...");
+                    }
                     out << "\n";
                     depth++;
                     emitStmts(d.body);
@@ -374,4 +395,18 @@ struct SGen {
 std::string emitSc(const Program& prog) {
     SGen g;
     return g.run(prog);
+}
+
+std::string emitMacroBodySc(const std::vector<StmtPtr>& body) {
+    SGen g;
+    // 预扫：宏体内嵌套结构体的成员函数归入所属类型，使再生时印回结构体内部
+    for (auto& s : body)
+        if (s->kind == Stmt::DeclS && s->decl) {
+            auto* d = s->decl.get();
+            if ((d->kind == Decl::FuncD && !d->methodOwner.empty()) ||
+                (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty()))
+                g.methodImpls[d->methodOwner].push_back(d);
+        }
+    g.emitStmts(body);
+    return g.out.str();
 }

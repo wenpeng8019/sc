@@ -77,7 +77,8 @@ std::string stmtNode(const Stmt& s) {
             for (auto& f : s.decls)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
             return node(s.kind == Stmt::VarS ? "var"
-                      : s.kind == Stmt::LetS ? "let" : "tls", "", "", s.line, c);
+                      : s.kind == Stmt::LetS ? "let" : "tls",
+                        "", s.exported ? "@" : "", s.line, c);
         }
         case Stmt::ReturnS:
             return node("return", "", s.expr ? exprToStr(*s.expr) : "", s.line);
@@ -288,11 +289,13 @@ std::string declNode(const Decl& d) {
                 return nodeExt("macro", d.name, X + "= " + (d.expr ? exprToStr(*d.expr) : ""),
                                d.line, d.external, d.origin, d.used);
             std::vector<std::string> c;
+            for (auto& tp : d.macroTypeParams)
+                c.push_back(node("typeparam", tp, "", d.line));
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("param", f.name, "", f.line));
             if (d.structCommon.variadic) c.push_back(node("param", "...", "", d.line));
             for (auto& s : d.body) c.push_back(stmtNode(*s));
-            return nodeExt("macro", d.name, X, d.line, d.external, d.origin, d.used, c);
+            return nodeExt("macro", d.name, d.cImpl ? "::" : X, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::MixD:
             return node("mix", "", d.expr ? exprToStr(*d.expr) : "", d.line);

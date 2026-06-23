@@ -3,8 +3,8 @@
 
 #define TAG 7
 #define decl_pair(pfx) \
-    int32_t pfx##_lo = 0; \
-    int32_t pfx##_hi = 1;
+    static int32_t pfx##_lo = 0; \
+    static int32_t pfx##_hi = 1;
 #define show(x) \
     printf("%s = %d\n", #x, x);
 #define sumprint(fmt, ...) \

@@ -7,7 +7,7 @@ typedef struct obj obj;
 typedef union value value;
 
 #define macro(p1, p2, p3, ...) \
-    int32_t p1##b = 2;
+    static int32_t p1##b = 2;
 typedef enum { /* base: int32_t */
     Red = 0,
     Green,

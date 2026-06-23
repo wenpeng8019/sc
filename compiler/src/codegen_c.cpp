@@ -2085,7 +2085,7 @@ struct CGen {
     }
 
     void emitVarDecls(const std::vector<Field>& decls, bool asConst,
-                      bool isStatic = false, bool isTls = false) {
+                      bool isStatic = false, bool isTls = false, bool externFwd = false) {
         for (auto& f : decls) {
             // C 桥接绑定 name:: type（let/var X:: T）：声明 extern，认领 C 侧已定义符号
             // （不分配存储、无初值）。let/var 之别仅作用于 sc 侧可变性检查，C 端恒为 extern T。
@@ -2210,6 +2210,19 @@ struct CGen {
 
             if (inferred) (inFunc ? localsT : globalsT)[f.name] = VType{infBase, infPtr, 0};
             else regVar(f);
+            // 宏体内 @ 导出变量：先发 extern 前置声明（外部链接 + 与手写 C ABI 头一致），
+            //   随后的定义为非 static（外部链接）。供其它模块经注入的根接口头 extern 引用。
+            if (externFwd) {
+                indent();
+                out << "extern ";
+                if (inferred) {
+                    if (asConst) out << "const ";
+                    out << mapBase(infBase) << " ";
+                    for (int i = 0; i < infPtr; i++) out << "*";
+                    out << f.name;
+                } else emitDeclarator(f, asConst);
+                out << ";\n";
+            }
             indent();
             if (isTls) out << "static TLS ";   // tls：必为 static（C 规范），TLS 宏见 platform.h
             else if (isStatic) out << "static ";
@@ -2917,8 +2930,8 @@ struct CGen {
                 emitExpr(*s.expr, true);
                 out << ";\n";
                 break;
-            case Stmt::VarS: emitVarDecls(s.decls, false); break;
-            case Stmt::LetS: emitVarDecls(s.decls, true); break;
+            case Stmt::VarS: emitVarDecls(s.decls, false, inMacro && !s.exported, false, inMacro && s.exported); break;
+            case Stmt::LetS: emitVarDecls(s.decls, true, inMacro && !s.exported, false, inMacro && s.exported); break;
             case Stmt::TlsS: emitVarDecls(s.decls, false, false, true); break;
             case Stmt::ReturnS:
                 if (curRpc) {
@@ -3137,7 +3150,11 @@ struct CGen {
                 depth++; emitStmts(s.body); depth--;
                 break;
             case Stmt::DeclS:
-                emitTypeDecl(*s.decl);
+                // 宏体内可定义函数（fnc）：emit 为函数定义（#define 续行）；其余为内嵌类型
+                if (s.decl->kind == Decl::FuncD || s.decl->kind == Decl::FuncTypeD)
+                    emitFunc(*s.decl);
+                else
+                    emitTypeDecl(*s.decl);
                 break;
             case Stmt::MixS:
                 // mix 宏展开（函数体内）：展开为 C 宏调用，宏体自含分号，不再包裹
@@ -3945,8 +3962,8 @@ struct CGen {
     }
 
     void emitFunc(const Decl& d) {
-        // 函数定义行映射回 .sc 源码（函数序言断点落在 fnc 行）
-        if (!srcFile.empty() && d.line > 0)
+        // 函数定义行映射回 .sc 源码（函数序言断点落在 fnc 行）；宏体内禁用 #line（#define 内不可含）
+        if (!inMacro && !srcFile.empty() && d.line > 0)
             out << "#line " << d.line << " \"" << srcFile << "\"\n";
         if (d.isRpc) { if (d.hasAwait) emitAsyncRpc(d); else emitRpcWorker(d); return; }
         if (d.name != "main" && shouldStaticize(d)) out << "static ";
@@ -4968,9 +4985,12 @@ struct CGen {
                 case Decl::AddD: break;  // 构建指令，不产生 C 输出
                 case Decl::TestD: break;  // tst 用例：普通编译忽略；测试模式由第二遍 + runner 处理
                 case Decl::MacroD:
+                    if (!d->macroTypeParams.empty()) break;  // 泛型宏模板：已单态化为具体声明，不输出 #define
+                    if (d->cImpl) break;  // C 宏桥接（def name::）：宏实现在 C 头中，不生成 #define
                     emitMacroDef(*d);    // def 宏 → #define
                     break;
                 case Decl::MixD:
+                    if (d->macroConsumed) break;  // 泛型 mix：已展开为具体声明，不再输出宏调用
                     emitMixExpand(*d);   // 顶层 mix → 宏调用展开（声明）
                     break;
             }

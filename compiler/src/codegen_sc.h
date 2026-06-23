@@ -17,3 +17,7 @@
 //   方便理解 AST 结构和源码的对应关系。
 // ============================================================
 std::string emitSc(const Program& prog);
+
+// 泛型宏单态化辅助：把宏体语句列表（DeclS 包裹的嵌套声明）再生成 sc 源码文本，
+// 供单态化 pass 做类型/名参数文本替换后重新解析为具体声明。
+std::string emitMacroBodySc(const std::vector<StmtPtr>& body);

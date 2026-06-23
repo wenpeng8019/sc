@@ -19,6 +19,17 @@ extern "C" {
  * args 使用示例:
  * -------------------------------------------------------------------------
  *
+ * sc（推荐）:
+ *
+ *   inc env.sc
+ *   mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")
+ *   let ARGS_verbose:: arg_var_st
+ *   let ARGS_DEF_verbose:: arg_def_st
+ *
+ *   fnc main: i4, argc: i4, argv: char&&
+ *       ARGS_parse(argc, argv, &ARGS_DEF_verbose, nil)
+ *       return ARGS_verbose.i64
+ *
  * // 定义参数（全局作用域）
  * ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output");
  * ARGS_S(true,  input,   'i', "input",   "Input file path");
@@ -53,7 +64,69 @@ extern "C" {
  * -------------------------------------------------------------------------
  */
 
- #include "args.h"
+typedef enum arg_type {
+	ARG_FLOAT = -3,
+	ARG_INT,
+	ARG_BOOL,
+	ARG_STR,
+	ARG_DIR,
+	ARG_LS,
+	ARG_PRE,
+} arg_type_e;
+
+typedef union arg_var {
+	const char*  str;
+	int64_t      i64;
+	double       f64;
+	const char** ls;
+} arg_var_st;
+
+typedef struct arg_def {
+	const char* name;
+	const char* desc;
+	arg_type_e  type;
+	char        s;
+	const char* l;
+	bool        req;
+	arg_var_st* var;
+	struct arg_def* next;
+} arg_def_st;
+
+#define ARGS_DEF(req, name, type, s_cmd, l_cmd, desc)   \
+extern arg_var_st ARGS_##name;                          \
+arg_var_st ARGS_##name;                                 \
+static arg_def_st ARGS_DEF_##name = {                   \
+	#name, desc, ARG_##type, s_cmd, l_cmd, req,         \
+	&ARGS_##name, NULL                                  \
+}
+#define ARGS_B(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, BOOL, s_cmd, l_cmd, desc)
+#define ARGS_I(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, INT, s_cmd, l_cmd, desc)
+#define ARGS_F(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, FLOAT, s_cmd, l_cmd, desc)
+#define ARGS_S(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, STR, s_cmd, l_cmd, desc)
+#define ARGS_D(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, DIR, s_cmd, l_cmd, desc)
+#define ARGS_L(req, name, s_cmd, l_cmd, desc)   ARGS_DEF(req, name, LS, s_cmd, l_cmd, desc)
+
+#define ARGS_DFT(init, name, type, s_cmd, l_cmd, desc)  \
+extern arg_var_st ARGS_##name;                          \
+arg_var_st ARGS_##name = init;                          \
+static arg_def_st ARGS_DEF_##name = {                   \
+	#name, desc, ARG_##type, s_cmd, l_cmd, false,       \
+	&ARGS_##name, NULL                                  \
+}
+#define ARGS_Bv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.i64=(dft)}, name, BOOL, s_cmd, l_cmd, desc)
+#define ARGS_Iv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.i64=(dft)}, name, INT, s_cmd, l_cmd, desc)
+#define ARGS_Fv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.f64=(dft)}, name, FLOAT, s_cmd, l_cmd, desc)
+#define ARGS_Sv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.str=(dft)}, name, STR, s_cmd, l_cmd, desc)
+#define ARGS_Dv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.str=(dft)}, name, DIR, s_cmd, l_cmd, desc)
+#define ARGS_Lv(dft, name, s_cmd, l_cmd, desc)  ARGS_DFT({.ls=(dft)}, name, LS, s_cmd, l_cmd, desc)
+
+#define ARGS_PRE(cb_pre, name, s_cmd, l_cmd, desc)      \
+static arg_def_st ARGS_DEF_##name = {                   \
+	#name, desc, ARG_PRE, s_cmd, l_cmd, false,          \
+	(arg_var_st*)cb_pre, NULL                           \
+}
+
+#define ARGS(name) extern arg_var_st ARGS_##name
 
 /**
  * 设置命令行帮助信息

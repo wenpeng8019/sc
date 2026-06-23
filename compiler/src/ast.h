@@ -368,6 +368,9 @@ struct Stmt {
     
     DeclPtr decl;                       // DeclS:（函数内部）内嵌的类型定义（def）
 
+    bool exported = false;              // VarS/LetS: 宏体内 @ 前缀导出标记（外部链接 + extern 前置声明）；
+                                        //   仅在 def 宏体内有意义，顶层 mix 展开后与顶层 @var/@let 同义
+
     int line = 0;                       // 语句起始行号
 };
 
@@ -465,6 +468,12 @@ struct Decl {
 
     bool macroObject = false;       // MacroD: true=对象宏 def NAME: = value（无参）；false=函数宏
     ExprPtr expr;                   // MacroD(对象宏): 值表达式；MixD: mix 调用（Expr::Call）
+
+    std::vector<std::string> macroTypeParams;  // MacroD: <T,...> 类型参数名（泛型宏/单态化模板）。
+                                    // 非空 → 语言级泛型宏：每个 mix 实例克隆宏体、替换类型参数、
+                                    // 重新解析为具体声明并参与语义检查（而非文本 #define）。
+                                    // 普通文本宏此列表为空（保持 #define 行为）。
+    bool macroConsumed = false;     // MixD: 该 mix 已被泛型单态化消费（已生成具体声明），codegen 不再输出。
 
     //---------
 

@@ -202,7 +202,7 @@ struct Parser {
         }
 
         // 获取类型名
-        if (at(Tok::Ident)) ty.name = advance().text;
+        if (at(Tok::Ident)) ty.name = foldMacroSpelling(advance().text);  // 宏体内折叠 \ 粘贴（如 Vec_\N& 类型引用）
         // 对于（无名）裸 & / &&，即 void* 指针
         else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&")))
             err("期望类型名");
@@ -512,7 +512,7 @@ struct Parser {
         d->line = cur().line;
         advance();                                      // 跳过 def 关键字
         if (!at(Tok::Ident)) err("期望类型名");           // 当前 token 必须是标识符（类型名）   
-        d->name = advance().text;                       // 类型名
+        d->name = foldMacroSpelling(advance().text);    // 类型名（宏体内折叠 \ 粘贴，支持 def T_\N 泛型实例化）
 
         // 1. 对于 -> 箭头语法：类型别名  def name -> target
         if (accept(Tok::Arrow)) {
@@ -521,28 +521,68 @@ struct Parser {
             expect(Tok::Newline, "换行");
             return d;
         }
+
+        // 1b. C 宏桥接：def name:: p1, p2, ... \n\t<只含 fnc:: / let:: / var:: 映射声明>
+        //   把「由 C 实现的宏」（来自 inc 头）映射进 sc：与 fnc::/let:: 同理，:: 表示实现在 C 侧，
+        //   故不生成 #define；仅登记该宏展开所「拼装」出的定义对象（函数原型 + 全局符号），
+        //   供 mix 调用点与后续引用做名字/类型检查。mix name(args) 仍原样输出宏调用，
+        //   由 C 预处理器（已 #include 真实 #define）展开。
+        if (accept(Tok::DColon)) {
+            d->kind = Decl::MacroD;
+            d->macroObject = false;
+            d->cImpl = true;                            // :: → C 实现的宏（不生成 #define）
+            if (!at(Tok::Newline)) {                    // 宏形参：裸标识符，逗号分隔，末尾可 ...
+                for (;;) {
+                    if (accept(Tok::Ellipsis)) { d->structCommon.variadic = true; break; }
+                    if (!at(Tok::Ident)) err("期望宏形参名");
+                    Field pf; pf.line = cur().line; pf.name = advance().text;
+                    d->structCommon.fields.push_back(std::move(pf));
+                    if (!accept(Tok::Comma)) break;
+                }
+            }
+            expect(Tok::Newline, "换行");
+            expect(Tok::Indent, "缩进的宏映射体");
+            { bool save = inMacroBody; inMacroBody = true;
+              parseStmts(d->body);
+              inMacroBody = save; }
+            accept(Tok::Dedent);
+            // 校验：C 宏桥接体内只允许 fnc:: 与 let:: / var:: 映射声明
+            //（即 C 宏所拼装的「定义对象」——函数原型与全局符号），其余一律拒绝。
+            for (auto& s : d->body) {
+                bool ok = false;
+                if (s->kind == Stmt::DeclS && s->decl &&
+                    s->decl->kind == Decl::FuncTypeD && s->decl->cImpl)
+                    ok = true;                          // fnc name:: ret, params
+                else if (s->kind == Stmt::VarS || s->kind == Stmt::LetS || s->kind == Stmt::TlsS) {
+                    ok = !s->decls.empty();
+                    for (auto& f : s->decls) if (!f.cBridge) ok = false;  // let/var name:: type
+                }
+                if (!ok)
+                    err(s->line, "C 宏桥接（def name::）体内只能是 fnc:: 或 let:: / var:: 映射声明");
+            }
+            return d;
+        }
         expect(Tok::Colon, "':'");
 
         // ~：链表标记（仅结构体）—— 转 C 时在成员前面注入 _prev/_next 自链指针
         bool linked = acceptOp("~");
 
-        // <C, I>：ADT 容器标记（仅结构体）—— C=自定义容器类型，I=元素节点类型；
-        // 转 C 时把 I 整体注入为 T 的首个 synthetic 成员（offset 0），从而 T& 与 I& 可零偏移互转
-        // <S>：分身/切片实体标记（仅结构体）—— S=分身/切片类型；
-        // 由解析后注入 pass 在 S 首部注入回指字段 _self: T&，并回填 S.projectEntity = T。
-        std::string adtColl, adtItem, projectSelf;
-        bool isAdt = false;
+        // <...>：尖括号参数列表。语义由其后跟随的形态决定：
+        //   结构体 {} 跟随：<S>（分身/切片实体）或 <C, I>（ADT 容器标记）
+        //   宏体（= / 形参 / 换行）跟随：<T,...> 泛型宏类型参数（语言级单态化模板）
+        // <C, I>：ADT 容器标记 —— C=自定义容器类型，I=元素节点类型；
+        //   转 C 时把 I 整体注入为 T 的首个 synthetic 成员（offset 0），T& 与 I& 可零偏移互转
+        // <S>：分身/切片实体标记 —— S=分身/切片类型；
+        //   由解析后注入 pass 在 S 首部注入回指字段 _self: T&，并回填 S.projectEntity = T。
+        std::vector<std::string> angleNames;            // 尖括号内逗号分隔的名字列表
+        bool hasAngle = false;
         if (!linked && atOp("<")) {
+            hasAngle = true;
             advance();                                  // '<'
-            if (!at(Tok::Ident)) err("期望容器/分身类型名");
-            std::string first = advance().text;
-            if (accept(Tok::Comma)) {
-                isAdt = true;
-                adtColl = first;
-                if (!at(Tok::Ident)) err("期望元素节点类型名");
-                adtItem = advance().text;
-            } else {
-                projectSelf = first;                    // <S>：分身/切片
+            for (;;) {
+                if (!at(Tok::Ident)) err("期望尖括号内类型/容器/分身参数名");
+                angleNames.push_back(advance().text);
+                if (!accept(Tok::Comma)) break;
             }
             if (!acceptOp(">")) err("'>'");
         }
@@ -552,6 +592,15 @@ struct Parser {
         if (at(Tok::LBrace)) {
 
             d->kind = Decl::StructD;                        // 标记为结构体定义
+
+            // 尖括号在结构体后跟随时解释为 ADT/分身标记：<S> 或 <C, I>
+            std::string adtColl, adtItem, projectSelf;
+            bool isAdt = false;
+            if (hasAngle) {
+                if (angleNames.size() == 1) projectSelf = angleNames[0];
+                else if (angleNames.size() == 2) { isAdt = true; adtColl = angleNames[0]; adtItem = angleNames[1]; }
+                else err("结构体尖括号标记仅支持 <S>（分身/切片）或 <C, I>（ADT 容器）");
+            }
             parseFieldBlock(d->structCommon.fields, &pendingMethods);    // 解析字段块
             for (auto& m : pendingMethods) {                // 处理成员函数：补齐 methodOwner 和 name（mangle 后）
                 m->methodOwner = d->name;
@@ -604,13 +653,12 @@ struct Parser {
 
         // 只有结构体支持链表标记 '~'
         if (linked) err("'~' 链表标记仅支持结构体 {}");
-        if (isAdt) err("'<C, I>' ADT 容器标记仅支持结构体 {}");
-        if (!projectSelf.empty()) err("'<S>' 分身/切片标记仅支持结构体 {}");
 
 
         // 3. 对于 ( ... ) 联合体（含 @( ... ) 标签联合）
         if (at(Tok::LParen) || (atOp("@") && peek().kind == Tok::LParen)) {
 
+            if (hasAngle) err("尖括号标记仅支持结构体 {} 或泛型宏");
             d->kind = Decl::UnionD;
             d->tagged = acceptOp("@");          // @ 前缀：带标签的安全联合（sum type）
             parseFieldBlock(d->structCommon.fields);
@@ -637,6 +685,7 @@ struct Parser {
         // 4. 枚举新形：def name: [ Item1 = 0, Item2 ... ] : base_type
         //    用 [] 包裹枚举项，与函数宏（裸标识符形参列表）区分。
         if (at(Tok::LBracket)) {
+            if (hasAngle) err("尖括号标记仅支持结构体 {} 或泛型宏");
             d->kind = Decl::EnumD;
             advance();                                      // '['
             for (;;) {
@@ -662,14 +711,18 @@ struct Parser {
         if (acceptOp("=")) {
             d->kind = Decl::MacroD;
             d->macroObject = true;
+            if (hasAngle) d->macroTypeParams = angleNames;
             d->expr = parseExpr();
             expect(Tok::Newline, "换行");
             return d;
         }
 
         // 6. 函数宏：def name: p1, p2, ... \n\tbody  → #define name(p1,...) \ body
+        //    泛型宏：def name: <T,...> [, p1, ...] \n\tbody —— <T,...> 为类型参数（单态化），
+        //    其后逗号分隔的裸标识符为文本名参数（用于拼接具体实例名）。
         d->kind = Decl::MacroD;
         d->macroObject = false;
+        if (hasAngle) { d->macroTypeParams = angleNames; accept(Tok::Comma); }  // 类型参数与名参数间的分隔逗号
         if (!at(Tok::Newline)) {                            // 形参：裸标识符，逗号分隔，末尾可 ...
             for (;;) {
                 if (accept(Tok::Ellipsis)) { d->structCommon.variadic = true; break; }
@@ -762,7 +815,7 @@ struct Parser {
         if (!at(Tok::Ident) && !(!isRpc && at(Tok::KwPrint)))
             err(isRpc ? "期望 rpc 名" : "期望函数名");
 
-        d->name = advance().text;                   // 函数名（rpc 时为接口名，后续会在函数名前加上 rpc_ 前缀）
+        d->name = foldMacroSpelling(advance().text); // 函数名（宏体内折叠 \ 粘贴；rpc 时为接口名，后续加 rpc_ 前缀）
 
         // rpc 伪形参糖不支持 :: 和 ->
         if (isRpc && at(Tok::DColon)) err("rpc 不支持 ::（C 实现接口）");
@@ -1622,6 +1675,18 @@ struct Parser {
         // ret 调用语法糖：!! / ! / > / < / >= / <= 开头（操作符与函数名间须有空格）
         if (StmtPtr rc = tryParseRetCall()) return rc;
 
+        // 宏体内 @ 导出前缀：作用于 var / let / fnc，赋予外部链接（顶层 mix 展开后等价 @var/@let/@fnc）。
+        //   普通 var/let（无 @）在宏体内为模块私有（static）；tls 本就线程局部 static，不可 @ 导出。
+        bool macroExport = false;
+        if (inMacroBody && atOp("@")) {
+            advance();
+            macroExport = true;
+            if (cur().kind == Tok::KwTls)
+                err("tls 变量为线程局部 static 存储，不可 @ 导出");
+            if (cur().kind != Tok::KwVar && cur().kind != Tok::KwLet && cur().kind != Tok::KwFnc)
+                err("宏体内 @ 导出仅可用于 var / let / fnc");
+        }
+
         switch (cur().kind) {
 
             // goto 标签语句：goto label
@@ -1634,6 +1699,7 @@ struct Parser {
             case Tok::KwTls: {
                 auto s = mkStmt(cur().kind == Tok::KwVar ? Stmt::VarS
                               : cur().kind == Tok::KwLet ? Stmt::LetS : Stmt::TlsS);
+                s->exported = macroExport;
                 advance();
                 parseVarList(s->decls);
                 return s;
@@ -1658,6 +1724,16 @@ struct Parser {
             }
 
             case Tok::KwFnc:
+                // 宏体内允许定义函数：宏展开为 C #define，可生成函数定义（符号经
+                // 顶层 mix 展开登记进语义层）。其余位置仍禁止嵌套函数定义。
+                if (inMacroBody) {
+                    auto s = mkStmt(Stmt::DeclS);
+                    s->decl = parseFnc();
+                    s->decl->exported = macroExport;
+                    if (!pendingMethods.empty())
+                        err("宏体内函数不支持成员函数");
+                    return s;
+                }
                 err("暂不支持嵌套函数定义");  // 限制：函数只能在顶层定义
 
             // return [expr]

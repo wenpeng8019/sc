@@ -7,7 +7,10 @@
 #     串化 `name`                      → #  （把参数名转成字符串字面量）
 # mix name(args)            展开宏：顶层展开声明 / 函数体内展开语句
 #
-# 注意：宏展开生成的符号对 sc 语义不可见；顶层 mix 出的全局可用 let X:: T 认领后再引用。
+# 宏体声明的存储类（var/let/fnc）：
+#     var/let X      模块私有 → static T X;（默认；不污染其它单元）
+#     @var/@let X    导出     → extern T X; T X;（外部链接，供其它单元引用）
+# 宏展开生成的符号经语义层自动登记，下游可直接引用，无需手写 let X:: 认领。
 
 inc stdio.h
 
@@ -28,14 +31,13 @@ def tally: tag
 def logf: fmt, ...
     printf(fmt, __VA_ARGS__)
 
-# ---- 顶层 mix 展开出一对全局，再用 let :: 认领后引用 ----
+# ---- 顶层 mix 展开出一对全局：@var 导出 + var 模块私有（static） ----
+# 符号由语义层自动登记，main 中可直接引用（无需手写 let :: 认领）。
 def gpair: pfx
-    var pfx\_lo: i4 = 10
+    @var pfx\_lo: i4 = 10
     var pfx\_hi: i4 = 20
 
 mix gpair(cfg)
-let cfg_lo:: i4
-let cfg_hi:: i4
 
 fnc main: i4
     var count: i4 = CAP
@@ -47,7 +49,7 @@ fnc main: i4
     printf("paste:\n")
     mix tally(item)
 
-    printf("variadic + claimed globals:\n")
+    printf("variadic + macro globals:\n")
     mix logf("  sum=%d range=[%d,%d]\n", count + cfg_lo, cfg_lo, cfg_hi)
 
     return 0

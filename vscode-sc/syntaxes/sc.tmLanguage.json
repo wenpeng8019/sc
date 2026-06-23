@@ -55,11 +55,27 @@
             "match": "^\\s*(@@)(?=\\s|#|$)"
         },
         "def-decl": {
-            "match": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
-            "captures": {
+            "begin": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "beginCaptures": {
                 "1": { "name": "keyword.declaration.def.sc" },
                 "2": { "name": "entity.name.type.sc" }
-            }
+            },
+            "end": "(?=[{(\\[<~=]|->|$)",
+            "patterns": [
+                { "include": "#comment" },
+                {
+                    "name": "keyword.operator.variadic.sc",
+                    "match": "\\.\\.\\."
+                },
+                {
+                    "name": "variable.parameter.sc",
+                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                },
+                {
+                    "name": "punctuation.separator.parameter.sc",
+                    "match": "[:,]"
+                }
+            ]
         },
         "fnc-decl": {
             "match": "\\b(fnc)\\s+([A-Za-z_][A-Za-z0-9_]*)",
