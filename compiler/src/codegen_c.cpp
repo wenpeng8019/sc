@@ -513,6 +513,20 @@ struct CGen {
     //   使根（集成单元）的 @导出 类型/操作在依赖单元 C 层可见。仅项目构建的非根单元设置。
     std::string rootPreludeHeader;
 
+    // 头支撑单元自检结果：本单元 srcFile 形如 <root>/<stem>/<stem>.sc 且同目录存在手写
+    //   <stem>.h（builtins 三件套 / 通用 M.sc+M.h 子项目）。此时本单元 .c 直接 #include
+    //   该手写头，并跳过自身 @导出类型的内联定义/前置声明（由头提供），与消费方对该模块的
+    //   视图对称——既避免拼接 <stem>_impl.c 时类型重定义，又带入仅头部宏（如 MEM_*）供
+    //   拼接的 _impl.c 使用。空=非头支撑单元（按既有内联策略输出自身类型）。
+    bool unitHeaderBacked = false;
+    std::string headerBackedInclude;    // 待 #include 的手写头路径（如 "builtins/mem/mem.h"）
+
+    // op 单元特例：op.sc 为默认导入的语言运行时模块，其全部类型/接口（含非 @导出的
+    //   机制内部类型 limit/operand 等）均由手写 op.h 提供，且 op.h 已经 platform.h
+    //   默认带入。故 op 单元 .c 跳过自身「所有」类型定义与 :: 接口原型的输出（不止
+    //   @导出者），仅保留 init/drop 与拼接进来的 op_impl.c。
+    bool unitOpModule = false;
+
     // 穿透别名得到最终类型名（最多 8 层防环）
     std::string resolveAliasName(std::string n) const {
         for (int i = 0; i < 8; i++) {
@@ -4686,6 +4700,10 @@ struct CGen {
             if (d->kind != Decl::StructD && d->kind != Decl::UnionD) continue;
             if (exportedOnly && !d->exported) continue;
             if (d->external) continue;  // 外部模块类型由其模块头提供
+            // 头支撑单元：自身 @导出聚合的前置/完整声明均由手写头提供，不重复前向声明。
+            //   op 单元：自身全部聚合（含非导出机制类型）均由 op.h 提供，整体跳过。
+            if (unitOpModule) continue;
+            if (unitHeaderBacked && d->exported) continue;
             if (!emitted.insert(d->name).second) continue;
             // 标签联合展开为 struct（带 tag + union），前向声明须与定义一致用 struct
             const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
@@ -4812,10 +4830,39 @@ struct CGen {
     }
 
     std::string run() {
+        // 头支撑单元自检：srcFile 形如 <root>/<stem>/<stem>.sc 且同目录有手写 <stem>.h。
+        if (!srcFile.empty()) {
+            std::filesystem::path p(srcFile);
+            const std::string stem = p.stem().string();
+            if (endsWith(p.string(), ".sc") && p.has_parent_path() &&
+                p.parent_path().filename() == stem &&
+                std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
+                const std::filesystem::path root = p.parent_path().parent_path();
+                const std::string rootName = root.empty() ? std::string()
+                                                          : root.filename().string();
+                headerBackedInclude = (rootName.empty() ? "" : rootName + "/")
+                                      + stem + "/" + stem + ".h";
+                unitHeaderBacked = true;
+            }
+            // op：默认导入的语言运行时模块（builtins/op.sc + 同目录 op.h），其手写头
+            //   op.h 已由 platform.h 默认带入，故按头支撑单元处理（跳过自身 @导出类型内联，
+            //   由 op.h 提供）——但无需再发 #include（platform.h 已含），headerBackedInclude 留空。
+            else if (stem == "op" && p.has_parent_path() &&
+                     std::filesystem::exists(p.parent_path() / "op.h")) {
+                unitOpModule = true;       // op 全部自有类型/原型均由 op.h 提供，整体跳过
+            }
+        }
+
         // 标准 C 头统一由 builtins/platform.h 提供（该目录默认在 -I 路径），
         // 同时带入 TLS 宏等跨平台适配
         out << "/* 由 scc 生成，请勿手工修改 */\n"
             << "#include \"platform.h\"\n";
+
+        // 头支撑单元：紧随 platform.h 引入本模块手写 C ABI 头，提供本单元 @导出类型的
+        // 唯一定义（下方第一遍跳过其内联），并带入仅头部宏供拼接的 <stem>_impl.c 使用。
+        // op 例外：其 op.h 已由 platform.h 默认带入，headerBackedInclude 留空、不重复发出。
+        if (unitHeaderBacked && !headerBackedInclude.empty())
+            out << "#include \"" << headerBackedInclude << "\"\n";
 
 
         // future<ID> 聚合枚举 future_id：头文件模式下由独立 type.h 提供，.c 在此 #include
@@ -4946,6 +4993,26 @@ struct CGen {
                 if (d->kind == Decl::StructD && !d->projectSelf.empty())
                     emitProjectTypedef(*d);
                 continue;
+            }
+            // 头支撑单元：自身 @导出类型由手写头提供完整定义，跳过内联（避免与拼接的
+            // <stem>_impl.c 经手写头带入的定义重复）。分身句柄 T__project 仍需本工程生成。
+            if (unitHeaderBacked && d->exported &&
+                (d->kind == Decl::StructD || d->kind == Decl::UnionD ||
+                 d->kind == Decl::EnumD   || d->kind == Decl::AliasD)) {
+                if (d->kind == Decl::StructD && !d->projectSelf.empty())
+                    emitProjectTypedef(*d);
+                continue;
+            }
+            // op 单元：自身全部类型/ :: 接口原型均由 op.h（经 platform.h）提供，整体跳过
+            //   （含非 @导出的机制内部类型）；分身句柄（如 com__project）仅消费单元需要、
+            //   在各消费单元就地生成，op 自身不发出（其 op_impl.c 直接用 op.h 的 limit/com）。
+            if (unitOpModule) {
+                if (d->kind == Decl::StructD || d->kind == Decl::UnionD ||
+                    d->kind == Decl::EnumD   || d->kind == Decl::AliasD)
+                    continue;
+                if (d->kind == Decl::FuncTypeD && !d->isRpc &&
+                    (d->cImpl || !d->methodOwner.empty()))
+                    continue;   // :: 接口原型由 op.h 提供
             }
             switch (d->kind) {
                 case Decl::EnumD: case Decl::AliasD:

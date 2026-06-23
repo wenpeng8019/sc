@@ -1143,6 +1143,46 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     return true;
 }
 
+// 拼接机制：把模块自身的源码实现 <stem>_impl.c 作为内容并入生成的单元 .c，
+//   编成同一翻译单元（TU）。这样手写 C 实现可直接引用 sc 侧模块私有 static 全局，
+//   且 `::` 接口的 extern 符号在本 TU 内就地定义，无需单独编译/链接。
+// include 处理：剥离 impl 中对「模块自身 ABI 头」<stem>.h 的 #include。
+//   · 非头支撑单元：本单元 .c 已就地内联输出 struct/typedef 与函数原型（无 include
+//     guard），再经 <stem>.h 重复定义会触发「结构体重定义」；剥离后由单元 .c 的内联
+//     定义统一供给（单一真相 = <stem>.sc）。
+//   · 头支撑单元（子项目三件套）：本单元 .c 已在顶部 #include 该手写头（emitC 自检
+//     发出），结构/原型/宏由头提供且 emitC 跳过自身 @导出类型内联；剥离 impl 的同名
+//     头重复包含纯属冗余消除（即便保留亦因 include guard 无害）。
+//   其余 include（platform.h / 系统头，均带 include guard）原样保留、重复包含无害。
+//   剥离时以空行占位以维持 #line 行号对齐。
+static std::string spliceImpl(const std::string& csrc,
+                              const std::filesystem::path& implPath,
+                              const std::string& stem) {
+    const std::string impl = readWholeFile(implPath);
+    if (impl.empty()) return csrc;
+    const std::string ownHdr = stem + ".h";
+    std::ostringstream stripped;
+    std::istringstream in(impl);
+    std::string line;
+    while (std::getline(in, line)) {
+        bool isOwn = false;
+        const size_t s = line.find_first_not_of(" \t");
+        if (s != std::string::npos && line.compare(s, 8, "#include") == 0) {
+            const size_t q1 = line.find('"', s);
+            const size_t q2 = (q1 == std::string::npos) ? std::string::npos
+                                                        : line.find('"', q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos) {
+                const std::string inc = line.substr(q1 + 1, q2 - q1 - 1);
+                if (std::filesystem::path(inc).filename().string() == ownHdr)
+                    isOwn = true;
+            }
+        }
+        if (isOwn) stripped << '\n';            // 空行占位，维持后续行号对齐
+        else stripped << line << '\n';
+    }
+    return csrc + "\n#line 1 \"" + implPath.string() + "\"\n" + stripped.str();
+}
+
 // 把模块图中所有单元生成 .c/.h 并编译为 .o
 // + extraCFlags 用于追加单元级编译选项（如动态库的 -fPIC）；成功返回 0
 //   extraLd 返回子项目需要的额外链接选项（如 Linux 上 m 的 -lpthread）
@@ -1161,8 +1201,30 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         std::filesystem::path hpath;
         std::filesystem::path opath;
         std::filesystem::path srcDir;  // 源 .sc 所在目录（解析 inc "local.h"）
+        std::filesystem::path linkImpl;  // 二进制实现（.o/.a）直接参与链接；空=无（源实现已拼接）
+        std::string unitCFlags;          // 本单元额外编译选项（如 async 的 libuv）
     };
     std::vector<UnitArtifact> arts;
+
+    // op.sc 统一进单元图：op.sc 为默认导入的语言运行时模块（chain/异步内核等机制）。
+    //   将其作为正式单元纳入图，生成 op 单元 .c，其运行时 op_impl.c 经拼接机制并入同
+    //   一 TU（见下方第一阶段），不再单独编译/链接。op 的唯一特殊性退化为「自动导入」。
+    if (!units.empty()) {
+        const std::filesystem::path anyDir =
+            std::filesystem::path(units.begin()->first).parent_path();
+        const auto opPath = resolveModulePath("op.sc", anyDir);
+        if (!opPath.empty()) {
+            const std::string opKey = std::filesystem::weakly_canonical(opPath).string();
+            if (units.find(opKey) == units.end()) {
+                std::unordered_set<std::string> opVisiting;
+                std::string opErr;
+                if (!loadUnitGraph(opPath, units, opVisiting, opErr)) {
+                    std::cerr << "错误: 加载 op.sc 单元失败: " << opErr << "\n";
+                    return 1;
+                }
+            }
+        }
+    }
 
     // 第一阶段：为每个模块生成 .c/.h 单元
     for (auto& kv : units) {
@@ -1187,7 +1249,70 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (unitTest) setTestMode(true);
         const std::string csrc = emitC(kv.second.prog, kv.first, sofName, &sofSrc, rph);  // 带 #line 源码映射
         if (unitTest) setTestMode(false);
-        if (!writeTextFile(cpath, csrc)) return 1;
+
+        // 拼接机制：模块自身的源码实现 <stem>_impl.c 并入本单元 .c（同 TU）。
+        //   决定本单元的 impl 处理方式：源实现 → 拼接；二进制（.o/.a）→ 单独链接。
+        //   adt 可经 --adt/SCC_ADT/.sc 配置替换默认实现（.c 拼接、.o/.a 链接）。
+        const std::string scStem = kv.second.path.stem().string();
+        const std::filesystem::path scDir = kv.second.path.parent_path();
+        std::filesystem::path spliceC, linkImpl;
+        std::string unitCFlags;
+        if (scStem == "adt" && !tc.adtImpl.empty()) {
+            const std::filesystem::path ov(tc.adtImpl);
+            if (!std::filesystem::exists(ov)) {
+                std::cerr << "错误: adt 实现文件不存在: " << ov.string() << "\n";
+                return 1;
+            }
+            if (ov.extension() == ".c") spliceC = ov; else linkImpl = ov;
+        } else {
+            const std::filesystem::path cImpl = scDir / (scStem + "_impl.c");
+            if (std::filesystem::exists(cImpl)) spliceC = cImpl;
+            else {
+                const std::filesystem::path aImpl = scDir / (scStem + ".a");
+                if (std::filesystem::exists(aImpl)) linkImpl = aImpl;
+            }
+        }
+        const bool hasImpl = !spliceC.empty() || !linkImpl.empty();
+        // 子项目特殊编译/链接选项（仅当本模块带实现时生效）：
+        //   m   —— 线程库（Linux=-lpthread；macOS/Windows/裸机=空），进最终链接
+        //   async —— 叶子原语，编译器以 -DSCC_WITH_UV 构建时改用 libuv 后端（需 -I 头）
+        if (hasImpl && scStem == "m" && extraLd && !tc.threadsLib.empty()
+            && extraLd->find(tc.threadsLib) == std::string::npos)
+            *extraLd += " " + tc.threadsLib;
+#ifdef SCC_WITH_UV
+        if (hasImpl && scStem == "async") {
+            const std::filesystem::path repo = scDir.parent_path().parent_path();
+            const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
+            unitCFlags = " -DSCC_WITH_UV";
+            if (std::filesystem::exists(uvInc)) unitCFlags += " -I " + uvInc.string();
+        }
+#endif
+        // op —— 默认导入的语言运行时（chain/异步内核）。异步内核基于 pthread，故需链接
+        //   线程库（Linux=-lpthread；macOS/Windows/裸机=空）。编译器以 -DSCC_WITH_UV
+        //   构建时改用 libuv 后端：op_impl.c 需 -DSCC_WITH_UV + libuv 头，链接 libuv.a
+        //   （+ macOS 系统框架）。op_impl.c 已经上方拼接逻辑并入 op 单元 .c（同 TU）。
+        if (hasImpl && scStem == "op") {
+            if (extraLd && !tc.threadsLib.empty()
+                && extraLd->find(tc.threadsLib) == std::string::npos)
+                *extraLd += " " + tc.threadsLib;
+#ifdef SCC_WITH_UV
+            const std::filesystem::path repo = scDir.parent_path();
+            const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
+            const std::filesystem::path uvLib = repo / "vendor" / "libuv" / "build" / "libuv.a";
+            unitCFlags += " -DSCC_WITH_UV";
+            if (std::filesystem::exists(uvInc)) unitCFlags += " -I " + uvInc.string();
+            if (extraLd && std::filesystem::exists(uvLib)
+                && extraLd->find(uvLib.string()) == std::string::npos)
+                *extraLd += " " + uvLib.string();   // libuv.a 在 op.o 之后参与链接
+#ifdef __APPLE__
+            if (extraLd && extraLd->find("CoreFoundation") == std::string::npos)
+                *extraLd += " -framework CoreFoundation -framework CoreServices";
+#endif
+#endif
+        }
+        const std::string finalCsrc = spliceC.empty() ? csrc
+                                                      : spliceImpl(csrc, spliceC, scStem);
+        if (!writeTextFile(cpath, finalCsrc)) return 1;
         if (!sofSrc.empty() && !writeTextFile(tmpDir / sofName, sofSrc)) return 1;
 
         std::string hsrc = emitCHeader(kv.second.prog, guardFromHeaderName(hname));
@@ -1196,8 +1321,9 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             hsrc = "#ifndef " + guard + "\n#define " + guard + "\n#endif\n";
         }
         if (!writeTextFile(hpath, hsrc)) return 1;
-        
-        arts.push_back({cpath, hpath, opath, kv.second.path.parent_path()});
+
+        arts.push_back({cpath, hpath, opath, kv.second.path.parent_path(),
+                        linkImpl, unitCFlags});
     }
 
     // future<ID> 聚合枚举：跨所有单元取 ID 并集（去重、首见序），写出工程级 type.h，
@@ -1212,10 +1338,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (!th.empty() && !writeTextFile(tmpDir / "type.h", th)) return 1;
     }
 
-    // 第二阶段：统一编译所有 .c -> .o
+    // 第二阶段：统一编译所有 .c -> .o（含已拼接进 .c 的源实现 <stem>_impl.c）
     for (auto& a : arts) {
-        // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到
-        std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags + " -I " + tmpDir.string();
+        // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到；
+        //   a.unitCFlags 为本单元额外编译选项（如 async 拼接 libuv 实现时的 -DSCC_WITH_UV）
+        std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
+            + a.unitCFlags + " -I " + tmpDir.string();
         if (!a.srcDir.empty()) ccCmd += " -I " + a.srcDir.string();
         ccCmd += " -c " + a.cpath.string() + " -o " + a.opath.string();
         if (std::system(ccCmd.c_str()) != 0) {
@@ -1225,112 +1353,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         objects.push_back(a.opath);
     }
 
-    // 第三阶段：builtins 子项目实现自动参与链接
-    //   子项目形态 <目录>/x/x.sc，同目录存在 x_impl.c（自动编译，
-    //   -I 自身目录 + -I 上级目录使 "x.h"/"platform.h" 可见）或
-    //   x.a（内嵌发行版释放的预编译库，直接链接）；两者皆无则跳过。
-    //   adt 特例：--adt <x.c|x.o|x.a> 可替换默认实现。
-    for (auto& kv : units) {
-        const std::filesystem::path p(kv.first);
-        const std::string stem = p.stem().string();
-        if (p.extension() != ".sc" || p.parent_path().filename() != stem) continue;
-        const std::filesystem::path dir = p.parent_path();
-
-        std::filesystem::path impl;
-        if (stem == "adt" && !tc.adtImpl.empty()) {
-            impl = tc.adtImpl;
-            if (!std::filesystem::exists(impl)) {
-                std::cerr << "错误: adt 实现文件不存在: " << impl.string() << "\n";
-                return 1;
-            }
-        } else {
-            impl = dir / (stem + "_impl.c");
-            if (!std::filesystem::exists(impl)) impl = dir / (stem + ".a");
-            if (!std::filesystem::exists(impl)) continue;  // 非子项目实现形态
-        }
-        // 线程库由目标平台表决定（Linux=-lpthread；macOS/Windows/裸机=空）
-        if (stem == "m" && extraLd && !tc.threadsLib.empty()
-            && extraLd->find(tc.threadsLib) == std::string::npos)
-            *extraLd += " " + tc.threadsLib;
-        // async 模块：承载叶子原语（delay 等）。默认后端经 op 层钩子构建（零依赖）；
-        //   编译器若以 -DSCC_WITH_UV 构建，则 async 叶子原语可直接用 libuv 现成生态，
-        //   需 -DSCC_WITH_UV + libuv 头（libuv.a 由 op 层链接段统一带入）。
-        std::string subCFlags;
-#ifdef SCC_WITH_UV
-        if (stem == "async") {
-            const std::filesystem::path repo = dir.parent_path().parent_path();
-            const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
-            subCFlags = " -DSCC_WITH_UV";
-            if (std::filesystem::exists(uvInc)) subCFlags += " -I " + uvInc.string();
-        }
-#endif
-        if (impl.extension() == ".c") {
-            const std::filesystem::path obj = tmpDir / (stem + "_impl.o");
-            std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
-                + subCFlags
-                + " -I " + dir.string()
-                + " -I " + dir.parent_path().string()
-                + " -c " + impl.string() + " -o " + obj.string();
-            if (std::system(ccCmd.c_str()) != 0) {
-                std::cerr << "错误: " << stem << " 实现编译失败（" << ccCmd << "）\n";
-                return 1;
-            }
-            objects.push_back(obj);
-        } else {
-            objects.push_back(impl);  // .o/.a 直接参与链接
-        }
-    }
-
-    // 第三阶段·补：op.sc 机制运行时（builtins/op_impl.c）无条件参与链接。
-    //   op.sc 为默认导入模块（chain 等语法机制），其 C 运行时随每个工程自动编译
-    //   并链接，无需 inc。与 platform.h 的「默认带入」对应。
-    //   op_impl.c 内含语言自有异步内核（future/async_*/delay/com_*_async/async_io，
-    //   POSIX poll + 自管道 + pthread），故链接需线程库（Linux=-lpthread；
-    //   macOS/Windows/裸机=空，由平台表给出）。
-    if (!units.empty()) {
-        const std::filesystem::path anyDir =
-            std::filesystem::path(units.begin()->first).parent_path();
-        const auto opPath = resolveModulePath("op.sc", anyDir);
-        if (!opPath.empty()) {
-            const std::filesystem::path opImpl = opPath.parent_path() / "op_impl.c";
-            if (std::filesystem::exists(opImpl)) {
-                const std::filesystem::path obj = tmpDir / "op_impl.o";
-                // 异步内核多路复用后端：默认 POSIX poll（零依赖）。编译器若以
-                //   -DSCC_WITH_UV 构建，则改用 libuv 后端：op_impl.c 需 -DSCC_WITH_UV
-                //   + libuv 头，链接需 libuv.a（紧随 op_impl.o）+ macOS 系统框架。
-                std::string opCFlags;
-                std::filesystem::path uvLib;
-#ifdef SCC_WITH_UV
-                {
-                    const std::filesystem::path repo = opPath.parent_path().parent_path();
-                    const std::filesystem::path uvInc = repo / "vendor" / "libuv" / "include";
-                    uvLib = repo / "vendor" / "libuv" / "build" / "libuv.a";
-                    opCFlags = " -DSCC_WITH_UV";
-                    if (std::filesystem::exists(uvInc)) opCFlags += " -I " + uvInc.string();
-                }
-#endif
-                std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
-                    + opCFlags
-                    + " -I " + opPath.parent_path().string()
-                    + " -c " + opImpl.string() + " -o " + obj.string();
-                if (std::system(ccCmd.c_str()) != 0) {
-                    std::cerr << "错误: op 运行时编译失败（" << ccCmd << "）\n";
-                    return 1;
-                }
-                objects.push_back(obj);
-                if (!uvLib.empty() && std::filesystem::exists(uvLib))
-                    objects.push_back(uvLib);   // libuv.a 紧随 op_impl.o（静态库依赖顺序）
-                if (extraLd && !tc.threadsLib.empty()
-                    && extraLd->find(tc.threadsLib) == std::string::npos)
-                    *extraLd += " " + tc.threadsLib;   // 异步内核用 pthread
-#ifdef SCC_WITH_UV
-#ifdef __APPLE__
-                if (extraLd && extraLd->find("CoreFoundation") == std::string::npos)
-                    *extraLd += " -framework CoreFoundation -framework CoreServices";
-#endif
-#endif
-            }
-        }
+    // 第三阶段：二进制形态的模块实现参与链接
+    //   源实现 <stem>_impl.c 已在第一阶段拼接进对应单元 .c（同 TU 编译，第二阶段完成）；
+    //   此处仅链接无法拼接的二进制实现——子项目预编译库 <stem>.a（内嵌发行版释放）
+    //   或 --adt <x.o|x.a> 替换的二进制实现。线程库/libuv 等链接选项已在第一阶段按需登记。
+    for (auto& a : arts) {
+        if (!a.linkImpl.empty()) objects.push_back(a.linkImpl);  // .o/.a 直接参与链接
     }
 
     // 第四阶段：模块内 add 指令声明的实现/库文件参与编译与链接

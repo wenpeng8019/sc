@@ -26,18 +26,18 @@
     fnc cstr:: char&                              # C 字符串视图（始终非 nil）
     fnc clear::                                    # 置空（保留容量）
     fnc reserve:: bool, n: u8                     # 预留容量
-    fnc assign:: bool, s: char&                   # 赋值为 C 字符串
-    fnc append:: bool, s: char&                   # 追加 C 字符串
-    fnc append_n:: bool, s: char&, n: u8          # 追加前 n 字节
+    fnc assign:: bool, s: const char&             # 赋值为 C 字符串
+    fnc append:: bool, s: const char&             # 追加 C 字符串
+    fnc append_n:: bool, s: const char&, n: u8    # 追加前 n 字节
     fnc append_char:: bool, c: char               # 追加单字符
-    fnc insert:: bool, index: u8, s: char&        # 指定位置插入
+    fnc insert:: bool, index: u8, s: const char&  # 指定位置插入
     fnc erase:: bool, index: u8, n: u8            # 删除 n 字节
     fnc at:: char, index: u8                      # 取字符（越界返回 0）
-    fnc find:: i8, sub: char&, start: u8          # 查找子串（未找到 -1）
-    fnc rfind:: i8, sub: char&                    # 反向查找（未找到 -1）
-    fnc equals:: bool, s: char&                   # 与 C 字符串比较相等
-    fnc starts_with:: bool, s: char&              # 前缀判断
-    fnc ends_with:: bool, s: char&                # 后缀判断
+    fnc find:: i8, sub: const char&, start: u8    # 查找子串（未找到 -1）
+    fnc rfind:: i8, sub: const char&              # 反向查找（未找到 -1）
+    fnc equals:: bool, s: const char&             # 与 C 字符串比较相等
+    fnc starts_with:: bool, s: const char&        # 前缀判断
+    fnc ends_with:: bool, s: const char&          # 后缀判断
     fnc slice:: bool, start: i8, stop: i8, out: string&  # 切片（负索引从尾部计）
     fnc strip::                                    # 去除首尾空白
     fnc lower::                                    # 转小写（ASCII）
@@ -69,6 +69,6 @@
     fnc index_of:: i8, value: &                      # 查找元素位置（未找到 -1）
     fnc reverse::                                    # 原地反转
     fnc clone:: bool, out: list&                    # 浅拷贝到 out
-    fnc sort:: cmp: list_cmp&                       # 按比较回调排序
+    fnc sort:: cmp: list_cmp                         # 按比较回调排序
 }
 

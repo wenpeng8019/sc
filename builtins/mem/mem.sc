@@ -113,7 +113,7 @@
     # flags 按位或：0=默认读写共享；1=只读（SHM_RDONLY，仅附着不创建）；2=独占创建（SHM_EXCL，已存在则失败）。
     # 区不存在则创建并定容；已存在则附着（要求其容量 >= 申请页数，且 size() 回报真实容量）。
     # 成功返回 1 并完成映射（data() 可用）；失败返回 0（h 置 nil）。
-    fnc make:: bool, name: char&, size: u8, flags: u4
+    fnc make:: bool, name: const char&, size: u8, flags: u4
 
     fnc data:: &          # 本进程映射首地址；未映射/失败返回 nil
     fnc size:: u8         # 实际映射字节数（附着时为底层区真实容量）；未映射返回 nil
@@ -122,5 +122,5 @@
 
 # 删除命名共享内存区（POSIX shm_unlink）：移除 name 后新 make 无法再附着到旧区，
 # 已映射者仍可访问至各自 drop。成功（或 Windows 无需删除）返回 1，失败返回 0。
-@fnc shm_remove:: bool, name: char&
+@fnc shm_remove:: bool, name: const char&
 

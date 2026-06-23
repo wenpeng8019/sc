@@ -33,18 +33,18 @@ uint64_t string_len(string *_this);
 char    *string_cstr(string *_this);                  /* 始终非 NULL */
 void     string_clear(string *_this);
 uint8_t  string_reserve(string *_this, uint64_t n);
-uint8_t  string_assign(string *_this, char *s);
-uint8_t  string_append(string *_this, char *s);
-uint8_t  string_append_n(string *_this, char *s, uint64_t n);
+uint8_t  string_assign(string *_this, const char *s);
+uint8_t  string_append(string *_this, const char *s);
+uint8_t  string_append_n(string *_this, const char *s, uint64_t n);
 uint8_t  string_append_char(string *_this, char c);
-uint8_t  string_insert(string *_this, uint64_t index, char *s);
+uint8_t  string_insert(string *_this, uint64_t index, const char *s);
 uint8_t  string_erase(string *_this, uint64_t index, uint64_t n);
 char     string_at(string *_this, uint64_t index);    /* 越界返回 0 */
-int64_t  string_find(string *_this, char *sub, uint64_t start);
-int64_t  string_rfind(string *_this, char *sub);
-uint8_t  string_equals(string *_this, char *s);
-uint8_t  string_starts_with(string *_this, char *s);
-uint8_t  string_ends_with(string *_this, char *s);
+int64_t  string_find(string *_this, const char *sub, uint64_t start);
+int64_t  string_rfind(string *_this, const char *sub);
+uint8_t  string_equals(string *_this, const char *s);
+uint8_t  string_starts_with(string *_this, const char *s);
+uint8_t  string_ends_with(string *_this, const char *s);
 uint8_t  string_slice(string *_this, int64_t start, int64_t stop, string *out);
 void     string_strip(string *_this);
 void     string_lower(string *_this);
@@ -53,7 +53,7 @@ uint8_t  string_clone(string *_this, string *out);
 
 /* ---------------- list：动态指针数组 ---------------- */
 
-typedef int32_t list_cmp(void *a, void *b);           /* sort 比较回调 */
+typedef int32_t (*list_cmp)(void *a, void *b);        /* sort 比较回调（函数指针，与 adt.sc @fnc 生成形一致） */
 
 typedef struct list {
     void   **items;    /* 元素数组 */
@@ -75,7 +75,7 @@ void    *list_remove_at(list *_this, uint64_t index);
 int64_t  list_index_of(list *_this, void *value);     /* 未找到 -1 */
 void     list_reverse(list *_this);
 uint8_t  list_clone(list *_this, list *out);
-void     list_sort(list *_this, list_cmp *cmp);
+void     list_sort(list *_this, list_cmp cmp);
 
 #ifdef __cplusplus
 }

@@ -24,7 +24,7 @@
 |------|------|--------|
 | x.sc | **sc 侧接口声明**：`@def` 数据布局 + `@fnc T::m` 方法声明（无函数体），决定 sc 代码能怎么用 | scc 编译器 |
 | x.h | **C ABI 契约**（数据布局/原型，与 x.sc 同步维护），自定义/默认实现据此编写 | C 编译器 |
-| x_impl.c | **默认实现**，编译器自动编译并链接（`-I` 自身目录与 builtins 根） | 链接器 |
+| x_impl.c | **默认实现**：源实现经拼接机制并入 `x.sc` 生成的单元 `.c`（同一 TU）；预编译 `.a` 则单独链接 | C 编译器 / 链接器 |
 
 ### 本质：x.sc 真正参与编译，不是参考文档
 
@@ -50,9 +50,11 @@
    模块头提供"），仅生成对它们的引用——方法调用 `s.len()` 重整为 `string_len(&s)`，
    并依据声明驱动语法糖（`string()` 堆构造、声明即构造）。生成的 `.c` 顶部
    `#include "builtins/x/x.h"`，由 x.h 提供真正的 `struct` 定义与函数原型。
-5. **链接**：单元图包含 `<目录>/x/x.sc` 且同目录存在 `x_impl.c`（或内嵌发行版释放的
-   预编译 `x.a`）时，scc 自动编译并链接默认实现，填上第 4 步引用的 extern 符号；
-   两者皆无则跳过（不影响纯 sc 子项目）。
+5. **并入实现**：源实现 `x_impl.c` 经**拼接机制**并入 `x.sc` 生成的单元 `.c`、
+   编成同一翻译单元（与 sc 侧共享模块私有 `static`，`::` 符号就地定义）；预编译
+   `x.a`（内嵌发行版释放）或 `--adt <x.o|x.a>` 指定的二进制实现无法拼接，则作为目标
+   文件单独参与链接；皆无则跳过（不影响纯 sc 子项目）。拼接机制通用细节见
+   [syntax.md](../syntax.md) §9「模块实现的并入：拼接机制」。
 
 ### 用途：三件套各自决定什么
 
@@ -60,10 +62,11 @@
 |------|------|------|
 | x.sc | sc 代码**怎么用**这个类型（合法类型、方法签名、语法糖、name mangling） | `var s: string`、`s.len()` 返回 `u8` |
 | x.h | 生成的 C 与实现**怎么对齐**（数据布局、函数原型） | `struct string {...}`、`string_len(...)` |
-| x_impl.c | extern 符号在**链接期**怎么填上（默认实现，可替换） | `string_len` 的实际函数体 |
+| x_impl.c | extern 符号怎么兑现（默认实现，可替换）——源实现拼接进单元 TU，二进制实现走链接 | `string_len` 的实际函数体 |
 
-关键点：x.sc 的方法**没有函数体**，scc 因此不为其生成任何代码体，实现完全交给
-链接期注入——这正是"可替换实现"（`--adt` 等）得以成立的基础。
+关键点：x.sc 的方法**没有函数体**，scc 因此不为其生成任何代码体，实现交给配套 C——
+源实现 `x_impl.c` 拼接进同一 TU、二进制实现（`.a`/`--adt`）走链接——这正是"可替换
+实现"（`--adt` 等）得以成立的基础。
 
 ## adt —— 抽象数据类型子项目
 
@@ -73,18 +76,18 @@
 |------|------|
 | adt.sc | sc 侧接口声明：`@def` 数据布局 + `@fnc T::m` 方法声明（无函数体） |
 | adt.h | C ABI 契约（数据布局/原型，与 adt.sc 同步维护），自定义实现据此编写 |
-| adt_impl.c | 默认实现，编译器自动编译并链接 |
+| adt_impl.c | 默认实现，经拼接机制并入 adt 单元 `.c`（同一 TU） |
 
 ### 工作机制
 
 1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list` 类型及其方法。
 2. 方法声明（`fnc T::m` 无函数体）转 C 时生成 extern 原型 `T_m(T *_this, ...)`，
-   实现由链接期注入。
-3. 单元图包含 `builtins/adt/adt.sc` 时，scc 自动编译并链接默认实现
-   `adt_impl.c`；可替换为自定义实现：
+   实现由配套 C 兑现。
+3. 单元图包含 `builtins/adt/adt.sc` 时，scc 把默认实现 `adt_impl.c` 经拼接机制并入
+   adt 单元 `.c`（同一 TU）；可替换为自定义实现：
 
 ```sh
-scc app.sc --adt my_adt.c      # .c 自动编译；.o/.a 直接参与链接
+scc app.sc --adt my_adt.c      # .c 源实现拼接进 adt 单元 TU；.o/.a 直接参与链接
 SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 ```
 
@@ -113,18 +116,18 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 | cstr | `char&` | C 字符串视图（始终非 nil） |
 | clear | | 置空（保留容量） |
 | reserve | `bool, n: u8` | 预留容量 |
-| assign | `bool, s&: char` | 赋值为 C 字符串 |
-| append | `bool, s&: char` | 追加 C 字符串 |
-| append_n | `bool, s&: char, n: u8` | 追加前 n 字节 |
+| assign | `bool, s&: const char` | 赋值为 C 字符串 |
+| append | `bool, s&: const char` | 追加 C 字符串 |
+| append_n | `bool, s&: const char, n: u8` | 追加前 n 字节 |
 | append_char | `bool, c: char` | 追加单字符 |
-| insert | `bool, index: u8, s&: char` | 指定位置插入 |
+| insert | `bool, index: u8, s&: const char` | 指定位置插入 |
 | erase | `bool, index: u8, n: u8` | 删除 n 字节 |
 | at | `char, index: u8` | 取字符（越界返回 0） |
-| find | `i8, sub&: char, start: u8` | 查找子串（未找到 -1） |
-| rfind | `i8, sub&: char` | 反向查找（未找到 -1） |
-| equals | `bool, s&: char` | 与 C 字符串比较相等 |
-| starts_with | `bool, s&: char` | 前缀判断 |
-| ends_with | `bool, s&: char` | 后缀判断 |
+| find | `i8, sub&: const char, start: u8` | 查找子串（未找到 -1） |
+| rfind | `i8, sub&: const char` | 反向查找（未找到 -1） |
+| equals | `bool, s&: const char` | 与 C 字符串比较相等 |
+| starts_with | `bool, s&: const char` | 前缀判断 |
+| ends_with | `bool, s&: const char` | 后缀判断 |
 | slice | `bool, start: i8, stop: i8, out&: string` | 切片 `[start, stop)`，负索引从尾部计 |
 | strip | | 去除首尾空白 |
 | lower / upper | | 大小写转换（ASCII） |
@@ -172,13 +175,14 @@ fnc main: i4
 
 `builtins/op.sc` 与 `platform.h` 一样属**默认导入**，无需 `inc`。它汇集编译器
 需要感知的「语言底层（语法层面）机制」声明，据此识别方法调用糖、字段访问、
-链表注入等语法糖。其 C 运行时随每个工程自动编译并链接（无需 inc）：
+链表注入等语法糖。它同样作为正式单元进入模块图、生成 `op.c`，其 C 运行时
+`op_impl.c` 经拼接机制并入同一 TU（无需 inc）：
 
 | 文件 | 角色 |
 |------|------|
 | op.sc | sc 侧机制声明（operand、chain；后续切片/容器/COM 等） |
 | op.h | C ABI 契约（chain 结构体/原型），随 `platform.h` 默认带入每个生成单元 |
-| op_impl.c | 机制运行时默认实现，编译器对每个工程自动编译并链接 |
+| op_impl.c | 机制运行时默认实现，经拼接机制并入 op 单元 `.c`（同一 TU） |
 
 ### operand —— 设备操作数通用指令
 
@@ -607,11 +611,11 @@ fnc main: i4
 
 | 接口 | 类型/签名 | 说明 |
 |------|---------|------|
-| shm.make | `bool, name: char&, size: u8, flags: u4` | 创建或附着命名区，映射 `size` 字节（0 为 1，向上取整到页）；已存在则附着（要求容量足够，`size()` 回报真实容量）。`flags`：0 默认读写、1 只读（`SHM_RDONLY`，仅附着不创建）、2 独占创建（`SHM_EXCL`，已存在则失败），可按位或。成功 1 / 失败 0 |
+| shm.make | `bool, name: const char&, size: u8, flags: u4` | 创建或附着命名区，映射 `size` 字节（0 为 1，向上取整到页）；已存在则附着（要求容量足够，`size()` 回报真实容量）。`flags`：0 默认读写、1 只读（`SHM_RDONLY`，仅附着不创建）、2 独占创建（`SHM_EXCL`，已存在则失败），可按位或。成功 1 / 失败 0 |
 | shm.data | `&` | 本进程映射首地址；未映射返回 nil |
 | shm.size | `u8` | 实际映射字节数（附着已存在区时为其底层真实容量）；未映射返回 0 |
 | shm.drop | （无） | 解除映射 + 关闭句柄（不删除命名）；可重复调用 |
-| shm_remove | `bool, name: char&`（自由函数） | 删除命名区（POSIX `shm_unlink`）；Windows 无需删除返回 1 |
+| shm_remove | `bool, name: const char&`（自由函数） | 删除命名区（POSIX `shm_unlink`）；Windows 无需删除返回 1 |
 
 - **标志**：`SHM_RDONLY`(1) 以只读保护映射（POSIX `PROT_READ` / Windows `FILE_MAP_READ`），
   单独使用时仅附着已存在区、不创建；`SHM_EXCL`(2) 独占创建，区已存在则 `make` 失败

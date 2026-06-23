@@ -19,4 +19,4 @@
 
 # ---------------- file：文件 com 设备（C 实现接口）----------------
 # 打开 name 指定文件，构造 com 端点；read/write 取 0/1/2（禁用/同步/异步）。
-@fnc file:: com&, name: char&, txt: bool, read: u1, write: u1
+@fnc file:: com&, name: const char&, txt: bool, read: u1, write: u1

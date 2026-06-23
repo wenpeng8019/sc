@@ -48,16 +48,16 @@ void string_clear(string *_this) {
 
 uint8_t string_reserve(string *_this, uint64_t n) { return str_grow(_this, n); }
 
-uint8_t string_assign(string *_this, char *s) {
+uint8_t string_assign(string *_this, const char *s) {
     string_clear(_this);
     return string_append(_this, s);
 }
 
-uint8_t string_append(string *_this, char *s) {
+uint8_t string_append(string *_this, const char *s) {
     return string_append_n(_this, s, s ? strlen(s) : 0);
 }
 
-uint8_t string_append_n(string *_this, char *s, uint64_t n) {
+uint8_t string_append_n(string *_this, const char *s, uint64_t n) {
     if (!n) { /* 仍保证缓冲区存在，便于 cstr() */ }
     if (!str_grow(_this, _this->size + n)) return 0;
     if (n) memcpy(_this->data + _this->size, s, n);
@@ -70,7 +70,7 @@ uint8_t string_append_char(string *_this, char c) {
     return string_append_n(_this, &c, 1);
 }
 
-uint8_t string_insert(string *_this, uint64_t index, char *s) {
+uint8_t string_insert(string *_this, uint64_t index, const char *s) {
     if (index > _this->size) return 0;
     uint64_t n = s ? strlen(s) : 0;
     if (!n) return 1;
@@ -96,14 +96,14 @@ char string_at(string *_this, uint64_t index) {
     return index < _this->size ? _this->data[index] : 0;
 }
 
-int64_t string_find(string *_this, char *sub, uint64_t start) {
+int64_t string_find(string *_this, const char *sub, uint64_t start) {
     if (!sub || start > _this->size) return -1;
     if (!_this->data) return *sub ? -1 : 0;
     const char *p = strstr(_this->data + start, sub);
     return p ? (int64_t)(p - _this->data) : -1;
 }
 
-int64_t string_rfind(string *_this, char *sub) {
+int64_t string_rfind(string *_this, const char *sub) {
     if (!sub || !_this->data) return -1;
     uint64_t n = strlen(sub);
     if (n > _this->size) return -1;
@@ -112,17 +112,17 @@ int64_t string_rfind(string *_this, char *sub) {
     return -1;
 }
 
-uint8_t string_equals(string *_this, char *s) {
+uint8_t string_equals(string *_this, const char *s) {
     return strcmp(string_cstr(_this), s ? s : "") == 0;
 }
 
-uint8_t string_starts_with(string *_this, char *s) {
+uint8_t string_starts_with(string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
     return n <= _this->size && memcmp(string_cstr(_this), s, n) == 0;
 }
 
-uint8_t string_ends_with(string *_this, char *s) {
+uint8_t string_ends_with(string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
     return n <= _this->size &&
@@ -258,8 +258,8 @@ uint8_t list_clone(list *_this, list *out) {
     return 1;
 }
 
-/* 插入排序：元素数通常不大，且保持稳定 */
-void list_sort(list *_this, list_cmp *cmp) {
+/* 插入排序：元素数通常不大，且保持稳定。cmp 为 list_cmp（函数指针） */
+void list_sort(list *_this, list_cmp cmp) {
     if (!cmp) return;
     for (uint64_t i = 1; i < _this->size; i++) {
         void *v = _this->items[i];
