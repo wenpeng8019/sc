@@ -37,26 +37,26 @@ typedef struct com__project {
 
 
 static float area(Shape s) {
-    /* line 31 */
+    /* line 29 */
     Shape _case0 = s;
     switch (_case0.tag) {
         case Shape__Empty:
         {
-            /* line 33 */
+            /* line 31 */
             return 0.0;
             break;
         }
         case Shape__Circle:
         {
             float r = _case0.u.Circle;
-            /* line 35 */
+            /* line 33 */
             return (3.14159 * r) * r;
             break;
         }
         case Shape__Rect:
         {
             Rect box = _case0.u.Rect;
-            /* line 37 */
+            /* line 35 */
             return box.w * box.h;
             break;
         }
@@ -64,29 +64,29 @@ static float area(Shape s) {
 }
 
 static Result safe_div(int32_t a, int32_t b) {
-    /* line 43 */
+    /* line 41 */
     if (b == 0) {
-        /* line 44 */
+        /* line 42 */
         return ((Result){ .tag = Result__Err, .u.Err = -(1) });
     }
-    /* line 45 */
+    /* line 43 */
     return ((Result){ .tag = Result__Ok, .u.Ok = a / b });
 }
 
 static int32_t unwrap_or(Result r, int32_t fallback) {
-    /* line 49 */
+    /* line 47 */
     Result _case1 = r;
     switch (_case1.tag) {
         case Result__Ok:
         {
             int32_t v = _case1.u.Ok;
-            /* line 51 */
+            /* line 49 */
             return v;
             break;
         }
         default:
         {
-            /* line 53 */
+            /* line 51 */
             return fallback;
             break;
         }
@@ -94,28 +94,28 @@ static int32_t unwrap_or(Result r, int32_t fallback) {
 }
 
 int32_t main(void) {
-    /* line 56 */
+    /* line 54 */
     Shape a = ((Shape){ .tag = Shape__Circle, .u.Circle = 2.0 });
-    /* line 57 */
+    /* line 55 */
     Shape b = ((Shape){ .tag = Shape__Empty });
-    /* line 58 */
+    /* line 56 */
     Rect rc = {.w = 3.0, .h = 4.0};
-    /* line 59 */
+    /* line 57 */
     Shape c = ((Shape){ .tag = Shape__Rect, .u.Rect = rc });
-    /* line 60 */
+    /* line 58 */
     printf("circle area = %.2f\n", area(a));
-    /* line 61 */
+    /* line 59 */
     printf("empty area  = %.2f\n", area(b));
-    /* line 62 */
+    /* line 60 */
     printf("rect area   = %.2f\n", area(c));
-    /* line 64 */
+    /* line 62 */
     Result r1 = safe_div(10, 2);
-    /* line 65 */
+    /* line 63 */
     Result r2 = safe_div(10, 0);
-    /* line 66 */
+    /* line 64 */
     printf("10/2 = %d\n", unwrap_or(r1, -(999)));
-    /* line 67 */
+    /* line 65 */
     printf("10/0 = %d (fallback)\n", unwrap_or(r2, -(999)));
-    /* line 68 */
+    /* line 66 */
     return 0;
 }

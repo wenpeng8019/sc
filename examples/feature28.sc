@@ -18,8 +18,6 @@
 #         Rect as box:      ... 用 box.w / box.h ...
 #   穷尽性：无 default `:` 分支时必须覆盖全部变体，否则编译报错。
 
-inc stdio.h
-
 #-------------- 具名结构体载荷 --------------
 def Rect: { w: f4, h: f4 }
 

@@ -16,30 +16,30 @@ typedef struct com__project {
 
 
 int32_t main(void) {
-    /* line 10 */
+    /* line 9 */
     pair p = {0};
-    /* line 11 */
+    /* line 10 */
     p.a = 3;
-    /* line 12 */
+    /* line 11 */
     p.b = 4;
-    /* line 15 */
+    /* line 14 */
     printf("sz_expr=%lld sz_type=%lld\n", ((int64_t)(sizeof(p))), ((int64_t)(sizeof(pair))));
-    /* line 18 */
+    /* line 17 */
     printf("off_a=%lld off_b=%lld\n", ((int64_t)(offsetof(pair, a))), ((int64_t)(offsetof(pair, b))));
-    /* line 21 */
+    /* line 20 */
     int32_t m = (p.a > p.b) ? p.a : p.b;
-    /* line 22 */
+    /* line 21 */
     printf("max=%d\n", m);
-    /* line 25 */
+    /* line 24 */
     int32_t arr[3];
-    /* line 26 */
+    /* line 25 */
     arr[0] = p.a;
-    /* line 27 */
+    /* line 26 */
     arr[1] = p.b;
-    /* line 28 */
+    /* line 27 */
     arr[2] = m;
-    /* line 29 */
+    /* line 28 */
     printf("sum=%d\n", (arr[0] + arr[1]) + arr[2]);
-    /* line 30 */
+    /* line 29 */
     return 0;
 }

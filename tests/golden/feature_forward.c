@@ -22,36 +22,36 @@ typedef struct com__project {
 
 
 uint8_t is_even(int32_t n) {
-    /* line 15 */
+    /* line 14 */
     if (n == 0) {
-        /* line 16 */
+        /* line 15 */
         return true;
     }
-    /* line 17 */
+    /* line 16 */
     return is_odd(n - 1);
 }
 
 uint8_t is_odd(int32_t n) {
-    /* line 20 */
+    /* line 19 */
     if (n == 0) {
-        /* line 21 */
+        /* line 20 */
         return false;
     }
-    /* line 22 */
+    /* line 21 */
     return is_even(n - 1);
 }
 
 int32_t main(void) {
-    /* line 25 */
+    /* line 24 */
     node_a x = {0};
-    /* line 26 */
+    /* line 25 */
     node_b y = {0};
-    /* line 27 */
+    /* line 26 */
     x.pb = &(y);
-    /* line 28 */
+    /* line 27 */
     y.pa = &(x);
-    /* line 29 */
+    /* line 28 */
     printf("even(10)=%d odd(7)=%d\n", is_even(10), is_odd(7));
-    /* line 30 */
+    /* line 29 */
     return 0;
 }

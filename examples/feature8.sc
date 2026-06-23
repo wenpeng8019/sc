@@ -1,6 +1,5 @@
 # 特性 8：io 子模块 —— print / stringify(...) 关键字
 
-inc stdio.h
 inc adt.sc
 inc io.sc
 

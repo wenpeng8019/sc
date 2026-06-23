@@ -2,8 +2,6 @@
 
 @@
 
-inc stdio.h
-
 inc feature30_mod.sc
 
 @def metric: {

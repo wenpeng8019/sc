@@ -1,5 +1,4 @@
 # 专项回归：表达式节点（sizeof / offsetof / 三目 / 成员/下标）
-inc stdio.h
 
 def pair: {
     a: i4

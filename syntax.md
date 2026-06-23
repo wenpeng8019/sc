@@ -80,7 +80,6 @@ var a:i1
 ### 顶层示例
 
 ```sc
-inc stdio.h
 inc io.sc
 inc adt.sc
 
@@ -340,6 +339,10 @@ inc "my.h"
 - `inc stdio.h` -> `#include <stdio.h>`
 - `inc "my.h"` -> `#include "my.h"`
 
+> 编译器默认带入 `platform.h`（随 `op.sc` 一并），其中已 `#include` 了
+> `<stdio.h>`/`<stdlib.h>`/`<string.h>` 等常用标准头，故 `printf`/`malloc`/`memcpy`
+> 这类符号无需显式 `inc` 即可使用——本文档与 examples 因此不再写 `inc stdio.h`。
+
 ### 导入 sc 模块
 
 ```sc
@@ -406,7 +409,6 @@ inc io.sc
 ```sc
 # app.sc（根 / 集成单元）
 @@                                  # 根模块标记：开启「导出注入」
-inc stdio.h
 inc sensor.sc                       # 普通 inc 一个消费单元
 @def metric: { tag: char&, value: i4 }     # 全局通用类型
 @fnc app_report: m: metric           # 全局通用操作
@@ -416,7 +418,6 @@ fnc main: i4
     return 0
 
 # sensor.sc（消费单元，不 inc app.sc）
-inc stdio.h
 @fnc sensor_sample: label: char&, v: i4
     var m: metric                   # 直接用根导出的类型（经注入可见）
     m.tag = label
@@ -475,7 +476,6 @@ int32_t square(int32_t x) { return x * x; }
 
 ```sc
 # main.sc —— 仅 inc 即可，实现随模块自动链接
-inc stdio.h
 inc mymath.sc
 
 fnc main: i4
@@ -541,7 +541,6 @@ sc 通过 `inc` 导入后直接使用适配后的结果：
 ```
 
 ```sc
-inc stdio.h
 inc limits.h
 inc "platform.h"
 
@@ -571,8 +570,6 @@ fnc main: i4
 头已 `inc` 进来，或属 libc 常用符号白名单）：
 
 ```sc
-inc stdio.h
-
 fnc main: i4
     printf("hello\n")            # 调用 C 变参函数
     var n: i4 = abs(-7)          # 调用 C 函数，结果赋给 sc 变量
@@ -2147,8 +2144,6 @@ com >> v        # 接收：read (&com, &v, &sizeof(v))
   （见 `io` 枚举：`<0` 错误 / `0` 成功 / `again` / `eof`）由调用方按需检查。
 
 ```sc
-inc stdio.h
-
 fnc main: i4
     var c: com
     c.read  = dev_read              # 绑定每对象 io 实现（用户提供）
@@ -2182,7 +2177,6 @@ fnc main: i4
   参数自动提升到帧结构体。
 
 ```sc
-inc stdio.h
 inc async.sc                        # 异步形态需事件循环运行时
 
 # rpc 内：com >> / << 自动套用 await 状态机
@@ -2631,8 +2625,6 @@ flowchart TD
 <文件>.sc` 把**目标文件**的全部 `tst` 用例编译成一个测试 runner 并运行：
 
 ```sc
-inc stdio.h
-
 fnc add: i4, a: i4, b: i4
     return a + b
 

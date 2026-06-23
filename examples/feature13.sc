@@ -119,7 +119,6 @@
 #       _p->_state = 1; return;
 # ════════════════════════════════════════════════════════════════════════════
 
-inc stdio.h
 inc m.sc                      # 多线程（特性 9 的 run）——自定义叶子原语 bg_square 用
 inc async.sc                 # 异步功能库（delay）+ 触发链接 libuv 运行时（future/async_* 实现）
 

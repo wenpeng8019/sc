@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 @fnc pick: i4, n: i4
     final
         printf("  [pick] final 执行\n")

@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 fnc demo_scalar
     var x: i4 = 0
     x.set(42)

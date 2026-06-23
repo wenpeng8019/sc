@@ -1,7 +1,5 @@
 # 特性 6：链表结构体（def T: ~）与 prev/next 上下文关键字
 
-inc stdio.h
-inc stdlib.h
 # chain 为 op.sc 默认导入机制，无需 inc 即可使用
 
 #-------------- def T: ~ —— 链表标记 --------------------------

@@ -7,8 +7,6 @@
 #   - com.read：设备读
 # 本例用 HTTP 行结束符 "\r\n" 做动态截止：c >> s 自动跑框架读循环。
 
-inc stdio.h
-
 #-------------- 模拟字节流设备：dev 指向带读游标的源 + limit 存储 + 缓冲 --------
 def src: {
     text: char&

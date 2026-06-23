@@ -19,12 +19,12 @@ static int32_t g_lo = 0;
 static int32_t g_hi = 1;
 
 int32_t main(void) {
-    /* line 24 */
+    /* line 23 */
     int32_t count = TAG;
-    /* line 25 */
+    /* line 24 */
     show(count)
-    /* line 26 */
+    /* line 25 */
     sumprint("sum=%d\n", count)
-    /* line 27 */
+    /* line 26 */
     return count;
 }

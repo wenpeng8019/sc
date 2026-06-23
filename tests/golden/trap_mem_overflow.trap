@@ -1,1 +1,1 @@
-sc: 越界：栈数组 buf@trap_mem_overflow.sc:7 尾哨兵被破坏（缓冲区上溢）
+sc: 越界：栈数组 buf@trap_mem_overflow.sc:6 尾哨兵被破坏（缓冲区上溢）

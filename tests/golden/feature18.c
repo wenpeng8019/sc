@@ -28,120 +28,120 @@ typedef struct com__project {
 
 
 static int32_t dev_read(com *_this, void *data, uint32_t *size) {
-    /* line 26 */
+    /* line 24 */
     ctx *c = ((ctx*)(_this->dev));
-    /* line 27 */
+    /* line 25 */
     src *s = &(c->in);
-    /* line 28 */
+    /* line 26 */
     char *out = ((char*)(data));
-    /* line 29 */
+    /* line 27 */
     uint32_t n = 0;
-    /* line 30 */
+    /* line 28 */
     while ((n < *(size)) && (s->text[s->pos] != 0)) {
-        /* line 31 */
+        /* line 29 */
         out[n] = s->text[s->pos];
-        /* line 32 */
+        /* line 30 */
         n = (n + 1);
-        /* line 33 */
+        /* line 31 */
         s->pos = (s->pos + 1);
     }
-    /* line 34 */
+    /* line 32 */
     *(size) = n;
-    /* line 35 */
+    /* line 33 */
     return ((int32_t)(n));
 }
 
 static void * lm_data(limit *_this) {
-    /* line 39 */
+    /* line 37 */
     ctx *c = ((ctx*)(_this->_self->dev));
-    /* line 40 */
+    /* line 38 */
     return &(c->buf[0]);
 }
 
 static int32_t http_ending(limit *_this) {
-    /* line 45 */
+    /* line 43 */
     char *p = ((char*)(_this->data(_this)));
-    /* line 46 */
+    /* line 44 */
     uint32_t i = 0;
-    /* line 47 */
+    /* line 45 */
     while ((i + 1) < _this->len) {
-        /* line 48 */
+        /* line 46 */
         if ((p[i] == '\r') && (p[i + 1] == '\n')) {
-            /* line 49 */
+            /* line 47 */
             return ((int32_t)(i));
         }
-        /* line 50 */
+        /* line 48 */
         i = (i + 1);
     }
-    /* line 51 */
+    /* line 49 */
     return -(1);
 }
 
 static limit * com_alloc(com *_this, uint32_t size, void *ending) {
-    /* line 55 */
+    /* line 53 */
     ctx *c = ((ctx*)(_this->dev));
-    /* line 56 */
+    /* line 54 */
     limit *s = &(c->box);
-    /* line 57 */
+    /* line 55 */
     s->size = size;
-    /* line 58 */
+    /* line 56 */
     s->len = 0;
-    /* line 59 */
+    /* line 57 */
     s->data = lm_data;
-    /* line 60 */
+    /* line 58 */
     s->ending = ending;
-    /* line 61 */
+    /* line 59 */
     return s;
 }
 
 static void com_free(com *_this, limit *s) {
-    /* line 65 */
+    /* line 63 */
     return;
 }
 
 int32_t main(void) {
-    /* line 68 */
+    /* line 66 */
     ctx cctx = {0};
-    /* line 69 */
+    /* line 67 */
     cctx.in.text = "GET /index\r\nrest...";
-    /* line 70 */
+    /* line 68 */
     cctx.in.pos = 0;
-    /* line 72 */
+    /* line 70 */
     com c = {0};
-    /* line 73 */
+    /* line 71 */
     c.read = dev_read;
-    /* line 74 */
+    /* line 72 */
     c.alloc = com_alloc;
-    /* line 75 */
+    /* line 73 */
     c.free = com_free;
-    /* line 76 */
+    /* line 74 */
     c.dev = &(cctx);
-    /* line 78 */
+    /* line 76 */
     struct com__project s = {256, http_ending, NULL};
-    /* line 79 */
+    /* line 77 */
     s._ = c.alloc(&c, s.size, s.ending);
     s._->_self = &c;
-    /* line 80 */
+    /* line 78 */
     {
         limit_read(&(c), s._);
     }
-    /* line 82 */
+    /* line 80 */
     printf("收到一行（%u 字节）: ", s._->len);
-    /* line 83 */
+    /* line 81 */
     char *p = ((char*)(s._->data(s._)));
-    /* line 84 */
+    /* line 82 */
     int32_t k = 0;
-    /* line 85 */
+    /* line 83 */
     while (((uint32_t)(k)) < s._->len) {
-        /* line 86 */
+        /* line 84 */
         printf("%c", p[k]);
-        /* line 87 */
+        /* line 85 */
         k = (k + 1);
     }
-    /* line 88 */
+    /* line 86 */
     printf("\n");
-    /* line 90 */
+    /* line 88 */
     if (s._) { s._->_self->free(s._->_self, s._); s._ = NULL; }
-    /* line 91 */
+    /* line 89 */
     return 0;
 }

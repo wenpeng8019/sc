@@ -20,8 +20,6 @@
 #     ! func() ?           （无体）失败即 return $ 上报
 #   $ 在生成的 C 中映射为合法标识符 _sc_ret（$ 非 C99 标准标识符）。
 
-inc stdio.h
-
 #-------------- 字面量后缀 --------------
 fnc show_suffix
     var a: = 5b          # i1

@@ -10,7 +10,6 @@
 # 含 << / >> 的 rpc 因此被编译为状态机：跨收发存活的局部/参数提升到帧，rpc 参数槽
 # 堆分配挂在帧 _crpcN（跨 await 存活）。用内存回环 com 验证 round-trip。
 
-inc stdio.h
 inc async.sc                            # 事件循环运行时（async_init/loop/final + future）
 
 #-------------- 内存回环 com 设备：write 追加到缓冲，read 从缓冲消费 -------------

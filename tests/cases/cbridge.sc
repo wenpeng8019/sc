@@ -2,8 +2,6 @@
 #   let/var X:: T 认领 C 侧已定义的全局符号（emit extern T X）
 #   C 函数/宏直接用名调用（libc 白名单或未解析头 → 放宽未定义检查）
 
-inc stdio.h
-
 # 认领 C 全局符号（不分配存储、无初值）
 let MAX_VIEW:: i4
 var g_tick:: i8

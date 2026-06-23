@@ -16,31 +16,31 @@ typedef struct com__project {
 
 
 void copy(int32_t *restrict dst, const int32_t *restrict src) {
-    /* line 12 */
+    /* line 11 */
     *(dst) = *(src);
 }
 
 int32_t main(void) {
-    /* line 15 */
+    /* line 14 */
     volatile int32_t a = 5;
-    /* line 16 */
+    /* line 15 */
     volatile uint32_t *reg = NULL;
-    /* line 17 */
+    /* line 16 */
     const volatile uint32_t *x = NULL;
-    /* line 18 */
+    /* line 17 */
     const node *p = NULL;
-    /* line 19 */
+    /* line 18 */
     node *const q = NULL;
-    /* line 20 */
+    /* line 19 */
     const node *const r = NULL;
-    /* line 21 */
+    /* line 20 */
     const int32_t n = 7;
-    /* line 22 */
+    /* line 21 */
     int32_t src = 11;
-    /* line 23 */
+    /* line 22 */
     int32_t dst = 0;
-    /* line 24 */
+    /* line 23 */
     copy(&(dst), &(src));
-    /* line 25 */
+    /* line 24 */
     return dst + n;
 }

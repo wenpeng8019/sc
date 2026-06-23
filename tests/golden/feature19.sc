@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 def membuf: {
     data[256]: char
     wpos: u4

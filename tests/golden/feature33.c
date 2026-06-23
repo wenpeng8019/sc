@@ -42,43 +42,43 @@ static int32_t max_i(int32_t a, int32_t b);
 static double max_d(double a, double b);
 
 int32_t main(void) {
-    /* line 47 */
+    /* line 45 */
     Vec_int vi = {0};
-    /* line 48 */
+    /* line 46 */
     vi.len = 0;
-    /* line 49 */
+    /* line 47 */
     Vec_int_push(&(vi), 10);
-    /* line 50 */
+    /* line 48 */
     Vec_int_push(&(vi), 20);
-    /* line 51 */
+    /* line 49 */
     Vec_int_push(&(vi), 30);
-    /* line 52 */
+    /* line 50 */
     printf("Vec_int: %d %d %d\n", Vec_int_get(&(vi), 0), Vec_int_get(&(vi), 1), Vec_int_get(&(vi), 2));
-    /* line 54 */
+    /* line 52 */
     Vec_dbl vd = {0};
-    /* line 55 */
+    /* line 53 */
     vd.len = 0;
-    /* line 56 */
+    /* line 54 */
     Vec_dbl_push(&(vd), 1.5);
-    /* line 57 */
+    /* line 55 */
     Vec_dbl_push(&(vd), 2.5);
-    /* line 58 */
+    /* line 56 */
     printf("Vec_dbl: %g %g\n", Vec_dbl_get(&(vd), 0), Vec_dbl_get(&(vd), 1));
-    /* line 60 */
+    /* line 58 */
     Vec_pt vp = {0};
-    /* line 61 */
+    /* line 59 */
     vp.len = 0;
-    /* line 62 */
+    /* line 60 */
     Point p0 = {3, 4};
-    /* line 63 */
+    /* line 61 */
     Vec_pt_push(&(vp), p0);
-    /* line 64 */
+    /* line 62 */
     Point got = Vec_pt_get(&(vp), 0);
-    /* line 65 */
+    /* line 63 */
     printf("Vec_pt[0]: (%d, %d)\n", got.x, got.y);
-    /* line 67 */
+    /* line 65 */
     printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5));
-    /* line 68 */
+    /* line 66 */
     return 0;
 }
 

@@ -197,107 +197,107 @@ static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t 
 int32_t main(void) {
     sc_mod_adt_init();
     sc_mod_io_init();
-    /* line 37 */
+    /* line 36 */
     int32_t nn = 42;
-    /* line 38 */
+    /* line 37 */
     char *nm = "hello";
-    /* line 39 */
+    /* line 38 */
     print((uint8_t)(0), "print 基础输出 n=%d s=%s", (int)(nn), nm);
-    /* line 40 */
+    /* line 39 */
     print((uint8_t)(0), "E: 错误级别示例 code=%d", -(1));
-    /* line 41 */
+    /* line 40 */
     print((uint8_t)(0), "W: 警告级别示例");
-    /* line 42 */
+    /* line 41 */
     print((uint8_t)(0), "V: 详细级别（默认 SC_LOG=D 下本行不输出）");
-    /* line 43 */
+    /* line 42 */
     print((uint8_t)(7), "通道 7：自定义日志通道");
-    /* line 44 */
+    /* line 43 */
     double pi = 3.14159;
-    /* line 45 */
+    /* line 44 */
     print((uint8_t)(0), "默认浮点=%f 定点=%.2f", (double)(pi), pi);
-    /* line 51 */
+    /* line 50 */
     string s = {0};
     string_init(&s);
-    /* line 53 */
+    /* line 52 */
     point p = {0};
-    /* line 54 */
+    /* line 53 */
     p.x = 3;
-    /* line 55 */
+    /* line 54 */
     p.y = 4;
-    /* line 56 */
+    /* line 55 */
     s = stringify_point(p, (stringify_t){ .compact = 1 });
-    /* line 57 */
+    /* line 56 */
     print((uint8_t)(0), "point 值: %s", string_cstr(&s));
-    /* line 58 */
+    /* line 57 */
     string_drop(&s);
-    /* line 60 */
+    /* line 59 */
     node n = {0};
-    /* line 61 */
+    /* line 60 */
     n.id = 1;
-    /* line 62 */
+    /* line 61 */
     n.name[0] = 'A';
-    /* line 63 */
+    /* line 62 */
     n.name[1] = 'B';
-    /* line 64 */
+    /* line 63 */
     n.pos = p;
-    /* line 65 */
+    /* line 64 */
     n.link = &(p);
-    /* line 66 */
+    /* line 65 */
     n.ref = &(n.id);
-    /* line 67 */
+    /* line 66 */
     n.score = 9.5;
-    /* line 68 */
+    /* line 67 */
     n.ok = true;
-    /* line 69 */
+    /* line 68 */
     n.tag = "hot";
-    /* line 70 */
+    /* line 69 */
     s = stringify_node(n, (stringify_t){ .compact = 1 });
-    /* line 71 */
+    /* line 70 */
     print((uint8_t)(0), "node 值: %s", string_cstr(&s));
-    /* line 72 */
+    /* line 71 */
     string_drop(&s);
-    /* line 75 */
+    /* line 74 */
     s = stringify_node(n, (stringify_t){ .compact = 0 });
-    /* line 76 */
+    /* line 75 */
     print((uint8_t)(0), "node 美化:\n%s", string_cstr(&s));
-    /* line 77 */
+    /* line 76 */
     string_drop(&s);
-    /* line 79 */
+    /* line 78 */
     node *pn = &(n);
-    /* line 80 */
+    /* line 79 */
     s = stringify_node_p(pn, (stringify_t){ .compact = 1 });
-    /* line 81 */
+    /* line 80 */
     print((uint8_t)(0), "node 指针: %s", string_cstr(&s));
-    /* line 82 */
+    /* line 81 */
     string_drop(&s);
-    /* line 85 */
+    /* line 84 */
     int32_t arr[4];
-    /* line 86 */
+    /* line 85 */
     int32_t i;
-    /* line 87 */
+    /* line 86 */
     for (i = 0; i < 4; i++) {
-        /* line 88 */
+        /* line 87 */
         arr[i] = ((i + 1) * 10);
     }
-    /* line 89 */
+    /* line 88 */
     s = stringify_i4_a4(arr, (stringify_t){ .compact = 1 });
-    /* line 90 */
+    /* line 89 */
     print((uint8_t)(0), "一维数组: %s", string_cstr(&s));
-    /* line 91 */
+    /* line 90 */
     string_drop(&s);
-    /* line 93 */
+    /* line 92 */
     color c = Green;
-    /* line 94 */
+    /* line 93 */
     s = stringify_color(c, (stringify_t){ .compact = 1 });
-    /* line 95 */
+    /* line 94 */
     print((uint8_t)(0), "枚举: %s", string_cstr(&s));
-    /* line 96 */
+    /* line 95 */
     string_drop(&s);
-    /* line 99 */
+    /* line 98 */
     char buf[64];
-    /* line 100 */
+    /* line 99 */
     print((uint8_t)(0), "缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (stringify_t){ .compact = 1 }));
-    /* line 102 */
+    /* line 101 */
     {
         int32_t _ret = 0;
         sc_mod_io_drop();

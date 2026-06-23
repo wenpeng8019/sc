@@ -1,7 +1,6 @@
 # 类型限定符回归：const / volatile / restrict 与 let/var 的正交组合。
 # 规则：类型侧 const/volatile 限定「指向对象/对象本身」；let/var 决定「指针本身」是否 const；
 #       restrict 尾置（& 之后），约束指针无别名。仅做 emit-c / emit-sc 双快照。
-inc stdint.h
 
 @def node: {
     v: i4

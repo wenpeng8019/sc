@@ -31,58 +31,58 @@ typedef struct com__project {
 
 
 static int32_t view_capacity(view *_this) {
-    /* line 28 */
+    /* line 25 */
     return sizeof((_this->_self)->data);
 }
 
 static view * buffer_alloc(buffer *_this, int32_t off, int32_t len) {
-    /* line 37 */
+    /* line 34 */
     view *v = ((view*)(malloc(sizeof(view))));
-    /* line 38 */
+    /* line 35 */
     v->p = &(_this->data[off]);
-    /* line 39 */
+    /* line 36 */
     v->n = len;
-    /* line 40 */
+    /* line 37 */
     return v;
 }
 
 static void buffer_free(buffer *_this, view *v) {
-    /* line 44 */
+    /* line 41 */
     free(v);
 }
 
 int32_t main(void) {
-    /* line 49 */
+    /* line 46 */
     buffer b = {0};
-    /* line 50 */
+    /* line 47 */
     int32_t i;
-    /* line 51 */
+    /* line 48 */
     for (i = 0; i < 26; i++) {
-        /* line 52 */
+        /* line 49 */
         b.data[i] = ('a' + i);
     }
-    /* line 55 */
+    /* line 52 */
     struct buffer__project s = {2, 5, NULL};
-    /* line 58 */
+    /* line 55 */
     s._ = buffer_alloc(&b, s.off, s.len);
     s._->_self = &b;
-    /* line 60 */
+    /* line 57 */
     printf("切片:");
-    /* line 61 */
+    /* line 58 */
     int32_t j;
-    /* line 62 */
+    /* line 59 */
     for (j = 0; j < s._->n; j++) {
-        /* line 63 */
+        /* line 60 */
         printf(" %c", s._->p[j]);
     }
-    /* line 64 */
+    /* line 61 */
     printf("\n");
-    /* line 67 */
+    /* line 64 */
     printf("本体容量: %d\n", view_capacity(s._));
-    /* line 70 */
+    /* line 67 */
     if (s._) { buffer_free(s._->_self, s._); s._ = NULL; }
-    /* line 71 */
+    /* line 68 */
     printf("已解绑: %d\n", s._ == NULL);
-    /* line 73 */
+    /* line 70 */
     return 0;
 }

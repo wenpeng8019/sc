@@ -1,6 +1,5 @@
 # final 域退出钩子回归用例：覆盖正常落出 / 早退 return / 循环 break/continue /
 # 与 T@ 胖指针交互（final 先于自动拆边）。仅做产物快照（--emit-c / --emit-sc）。
-inc stdio.h
 
 @def node: {
     v: i4

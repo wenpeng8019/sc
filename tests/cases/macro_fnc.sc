@@ -1,5 +1,4 @@
 # 宏声明函数：宏体内 fnc + tls，顶层 mix 展开后符号自动登记（无需手写认领）
-inc stdio.h
 
 # 计数器工厂宏：每次展开生成一个独立计数器（tls 状态 + 自增函数）
 def make_counter: nm

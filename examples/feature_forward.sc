@@ -1,5 +1,4 @@
 # 专项验证：定义顺序无关（结构前置声明 + 函数原型，含互递归）
-inc stdio.h
 
 # 先引用后定义：node_a 里用到 node_b，node_b 在后面定义
 @def node_a: {

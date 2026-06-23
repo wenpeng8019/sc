@@ -20,7 +20,6 @@
 # 示例（sc）：
 #
 #   inc env.sc
-#   inc stdio.h
 #
 #   mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")
 #   mix ARGS_S(true,  input,   'i', "input",   "Input file path")

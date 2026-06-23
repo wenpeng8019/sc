@@ -90,132 +90,132 @@ static future *session__async(com *c);
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
 static int32_t mb_write(com *_this, void *buf, uint32_t *size) {
-    /* line 26 */
+    /* line 25 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 27 */
+    /* line 26 */
     char *src = ((char*)(buf));
-    /* line 28 */
+    /* line 27 */
     uint32_t n = 0;
-    /* line 29 */
+    /* line 28 */
     while (n < *(size)) {
-        /* line 30 */
+        /* line 29 */
         m->data[m->wpos] = src[n];
-        /* line 31 */
+        /* line 30 */
         m->wpos = (m->wpos + 1);
-        /* line 32 */
+        /* line 31 */
         n = (n + 1);
     }
-    /* line 33 */
+    /* line 32 */
     return ((int32_t)(n));
 }
 
 static int32_t mb_read(com *_this, void *buf, uint32_t *size) {
-    /* line 36 */
+    /* line 35 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 37 */
+    /* line 36 */
     char *dst = ((char*)(buf));
-    /* line 38 */
+    /* line 37 */
     uint32_t n = 0;
-    /* line 39 */
+    /* line 38 */
     while (n < *(size)) {
-        /* line 40 */
+        /* line 39 */
         dst[n] = m->data[m->rpos];
-        /* line 41 */
+        /* line 40 */
         m->rpos = (m->rpos + 1);
-        /* line 42 */
+        /* line 41 */
         n = (n + 1);
     }
-    /* line 43 */
+    /* line 42 */
     *(size) = n;
-    /* line 44 */
+    /* line 43 */
     return ((int32_t)(n));
 }
 
 static int32_t mb_readable(com *_this, void **id) {
-    /* line 48 */
+    /* line 47 */
     *(id) = NULL;
-    /* line 49 */
+    /* line 48 */
     return 1;
 }
 
 static void * mb_data(limit *_this) {
-    /* line 53 */
+    /* line 52 */
     membuf *m = ((membuf*)(_this->_self->dev));
-    /* line 54 */
+    /* line 53 */
     return &(m->rbuf[0]);
 }
 
 static limit * mb_alloc(com *_this, uint32_t size, void *ending) {
-    /* line 57 */
+    /* line 56 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 58 */
+    /* line 57 */
     limit *s = &(m->box);
-    /* line 59 */
+    /* line 58 */
     s->size = size;
-    /* line 60 */
+    /* line 59 */
     s->len = 0;
-    /* line 61 */
+    /* line 60 */
     s->data = mb_data;
-    /* line 62 */
+    /* line 61 */
     s->ending = ending;
-    /* line 63 */
+    /* line 62 */
     return s;
 }
 
 static void mb_free(com *_this, limit *s) {
-    /* line 66 */
+    /* line 65 */
     return;
 }
 
 static void fill_raw(char *dst) {
-    /* line 70 */
+    /* line 69 */
     int32_t i = 0;
-    /* line 71 */
+    /* line 70 */
     while (i < 16) {
-        /* line 72 */
+        /* line 71 */
         dst[i] = '.';
-        /* line 73 */
+        /* line 72 */
         i = (i + 1);
     }
-    /* line 74 */
+    /* line 73 */
     dst[0] = 'O';
-    /* line 75 */
+    /* line 74 */
     dst[1] = 'K';
-    /* line 76 */
+    /* line 75 */
     return;
 }
 
 static void greet_rpc(struct greet *_p) {
-    /* line 80 */
+    /* line 79 */
     printf("  标量 rpc: a=%d b=%d\n", _p->a, _p->b);
-    /* line 81 */
+    /* line 80 */
     _p->_ = 0; return;
 }
 
 static void greet_buf_rpc(struct greet_buf *_p) {
-    /* line 85 */
+    /* line 84 */
     printf("  数组 rpc: tag=%d buf=%s\n", _p->tag, &(_p->buf[0]));
-    /* line 86 */
+    /* line 85 */
     _p->_ = 0; return;
 }
 
 static void greet_body_rpc(struct greet_body *_p) {
-    /* line 90 */
+    /* line 89 */
     char *p = ((char*)(_p->body._->data(_p->body._)));
-    /* line 91 */
+    /* line 90 */
     printf("  句柄 rpc: n=%d body(%u)=", _p->n, _p->body._->len);
-    /* line 92 */
+    /* line 91 */
     int32_t k = 0;
-    /* line 93 */
+    /* line 92 */
     while (((uint32_t)(k)) < _p->body._->len) {
-        /* line 94 */
+        /* line 93 */
         printf("%c", p[k]);
-        /* line 95 */
+        /* line 94 */
         k = (k + 1);
     }
-    /* line 96 */
+    /* line 95 */
     printf("\n");
-    /* line 97 */
+    /* line 96 */
     _p->_ = 0; return;
 }
 
@@ -329,37 +329,37 @@ static void session_rpc(struct session *_p) {
 
 int32_t main(void) {
     sc_mod_async_init();
-    /* line 124 */
+    /* line 123 */
     async_init();
-    /* line 126 */
+    /* line 125 */
     membuf mb = {0};
-    /* line 127 */
+    /* line 126 */
     mb.wpos = 0;
-    /* line 128 */
+    /* line 127 */
     mb.rpos = 0;
-    /* line 130 */
+    /* line 129 */
     com c = {0};
-    /* line 131 */
+    /* line 130 */
     c.read = mb_read;
-    /* line 132 */
+    /* line 131 */
     c.write = mb_write;
-    /* line 133 */
+    /* line 132 */
     c.alloc = mb_alloc;
-    /* line 134 */
+    /* line 133 */
     c.free = mb_free;
-    /* line 135 */
+    /* line 134 */
     c.readable = mb_readable;
-    /* line 136 */
+    /* line 135 */
     c.dev = &(mb);
-    /* line 138 */
+    /* line 137 */
     future *f = session__async(&(c));
-    /* line 139 */
+    /* line 138 */
     async_loop(NULL);
-    /* line 141 */
+    /* line 140 */
     printf("done\n");
-    /* line 142 */
+    /* line 141 */
     async_final();
-    /* line 143 */
+    /* line 142 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

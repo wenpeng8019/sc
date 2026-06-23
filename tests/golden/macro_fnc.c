@@ -19,9 +19,9 @@ static TLS int32_t cnt_b = 0;
 static int32_t bump_b(void);
 
 int32_t main(void) {
-    /* line 17 */
+    /* line 16 */
     printf("%d %d %d\n", bump_a(), bump_a(), bump_b());
-    /* line 18 */
+    /* line 17 */
     return 0;
 }
 

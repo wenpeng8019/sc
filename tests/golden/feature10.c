@@ -30,88 +30,88 @@ static inline string *string__new(void) {
 }
 
 static void counter_init(counter *_this) {
-    /* line 18 */
+    /* line 17 */
     _this->n = 100;
 }
 
 static int32_t counter_add(counter *_this, int32_t k) {
-    /* line 20 */
+    /* line 19 */
     _this->n = (_this->n + k);
-    /* line 21 */
+    /* line 20 */
     return _this->n;
 }
 
 static int32_t str_cmp(void *a, void *b) {
-    /* line 25 */
+    /* line 24 */
     return strcmp(((char*)(a)), ((char*)(b)));
 }
 
 int32_t main(void) {
     sc_mod_adt_init();
-    /* line 29 */
+    /* line 28 */
     counter c = {0};
     counter_init(&c);
-    /* line 30 */
+    /* line 29 */
     printf("counter: init=%d add(5)=%d\n", c.n, counter_add(&c, 5));
-    /* line 33 */
+    /* line 32 */
     string s = {0};
     string_init(&s);
-    /* line 34 */
+    /* line 33 */
     string_append(&s, "Hello");
-    /* line 35 */
+    /* line 34 */
     string_append(&s, ", sc!");
-    /* line 36 */
+    /* line 35 */
     printf("s=%s len=%llu\n", string_cstr(&s), string_len(&s));
-    /* line 37 */
+    /* line 36 */
     printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(&s, "sc", 0), string_starts_with(&s, "Hello"));
-    /* line 39 */
+    /* line 38 */
     string part = {0};
     string_init(&part);
-    /* line 40 */
+    /* line 39 */
     string_slice(&s, -(3), -(1), &(part));
-    /* line 41 */
+    /* line 40 */
     printf("slice(-3,-1)=%s\n", string_cstr(&part));
-    /* line 42 */
+    /* line 41 */
     string_upper(&s);
-    /* line 43 */
+    /* line 42 */
     printf("upper=%s\n", string_cstr(&s));
-    /* line 46 */
+    /* line 45 */
     list l = {0};
     list_init(&l);
-    /* line 47 */
+    /* line 46 */
     list_push(&l, "banana");
-    /* line 48 */
+    /* line 47 */
     list_push(&l, "apple");
-    /* line 49 */
+    /* line 48 */
     list_push(&l, "cherry");
-    /* line 50 */
+    /* line 49 */
     list_sort(&l, str_cmp);
-    /* line 51 */
+    /* line 50 */
     uint64_t i = 0;
-    /* line 52 */
+    /* line 51 */
     for (i = 0; i < list_len(&l); i++) {
-        /* line 53 */
+        /* line 52 */
         printf("list[%llu]=%s\n", i, ((char*)(list_get(&l, i))));
     }
-    /* line 56 */
+    /* line 55 */
     list *lp = &(l);
-    /* line 57 */
+    /* line 56 */
     list_drop(lp);
-    /* line 58 */
+    /* line 57 */
     string_drop(&part);
-    /* line 59 */
+    /* line 58 */
     string_drop(&s);
-    /* line 62 */
+    /* line 61 */
     string *hs = string__new();
-    /* line 63 */
+    /* line 62 */
     string_append(hs, "on the heap");
-    /* line 64 */
+    /* line 63 */
     printf("heap: %s\n", string_cstr(hs));
-    /* line 65 */
+    /* line 64 */
     string_drop(hs);
-    /* line 66 */
+    /* line 65 */
     free(hs);
-    /* line 67 */
+    /* line 66 */
     {
         int32_t _ret = 0;
         sc_mod_adt_drop();

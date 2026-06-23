@@ -20,25 +20,25 @@ typedef struct com__project {
 
 
 void audit_init(audit *_this) {
-    /* line 13 */
+    /* line 11 */
     _this->seq = 0;
-    /* line 14 */
+    /* line 12 */
     printf("[lib.init] audit ready\n");
 }
 
 void audit_note(audit *_this) {
-    /* line 16 */
+    /* line 14 */
     _this->seq++;
-    /* line 17 */
+    /* line 15 */
     printf("[lib.note] #%d\n", _this->seq);
 }
 
 void audit_drop(audit *_this) {
-    /* line 19 */
+    /* line 17 */
     printf("[lib.drop] total=%d\n", _this->seq);
 }
 
 void lib_audit(void) {
-    /* line 29 */
+    /* line 27 */
     audit_note(&g_audit);
 }

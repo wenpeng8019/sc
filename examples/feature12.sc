@@ -15,9 +15,6 @@
 #       s = nil    →  if (s._) { T_free(s._->_self, s._); s._ = nil; }
 #   - self：分身 S 的成员函数内上下文关键字，等价 _this->_self，指向本体实体 T。
 
-inc stdio.h
-inc stdlib.h
-
 #-------------- S：分身/切片类型（实体的一个"视图"）------------
 def view: {
     p: char&

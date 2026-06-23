@@ -12,9 +12,9 @@
 #define SC_PLATFORM_H
 
 #include <stdint.h>
-#include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stddef.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

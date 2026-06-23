@@ -6,7 +6,6 @@
 #   - 接收者无同名方法时，. 操作透传为 platform.h 的同名 sc_<op> 宏
 #   - 接收者一律以指针传入：值接收者 v.op() 自动取址 &v；指针接收者 p->op() 原样
 #   - 指令类型无关，忽略入参/返回值类型；当前提供原子读写 get/set/get_acq/set_rel
-inc stdio.h
 
 # 任意类型操作数：值接收者 . → 透传 sc_<op>(&v, ...)
 fnc demo_scalar

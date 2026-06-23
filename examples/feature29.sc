@@ -23,7 +23,6 @@
 #     drop 解除、shm_remove 删除命名。flags：0 默认读写，1 只读(SHM_RDONLY)，
 #     2 独占创建(SHM_EXCL)。（POSIX shm_open+mmap / Windows CreateFileMapping）
 
-inc stdio.h
 inc mem.sc
 
 fnc main: i4

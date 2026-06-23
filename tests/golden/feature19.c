@@ -68,130 +68,130 @@ static inline int32_t handle_body(int32_t n, struct com__project body) {
 
 
 static int32_t mb_write(com *_this, void *buf, uint32_t *size) {
-    /* line 21 */
+    /* line 19 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 22 */
+    /* line 20 */
     char *src = ((char*)(buf));
-    /* line 23 */
+    /* line 21 */
     uint32_t n = 0;
-    /* line 24 */
+    /* line 22 */
     while (n < *(size)) {
-        /* line 25 */
+        /* line 23 */
         m->data[m->wpos] = src[n];
-        /* line 26 */
+        /* line 24 */
         m->wpos = (m->wpos + 1);
-        /* line 27 */
+        /* line 25 */
         n = (n + 1);
     }
-    /* line 28 */
+    /* line 26 */
     return ((int32_t)(n));
 }
 
 static int32_t mb_read(com *_this, void *buf, uint32_t *size) {
-    /* line 31 */
+    /* line 29 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 32 */
+    /* line 30 */
     char *dst = ((char*)(buf));
-    /* line 33 */
+    /* line 31 */
     uint32_t n = 0;
-    /* line 34 */
+    /* line 32 */
     while (n < *(size)) {
-        /* line 35 */
+        /* line 33 */
         dst[n] = m->data[m->rpos];
-        /* line 36 */
+        /* line 34 */
         m->rpos = (m->rpos + 1);
-        /* line 37 */
+        /* line 35 */
         n = (n + 1);
     }
-    /* line 38 */
+    /* line 36 */
     *(size) = n;
-    /* line 39 */
+    /* line 37 */
     return ((int32_t)(n));
 }
 
 static void * mb_data(limit *_this) {
-    /* line 43 */
+    /* line 41 */
     membuf *m = ((membuf*)(_this->_self->dev));
-    /* line 44 */
+    /* line 42 */
     return &(m->rbuf[0]);
 }
 
 static limit * mb_alloc(com *_this, uint32_t size, void *ending) {
-    /* line 47 */
+    /* line 45 */
     membuf *m = ((membuf*)(_this->dev));
-    /* line 48 */
+    /* line 46 */
     limit *s = &(m->box);
-    /* line 49 */
+    /* line 47 */
     s->size = size;
-    /* line 50 */
+    /* line 48 */
     s->len = 0;
-    /* line 51 */
+    /* line 49 */
     s->data = mb_data;
-    /* line 52 */
+    /* line 50 */
     s->ending = ending;
-    /* line 53 */
+    /* line 51 */
     return s;
 }
 
 static void mb_free(com *_this, limit *s) {
-    /* line 56 */
+    /* line 54 */
     return;
 }
 
 static void handle_rpc(struct handle *_p) {
-    /* line 60 */
+    /* line 58 */
     printf("标量 rpc: a=%d b=%d\n", _p->a, _p->b);
-    /* line 61 */
+    /* line 59 */
     _p->_ = 0; return;
 }
 
 static void handle_buf_rpc(struct handle_buf *_p) {
-    /* line 65 */
+    /* line 63 */
     printf("数组 rpc: tag=%d buf=%s\n", _p->tag, &(_p->buf[0]));
-    /* line 66 */
+    /* line 64 */
     _p->_ = 0; return;
 }
 
 static void handle_body_rpc(struct handle_body *_p) {
-    /* line 70 */
+    /* line 68 */
     char *p = ((char*)(_p->body._->data(_p->body._)));
-    /* line 71 */
+    /* line 69 */
     printf("句柄 rpc: n=%d body(%u)=", _p->n, _p->body._->len);
-    /* line 72 */
+    /* line 70 */
     int32_t k = 0;
-    /* line 73 */
+    /* line 71 */
     while (((uint32_t)(k)) < _p->body._->len) {
-        /* line 74 */
+        /* line 72 */
         printf("%c", p[k]);
-        /* line 75 */
+        /* line 73 */
         k = (k + 1);
     }
-    /* line 76 */
+    /* line 74 */
     printf("\n");
-    /* line 77 */
+    /* line 75 */
     _p->_ = 0; return;
 }
 
 int32_t main(void) {
-    /* line 80 */
+    /* line 78 */
     membuf mb = {0};
-    /* line 81 */
+    /* line 79 */
     mb.wpos = 0;
-    /* line 82 */
+    /* line 80 */
     mb.rpos = 0;
-    /* line 84 */
+    /* line 82 */
     com c = {0};
-    /* line 85 */
+    /* line 83 */
     c.read = mb_read;
-    /* line 86 */
+    /* line 84 */
     c.write = mb_write;
-    /* line 87 */
+    /* line 85 */
     c.alloc = mb_alloc;
-    /* line 88 */
+    /* line 86 */
     c.free = mb_free;
-    /* line 89 */
+    /* line 87 */
     c.dev = &(mb);
-    /* line 92 */
+    /* line 90 */
     {
         {
             struct handle _rp = {0};
@@ -202,7 +202,7 @@ int32_t main(void) {
             _scsz = sizeof(_rp.b); c.write(&(c), (void *)&(_rp.b), &_scsz);
         }
     }
-    /* line 93 */
+    /* line 91 */
     {
         {
             struct handle _rp = {0};
@@ -212,15 +212,15 @@ int32_t main(void) {
             handle_rpc(&_rp);
         }
     }
-    /* line 96 */
+    /* line 94 */
     char msg[8];
-    /* line 97 */
+    /* line 95 */
     msg[0] = 'h';
-    /* line 98 */
+    /* line 96 */
     msg[1] = 'i';
-    /* line 99 */
+    /* line 97 */
     msg[2] = 0;
-    /* line 100 */
+    /* line 98 */
     {
         {
             struct handle_buf _rp = {0};
@@ -232,7 +232,7 @@ int32_t main(void) {
             _scsz = (uint32_t)_rp.buf_size; c.write(&(c), (void *)(_rp.buf), &_scsz);
         }
     }
-    /* line 101 */
+    /* line 99 */
     {
         {
             struct handle_buf _rp = {0};
@@ -245,34 +245,34 @@ int32_t main(void) {
             handle_buf_rpc(&_rp);
         }
     }
-    /* line 105 */
+    /* line 103 */
     int32_t n5 = 5;
-    /* line 106 */
+    /* line 104 */
     char raw[16];
-    /* line 107 */
+    /* line 105 */
     int32_t i = 0;
-    /* line 108 */
+    /* line 106 */
     while (i < 16) {
-        /* line 109 */
+        /* line 107 */
         raw[i] = '.';
-        /* line 110 */
+        /* line 108 */
         i = (i + 1);
     }
-    /* line 111 */
+    /* line 109 */
     raw[0] = 'O';
-    /* line 112 */
+    /* line 110 */
     raw[1] = 'K';
-    /* line 113 */
+    /* line 111 */
     {
         uint32_t _scsz;
         _scsz = sizeof(n5); c.write(&(c), (void *)&(n5), &_scsz);
     }
-    /* line 114 */
+    /* line 112 */
     {
         uint32_t _scsz;
         _scsz = sizeof(raw); c.write(&(c), (void *)&(raw), &_scsz);
     }
-    /* line 115 */
+    /* line 113 */
     {
         {
             struct handle_body _rp = {0};
@@ -286,6 +286,6 @@ int32_t main(void) {
             handle_body_rpc(&_rp);
         }
     }
-    /* line 116 */
+    /* line 114 */
     return 0;
 }

@@ -12,7 +12,6 @@
 #   表达式 / 语句位置的「求值型」C 宏（展开为一个值 / 一次调用）不是定义对象，
 #   不属于本机制（头已 #include 后可直接写名调用）。
 
-inc stdio.h
 inc "feature34_cmac.h"          # 提供定义型 C 宏 DEFINE_COUNTER
 
 # 映射「定义型」C 宏：每次实例化拼装出 counter_<N> 全局 + inc/get 两个函数

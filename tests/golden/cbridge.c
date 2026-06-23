@@ -12,14 +12,14 @@ typedef struct com__project {
 
 
 static int32_t demo(void) {
-    /* line 13 */
+    /* line 11 */
     printf("v=%d\n", 1);
-    /* line 15 */
+    /* line 13 */
     int32_t a = abs(-(3));
-    /* line 17 */
+    /* line 15 */
     int32_t b = MAX_VIEW;
-    /* line 19 */
+    /* line 17 */
     g_tick = (g_tick + 1);
-    /* line 20 */
+    /* line 18 */
     return a + b;
 }

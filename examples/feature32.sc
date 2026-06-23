@@ -13,8 +13,6 @@
 #     需要时传 C 名（int32_t/double…）或先 def 一个别名
 #   - 宏体内 sc 不知道形参类型，故指针成员访问要显式写 `->`（值访问写 `.`）
 
-inc stdio.h
-
 # ---- 泛型函数：在任意可比较类型 T 上求较大者 ----
 def def_max: T, N
     fnc max_\N: T, a: T, b: T

@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 let MAX_VIEW:: i4
 
 var g_tick:: i8

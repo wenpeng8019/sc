@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 def def_max: T, N
     fnc max_\N: T, a: T, b: T
         if a > b

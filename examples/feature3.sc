@@ -6,7 +6,6 @@
 #   void name_rpc(struct name *_p)     实际函数（仅声明形态由 C 侧实现）
 #   static inline ret name(...)        调用包装（装填 → 执行 → 取返回槽）
 # 调用形式与普通函数完全一致；参数天然可打包、可转发（消息派发/RPC 场景）
-inc stdio.h
 
 # 定义形态：函数体内参数引用自动改写为 _p->x，return e 改写为 _p->_ = e
 rpc add: i4, a: i4, b: i4

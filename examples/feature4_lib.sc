@@ -5,8 +5,6 @@
 #   sc_mod_feature4_lib_drop —— 入口 main 尾声调用，析构 g_audit（打印 [lib.drop]）
 # 入口（feature4.sc）只需 inc 本模块，无需手动初始化/析构其全局状态。
 
-inc stdio.h
-
 @def audit: {
     seq: i4
     init: fnc                              # 构造：被 sc_mod_feature4_lib_init 注入

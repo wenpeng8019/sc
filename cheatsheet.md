@@ -5,7 +5,6 @@
 ## 1. 顶层对象
 
 ```sc
-inc stdio.h
 inc io.sc
 
 def Name: base_type

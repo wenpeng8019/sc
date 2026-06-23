@@ -15,38 +15,38 @@ typedef struct com__project {
 
 
 int32_t main(void) {
-    /* line 15 */
+    /* line 13 */
     int64_t big = 1000;
-    /* line 16 */
+    /* line 14 */
     int32_t n = ((int32_t)(big));
-    /* line 17 */
+    /* line 15 */
     printf("assign=%d\n", n);
-    /* line 20 */
+    /* line 18 */
     box b = {0};
-    /* line 21 */
+    /* line 19 */
     b.v = 42;
-    /* line 22 */
+    /* line 20 */
     void *pv = &(b);
-    /* line 23 */
+    /* line 21 */
     printf("deref=%d\n", ((box*)(pv))->v);
-    /* line 26 */
+    /* line 24 */
     void *raw = malloc(8);
-    /* line 27 */
+    /* line 25 */
     box *pb = ((box*)(raw));
-    /* line 28 */
+    /* line 26 */
     pb->v = 7;
-    /* line 29 */
+    /* line 27 */
     printf("heap=%d\n", pb->v);
-    /* line 30 */
+    /* line 28 */
     free(((void*)(raw)));
-    /* line 33 */
+    /* line 31 */
     box *sp = &(b);
-    /* line 34 */
+    /* line 32 */
     box **ppb = &(sp);
-    /* line 35 */
+    /* line 33 */
     box **qq = ((box**)(ppb));
-    /* line 36 */
+    /* line 34 */
     printf("pp=%d\n", qq[0]->v);
-    /* line 37 */
+    /* line 35 */
     return 0;
 }

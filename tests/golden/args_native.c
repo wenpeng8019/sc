@@ -28,15 +28,15 @@ int32_t main(int32_t argc, char **argv) {
     arg_def_st_init(&ARGS_DEF_count);
     arg_def_st_init(&ARGS_DEF_input);
     arg_def_st_init(&ARGS_DEF_files);
-    /* line 21 */
+    /* line 20 */
     ARGS_usage("<paths...>", "demo: $0 -v -n 3 -f a b");
-    /* line 24 */
+    /* line 23 */
     int32_t pos_count = ARGS_parse(argc, argv, NULL);
-    /* line 27 */
+    /* line 26 */
     args_report_verbose();
-    /* line 29 */
+    /* line 28 */
     printf("count=%lld input=%s files=%d pos=%d\n", ARGS_count.i64, ARGS_input.str, ARGS_ls_count(&(ARGS_files)), pos_count);
-    /* line 35 */
+    /* line 34 */
     {
         int32_t _ret = 0;
         sc_mod_args_native_mod_drop();

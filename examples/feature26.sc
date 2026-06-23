@@ -17,7 +17,6 @@
 #   offset <expr> 起点跳过 expr 个元素（默认 0）
 #   num <expr>    最多遍历 expr 个元素（默认无上限）
 
-inc stdio.h
 inc adt.sc
 
 #-------------- ADT 容器（def T: <C, I>，见特性 7）-------------

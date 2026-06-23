@@ -4,8 +4,6 @@
 
 inc env.sc
 
-inc stdio.h
-
 inc args_native_mod.sc
 
 mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")

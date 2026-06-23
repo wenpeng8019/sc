@@ -6,8 +6,6 @@
 #              com[...] 句柄参数走框架读流程 limit_read，从同一 com 读入。
 # 覆盖：标量、数组、com[...] 句柄三类参数。用内存回环 com 验证 round-trip。
 
-inc stdio.h
-
 #-------------- 内存回环 com 设备：write 追加到缓冲，read 从缓冲消费 -------------
 def membuf: {
     data[256]: char                     # 收发共享缓冲

@@ -10,7 +10,6 @@
 # 即关闭（届时本模块将因找不到 ARGS_verbose 而报错）。
 
 inc env.sc
-inc stdio.h
 
 @fnc args_report_verbose:
     if ARGS_verbose.i64             # 直接访问根注入的 ARGS_verbose 属性

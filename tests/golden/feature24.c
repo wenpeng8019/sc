@@ -41,13 +41,13 @@ static inline node *node__new_ref(int32_t _atom) {
 }
 
 sc_fat make(int32_t val) {
-    /* line 26 */
+    /* line 24 */
     sc_fat n = {0};
     node *_fat0 = node__new_ref(0);
     sc_fat_bind(&n, _fat0, (sc_ref *)((char *)_fat0 - SC_REF_HDR), SC_OWN_ROOT);
-    /* line 27 */
+    /* line 25 */
     ((node *)(n).p)->v = val;
-    /* line 28 */
+    /* line 26 */
     {
         sc_fat _ret = n;
         return _ret;
@@ -55,36 +55,36 @@ sc_fat make(int32_t val) {
 }
 
 int32_t main(void) {
-    /* line 31 */
+    /* line 29 */
     sc_fat root = {0};
     root = make(1);
-    /* line 32 */
+    /* line 30 */
     ((node *)(root).p)->pt.x = 10;
-    /* line 33 */
+    /* line 31 */
     ((node *)(root).p)->pt.y = 20;
-    /* line 34 */
+    /* line 32 */
     sc_fat_unbind(&((node *)(root).p)->child);
     node *_fat1 = node__new_ref(0);
     sc_fat_bind(&((node *)(root).p)->child, _fat1, (sc_ref *)((char *)_fat1 - SC_REF_HDR), &((sc_ref *)(root).tar)->out);
-    /* line 35 */
+    /* line 33 */
     ((node *)(((node *)(root).p)->child).p)->v = 2;
-    /* line 36 */
+    /* line 34 */
     printf("root.v=%d child.v=%d\n", ((node *)(root).p)->v, ((node *)(((node *)(root).p)->child).p)->v);
-    /* line 38 */
+    /* line 36 */
     sc_fat alias = {0};
     sc_fat_bind(&alias, (root).p, (sc_ref *)(root).tar, SC_OWN_ROOT);
-    /* line 39 */
+    /* line 37 */
     printf("alias.v=%d\n", ((node *)(alias).p)->v);
-    /* line 41 */
+    /* line 39 */
     sc_fat px = {0};
     sc_fat_bind(&px, &(((node *)(root).p)->pt), (sc_ref *)(root).tar, SC_OWN_ROOT);
-    /* line 42 */
+    /* line 40 */
     printf("px.x=%d px.y=%d\n", ((point *)(px).p)->x, ((point *)(px).p)->y);
-    /* line 44 */
+    /* line 42 */
     sc_fat_unbind(&((node *)(root).p)->child);
-    /* line 45 */
+    /* line 43 */
     printf("after-detach root.v=%d\n", ((node *)(root).p)->v);
-    /* line 46 */
+    /* line 44 */
     {
         int32_t _ret = 0;
         sc_fat_unbind(&px);

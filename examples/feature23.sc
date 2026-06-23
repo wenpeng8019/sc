@@ -7,8 +7,6 @@
 #   - 强转表达式同样可写限定符：(e: const T&) / (e: volatile T&) / (e: T& restrict)
 # 初始化列表：数组用 [...] / 结构体用 {...} / 指定成员用 {name = expr}
 
-inc stdio.h
-
 def point: {
     x: i4
     y: i4

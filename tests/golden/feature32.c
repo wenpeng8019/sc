@@ -41,38 +41,38 @@ typedef struct com__project {
 
 
 int32_t main(void) {
-    /* line 52 */
+    /* line 50 */
     printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5));
-    /* line 54 */
+    /* line 52 */
     int32_t ibuf[4];
-    /* line 55 */
+    /* line 53 */
     Vec_int iv = {ibuf, 0, 4};
-    /* line 56 */
+    /* line 54 */
     Vec_int_push(&(iv), 10);
-    /* line 57 */
+    /* line 55 */
     Vec_int_push(&(iv), 20);
-    /* line 58 */
+    /* line 56 */
     printf("Vec_int: %d %d\n", Vec_int_get(&(iv), 0), Vec_int_get(&(iv), 1));
-    /* line 60 */
+    /* line 58 */
     double dbuf[4];
-    /* line 61 */
+    /* line 59 */
     Vec_dbl dv = {dbuf, 0, 4};
-    /* line 62 */
+    /* line 60 */
     Vec_dbl_push(&(dv), 1.5);
-    /* line 63 */
+    /* line 61 */
     printf("Vec_dbl: %g\n", Vec_dbl_get(&(dv), 0));
-    /* line 65 */
+    /* line 63 */
     Point pbuf[4] = {0};
-    /* line 66 */
+    /* line 64 */
     Vec_pt pv = {pbuf, 0, 4};
-    /* line 67 */
+    /* line 65 */
     Point p0 = {3, 4};
-    /* line 68 */
+    /* line 66 */
     Vec_pt_push(&(pv), p0);
-    /* line 69 */
+    /* line 67 */
     Point p = Vec_pt_get(&(pv), 0);
-    /* line 70 */
+    /* line 68 */
     printf("Vec_pt: %d %d\n", p.x, p.y);
-    /* line 71 */
+    /* line 69 */
     return 0;
 }

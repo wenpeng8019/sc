@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 fnc dev_read: ret, _this: com&, data: &, size: u4&
     var p: char& = (data: char&)
     var i: u4 = 0

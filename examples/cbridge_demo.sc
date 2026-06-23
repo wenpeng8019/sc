@@ -5,8 +5,6 @@
 #
 # 运行： scc examples/cbridge_demo.sc
 
-inc stdio.h
-
 # 把实现 C 全局符号的源文件加入工程（编译并链接）。
 add cbridge_demo_globals.c
 

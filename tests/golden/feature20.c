@@ -41,66 +41,66 @@ static inline future *future__new_tagged(int _id, void *_ctx) {
 }
 
 static int32_t async_proc(future_id id, future *f) {
-    /* line 42 */
+    /* line 41 */
     int32_t v = ((int32_t)(future_get(f)));
-    /* line 43 */
+    /* line 42 */
     session *s = ((session*)(future_ctx(f)));
-    /* line 44 */
+    /* line 43 */
     switch (id) {
         case conn:
         {
-            /* line 46 */
+            /* line 45 */
             printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
         case data:
         {
-            /* line 48 */
+            /* line 47 */
             printf("派发 data[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
         case term:
         {
-            /* line 50 */
+            /* line 49 */
             printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v);
-            /* line 51 */
+            /* line 50 */
             return -(1);
             break;
         }
     }
-    /* line 52 */
+    /* line 51 */
     return 0;
 }
 
 int32_t main(void) {
     sc_mod_async_init();
-    /* line 55 */
+    /* line 54 */
     async_init();
-    /* line 58 */
+    /* line 57 */
     session s1 = {"alpha", 1};
-    /* line 59 */
+    /* line 58 */
     session s2 = {"beta", 2};
-    /* line 63 */
+    /* line 62 */
     future *c = future__new_tagged(conn, &(s1));
-    /* line 64 */
+    /* line 63 */
     future_done(c, (void *)(intptr_t)(7));
-    /* line 65 */
+    /* line 64 */
     future *d1 = future__new_tagged(data, &(s2));
-    /* line 66 */
+    /* line 65 */
     future_done(d1, (void *)(intptr_t)(42));
-    /* line 67 */
+    /* line 66 */
     future *d2 = future__new_tagged(data, &(s1));
-    /* line 68 */
+    /* line 67 */
     future_done(d2, (void *)(intptr_t)(43));
-    /* line 69 */
+    /* line 68 */
     future *x = future__new_tagged(term, &(s2));
-    /* line 70 */
+    /* line 69 */
     future_done(x, (void *)(intptr_t)(0));
-    /* line 73 */
+    /* line 72 */
     async_loop(async_proc);
-    /* line 75 */
+    /* line 74 */
     async_final();
-    /* line 76 */
+    /* line 75 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

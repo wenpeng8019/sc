@@ -75,61 +75,61 @@ typedef struct com__project {
 
 
 static void add_rpc(struct add *_p) {
-    /* line 13 */
+    /* line 12 */
     _p->_ = _p->a + _p->b; return;
 }
 
 static void greet_rpc(struct greet *_p) {
-    /* line 17 */
+    /* line 16 */
     printf("hello rpc x%d\n", _p->n);
 }
 
 static void strlen2_rpc(struct strlen2 *_p) {
-    /* line 21 */
+    /* line 20 */
     int32_t n = 0;
-    /* line 22 */
+    /* line 21 */
     while (_p->s[n] != 0) {
-        /* line 23 */
+        /* line 22 */
         n++;
     }
-    /* line 24 */
+    /* line 23 */
     _p->_ = n * 2; return;
 }
 
 static void dot_rpc(struct dot *_p) {
-    /* line 30 */
+    /* line 29 */
     int32_t s = 0;
-    /* line 31 */
+    /* line 30 */
     int32_t i = 0;
-    /* line 32 */
+    /* line 31 */
     for (i = 0; i < 3; i++) {
-        /* line 33 */
+        /* line 32 */
         s = (s + (_p->a[i] * _p->b[i]));
     }
-    /* line 34 */
+    /* line 33 */
     _p->_ = s; return;
 }
 
 void square_rpc(struct square *_p) {
-    /* line 38 */
+    /* line 37 */
     _p->_ = _p->x * _p->x; return;
 }
 
 int32_t main(void) {
-    /* line 41 */
+    /* line 40 */
     printf("add(3,4) = %d\n", add(3, 4));
-    /* line 42 */
+    /* line 41 */
     greet(2);
-    /* line 43 */
+    /* line 42 */
     printf("strlen2 = %d\n", strlen2("abc"));
-    /* line 44 */
+    /* line 43 */
     int32_t u[3] = {1, 2, 3};
-    /* line 45 */
+    /* line 44 */
     int32_t v[3] = {4, 5, 6};
-    /* line 46 */
+    /* line 45 */
     printf("dot = %d\n", dot(u, v));
-    /* line 47 */
+    /* line 46 */
     printf("square(9) = %d\n", square(9));
-    /* line 48 */
+    /* line 47 */
     return 0;
 }

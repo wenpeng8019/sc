@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 fnc show_suffix
     var a: = 5b
     var b: = 300w

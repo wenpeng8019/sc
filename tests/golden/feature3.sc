@@ -1,7 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
 rpc add: i4, a: i4, b: i4
     return a + b
 

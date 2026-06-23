@@ -40,58 +40,58 @@ static inline point *point__new(void) {
 }
 
 static void point_init(point *_this) {
-    /* line 20 */
+    /* line 18 */
     _this->x = 1;
-    /* line 21 */
+    /* line 19 */
     _this->y = 2;
 }
 
 static int32_t point_sum(point *_this, int32_t dx, int32_t dy) {
-    /* line 23 */
+    /* line 21 */
     return ((_this->x + _this->y) + dx) + dy;
 }
 
 static void point_drop(point *_this) {
-    /* line 25 */
+    /* line 23 */
     printf("point(%d,%d) dropped\n", _this->x, _this->y);
 }
 
 int32_t main(void) {
     sc_mod_feature4_lib_init();
     point_init(&g_origin);
-    /* line 44 */
+    /* line 42 */
     printf("global: x=%d y=%d\n", g_origin.x, g_origin.y);
-    /* line 49 */
+    /* line 47 */
     lib_audit();
-    /* line 50 */
+    /* line 48 */
     lib_audit();
-    /* line 54 */
+    /* line 52 */
     point pt = {0};
     point_init(&pt);
-    /* line 55 */
+    /* line 53 */
     printf("init: x=%d y=%d\n", pt.x, pt.y);
-    /* line 58 */
+    /* line 56 */
     printf("pt.sum(3,4) = %d\n", point_sum(&pt, 3, 4));
-    /* line 61 */
+    /* line 59 */
     point *pp = &(pt);
-    /* line 62 */
+    /* line 60 */
     printf("pp->sum(3,4) = %d\n", point_sum(pp, 3, 4));
-    /* line 65 */
+    /* line 63 */
     point p2 = {0};
     point_init(&p2);
-    /* line 66 */
+    /* line 64 */
     printf("op is nil (before bind): %d\n", p2.op == NULL);
-    /* line 69 */
+    /* line 67 */
     point_drop(&p2);
-    /* line 74 */
+    /* line 72 */
     point *hp = point__new();
-    /* line 75 */
+    /* line 73 */
     printf("heap: sum() = %d\n", point_sum(hp, 0, 0));
-    /* line 76 */
+    /* line 74 */
     point_drop(hp);
-    /* line 77 */
+    /* line 75 */
     free(hp);
-    /* line 88 */
+    /* line 86 */
     {
         int32_t _ret = 0;
         point_drop(&g_origin);

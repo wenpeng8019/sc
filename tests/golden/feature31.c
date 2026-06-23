@@ -24,22 +24,22 @@ int32_t cfg_lo = 10;
 static int32_t cfg_hi = 20;
 
 int32_t main(void) {
-    /* line 43 */
+    /* line 41 */
     int32_t count = CAP;
-    /* line 44 */
+    /* line 42 */
     printf("object macro: CAP=%d\n", CAP);
-    /* line 46 */
+    /* line 44 */
     printf("stringify:\n");
-    /* line 47 */
+    /* line 45 */
     dump(count)
-    /* line 49 */
+    /* line 47 */
     printf("paste:\n");
-    /* line 50 */
+    /* line 48 */
     tally(item)
-    /* line 52 */
+    /* line 50 */
     printf("variadic + macro globals:\n");
-    /* line 53 */
+    /* line 51 */
     logf("  sum=%d range=[%d,%d]\n", count + cfg_lo, cfg_lo, cfg_hi)
-    /* line 55 */
+    /* line 53 */
     return 0;
 }

@@ -8,8 +8,6 @@
 #   - return p      移动（所有权转给调用方，跳过退域拆边）
 #   - &obj->field   取址传染：对值子成员取址，结果仍是 T@，借用容器堆对象延寿
 
-inc stdio.h
-
 @def point: {
     x: i4
     y: i4

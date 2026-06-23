@@ -9,8 +9,6 @@
 # 「可执行（EXE）构建」下生效。移除根的 @@ 标记即可关闭（届时本模块将因
 # 找不到 metric/app_report 而报错）。
 
-inc stdio.h
-
 # 直接使用根导出的 metric（类型）与 app_report（操作），无需 inc 根模块。
 @fnc sensor_sample: label: char&, v: i4
     var m: metric

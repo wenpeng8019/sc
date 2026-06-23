@@ -8,9 +8,6 @@
 # - sizeof / offsetof / 初始化列表
 # - 控制流（if/else if/for/while/do-while/break/continue/goto/case）、多行条件表达式
 
-inc stdio.h
-inc stdlib.h
-
 #-------------- def：枚举 / 结构 / 联合 / 别名 -----------------
 
 def macro: p1, p2, p3, ...

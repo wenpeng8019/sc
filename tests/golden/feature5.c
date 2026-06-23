@@ -31,27 +31,27 @@ typedef struct com__project {
 
 
 int32_t add(int32_t a, int32_t b) {
-    /* line 23 */
+    /* line 21 */
     return a + b;
 }
 
 void tracker_init(tracker *_this) {
-    /* line 31 */
+    /* line 29 */
     _this->val = 0;
 }
 
 void tracker_add(tracker *_this, int32_t k) {
-    /* line 33 */
+    /* line 31 */
     _this->val = (_this->val + k);
 }
 
 int32_t main(void) {
-    /* line 39 */
+    /* line 37 */
     printf("add = %d\n", add(2, 3));
-    /* line 40 */
+    /* line 38 */
     total = add(10, 20);
-    /* line 41 */
+    /* line 39 */
     printf("total = %d\n", total);
-    /* line 43 */
+    /* line 41 */
     return 0;
 }

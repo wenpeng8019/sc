@@ -25,38 +25,38 @@ typedef struct com__project {
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
 static int32_t dev_read(com *_this, void *data, uint32_t *size) {
-    /* line 20 */
+    /* line 19 */
     char *p = ((char*)(data));
-    /* line 21 */
+    /* line 20 */
     uint32_t i = 0;
-    /* line 22 */
+    /* line 21 */
     while (i < *(size)) {
-        /* line 23 */
+        /* line 22 */
         p[i] = (((char)(i)) + 'a');
-        /* line 24 */
+        /* line 23 */
         i = (i + 1);
     }
-    /* line 25 */
+    /* line 24 */
     return ((int32_t)(*(size)));
 }
 
 static int32_t dev_write(com *_this, void *buf, uint32_t *size) {
-    /* line 29 */
+    /* line 28 */
     char *p = ((char*)(buf));
-    /* line 30 */
+    /* line 29 */
     printf("  写出: ");
-    /* line 31 */
+    /* line 30 */
     uint32_t i = 0;
-    /* line 32 */
+    /* line 31 */
     while (i < *(size)) {
-        /* line 33 */
+        /* line 32 */
         printf("%c", p[i]);
-        /* line 34 */
+        /* line 33 */
         i = (i + 1);
     }
-    /* line 35 */
+    /* line 34 */
     printf("\n");
-    /* line 36 */
+    /* line 35 */
     return ((int32_t)(*(size)));
 }
 
@@ -95,23 +95,23 @@ static void handler_rpc(struct handler *_p) {
 
 int32_t main(void) {
     sc_mod_async_init();
-    /* line 53 */
+    /* line 52 */
     async_init();
-    /* line 55 */
+    /* line 54 */
     com c = {0};
-    /* line 56 */
+    /* line 55 */
     c.read = dev_read;
-    /* line 57 */
+    /* line 56 */
     c.write = dev_write;
-    /* line 59 */
+    /* line 58 */
     future *f = handler__async(&(c));
-    /* line 60 */
+    /* line 59 */
     async_loop(NULL);
-    /* line 62 */
+    /* line 61 */
     printf("done\n");
-    /* line 63 */
+    /* line 62 */
     async_final();
-    /* line 64 */
+    /* line 63 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

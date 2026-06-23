@@ -1,5 +1,4 @@
 # 结构化宏：对象宏 / 函数宏 / mix 展开 / \ 粘贴 / ` 串化 / 可变参
-inc stdio.h
 
 # 对象宏 → #define TAG 7
 def TAG: = 7

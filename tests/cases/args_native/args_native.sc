@@ -9,7 +9,6 @@
 @@                                  # 根模块标记：开启「导出注入」（root-prelude）
 
 inc env.sc
-inc stdio.h
 inc args_native_mod.sc              # 引入消费子模块（其内部直接引用根的 ARGS_verbose）
 
 mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")

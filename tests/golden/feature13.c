@@ -130,21 +130,21 @@ static void both_rpc(struct both *_p) {
 }
 
 static void square_worker_rpc(struct square_worker *_p) {
-    /* line 167 */
+    /* line 166 */
     future_done(_p->f, (void *)(intptr_t)(_p->n * _p->n));
 }
 
 static future * bg_square(int32_t n) {
-    /* line 171 */
+    /* line 170 */
     future *f = future__new();
-    /* line 172 */
+    /* line 171 */
     {
         struct square_worker _rp = {0};
         _rp.f = f;
         _rp.n = n;
         thread_run((void (*)(void *))square_worker_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 173 */
+    /* line 172 */
     return f;
 }
 
@@ -182,33 +182,33 @@ static void compute_rpc(struct compute *_p) {
 int32_t main(void) {
     sc_mod_m_init();
     sc_mod_async_init();
-    /* line 184 */
+    /* line 183 */
     async_init();
-    /* line 188 */
+    /* line 187 */
     future *fa = greet__async("A", 80);
-    /* line 189 */
+    /* line 188 */
     future *fb = greet__async("B", 30);
-    /* line 192 */
+    /* line 191 */
     async_loop(NULL);
-    /* line 195 */
+    /* line 194 */
     printf("fa = %s\n", ((char*)(future_get(fa))));
-    /* line 196 */
+    /* line 195 */
     printf("fb = %s\n", ((char*)(future_get(fb))));
-    /* line 199 */
+    /* line 198 */
     future *fc = both__async("X", "Y");
+    /* line 199 */
+    async_loop(NULL);
     /* line 200 */
-    async_loop(NULL);
-    /* line 201 */
     printf("both ret = %d\n", ((int32_t)(future_get(fc))));
-    /* line 204 */
+    /* line 203 */
     future *fd = compute__async(3);
-    /* line 205 */
+    /* line 204 */
     async_loop(NULL);
-    /* line 206 */
+    /* line 205 */
     printf("compute ret = %d\n", ((int32_t)(future_get(fd))));
-    /* line 208 */
+    /* line 207 */
     async_final();
-    /* line 209 */
+    /* line 208 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

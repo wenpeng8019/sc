@@ -12,18 +12,18 @@ typedef struct com__project {
 
 
 int32_t main(void) {
+    /* line 28 */
+    counter_hits_inc();
     /* line 29 */
     counter_hits_inc();
     /* line 30 */
     counter_hits_inc();
     /* line 31 */
-    counter_hits_inc();
-    /* line 32 */
     counter_miss_inc();
-    /* line 33 */
+    /* line 32 */
     printf("hits=%d miss=%d\n", counter_hits_get(), counter_miss_get());
-    /* line 34 */
+    /* line 33 */
     printf("counter_hits(direct)=%d\n", counter_hits);
-    /* line 35 */
+    /* line 34 */
     return 0;
 }

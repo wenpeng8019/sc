@@ -11,7 +11,6 @@
 # 当前异步驱动为「立即完成」桥接（com_*_async 同步调一次 read/write 后即兑现 future），
 # 用于打通端到端语义；真实驱动改为入队 rq/wq、io 完成回调里延迟兑现（ioq 循环缓冲已就位）。
 
-inc stdio.h
 inc async.sc                       # 引入事件循环运行时（async_init/loop/final + future）
 
 #-------------- 设备 io 实现（每对象绑定，MethodPtr）-----------------------

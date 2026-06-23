@@ -6,8 +6,6 @@
 #   - LIFO：后注册先执行，契合资源获取/释放的栈式配对
 #   - 与 T@ 协作：final 块体先于退域自动拆边执行，块内访问的自动指针仍有效
 
-inc stdio.h
-
 # 多退出点：final 在 early return 与正常 return 处都执行
 @fnc pick: i4, n: i4
     final

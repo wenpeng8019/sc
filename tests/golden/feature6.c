@@ -42,138 +42,138 @@ static inline task *task__new(void) {
 }
 
 static void dump(char *tag, chain *l) {
-    /* line 32 */
+    /* line 30 */
     printf("%s:", tag);
-    /* line 33 */
+    /* line 31 */
     task *it = ((task*)(chain_first(l)));
-    /* line 34 */
+    /* line 32 */
     while (it != NULL) {
-        /* line 35 */
+        /* line 33 */
         printf(" %d", it->id);
-        /* line 36 */
+        /* line 34 */
         it = it->_next;
     }
-    /* line 37 */
+    /* line 35 */
     printf("\n");
 }
 
 int32_t main(void) {
-    /* line 43 */
+    /* line 41 */
     chain l = {0};
-    /* line 44 */
+    /* line 42 */
     task t[6] = {0};
-    /* line 45 */
+    /* line 43 */
     int32_t i;
-    /* line 46 */
+    /* line 44 */
     for (i = 0; i < 6; i++) {
-        /* line 47 */
+        /* line 45 */
         t[i].id = i;
     }
-    /* line 49 */
+    /* line 47 */
     chain_append(&l, &(t[2]));
-    /* line 50 */
+    /* line 48 */
     chain_append(&l, &(t[3]));
-    /* line 51 */
+    /* line 49 */
     chain_push(&l, &(t[1]));
-    /* line 52 */
+    /* line 50 */
     dump("append/push", &(l));
-    /* line 54 */
+    /* line 52 */
     chain_before(&l, &(t[1]), &(t[0]));
-    /* line 55 */
+    /* line 53 */
     chain_after(&l, &(t[3]), &(t[4]));
-    /* line 56 */
+    /* line 54 */
     dump("before/after", &(l));
-    /* line 58 */
+    /* line 56 */
     task *f = ((task*)(chain_first(&l)));
-    /* line 59 */
+    /* line 57 */
     task *b = ((task*)(chain_last(&l)));
-    /* line 61 */
+    /* line 59 */
     printf("first=%d last=%d head_prev_nil=%d\n", f->id, b->id, ((void *)chain_prev(f)) == NULL);
-    /* line 63 */
+    /* line 61 */
     chain_remove(&l, &(t[2]));
-    /* line 64 */
+    /* line 62 */
     task *p = ((task*)(chain_pop(&l)));
-    /* line 65 */
+    /* line 63 */
     printf("pop=%d\n", p->id);
-    /* line 66 */
+    /* line 64 */
     dump("remove/pop", &(l));
-    /* line 68 */
+    /* line 66 */
     chain_revert(&l);
-    /* line 69 */
+    /* line 67 */
     dump("revert", &(l));
-    /* line 71 */
+    /* line 69 */
     chain seg = {0};
-    /* line 72 */
+    /* line 70 */
     chain_cut(&l, &(t[3]), &(t[1]), &(seg));
-    /* line 73 */
+    /* line 71 */
     dump("cut-out", &(seg));
-    /* line 74 */
+    /* line 72 */
     dump("cut-rest", &(l));
-    /* line 76 */
+    /* line 74 */
     chain_append_to(&seg, &(l));
-    /* line 77 */
+    /* line 75 */
     dump("append_to", &(l));
-    /* line 78 */
+    /* line 76 */
     printf("seg empty=%d\n", chain_first(&seg) == NULL);
-    /* line 79 */
+    /* line 77 */
     chain_cut(&l, &(t[3]), &(t[1]), &(seg));
-    /* line 80 */
+    /* line 78 */
     chain_push_to(&seg, &(l));
-    /* line 81 */
+    /* line 79 */
     dump("push_to", &(l));
-    /* line 84 */
+    /* line 82 */
     task *h = task__new();
-    /* line 85 */
+    /* line 83 */
     h->id = 9;
-    /* line 86 */
+    /* line 84 */
     chain_append(&l, h);
-    /* line 87 */
+    /* line 85 */
     dump("heap", &(l));
-    /* line 88 */
+    /* line 86 */
     chain_remove(&l, h);
-    /* line 89 */
+    /* line 87 */
     free(((void*)(h)));
-    /* line 93 */
+    /* line 91 */
     chain l2 = {0};
-    /* line 94 */
+    /* line 92 */
     node n[3] = {0};
-    /* line 95 */
+    /* line 93 */
     for (i = 0; i < 3; i++) {
-        /* line 96 */
+        /* line 94 */
         n[i].id = i;
     }
-    /* line 97 */
+    /* line 95 */
     chain_append(&l2, &(n[0]));
-    /* line 98 */
+    /* line 96 */
     chain_append(&l2, &(n[1]));
-    /* line 99 */
+    /* line 97 */
     chain_append(&l2, &(n[2]));
-    /* line 101 */
+    /* line 99 */
     node *it = ((node*)(chain_first(&l2)));
-    /* line 102 */
+    /* line 100 */
     printf("正向:");
-    /* line 103 */
+    /* line 101 */
     while (it != NULL) {
-        /* line 104 */
+        /* line 102 */
         printf(" %d", it->id);
-        /* line 105 */
+        /* line 103 */
         it = it->_next;
     }
-    /* line 106 */
+    /* line 104 */
     printf("\n");
-    /* line 109 */
+    /* line 107 */
     node *rear = ((node*)(chain_last(&l2)));
-    /* line 110 */
+    /* line 108 */
     printf("反向:");
-    /* line 111 */
+    /* line 109 */
     while (rear != NULL) {
-        /* line 112 */
+        /* line 110 */
         printf(" %d", rear->id);
-        /* line 113 */
+        /* line 111 */
         rear = ((void *)chain_prev(rear));
     }
-    /* line 114 */
+    /* line 112 */
     printf("\n");
-    /* line 116 */
+    /* line 114 */
     return 0;
 }

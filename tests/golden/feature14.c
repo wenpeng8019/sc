@@ -18,51 +18,51 @@ typedef struct com__project {
 
 
 static int32_t dbl(handler *_this, int32_t x) {
-    /* line 19 */
+    /* line 17 */
     return (x * 2) + _this->tag;
 }
 
 static int32_t neg(handler *_this, int32_t x) {
-    /* line 22 */
+    /* line 20 */
     return (0 - x) - _this->tag;
 }
 
 int32_t main(void) {
-    /* line 25 */
+    /* line 23 */
     handler a = {0};
-    /* line 26 */
+    /* line 24 */
     a.tag = 100;
-    /* line 27 */
+    /* line 25 */
     a.op = dbl;
-    /* line 29 */
+    /* line 27 */
     handler b = {0};
-    /* line 30 */
+    /* line 28 */
     b.tag = 1;
-    /* line 31 */
+    /* line 29 */
     b.op = neg;
-    /* line 34 */
+    /* line 32 */
     printf("a.op(5) = %d\n", a.op(&a, 5));
-    /* line 35 */
+    /* line 33 */
     printf("b.op(5) = %d\n", b.op(&b, 5));
-    /* line 38 */
+    /* line 36 */
     handler *p = &(a);
-    /* line 39 */
+    /* line 37 */
     printf("p->op(7) = %d\n", p->op(p, 7));
-    /* line 42 */
+    /* line 40 */
     handler c = {0};
-    /* line 43 */
+    /* line 41 */
     c.tag = 0;
-    /* line 44 */
+    /* line 42 */
     if (c.op == NULL) {
-        /* line 45 */
+        /* line 43 */
         printf("c.op is nil\n");
     }
-    /* line 48 */
+    /* line 46 */
     c.tag = 10;
-    /* line 49 */
+    /* line 47 */
     c.op = dbl;
-    /* line 50 */
+    /* line 48 */
     printf("c.op(5) = %d\n", c.op(&c, 5));
-    /* line 51 */
+    /* line 49 */
     return 0;
 }

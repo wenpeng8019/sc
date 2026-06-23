@@ -12,28 +12,28 @@ typedef struct com__project {
 
 
 int32_t pick(int32_t n) {
+    /* line 11 */
     /* line 13 */
-    /* line 15 */
     if (n > 0) {
-        /* line 16 */
+        /* line 14 */
         printf("  [pick] early return\n");
-        /* line 17 */
+        /* line 15 */
         {
             int32_t _ret = 1;
             {
-                /* line 14 */
+                /* line 12 */
                 printf("  [pick] final 执行\n");
             }
             return _ret;
         }
     }
-    /* line 18 */
+    /* line 16 */
     printf("  [pick] 正常 return\n");
-    /* line 19 */
+    /* line 17 */
     {
         int32_t _ret = 0;
         {
-            /* line 14 */
+            /* line 12 */
             printf("  [pick] final 执行\n");
         }
         return _ret;
@@ -41,17 +41,17 @@ int32_t pick(int32_t n) {
 }
 
 int32_t lifo(void) {
+    /* line 21 */
     /* line 23 */
     /* line 25 */
-    /* line 27 */
     {
         int32_t _ret = 0;
         {
-            /* line 26 */
+            /* line 24 */
             printf("  [lifo] 后注册（先执行）\n");
         }
         {
-            /* line 24 */
+            /* line 22 */
             printf("  [lifo] 先注册（后执行）\n");
         }
         return _ret;
@@ -59,53 +59,53 @@ int32_t lifo(void) {
 }
 
 int32_t loopy(int32_t n) {
-    /* line 31 */
+    /* line 29 */
     int32_t i = 0;
-    /* line 32 */
+    /* line 30 */
     for (i = 0; i < n; i++) {
+        /* line 31 */
         /* line 33 */
-        /* line 35 */
         if (i == 1) {
-            /* line 36 */
+            /* line 34 */
             {
-                /* line 34 */
+                /* line 32 */
                 printf("  [loopy] iter %d 清理\n", i);
             }
             continue;
         }
-        /* line 37 */
+        /* line 35 */
         if (i == 2) {
-            /* line 38 */
+            /* line 36 */
             {
-                /* line 34 */
+                /* line 32 */
                 printf("  [loopy] iter %d 清理\n", i);
             }
             break;
         }
         {
-            /* line 34 */
+            /* line 32 */
             printf("  [loopy] iter %d 清理\n", i);
         }
     }
-    /* line 39 */
+    /* line 37 */
     return 0;
 }
 
 int32_t main(void) {
-    /* line 42 */
+    /* line 40 */
     printf("== 多退出点 ==\n");
-    /* line 43 */
+    /* line 41 */
     pick(1);
-    /* line 44 */
+    /* line 42 */
     pick(0);
-    /* line 45 */
+    /* line 43 */
     printf("== LIFO 顺序 ==\n");
-    /* line 46 */
+    /* line 44 */
     lifo();
-    /* line 47 */
+    /* line 45 */
     printf("== 循环内 final ==\n");
-    /* line 48 */
+    /* line 46 */
     loopy(4);
-    /* line 49 */
+    /* line 47 */
     return 0;
 }

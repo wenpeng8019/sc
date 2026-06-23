@@ -1,5 +1,3 @@
-inc stdio.h
-
 fnc add: i4, a: i4, b: i4
     return a + b
 

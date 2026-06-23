@@ -40,7 +40,6 @@ do_dist() {
     local tmp
     tmp="$(mktemp -d)"
     cat > "$tmp/t.sc" <<'EOF'
-inc stdio.h
 inc adt.sc
 inc m.sc
 inc mem.sc

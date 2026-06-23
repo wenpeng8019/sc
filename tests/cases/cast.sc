@@ -3,8 +3,6 @@
 #   - 调用结果/实参位置裸转
 #   - 括号转后 -> 成员访问  (expr: type&)->m
 #   - 多级指针转  type&&
-inc stdio.h
-inc stdlib.h
 
 def box: {
     v: i4
