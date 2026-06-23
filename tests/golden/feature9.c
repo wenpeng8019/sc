@@ -1,6 +1,5 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "platform.h"
 #include "builtins/m/m.h"
 
 typedef struct ctx ctx;
@@ -94,216 +93,216 @@ typedef struct com__project {
 void sc_mod_m_init(void); void sc_mod_m_drop(void);
 
 static void work_rpc(struct work *_p) {
-    /* line 31 */
+    /* line 29 */
     int32_t i = 0;
-    /* line 32 */
+    /* line 30 */
     for (i = 0; i < _p->rounds; i++) {
-        /* line 33 */
+        /* line 31 */
         mutex_lock(&_p->c->mu);
-        /* line 34 */
+        /* line 32 */
         _p->c->n = (_p->c->n + 1);
-        /* line 35 */
+        /* line 33 */
         mutex_unlock(&_p->c->mu);
     }
 }
 
 static void note_rpc(struct note *_p) {
-    /* line 39 */
+    /* line 37 */
     printf("detached note: tag=%d\n", _p->tag);
 }
 
 static void bump_rpc(struct bump *_p) {
-    /* line 45 */
+    /* line 43 */
     int32_t i = 0;
-    /* line 46 */
+    /* line 44 */
     for (i = 0; i < _p->rounds; i++) {
-        /* line 47 */
+        /* line 45 */
         hits = (hits + 1);
     }
-    /* line 48 */
+    /* line 46 */
     if (hits == _p->rounds) {
-        /* line 49 */
+        /* line 47 */
         mutex_lock(&_p->c->mu);
-        /* line 50 */
+        /* line 48 */
         _p->c->n = (_p->c->n + 1);
-        /* line 51 */
+        /* line 49 */
         mutex_unlock(&_p->c->mu);
     }
 }
 
 static int32_t next_id(void) {
-    /* line 55 */
+    /* line 53 */
     static TLS int32_t id = 100;
-    /* line 56 */
+    /* line 54 */
     id++;
-    /* line 57 */
+    /* line 55 */
     return id;
 }
 
 static void ping_rpc(struct ping *_p) {
-    /* line 67 */
+    /* line 65 */
     mutex_lock(&_p->s->mu);
-    /* line 68 */
+    /* line 66 */
     _p->s->ready = 1;
-    /* line 69 */
+    /* line 67 */
     cond_one(&_p->s->cv);
-    /* line 70 */
+    /* line 68 */
     mutex_unlock(&_p->s->mu);
 }
 
 static void bwork_rpc(struct bwork *_p) {
-    /* line 81 */
+    /* line 79 */
     mutex_lock(&_p->b->mu);
-    /* line 82 */
+    /* line 80 */
     _p->b->arrived = (_p->b->arrived + 1);
-    /* line 83 */
+    /* line 81 */
     mutex_unlock(&_p->b->mu);
-    /* line 84 */
+    /* line 82 */
     if (barrier_wait(&_p->b->bar)) {
-        /* line 85 */
+        /* line 83 */
         mutex_lock(&_p->b->mu);
-        /* line 86 */
+        /* line 84 */
         _p->b->serial = (_p->b->serial + 1);
-        /* line 87 */
+        /* line 85 */
         mutex_unlock(&_p->b->mu);
     }
 }
 
 int32_t main(void) {
     sc_mod_m_init();
-    /* line 90 */
+    /* line 88 */
     ctx c = {0};
-    /* line 91 */
+    /* line 89 */
     c.n = 0;
-    /* line 92 */
+    /* line 90 */
     mutex_init(&c.mu);
-    /* line 95 */
+    /* line 93 */
     thread *t1 = NULL;
-    /* line 96 */
+    /* line 94 */
     thread *t2 = NULL;
-    /* line 97 */
+    /* line 95 */
     {
         struct work _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
         thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t1)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 98 */
+    /* line 96 */
     {
         struct work _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
         thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t2)), (uint32_t)262144u, (uint8_t)5u);
     }
-    /* line 99 */
+    /* line 97 */
     printf("t1 id set: %d\n", t1 != NULL);
-    /* line 100 */
+    /* line 98 */
     thread_join(t1);
-    /* line 101 */
+    /* line 99 */
     thread_join(t2);
-    /* line 102 */
+    /* line 100 */
     printf("threads done: n=%d\n", c.n);
-    /* line 105 */
+    /* line 103 */
     {
         struct note _rp = {0};
         _rp.tag = 7;
         thread_run((void (*)(void *))note_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 106 */
+    /* line 104 */
     P_usleep(50000);
-    /* line 109 */
+    /* line 107 */
     if (mutex_try_lock(&c.mu)) {
-        /* line 110 */
+        /* line 108 */
         printf("try_lock ok\n");
-        /* line 111 */
+        /* line 109 */
         mutex_unlock(&c.mu);
     }
+    /* line 112 */
+    next_id();
+    /* line 113 */
+    next_id();
     /* line 114 */
-    next_id();
-    /* line 115 */
-    next_id();
-    /* line 116 */
     printf("tls id=%d\n", next_id());
-    /* line 119 */
+    /* line 117 */
     c.n = 0;
-    /* line 120 */
+    /* line 118 */
     thread *b1 = NULL;
-    /* line 121 */
+    /* line 119 */
     thread *b2 = NULL;
-    /* line 122 */
+    /* line 120 */
     {
         struct bump _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
         thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b1)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 123 */
+    /* line 121 */
     {
         struct bump _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 20000;
         thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 124 */
+    /* line 122 */
     thread_join(b1);
-    /* line 125 */
+    /* line 123 */
     thread_join(b2);
-    /* line 126 */
+    /* line 124 */
     printf("tls threads ok: %d\n", c.n);
-    /* line 128 */
+    /* line 126 */
     mutex_drop(&c.mu);
-    /* line 131 */
+    /* line 129 */
     sig s = {0};
-    /* line 132 */
+    /* line 130 */
     s.ready = 0;
-    /* line 133 */
+    /* line 131 */
     mutex_init(&s.mu);
-    /* line 134 */
+    /* line 132 */
     cond_init(&s.cv);
-    /* line 135 */
+    /* line 133 */
     {
         struct ping _rp = {0};
         _rp.s = &(s);
         thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 136 */
+    /* line 134 */
     mutex_lock(&s.mu);
-    /* line 137 */
+    /* line 135 */
     while (s.ready == 0) {
-        /* line 138 */
+        /* line 136 */
         cond_wait(&s.cv, &(s.mu), 0, 0);
     }
-    /* line 139 */
+    /* line 137 */
     mutex_unlock(&s.mu);
-    /* line 140 */
+    /* line 138 */
     printf("cond wait ok: ready=%d\n", s.ready);
-    /* line 143 */
+    /* line 141 */
     mutex_lock(&s.mu);
-    /* line 144 */
+    /* line 142 */
     cond_wait(&s.cv, &(s.mu), 5000000, 0);
-    /* line 145 */
+    /* line 143 */
     mutex_unlock(&s.mu);
-    /* line 146 */
+    /* line 144 */
     printf("cond timeout ok\n");
-    /* line 148 */
+    /* line 146 */
     cond_drop(&s.cv);
-    /* line 149 */
+    /* line 147 */
     mutex_drop(&s.mu);
-    /* line 152 */
+    /* line 150 */
     ctx c2 = {0};
-    /* line 153 */
+    /* line 151 */
     c2.n = 0;
-    /* line 154 */
+    /* line 152 */
     mutex_init(&c2.mu);
-    /* line 155 */
+    /* line 153 */
     pool p = {0};
-    /* line 156 */
+    /* line 154 */
     pool_init(&p, 4);
-    /* line 157 */
+    /* line 155 */
     int32_t k = 0;
-    /* line 158 */
+    /* line 156 */
     for (k = 0; k < 8; k++) {
-        /* line 159 */
+        /* line 157 */
         {
             struct work _rp = {0};
             _rp.c = &(c2);
@@ -311,70 +310,70 @@ int32_t main(void) {
             pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
         }
     }
-    /* line 160 */
+    /* line 158 */
     pool_join(&p);
-    /* line 161 */
+    /* line 159 */
     printf("pool done: n=%d\n", c2.n);
-    /* line 162 */
+    /* line 160 */
     {
         struct work _rp = {0};
         _rp.c = &(c2);
         _rp.rounds = 1000;
         pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
     }
-    /* line 163 */
+    /* line 161 */
     pool_drop(&p);
-    /* line 164 */
+    /* line 162 */
     printf("pool drop: n=%d\n", c2.n);
-    /* line 165 */
+    /* line 163 */
     mutex_drop(&c2.mu);
-    /* line 168 */
+    /* line 166 */
     bctx bc = {0};
-    /* line 169 */
+    /* line 167 */
     bc.arrived = 0;
-    /* line 170 */
+    /* line 168 */
     bc.serial = 0;
-    /* line 171 */
+    /* line 169 */
     mutex_init(&bc.mu);
-    /* line 172 */
+    /* line 170 */
     barrier_init(&bc.bar, 3);
-    /* line 173 */
+    /* line 171 */
     thread *bt1 = NULL;
-    /* line 174 */
+    /* line 172 */
     thread *bt2 = NULL;
-    /* line 175 */
+    /* line 173 */
     thread *bt3 = NULL;
-    /* line 176 */
+    /* line 174 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt1)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 177 */
+    /* line 175 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt2)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 178 */
+    /* line 176 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt3)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 179 */
+    /* line 177 */
     thread_join(bt1);
-    /* line 180 */
+    /* line 178 */
     thread_join(bt2);
-    /* line 181 */
+    /* line 179 */
     thread_join(bt3);
-    /* line 182 */
+    /* line 180 */
     printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial);
-    /* line 183 */
+    /* line 181 */
     barrier_drop(&bc.bar);
-    /* line 184 */
+    /* line 182 */
     mutex_drop(&bc.mu);
-    /* line 185 */
+    /* line 183 */
     {
         int32_t _ret = 0;
         sc_mod_m_drop();

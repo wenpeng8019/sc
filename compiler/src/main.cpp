@@ -730,6 +730,21 @@ resolveModulePath(const std::string& raw, const std::filesystem::path& baseDir) 
     return {};
 }
 
+// 注册默认 #include 的内置 C 头（platform.h）符号到语义检查器（一次性，按内容动态扫描）。
+// 使 P_usleep / sc_thread_id / P_clock 等 platform 自有符号无需显式 inc 即被认作已知，
+// 且 platform.h 后续增删符号自动生效，无需改编译器白名单。
+static void ensureBuiltinHeaderSymbols(const std::filesystem::path& baseDir) {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const auto p = resolveModulePath("platform.h", baseDir);
+    if (p.empty()) return;
+    std::ifstream f(p);
+    if (!f) return;
+    std::stringstream b; b << f.rdbuf();
+    registerBuiltinHeaderSymbols(b.str());
+}
+
 struct UnitInfo {
     std::filesystem::path path;
     Program prog;
@@ -1186,6 +1201,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
             && !(preludeSkip && preludeSkip->count(key)))
             mergeRootPrelude(u.prog, rootPrelude);
         expandGenericMixes(u.prog);                 // 泛型宏单态化：克隆宏体+替换类型参数→具体声明
+        ensureBuiltinHeaderSymbols(canon.parent_path());  // 注册 platform.h 符号（一次性）
         semanticCheck(u.prog);                      // 再检查：导入类型/方法可见 + 本模块函数体语义复检
     } catch (CompileError& e) {
         // 跨模块错误链完整展示：把错误准确归属到出错模块文件、补全该模块的源代码行，
@@ -1858,6 +1874,8 @@ int main(int argc, char** argv) {
         auto warnings = analyzeExternalUsage(prog);                 // 外部描述符使用统计（标记 used）+ 导入未使用警告
         // 泛型宏单态化：仅实际编译路径生效；--emit-sc/--ast 保留原始 def/mix 以便源码回写。
         if (mode != "sc" && mode != "ast") expandGenericMixes(prog);
+        ensureBuiltinHeaderSymbols(unitPath.has_parent_path() ? unitPath.parent_path()
+                                                              : std::filesystem::current_path());
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）

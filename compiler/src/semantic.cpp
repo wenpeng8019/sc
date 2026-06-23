@@ -79,9 +79,83 @@ const std::unordered_set<std::string>& preludeHeaders() {
         "stdint.h", "stddef.h", "stdbool.h", "stdarg.h",
         "stdio.h", "stdlib.h", "string.h", "time.h",
         "assert.h", "inttypes.h",
+        "platform.h",   // scc 生成的 C 始终经 platform.h 带入；其自有符号由动态扫描登记
     };
     return s;
 }
+
+// ---- 内置 C 头（platform.h）符号动态注册表 ----
+// 由 registerBuiltinHeaderSymbols（见文件末公开接口）按 header 内容填充。
+// 区别于下面写死的 libc 白名单：platform.h 是可编辑/扩展的「我们自己的」头，
+// 故按内容扫描其声明的符号，免去每次加 P_xxx/sc_xxx 都改编译器。
+std::unordered_set<std::string>& builtinHeaderIdents() {
+    static std::unordered_set<std::string> s; return s;   // 宏 / 函数名（值与可调用位置）
+}
+std::unordered_set<std::string>& builtinHeaderTypes() {
+    static std::unordered_set<std::string> s; return s;   // typedef / struct-union 类型名
+}
+
+// 扫描内置 C 头文本，按行启发式提取其声明的符号名（宏 / 函数 / 类型）填入注册表。
+// 仅用于「已知符号」放宽：多收录无害（只会少报未定义，绝不会误报），故取宽松匹配。
+void scanBuiltinHeaderText(const std::string& text) {
+    auto& idents = builtinHeaderIdents();
+    auto& types  = builtinHeaderTypes();
+    auto isIdentCh = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+    // '(' 前 / ';' 前紧邻的标识符（跳过尾随非标识符字符）
+    auto identBefore = [&](const std::string& s, size_t pos) -> std::string {
+        size_t q = pos; while (q > 0 && !isIdentCh(s[q - 1])) q--;
+        size_t p = q;   while (p > 0 && isIdentCh(s[p - 1])) p--;
+        return q > p ? s.substr(p, q - p) : std::string{};
+    };
+
+    size_t i = 0, n = text.size();
+    while (i < n) {
+        size_t e = text.find('\n', i);
+        if (e == std::string::npos) e = n;
+        std::string line = text.substr(i, e - i);
+        i = e + 1;
+
+        size_t s = line.find_first_not_of(" \t");
+        if (s == std::string::npos) continue;
+        std::string t = line.substr(s);
+
+        // 1) #define NAME / #define NAME(...) —— 宏（含平台判定宏、函数式宏）
+        if (t[0] == '#') {
+            size_t k = 1; while (k < t.size() && (t[k] == ' ' || t[k] == '\t')) k++;
+            if (t.compare(k, 6, "define") == 0) {
+                size_t p = k + 6; while (p < t.size() && (t[p] == ' ' || t[p] == '\t')) p++;
+                size_t q = p;     while (q < t.size() && isIdentCh(t[q])) q++;
+                if (q > p) idents.insert(t.substr(p, q - p));
+            }
+            continue;   // 其余预处理指令忽略
+        }
+
+        // 2) typedef ... NAME;  及  } NAME;（struct/union typedef 收尾）→ 类型名
+        const bool isTypedef = t.compare(0, 8, "typedef ") == 0;
+        if (isTypedef || t[0] == '}') {
+            size_t semi = t.find(';');
+            if (semi != std::string::npos) {
+                std::string nm = identBefore(t, semi);
+                if (!nm.empty()) types.insert(nm);
+            }
+            if (isTypedef) continue;
+        }
+
+        // 3) 函数定义/原型：仅认 static / extern / inline 起头的顶层声明行
+        //    （平台函数皆 static inline）；取首个 '(' 前紧邻标识符为函数名。
+        if (t.compare(0, 7, "static ") == 0 || t.compare(0, 7, "extern ") == 0 ||
+            t.compare(0, 7, "inline ") == 0) {
+            size_t lp = t.find('(');
+            if (lp != std::string::npos) {
+                std::string nm = identBefore(t, lp);
+                if (!nm.empty()) idents.insert(nm);
+            }
+        }
+    }
+}
+
 
 // 预置头（preludeHeaders）暴露的常用 libc 函数 / 宏 / 常量白名单：
 // 这些名字始终可作为「已知可调用」与「已知标识符」，避免对合法 C 互操作误报未定义。
@@ -323,6 +397,7 @@ struct Checker {
         if (structs.count(n) || aliases.count(n) || funcTypes.count(n)) return true;
         if (declNames.count(n)) return true;     // 枚举类型 / 外部模块 / C 头类型 / 全局符号
         if (libcTypes().count(n)) return true;
+        if (builtinHeaderTypes().count(n)) return true;   // platform.h 动态扫描的 typedef/结构类型
         return false;
     }
 
@@ -772,6 +847,7 @@ struct Checker {
         if (resolveStruct(nm)) return true;                           // T() 构造糖
         if (aliases.count(nm)) return true;                           // 别名 → 可能是构造糖
         if (libcSymbols().count(nm)) return true;                     // libc 函数
+        if (builtinHeaderIdents().count(nm)) return true;             // platform.h 动态扫描的宏/函数
         if (declNames.count(nm)) return true;                         // catch-all 外部/本地声明名
         return false;
     }
@@ -1866,6 +1942,11 @@ struct Checker {
 void semanticCheck(const Program& prog) {
     Checker c(prog);
     c.run();
+}
+
+// 对外接口：注册内置 C 头（platform.h）符号，使其在语义检查中视为已知。
+void registerBuiltinHeaderSymbols(const std::string& headerText) {
+    scanBuiltinHeaderText(headerText);
 }
 
 // ============================================================

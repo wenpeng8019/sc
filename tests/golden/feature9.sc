@@ -1,9 +1,5 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc stdio.h
-
-inc "platform.h"
-
 inc m.sc
 
 def ctx: {

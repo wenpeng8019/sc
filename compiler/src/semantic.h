@@ -7,6 +7,12 @@
 // 语义分析检查
 void semanticCheck(const Program& prog);
 
+// 注册「编译器默认 #include 的内置 C 头」（platform.h）所声明的符号，使其函数 /
+// 宏 / 类型名在语义检查中视为已知——区别于写死的 libc 白名单：platform.h 是可编辑、
+// 可扩展的「我们自己的」头，故按内容动态扫描，往后增删符号无需再改编译器。
+// 传入头文件全文；重复调用幂等（集合去重）。
+void registerBuiltinHeaderSymbols(const std::string& headerText);
+
 // 采集当前单元"自身代码"（非 external 声明）引用到的所有名字
 //（标识符 / 类型名 / 成员名 / 表达式 op/text）。供外部描述符使用分析与
 // C 头描述符匹配（cheaders）共用，避免重复遍历逻辑。

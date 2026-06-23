@@ -16,8 +16,6 @@
 #   - run<stack:N, prio:M> 选项块：设置线程属性（栈字节数 u4 / 优先级 u1），
 #     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
 #
-inc stdio.h
-inc "platform.h"
 inc m.sc
 
 # 共享上下文：互斥锁保护计数器
