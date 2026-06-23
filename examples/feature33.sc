@@ -23,7 +23,7 @@ def Vec: <T>, N
         data[8]: T
         len: i4
     }
-    fnc Vec_\N\_push: void, v: Vec_\N&, x: T
+    fnc Vec_\N\_push: v: Vec_\N&, x: T
         v->data[v->len] = x
         v->len = v->len + 1
     fnc Vec_\N\_get: T, v: Vec_\N&, i: i4

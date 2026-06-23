@@ -23,7 +23,7 @@
 inc stdio.h
 
 #-------------- 字面量后缀 --------------
-fnc show_suffix: void
+fnc show_suffix
     var a: = 5b          # i1
     var b: = 300w        # i2
     var c: = 7ub         # u1
@@ -41,7 +41,7 @@ fnc classify: ret, n: i4
         return 0
     return 1
 
-fnc demo_sugar: void
+fnc demo_sugar
     # ! → 失败（非 ok）时进入；classify(-2) 返回 -1 → 进块
     ! classify(-2)
         printf("fail branch, $=%d\n", $)

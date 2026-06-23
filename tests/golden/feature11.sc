@@ -2,13 +2,13 @@
 
 inc stdio.h
 
-fnc demo_scalar: void
+fnc demo_scalar
     var x: i4 = 0
     x.set(42)
     var y: i4 = x.get()
     printf("scalar: set(42) get()=%d\n", y)
 
-fnc bump: void, p: i4&
+fnc bump: p: i4&
     var cur: i4 = p->get_acq()
     p->set_rel(cur + 1)
 

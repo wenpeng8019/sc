@@ -18,7 +18,7 @@ inc "feature34_cmac.h"          # 提供定义型 C 宏 DEFINE_COUNTER
 # 映射「定义型」C 宏：每次实例化拼装出 counter_<N> 全局 + inc/get 两个函数
 def DEFINE_COUNTER:: N
     let counter_\N:: i4
-    fnc counter_\N\_inc:: void
+    fnc counter_\N\_inc::
     fnc counter_\N\_get:: i4
 
 # 实例化定义型 C 宏：展开点就地产生 static 计数器与函数

@@ -12,7 +12,7 @@
 inc stdio.h
 
 # 直接使用根导出的 metric（类型）与 app_report（操作），无需 inc 根模块。
-@fnc sensor_sample: void, label: char&, v: i4
+@fnc sensor_sample: label: char&, v: i4
     var m: metric
     m.tag = label
     m.value = v

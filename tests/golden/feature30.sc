@@ -11,7 +11,7 @@ inc feature30_mod.sc
     value: i4
 }
 
-@fnc app_report: void, m: metric
+@fnc app_report: m: metric
     printf("[report] %s = %d\n", m.tag, m.value)
 
 fnc main: i4

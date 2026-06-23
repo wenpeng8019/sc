@@ -16,5 +16,5 @@ inc stdio.h
 
 @var g_audit: audit
 
-@fnc lib_audit: void
+@fnc lib_audit
     g_audit.note()

@@ -32,7 +32,7 @@ def def_vec: T, N
         len: i4
         cap: i4
     }
-    fnc Vec_\N\_push: void, v: Vec_\N&, x: T
+    fnc Vec_\N\_push: v: Vec_\N&, x: T
         v->data[v->len] = x      # v 是指针形参：宏体内显式写 ->
         v->len = v->len + 1
     fnc Vec_\N\_get: T, v: Vec_\N&, i: i4

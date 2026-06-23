@@ -9,14 +9,14 @@
 inc stdio.h
 
 # 任意类型操作数：值接收者 . → 透传 sc_<op>(&v, ...)
-fnc demo_scalar: void
+fnc demo_scalar
     var x: i4 = 0
     x.set(42)                          # → sc_set(&x, 42)     原子写
     var y: i4 = x.get()                # → sc_get(&x)         原子读
     printf("scalar: set(42) get()=%d\n", y)
 
 # 指针接收者 -> → 透传 sc_<op>(p, ...)，并演示 acquire/release 序
-fnc bump: void, p: i4&
+fnc bump: p: i4&
     var cur: i4 = p->get_acq()         # → sc_get_acq(p)      acquire 读
     p->set_rel(cur + 1)                # → sc_set_rel(p, ...) release 写
 

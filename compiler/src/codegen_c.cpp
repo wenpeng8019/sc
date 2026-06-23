@@ -4756,7 +4756,8 @@ struct CGen {
         }
 
         // 自有全局对象：仅可变（var，非 let/tls/const）标量结构变量。
-        //   init：无显式初值且类型有零参 init 方法 → 注入构造。
+        //   init：类型有零参 init 方法 → 注入构造（不论是否显式初值）。显式初值先按聚合
+        //         初始化赋字段，init 随后作为构造钩子运行，语义同 C++ 成员初值 + 构造体。
         //   drop：类型有 drop 方法 → 注入析构（不论是否显式初值，对象存在即析构）。
         for (auto& d : prog.decls) {
             if (d->external || d->kind != Decl::VarD) continue;
@@ -4765,11 +4766,9 @@ struct CGen {
                     || f.type.fat || f.type.project
                     || f.type.fnKind != TypeRef::FncKind::None)
                     continue;
-                if (!f.init) {
-                    const Decl* im = findMethod(f.type.name, "init");
-                    if (im && im->structCommon.fields.empty())
-                        gInits.push_back({f.name, im->name});
-                }
+                const Decl* im = findMethod(f.type.name, "init");
+                if (im && im->structCommon.fields.empty())
+                    gInits.push_back({f.name, im->name});
                 const Decl* dm = findMethod(f.type.name, "drop");
                 if (dm) gDrops.push_back({f.name, dm->name});
             }

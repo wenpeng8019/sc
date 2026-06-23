@@ -29,7 +29,7 @@ inc feature30_mod.sc                # 引入消费单元（其内部引用本根
     value: i4
 }
 
-@fnc app_report: void, m: metric    # 全局通用操作：被依赖单元直接调用
+@fnc app_report: m: metric    # 全局通用操作：被依赖单元直接调用
     printf("[report] %s = %d\n", m.tag, m.value)
 
 fnc main: i4

@@ -9,13 +9,14 @@
     printf("%s = %d\n", #x, x);
 #define sumprint(fmt, ...) \
     printf(fmt, __VA_ARGS__);
-decl_pair(g)
 typedef struct com__project {
     uint32_t size;
     void *ending;
     limit *_;
 } com__project;
 
+static int32_t g_lo = 0;
+static int32_t g_hi = 1;
 
 int32_t main(void) {
     /* line 24 */

@@ -855,6 +855,7 @@ static bool programHasExports(const Program& prog) {
 //   仅供跨模块语法/语义可见（类型/方法/全局），不发定义、不参与链接——C 层定义与 extern
 //   原型由注入的 scm_<root>.h 提供。与 resolveUnitDeps 的向下合并同构，源头固定为根模块。
 //   仅并入类型/函数/变量/别名声明，跳过 inc/add（避免污染消费单元的 include 与构建指令）。
+static void expandGenericMixes(Program& prog);  // 前置声明（定义见下）
 static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPath) {
     const std::string origin = rootPath.string();
     for (auto& d : prog.decls) if (d->origin == origin) return;  // 已并入：幂等
@@ -862,8 +863,13 @@ static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPat
     if (text.empty()) return;
     try {
         Program mp = parse(lex(text));
+        // 解析根的依赖（带入其 inc 进来的宏定义）并展开根的顶层 mix，使「由宏展开产生的
+        //   @导出 对象」（如 mix ARGS_B 展开出的 @var ARGS_verbose）也作为根导出对消费单元
+        //   可见——与根自身编译时 scm_<root>.h 收录这些符号保持一致。
+        resolveUnitDeps(mp, rootPath);
+        expandGenericMixes(mp);
         for (auto& md : mp.decls) {
-            if (!md->exported) continue;
+            if (!md->exported || md->external) continue;   // 仅并根自身导出（跳过依赖并入的外部导出）
             if (md->kind == Decl::IncD || md->kind == Decl::AddD) continue;
             md->external = true;
             md->origin = origin;
@@ -904,6 +910,27 @@ static std::string substGenericText(const std::string& text,
             while (i < n && text[i] != '\n') out += text[i++];
             continue;
         }
+        if (c == '`') {                              // 串化 `name`（→ C #name）：消解为字符串字面量
+            size_t j = i + 1;                        //   宏体内 `param` 在重解析前即落地为 "实参文本"，
+            std::string inner;                       //   与 C 预处理 #param 语义一致（避免遗留为标识符）
+            while (j < n && text[j] != '`') inner += text[j++];
+            if (j < n) j++;                          // 吃掉收尾 `
+            std::string sub;                         // 对 inner 内整词做参数替换
+            for (size_t p = 0; p < inner.size(); ) {
+                char ic = inner[p];
+                if (std::isalpha((unsigned char)ic) || ic == '_') {
+                    size_t s = p;
+                    while (p < inner.size()
+                           && (std::isalnum((unsigned char)inner[p]) || inner[p] == '_')) p++;
+                    std::string id = inner.substr(s, p - s);
+                    auto it = binds.find(id);
+                    sub += (it != binds.end()) ? it->second : id;
+                } else { sub += ic; p++; }
+            }
+            out += '"'; out += sub; out += '"';
+            i = j;
+            continue;
+        }
         if (c == '\\') { i++; continue; }            // 粘贴运算符：丢弃（相邻段拼接）
         if (std::isalpha((unsigned char)c) || c == '_') {
             size_t s = i;
@@ -925,31 +952,66 @@ static std::string genericArgText(const Expr& a) {
 }
 
 static void expandGenericMixes(Program& prog) {
-    // 收集泛型宏（带类型参数）按名索引
-    std::unordered_map<std::string, const Decl*> generics;
+    // 收集可展开的函数宏（非 C 桥接 :: 、非对象 =value）按名索引；含外部依赖宏（mix 可能
+    // 引用 inc 进来的依赖宏，如下游 inc env.sc 后 mix ARGS_B）。
+    std::unordered_map<std::string, const Decl*> macros;
     for (auto& d : prog.decls)
-        if (d->kind == Decl::MacroD && !d->macroTypeParams.empty())
-            generics[d->name] = d.get();
-    if (generics.empty()) return;
+        if (d->kind == Decl::MacroD && !d->cImpl && !d->macroObject)
+            macros[d->name] = d.get();
+    if (macros.empty()) return;
 
-    std::vector<DeclPtr> generated;
+    // 「对象定义」宏集合（不动点）：宏体直接含 var/let/tls 声明，或经 mix 间接展开到对象
+    //   定义宏。这类非泛型宏的顶层 mix 与泛型一样重解析进 AST —— 使其声明的全局对象参与
+    //   语义检查与生命期（init/drop）注入，而非停留在 C 预处理 #define 层（不可见于 AST）。
+    std::unordered_set<std::string> objDefining;
+    for (bool changed = true; changed; ) {
+        changed = false;
+        for (auto& kv : macros) {
+            if (objDefining.count(kv.first)) continue;
+            bool obj = false;
+            for (auto& s : kv.second->body) {
+                if (!s) continue;
+                if (s->kind == Stmt::VarS || s->kind == Stmt::LetS || s->kind == Stmt::TlsS) {
+                    obj = true; break;
+                }
+                if (s->kind == Stmt::MixS && s->expr && s->expr->kind == Expr::Call
+                    && s->expr->a && s->expr->a->kind == Expr::Ident
+                    && objDefining.count(s->expr->a->text)) {
+                    obj = true; break;
+                }
+            }
+            if (obj) { objDefining.insert(kv.first); changed = true; }
+        }
+    }
+
+    bool anyGeneric = false;
+    for (auto& kv : macros)
+        if (!kv.second->macroTypeParams.empty()) { anyGeneric = true; break; }
+    if (!anyGeneric && objDefining.empty()) return;  // 无可重解析的 mix
+
     std::unordered_set<std::string> seen;   // 实例去重键
 
-    for (auto& d : prog.decls) {
-        if (d->kind != Decl::MixD || !d->expr) continue;
+    // 尝试展开单个顶层 MixD：泛型宏，或「对象定义」非泛型宏 → 重解析其特化体，结果声明压入
+    //   out（不含原 mix 自身），返回 true；其余宏保持 #define 行为，返回 false。
+    auto tryExpand = [&](Decl* d, std::vector<DeclPtr>& out) -> bool {
+        if (d->kind != Decl::MixD || !d->expr) return false;
         const Expr& call = *d->expr;
-        if (call.kind != Expr::Call || !call.a || call.a->kind != Expr::Ident) continue;
-        auto git = generics.find(call.a->text);
-        if (git == generics.end()) continue;     // 普通文本宏：保持 #define 行为
-        const Decl* m = git->second;
+        if (call.kind != Expr::Call || !call.a || call.a->kind != Expr::Ident) return false;
+        auto mit = macros.find(call.a->text);
+        if (mit == macros.end()) return false;
+        const Decl* m = mit->second;
+        const bool isGeneric = !m->macroTypeParams.empty();
+        if (!isGeneric && !objDefining.count(m->name)) return false;  // 普通文本宏：保持 #define
 
         const size_t nTy = m->macroTypeParams.size();
         const size_t nName = m->structCommon.fields.size();
         if (call.args.size() != nTy + nName) {
-            CompileError e("泛型宏 '" + m->name + "' 需要 " + std::to_string(nTy + nName)
-                           + " 个实参（" + std::to_string(nTy) + " 类型 + "
-                           + std::to_string(nName) + " 名），实际传入 "
-                           + std::to_string(call.args.size()) + " 个", d->line);
+            CompileError e((isGeneric ? std::string("泛型宏 '") : std::string("对象宏 '"))
+                           + m->name + "' 需要 " + std::to_string(nTy + nName) + " 个实参"
+                           + (isGeneric ? "（" + std::to_string(nTy) + " 类型 + "
+                                          + std::to_string(nName) + " 名）"
+                                        : std::string{})
+                           + "，实际传入 " + std::to_string(call.args.size()) + " 个", d->line);
             throw e;
         }
         d->macroConsumed = true;       // 标记消费（codegen 跳过该 mix 与泛型 #define）
@@ -965,7 +1027,7 @@ static void expandGenericMixes(Program& prog) {
             key += (k ? "," : "") + at;
         }
         key += ">";
-        if (!seen.insert(key).second) continue;   // 同一实例已生成，跳过
+        if (!seen.insert(key).second) return true;   // 同一实例已生成，丢弃本 mix
 
         // 渲染宏体 → 文本替换 → 重新解析为具体声明
         std::string bodyText = emitMacroBodySc(m->body);
@@ -973,14 +1035,29 @@ static void expandGenericMixes(Program& prog) {
         try {
             Program sp = parse(lex(specialized));
             for (auto& nd : sp.decls)
-                generated.push_back(std::move(nd));
+                out.push_back(std::move(nd));
         } catch (CompileError& e) {
             if (e.hint.empty())
-                e.hint = "泛型宏 '" + m->name + "' 实例化 " + key + " 时其特化体解析失败";
+                e.hint = "宏 '" + m->name + "' 实例化 " + key + " 时其特化体解析失败";
             throw;
         }
+        return true;
+    };
+
+    // 原始顶层 mix 展开到 pending；迭代抽干（嵌套 mix，如 ARGS_B→ARGS_DEF，继续展开），
+    //   非 mix 与不可展开 mix 落入 generated，最终按序追加到 prog.decls 尾部。
+    std::vector<DeclPtr> pending, generated;
+    for (auto& d : prog.decls)
+        tryExpand(d.get(), pending);
+    for (size_t i = 0; i < pending.size(); i++) {
+        std::vector<DeclPtr> more;
+        if (pending[i]->kind == Decl::MixD && tryExpand(pending[i].get(), more)) {
+            for (auto& g : more) pending.push_back(std::move(g));   // 追加再处理（索引稳定）
+        } else {
+            generated.push_back(std::move(pending[i]));
+        }
     }
-    for (auto& g : generated) prog.decls.push_back(std::move(g));
+    for (auto& g : generated) if (g) prog.decls.push_back(std::move(g));
 }
 
 // 收集根模块「导出 inc 闭包」（规范路径集，含根自身）：沿 @inc（导出 include）边递归。

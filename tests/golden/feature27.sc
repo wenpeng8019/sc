@@ -2,7 +2,7 @@
 
 inc stdio.h
 
-fnc show_suffix: void
+fnc show_suffix
     var a: = 5b
     var b: = 300w
     var c: = 7ub
@@ -18,7 +18,7 @@ fnc classify: ret, n: i4
         return 0
     return 1
 
-fnc demo_sugar: void
+fnc demo_sugar
     ! classify(-2)
         printf("fail branch, $=%d\n", $)
     ! classify(0)

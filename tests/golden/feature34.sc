@@ -6,7 +6,7 @@ inc "feature34_cmac.h"
 
 def DEFINE_COUNTER:: N
     let counter_\N:: i4
-    fnc counter_\N\_inc::: void
+    fnc counter_\N\_inc::
     fnc counter_\N\_get::: i4
 
 mix DEFINE_COUNTER(hits)

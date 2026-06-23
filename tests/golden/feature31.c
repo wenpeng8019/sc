@@ -14,13 +14,14 @@
     extern int32_t pfx##_lo; \
     int32_t pfx##_lo = 10; \
     static int32_t pfx##_hi = 20;
-gpair(cfg)
 typedef struct com__project {
     uint32_t size;
     void *ending;
     limit *_;
 } com__project;
 
+int32_t cfg_lo = 10;
+static int32_t cfg_hi = 20;
 
 int32_t main(void) {
     /* line 43 */

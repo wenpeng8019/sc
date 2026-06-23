@@ -126,6 +126,20 @@ const std::unordered_set<std::string>& libcSymbols() {
     return s;
 }
 
+// 预置头暴露的常用 libc 类型名白名单：无需 sc 侧 def 即可在类型位置使用，
+// 避免对常见 C 互操作类型（FILE/size_t 等）误报「未定义的类型」。
+const std::unordered_set<std::string>& libcTypes() {
+    static const std::unordered_set<std::string> s = {
+        "size_t", "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t",
+        "intmax_t", "uintmax_t", "max_align_t",
+        "int8_t", "int16_t", "int32_t", "int64_t",
+        "uint8_t", "uint16_t", "uint32_t", "uint64_t",
+        "FILE", "fpos_t", "time_t", "clock_t", "wchar_t",
+        "va_list", "div_t", "ldiv_t", "lldiv_t",
+    };
+    return s;
+}
+
 // ---------------- 内部类型表示 ----------------
 // 轻量级类型描述，比完整的 TypeRef 更紧凑、便于比较。
 // valid=false 表示类型未知（如调用未登记的模块函数），跳过后续检查。
@@ -289,6 +303,60 @@ struct Checker {
             name = al->second;
         }
         return name;
+    }
+
+    // ---- 类型名校验 ----
+
+    // sc 内置基本类型名（见 syntax.md §「内置类型」；含 char 别名 c1、可变参 va_list）。
+    static bool isPrimitiveType(const std::string& n) {
+        static const std::unordered_set<std::string> p = {
+            "i1", "i2", "i4", "i8", "u1", "u2", "u4", "u8",
+            "f4", "f8", "bool", "char", "ret", "c1", "va_list",
+        };
+        return p.count(n) != 0;
+    }
+
+    // 类型名是否已知：内置基本类型、用户定义类型（struct/union/alias/enum/functype）、
+    // 外部模块/C 头合并的声明名、常见 libc 互操作类型。
+    bool isKnownTypeName(const std::string& n) const {
+        if (isPrimitiveType(n)) return true;
+        if (structs.count(n) || aliases.count(n) || funcTypes.count(n)) return true;
+        if (declNames.count(n)) return true;     // 枚举类型 / 外部模块 / C 头类型 / 全局符号
+        if (libcTypes().count(n)) return true;
+        return false;
+    }
+
+    // 未知类型名的近似提示（typo）：在已知类型名集合里找最近者。
+    std::string hintTypeName(const std::string& n) const {
+        std::vector<std::string> cands;
+        for (const char* p : {"i1","i2","i4","i8","u1","u2","u4","u8",
+                              "f4","f8","bool","char","ret"}) cands.push_back(p);
+        for (auto& kv : structs)   cands.push_back(kv.first);
+        for (auto& kv : aliases)   cands.push_back(kv.first);
+        for (auto& kv : funcTypes) cands.push_back(kv.first);
+        std::string c = closestName(n, cands);
+        return c.empty() ? std::string{} : "，是否想用 '" + c + "'？";
+    }
+
+    // 校验出现在类型位置的基类型名是否合法。
+    // · void 特例：sc 无 void 值类型 —— 作返回/值类型（无指针无数组）即报错；
+    //   仅 void&/void**（指针，等价 void*）放行（与裸 & 同义）。
+    // · 内联结构/联合、函数指针类型：基类型名由其自身结构承载，跳过。
+    // · 其余未知名在非放宽模式下报「未定义的类型」（放宽门控同未定义标识符检查）。
+    void checkTypeName(const TypeRef& t, int line) const {
+        if (t.hasInline) return;                          // 内联 {..}/(..)：无具名基类型
+        if (t.fnKind != TypeRef::FncKind::None) return;   // 函数指针类型：单独承载签名
+        const std::string& n = t.name;
+        if (n == "void") {
+            if (t.ptr == 0 && t.arrayDims.empty())
+                err(line, "sc 无 void 值类型：函数无返回值请省略返回类型，"
+                          "空指针用裸 & 或 void&");
+            return;                                       // void&/void** ≡ void*/void**：放行
+        }
+        if (n.empty()) return;                            // 省略类型名：void*/char* 由 codegen 兜底
+        if (lenientCalls) return;                         // 存在未枚举 C 头 / add：可能引入未知类型
+        if (!isKnownTypeName(n))
+            err(line, "未定义的类型 '" + n + "'" + hintTypeName(n));
     }
 
     // ---- 按值递归包含检测 ----
@@ -945,6 +1013,7 @@ struct Checker {
                        std::unordered_map<std::string, Ty>& locals,
                        bool isLet = false) {
         for (auto& f : ds) {
+            checkTypeName(f.type, f.line);   // 校验显式声明的类型名（void 值类型 / 未定义类型）
             Ty lhs = declaredOrInferredType(f, locals);
             if (f.init) {
                 Ty rhs = inferExpr(*f.init, locals, f.line);
@@ -1752,10 +1821,37 @@ struct Checker {
         }
     }
 
+    // 顶层声明的类型位置校验：函数返回/形参、结构体/联合字段、全局 var/let/tls 的类型名。
+    //   仅校验本单元自身声明（external 的依赖/根注入声明已在其所属单元校验过）。
+    void checkDeclTypes() {
+        for (auto& d : prog.decls) {
+            if (d->external) continue;
+            switch (d->kind) {
+                case Decl::FuncD:
+                case Decl::FuncTypeD:
+                    if (d->structCommon.type) checkTypeName(*d->structCommon.type, d->line);
+                    for (auto& p : d->structCommon.fields)
+                        checkTypeName(p.type, p.line ? p.line : d->line);
+                    break;
+                case Decl::StructD:
+                case Decl::UnionD:
+                case Decl::VarD:
+                case Decl::LetD:
+                case Decl::TlsD:
+                    for (auto& f : d->structCommon.fields)
+                        checkTypeName(f.type, f.line ? f.line : d->line);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+
     // ---- 主入口：三阶段检查 ---------------------------------
     void run() {
         collectTop();                   // 1. 收集顶层符号 + 检查全局初值
         checkDuplicateDefs();           // 1.5 同名顶层符号重复定义检测
+        checkDeclTypes();               // 1.6 顶层声明的类型位置校验（返回/形参/字段/全局）
         checkAggregateByValueCycles();  // 2. 按值包含环检测
         checkFatBoundaries();           // 2.5 自动指针 T@ 边界检查
         checkDeadCode();                // 2.6 不可达（死）代码检测
