@@ -63,6 +63,8 @@ POSITIVE=(
     examples/feature32.sc
     examples/feature33.sc
     examples/feature34.sc
+    examples/feature35.sc
+    examples/feature36.sc
     examples/feature30/feature30.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
@@ -128,6 +130,7 @@ RUNTIME_TRAP=(
     "tests/cases/trap_ptr_oob.sc ptr"
     "tests/cases/trap_mem_overflow.sc mem"
     "tests/cases/trap_ref_dangle.sc ref"
+    "tests/cases/auto_ptr_drop_bad.sc ref"
 )
 
 # 单元测试框架用例：--test 编译并运行 tst 用例，比对归一化后的 TAP 报告（golden .tap）。

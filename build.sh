@@ -68,7 +68,7 @@ do_test() {
     echo "==> 端到端验证 examples/feature*.sc"
     # 可运行特性系列：默认模式（编译+执行）
     local f
-    for f in feature1 feature2 feature3 feature4 feature5 feature6 feature7 feature8 feature9 feature10 feature11 feature12 feature13 feature14 feature15 feature16 feature17 feature18 feature19 feature20 feature21 feature22 feature23 feature24 feature25 feature26 feature27 feature28 feature29 feature31 feature32 feature33 feature34 feature_forward; do
+    for f in feature1 feature2 feature3 feature4 feature5 feature6 feature7 feature8 feature9 feature10 feature11 feature12 feature13 feature14 feature15 feature16 feature17 feature18 feature19 feature20 feature21 feature22 feature23 feature24 feature25 feature26 feature27 feature28 feature29 feature31 feature32 feature33 feature34 feature35 feature36 feature_forward; do
         echo "--- $f.sc（默认模式）---"
         "$BUILD_DIR/scc" "$ROOT/examples/$f.sc"
     done

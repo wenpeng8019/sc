@@ -145,7 +145,7 @@ struct CGen {
     bool mainHasTeardown = false;   // 入口 main 有待注入的尾声（全局 drop 或模块 drop）
     std::string modToken;           // 本单元模块 token（文件名 stem 经 C 标识符净化）
     std::vector<std::string> depTokens;  // 直接依赖 .sc 模块 token（去重、按声明序）
-    struct GLife { std::string var; std::string fn; };  // 全局对象名 + init/drop 方法 C 名
+    struct GLife { std::string var; std::string fn; std::string ownArg; };  // 全局对象名 + init/drop 方法 C 名（+init 隐藏 own 实参）
     std::vector<GLife> gInits;      // 本单元自有全局 init（源序，逆序 drop）
     std::vector<GLife> gDrops;      // 本单元自有全局 drop（源序登记，发出时逆序）
 
@@ -165,11 +165,15 @@ struct CGen {
     std::unordered_map<std::string, VType> globalsT, localsT;
     // 自动指针 T@：被构造为胖目标（T()）的类型名集合（决定生成 T__new_ref 带头分配）
     std::set<std::string> fatTypeNames;
-    // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量名，退块/return 时逆序 unbind
-    std::vector<std::vector<std::string>> fatScopes;
+    // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量，退块/return 时逆序 unbind。
+    //   dtorArg = 目标类型 T 有 drop 时的析构实参串 "(void (*)(void *))T_drop"（无则空），
+    //   解绑（in→0）时按目标静态类型调析构清理子成员（见 auto_ptr.md §5）。
+    struct FatRoot { std::string name; std::string dtorArg; };
+    std::vector<std::vector<FatRoot>> fatScopes;
     // 与 fatScopes 平行：每层本块内声明的 T@ 数组根变量（元素各为一条根边），退块/return 时
     // 逐元素 unbind（覆盖整个引用图，避免泄漏）。局部 T@ 数组（一维/多维）。
-    struct FatArrayVar { std::string name; std::vector<std::string> dims; };
+    //   dtorArg = 元素类型 T 的析构实参串（同 FatRoot），逐元素解绑时按元素类型调析构。
+    struct FatArrayVar { std::string name; std::vector<std::string> dims; std::string dtorArg; };
     std::vector<std::vector<FatArrayVar>> fatArrayScopes;
     // 与 fatScopes 平行：每层本块内被 & 借出（须注入 sc_ref 头）的普通栈变量，
     // 退块时（拆边后）逐个 sc_ref_check 检测外部悬挂（§4.2/§7.3）。仅 --check=ref 开启时填充。
@@ -206,6 +210,7 @@ struct CGen {
     int forSeq = 0;             // for-in 临时变量序号（生成唯一 _fi/_fb/... 名）
     bool inFunc = false;        // 当前是否在函数体内（决定变量注册到哪个表）
     const Decl* curFnSig = nullptr;  // 当前普通函数签名（return 临时变量取返回类型用）
+    std::string curMethodOwner;      // 当前方法的接收者类型 T（非方法为空）；供 this 的类型推断
     bool retDollarDeclared = false;  // ret 调用语法糖：当前函数是否已声明 $（_sc_ret）
 
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
@@ -441,7 +446,8 @@ struct CGen {
                 out << "        memset(_p, 0, sizeof(" << tn << "));\n";
             const Decl* im = findMethod(tn, "init");
             if (im && im->structCommon.fields.empty())
-                out << "        " << im->name << "(_p);\n";
+                out << "        " << im->name << "(_p"
+                    << (typeHasFatMember(tn) ? ", SC_OWN_RAW" : "") << ");\n";
             out << "    }\n    return _p;\n}\n\n";
 
             // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
@@ -470,7 +476,8 @@ struct CGen {
                 else
                     out << "    memset(_p, 0, sizeof(" << tn << "));\n";
                 if (im && im->structCommon.fields.empty())
-                    out << "    " << im->name << "(_p);\n";
+                    out << "    " << im->name << "(_p"
+                        << (typeHasFatMember(tn) ? ", &_h->out" : "") << ");\n";
                 out << "    return _p;\n}\n\n";
             }
         }
@@ -876,6 +883,36 @@ struct CGen {
         return nullptr;
     }
 
+    // 类型 T 是否含 ≥1 个自动指针 T@ 成员（决定其 init 是否需隐藏 _self_own 参数：
+    // init 经 this 给胖成员绑「新边」时，own 取自该参数携带的持有者出边上下文，见 §7.4）。
+    bool typeHasFatMember(const std::string& typeName) const {
+        const Decl* sd = aggrOf(typeName);
+        if (!sd) return false;
+        for (auto& f : sd->structCommon.fields)
+            if (f.type.fat) return true;
+        return false;
+    }
+
+    // 当前是否在「含胖成员类型」的 init 体内（其签名带 _self_own）：
+    // 决定 this->member = T()/fat 是否可经裸接收者绑新边（own=_self_own，运行时按 REAL 分支）。
+    bool curInFatInit = false;
+
+    // 自动指针解绑实参：目标类型 T 有析构 drop → "(void (*)(void *))T_drop"（in→0 时调以清理
+    // 子成员，见 auto_ptr.md §5）；无 drop 则空串（解绑点退化为普通 sc_fat_unbind，无析构步）。
+    std::string fatDtorArg(const std::string& typeName) const {
+        if (typeName.empty()) return "";
+        const Decl* dm = findMethod(typeName, "drop");
+        if (!dm) return "";
+        return "(void (*)(void *))" + dm->name;
+    }
+
+    // 发一条胖指针解绑语句：有 dtorArg 走 sc_fat_unbind_d（带目标类型析构），否则 sc_fat_unbind。
+    void emitFatUnbind(const std::string& lvAddr, const std::string& dtorArg) {
+        indent();
+        if (dtorArg.empty()) out << "sc_fat_unbind(&" << lvAddr << ");\n";
+        else out << "sc_fat_unbind_d(&" << lvAddr << ", " << dtorArg << ");\n";
+    }
+
     // RAII 预扫描：收集本函数内被显式 x.drop()/x->drop() 调用的变量名（move 语义抑制），
     // 以及被显式取址 &x 的变量名（可能经别名指针管理生命周期，保守抑制以免双重释放）。
     // 注意：方法调用 o.m() 的接收者取址是 codegen 隐式注入，AST 中无 & 节点，不会误伤。
@@ -972,6 +1009,11 @@ struct CGen {
                 if (it != localsT.end()) { vt = it->second; return true; }
                 it = globalsT.find(e.text);
                 if (it != globalsT.end()) { vt = it->second; return true; }
+                // 方法接收者 this：类型为 T&（裸一级指针），供胖成员读/解绑的类型推断
+                if (e.text == "this" && !curMethodOwner.empty()) {
+                    vt = {curMethodOwner, 1, 0};
+                    return true;
+                }
                 return false;
             }
             case Expr::Member: {
@@ -1190,6 +1232,13 @@ struct CGen {
         out << ").p)";
     }
 
+    // 标量/指针上下文（条件、与 nil 比较）发射：胖指针 T@ 取其 .p 作真值，
+    // 否则原样发射（sc_fat 是结构体，不能直接作条件或与 NULL 比较）。
+    void emitScalarized(const Expr& e) {
+        if (isFatExpr(e)) { out << "("; emitExpr(e, true); out << ").p"; }
+        else emitExpr(e, true);
+    }
+
 
     const Field* callableField(const Expr& m) const {
         if (m.kind != Expr::Member) return nullptr;
@@ -1323,9 +1372,17 @@ struct CGen {
                 break;
             case Expr::Binary:
                 if (!top) out << "(";
-                emitExpr(*e.a);
-                out << " " << e.op << " ";
-                emitExpr(*e.b);
+                // 胖指针 T@ 参与 == / != 比较：两侧各取 .p（nil 侧发射 NULL），
+                // 因 sc_fat 是结构体不能直接比较。
+                if ((e.op == "==" || e.op == "!=") && (isFatExpr(*e.a) || isFatExpr(*e.b))) {
+                    emitScalarized(*e.a);
+                    out << " " << e.op << " ";
+                    emitScalarized(*e.b);
+                } else {
+                    emitExpr(*e.a);
+                    out << " " << e.op << " ";
+                    emitExpr(*e.b);
+                }
                 if (!top) out << ")";
                 break;
             case Expr::Ternary:
@@ -1502,8 +1559,13 @@ struct CGen {
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
                         if (const Decl* md = findMethod(base.name, e.a->text)) {
                             out << md->name << "(";   // 修饰名 T_m
-                            if (e.a->op == ".") out << "&";
-                            emitExpr(*e.a->a);
+                            if (base.fat) {
+                                // 胖指针接收者：传底层堆对象指针 (T*)(recv).p（已是 T*，不取址）
+                                emitFatBaseAsRaw(*e.a->a, base.name);
+                            } else {
+                                if (e.a->op == ".") out << "&";
+                                emitExpr(*e.a->a);
+                            }
                             for (size_t i = 0; i < e.args.size(); i++) {
                                 out << ", ";
                                 const Field* pf = i < md->structCommon.fields.size()
@@ -1514,6 +1576,17 @@ struct CGen {
                             for (size_t i = e.args.size(); i < md->structCommon.fields.size(); i++) {
                                 out << ", ";
                                 emitDefaultArg(md->structCommon.fields[i]);
+                            }
+                            // 显式调用含胖成员类型的 init：补隐藏 _self_own（胖接收者→其出边，
+                            // 否则裸/值接收者→ SC_OWN_RAW 退化，见 §7.4）。
+                            if (e.a->text == "init" && typeHasFatMember(base.name)) {
+                                if (base.fat) {
+                                    out << ", &((sc_ref *)(";
+                                    emitExpr(*e.a->a, true);
+                                    out << ").tar)->out";
+                                } else {
+                                    out << ", SC_OWN_RAW";
+                                }
                             }
                             out << ")";
                             break;
@@ -1873,8 +1946,15 @@ struct CGen {
             std::string tt;
             if (!isFatExpr(lhs, nullptr)) return false;  // 成员本身须是 T@
             if (!isFatExpr(*lhs.a, &tt)) {
-                // 经裸 base 写胖成员：§7.4 禁止
-                throw CompileError{"禁止经裸指针写自动指针 T@ 成员（须经 T@ base）", lhs.line};
+                // 经裸 base（含 this）写胖成员：仅允许 = nil 解绑（成员自带 own/tar，
+                // 无需重算持有者 out，对有头/无头容器都安全）。own="" 标记裸 base。
+                VType bt;
+                if (!exprVType(*lhs.a, bt)) return false;
+                std::string baseStr = captureExpr(*lhs.a);
+                std::string acc = (bt.ptr > 0 || bt.arr > 0) ? "->" : ".";
+                lv = "(" + baseStr + ")" + acc + lhs.text;
+                own = "";   // 裸 base 标记：只可解绑，不可绑新边
+                return true;
             }
             std::string baseStr = captureExpr(*lhs.a);
             lv = "((" + tt + " *)(" + baseStr + ").p)->" + lhs.text;
@@ -1887,13 +1967,13 @@ struct CGen {
     // 自动指针 T@ 根变量声明：sc_fat 声明 + 按初值形态绑定，并登记进当前作用域。
     void emitFatVarInit(const Field& f, bool asConst, bool isStatic) {
         regVar(f);
-        if (!fatScopes.empty()) fatScopes.back().push_back(f.name);
+        if (!fatScopes.empty()) fatScopes.back().push_back({f.name, fatDtorArg(f.type.name)});
         indent();
         if (isStatic) out << "static ";
         if (asConst) out << "const ";
         out << "sc_fat " << f.name << " = {0};\n";
         if (!f.init) return;
-        emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true);
+        emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true, f.type.name);
     }
 
     // 胖指针赋值（lv=左值, own=持有者 out 表达式）：
@@ -1902,14 +1982,16 @@ struct CGen {
     //   胖左值→ 绑定：新增一条边（目标.in++、own.out++）
     //   nil   → 解绑（清空）
     // isInit=false 时先解绑旧边（§4.1 重新赋值必先拆旧边）。
+    //   targetType=左值的目标静态类型 T（拆旧边时按其析构 drop 清理子成员，见 §5）。
     void emitFatBind(const std::string& lv, const std::string& own,
-                     const Expr& init, bool isInit) {
+                     const Expr& init, bool isInit, const std::string& targetType = "") {
+        std::string dtorArg = fatDtorArg(targetType);
         // nil：仅解绑
         if (init.kind == Expr::Ident && init.text == "nil") {
-            if (!isInit) { indent(); out << "sc_fat_unbind(&" << lv << ");\n"; }
+            if (!isInit) emitFatUnbind(lv, dtorArg);
             return;
         }
-        if (!isInit) { indent(); out << "sc_fat_unbind(&" << lv << ");\n"; }
+        if (!isInit) emitFatUnbind(lv, dtorArg);
         // T() → 带头分配 + 绑定
         if (const Decl* td = typeCallee(init)) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
@@ -1978,11 +2060,63 @@ struct CGen {
         out << ";\n";
     }
 
+    // 含胖成员类型的 init 体内、经 this 给胖成员绑「新边」：own 取隐藏 _self_own，
+    // 运行时按其是否「真实出边」分支（§7.4）：
+    //   SC_OWN_REAL(_self_own) → 容器是带头 ref 对象：带头堆分配 + 记账绑定（owner.out++）；
+    //   否则（SC_OWN_RAW，容器无头：栈值/裸堆/静态） → 退化为裸创建/裸别名，不追踪。
+    // init 为 T() 构造或既有胖表达式（nil 已在上层按解绑处理）。
+    void emitFatBindSelfOwn(const std::string& lv, const std::string& tt, const Expr& init) {
+        // 重新赋值先拆旧边（own 字段保留，解绑用成员自带 own/tar）
+        emitFatUnbind(lv, fatDtorArg(tt));
+        const Decl* td = typeCallee(init);
+        indent(); out << "if (SC_OWN_REAL(_self_own)) {\n";
+        depth++;
+        if (td) {
+            std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
+            indent(); out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
+                << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            indent(); out << "sc_fat_bind(&" << lv << ", " << tmp
+                << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), _self_own);\n";
+        } else {
+            std::string rhs = captureExpr(init);
+            indent(); out << "sc_fat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
+                << rhs << ").tar, _self_own);\n";
+        }
+        depth--;
+        indent(); out << "} else {\n";
+        depth++;
+        if (td) {
+            indent(); out << "(" << lv << ").p = " << td->name << "__new();\n";
+        } else {
+            std::string rhs = captureExpr(init);
+            indent(); out << "(" << lv << ").p = (" << rhs << ").p;\n";
+        }
+        indent(); out << "(" << lv << ").tar = (int32_t *)0;\n";
+        indent(); out << "(" << lv << ").own = SC_OWN_RAW;\n";
+        depth--;
+        indent(); out << "}\n";
+    }
+
     // 胖指针赋值语句入口（左值任意：根变量 / 胖成员）。返回 false 表示非胖左值。
     bool emitFatAssignStmt(const Expr& lhs, const Expr& init, bool isInit) {
         std::string lv, own;
         if (!fatLhsInfo(lhs, lv, own)) return false;
-        emitFatBind(lv, own, init, isInit);
+        std::string tt;                  // 左值目标静态类型（拆旧边时据此调析构）
+        isFatExpr(lhs, &tt);
+        if (own.empty()) {
+            // 裸 base（含 this）胖成员：nil 解绑总是允许（成员自带 own/tar）。
+            if (init.kind == Expr::Ident && init.text == "nil") {
+                emitFatUnbind(lv, fatDtorArg(tt));
+                return true;
+            }
+            // 含胖成员类型的 init 体内、经 this 绑新边：own 取隐藏 _self_own，运行时分支。
+            if (curInFatInit && lhs.a && lhs.a->kind == Expr::Ident && lhs.a->text == "this") {
+                emitFatBindSelfOwn(lv, tt, init);
+                return true;
+            }
+            throw CompileError{"禁止经裸指针绑定自动指针 T@ 成员新边（仅 init 内经 this 绑定，或 = nil 解绑）", lhs.line};
+        }
+        emitFatBind(lv, own, init, isInit, tt);
         return true;
     }
 
@@ -2011,11 +2145,10 @@ struct CGen {
     }
 
     // 作用域退出：对本块内胖根变量逆序 unbind（skip = 被移动返回的变量名，跳过）
-    void emitFatScopeCleanup(const std::vector<std::string>& scope, const std::string& skip) {
+    void emitFatScopeCleanup(const std::vector<FatRoot>& scope, const std::string& skip) {
         for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
-            if (*it == skip) continue;
-            indent();
-            out << "sc_fat_unbind(&" << *it << ");\n";
+            if (it->name == skip) continue;
+            emitFatUnbind(it->name, it->dtorArg);
         }
     }
 
@@ -2041,7 +2174,10 @@ struct CGen {
                         << k << "-- > 0; ) ";
                     sub += "[" + k + "]";
                 }
-                out << "sc_fat_unbind(&" << it->name << sub << ");\n";
+                if (it->dtorArg.empty())
+                    out << "sc_fat_unbind(&" << it->name << sub << ");\n";
+                else
+                    out << "sc_fat_unbind_d(&" << it->name << sub << ", " << it->dtorArg << ");\n";
             }
         if (i < fatStackScopes.size())                           // phase2：栈对象断言（带 site）
             for (auto it = fatStackScopes[i].rbegin(); it != fatStackScopes[i].rend(); ++it) {
@@ -2144,7 +2280,7 @@ struct CGen {
                 for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
                 out << " = {0};\n";
                 if (!fatArrayScopes.empty())
-                    fatArrayScopes.back().push_back({f.name, f.type.arrayDims});
+                    fatArrayScopes.back().push_back({f.name, f.type.arrayDims, fatDtorArg(f.type.name)});
                 continue;
             }
             // --check=mem：函数内栈数组 → 超额分配尾哨兵 + 退域校验，捕获栈数组越界写。
@@ -2268,7 +2404,8 @@ struct CGen {
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->structCommon.fields.empty()) {
                     indent();
-                    out << im->name << "(&" << f.name << ");\n";
+                    out << im->name << "(&" << f.name
+                        << (typeHasFatMember(f.type.name) ? ", SC_OWN_RAW" : "") << ");\n";
                 }
             }
             // RAII 闭环：栈值对象（类型有 drop 方法）退域自动 drop，LIFO。被显式 drop 的
@@ -2934,10 +3071,16 @@ struct CGen {
                 }
                 // 丢弃返回 T@ 的调用：移动来的入边无新主 → 丢弃点自动解绑临时（§7.7）
                 if (s.expr && s.expr->kind == Expr::Call && isFatExpr(*s.expr)) {
+                    std::string tt;
+                    isFatExpr(*s.expr, &tt);              // 临时目标类型（解绑即析构清理子成员）
+                    std::string dtorArg = fatDtorArg(tt);
                     std::string tmp = "_fatd" + std::to_string(fatTmpSeq++);
                     indent(); out << "{ sc_fat " << tmp << " = ";
                     emitExpr(*s.expr, true);
-                    out << "; sc_fat_unbind(&" << tmp << "); }\n";
+                    if (dtorArg.empty())
+                        out << "; sc_fat_unbind(&" << tmp << "); }\n";
+                    else
+                        out << "; sc_fat_unbind_d(&" << tmp << ", " << dtorArg << "); }\n";
                     break;
                 }
                 indent();
@@ -3022,7 +3165,7 @@ struct CGen {
             case Stmt::IfS:
                 indent();
                 out << "if (";
-                emitExpr(*s.expr, true);
+                emitScalarized(*s.expr);
                 out << ") {\n";
                 depth++; emitStmts(s.body); depth--;
                 indent(); out << "}";
@@ -3080,7 +3223,7 @@ struct CGen {
             case Stmt::WhileS:
                 indent();
                 out << "while (";
-                emitExpr(*s.expr, true);
+                emitScalarized(*s.expr);
                 out << ") {\n";
                 depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "}\n";
@@ -3089,7 +3232,7 @@ struct CGen {
                 indent(); out << "do {\n";
                 depth++; emitLoopBody(s.body); depth--;
                 indent(); out << "} while (";
-                emitExpr(*s.expr, true);
+                emitScalarized(*s.expr);
                 out << ");\n";
                 break;
             case Stmt::ForS:
@@ -3512,6 +3655,8 @@ struct CGen {
         inFunc = true;
         retDollarDeclared = false;
         curFnSig = nullptr;
+        curMethodOwner.clear();
+        curInFatInit = false;
         preScanFatBorrows(d.body);
         scanManualDrops(d.body);
         depth++;
@@ -3555,7 +3700,7 @@ struct CGen {
         out << "int main(int argc, char **argv) {\n";
         out << "    (void)argc; (void)argv;\n";
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
-        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << ");\n";
+        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
         for (auto& tc : testCases)
             out << "    sc__run_case(\"" << tc.d->name << "\", &" << tc.cname
                 << ", " << (tc.d->testSkip ? 1 : 0) << ");\n";
@@ -3581,7 +3726,7 @@ struct CGen {
 
     void emitElseIf(const Stmt& s) { // "} else " 之后接 if，不缩进首行
         out << "if (";
-        emitExpr(*s.expr, true);
+        emitScalarized(*s.expr);
         out << ") {\n";
         depth++; emitStmts(s.body); depth--;
         indent(); out << "}";
@@ -3969,6 +4114,9 @@ struct CGen {
                 out << ", ";
                 emitParams(sig->structCommon.fields, sig->structCommon.variadic);
             }
+            // 含胖成员类型的 init：尾随隐藏 _self_own（持有者出边上下文），见 §7.4。
+            if (d.methodName == "init" && typeHasFatMember(d.methodOwner))
+                out << ", int32_t *_self_own";
         } else {
             emitParams(sig->structCommon.fields, sig->structCommon.variadic);
         }
@@ -3997,6 +4145,8 @@ struct CGen {
         }
         for (auto& p : sig->structCommon.fields) regVar(p);
         curFnSig = sig;
+        curMethodOwner = d.methodOwner;   // 方法体内 this 的类型来源（非方法为空）
+        curInFatInit = (d.methodName == "init" && typeHasFatMember(d.methodOwner));
         preScanFatBorrows(d.body);   // Step4b：预扫描被 & 借出的栈变量，决定注入 ref 头
         scanManualDrops(d.body);     // RAII：预扫描显式 drop 的变量（move 语义抑制自动 drop）
         depth++;
@@ -4008,6 +4158,8 @@ struct CGen {
         depth--;
         inFunc = false;
         curFnSig = nullptr;
+        curMethodOwner.clear();
+        curInFatInit = false;
         out << "}\n\n";
     }
 
@@ -4021,11 +4173,15 @@ struct CGen {
         const bool savedInFunc = inFunc;
         const bool savedInMain = inMainFunc;   // lambda 体非 main：禁用尾声注入
         const int  savedDepth  = depth;
+        auto savedMethodOwner = std::move(curMethodOwner);   // lambda 体无 this
+        const bool savedInFatInit = curInFatInit;
         std::ostringstream savedOut = std::move(out);
         out = std::ostringstream();
 
         // 干净的函数作用域
         localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
+        curMethodOwner.clear();
+        curInFatInit = false;
         inFunc = true;
         inMainFunc = false;
         retDollarDeclared = false;
@@ -4058,6 +4214,8 @@ struct CGen {
         inFunc = savedInFunc;
         inMainFunc = savedInMain;
         depth  = savedDepth;
+        curMethodOwner = std::move(savedMethodOwner);
+        curInFatInit = savedInFatInit;
         manualDropVars = std::move(savedManualDrops);
         dropScopes     = std::move(savedDropScopes);
     }
@@ -4768,7 +4926,8 @@ struct CGen {
                     continue;
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->structCommon.fields.empty())
-                    gInits.push_back({f.name, im->name});
+                    gInits.push_back({f.name, im->name,
+                                      typeHasFatMember(f.type.name) ? "SC_OWN_RAW" : ""});
                 const Decl* dm = findMethod(f.type.name, "drop");
                 if (dm) gDrops.push_back({f.name, dm->name});
             }
@@ -4800,7 +4959,7 @@ struct CGen {
         out << "void sc_mod_" << modToken << "_init(void) {\n";
         out << "    static int _done = 0; if (_done) return; _done = 1;\n";
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
-        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << ");\n";
+        for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
         out << "}\n";
         out << "void sc_mod_" << modToken << "_drop(void) {\n";
         out << "    static int _done = 0; if (_done) return; _done = 1;\n";
@@ -4814,7 +4973,7 @@ struct CGen {
     // main 序言：递归各直接依赖模块 init，再构造入口自有全局（源序）。
     void emitMainPrologue() {
         for (auto& t : depTokens) { indent(); out << "sc_mod_" << t << "_init();\n"; }
-        for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << ");\n"; }
+        for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n"; }
     }
 
     // main 尾声：析构入口自有全局（逆序），再递归各直接依赖模块 drop（逆序）。

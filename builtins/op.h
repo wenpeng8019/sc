@@ -59,8 +59,13 @@ typedef struct sc_fat {
 
 /* 释放点验证：in!=0 悬挂 / out!=0 未清理（追踪构建附 who 源码定位） */
 void sc_ref_check(sc_ref *r, const char *who);
-/* 胖指针入边归零回调：out==0 且 heap → 自动 free；out>0 → 报未清理出边 */
+/* 胖指针入边归零回调：（堆对象）先调析构 dtor 让其清理子成员 → out 递减，再判定：
+ * out==0 → 自动 free；out>0 → 报「未清理出边」（dtor 未清干净）。
+ *   sc_fat_on_zero   —— 无析构（dtor=NULL）路径，等价 sc_fat_on_zero_d(f, NULL)。
+ *   sc_fat_on_zero_d —— 由解绑点按目标静态类型 T 传入 T 的析构（void(*)(void*)）；
+ *                       仅堆对象调 dtor（栈值对象自有退域 RAII drop，避免重复析构）。 */
 void sc_fat_on_zero(sc_fat *f);
+void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *));
 
 /* ---------------- --check=mem 越界 canary（头尾哨兵 + 地址派生魔数） ----------------
  * 仅在 --check=mem 构建下，T__new_ref 把 ref 头堆对象扩成：
@@ -110,22 +115,26 @@ static inline void sc_fat_bind(sc_fat *f, void *tgt, sc_ref *tr, int32_t *ow) {
         else (*f->own)++;
     }
 }
-/* 解绑一条边：目标.in--（触 0 → sc_fat_on_zero）、持有者.out--；清空指针。 */
-static inline void sc_fat_unbind(sc_fat *f) {
+/* 解绑一条边：目标.in--（触 0 → sc_fat_on_zero_d，传入目标类型析构）、持有者.out--；清空指针。
+ * own 字段解绑后保留（供重绑复用），故 own-- 仅在「确有活动边」（f->p 非空）时执行，
+ * 否则对已 = nil 的成员再次解绑会把 owner.out 误减为负。
+ * dtor 为目标静态类型 T 的析构 T_drop（无则 NULL），由编译器在解绑点按静态类型填入。 */
+static inline void sc_fat_unbind_d(sc_fat *f, void (*dtor)(void *)) {
     if (f->tar) {
         int32_t nv;
         if (SC_TAR_HDR(f->tar)->flags & SC_REF_ATOM)
             nv = __atomic_sub_fetch(f->tar, 1, __ATOMIC_SEQ_CST);
         else nv = --(*f->tar);
-        if (nv == 0) sc_fat_on_zero(f);
+        if (nv == 0) sc_fat_on_zero_d(f, dtor);
     }
-    if (SC_OWN_REAL(f->own)) {
+    if (SC_OWN_REAL(f->own) && f->p) {
         if (SC_OWN_HDR(f->own)->flags & SC_REF_ATOM)
             __atomic_fetch_sub(f->own, 1, __ATOMIC_SEQ_CST);
         else (*f->own)--;
     }
     f->p = (void *)0; f->tar = (int32_t *)0;
 }
+static inline void sc_fat_unbind(sc_fat *f) { sc_fat_unbind_d(f, (void (*)(void *))0); }
 
 /* ---------------- chain：侵入式双向链表 ----------------
  * 元素为 sc 链表结构体（def T: ~ {}，首位有 void *_prev, *_next）

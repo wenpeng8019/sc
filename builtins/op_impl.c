@@ -22,10 +22,17 @@ void sc_ref_check(sc_ref *r, const char *who) {
         fprintf(stderr, "sc: 未清理：%s 释放时仍持有 %d 个出向引用\n", who ? who : "对象", r->out);
 }
 
-void sc_fat_on_zero(sc_fat *f) {
+void sc_fat_on_zero(sc_fat *f) { sc_fat_on_zero_d(f, (void (*)(void *))0); }
+
+/* 入边归零（in→0）：堆对象先调目标类型析构 dtor（清子成员 → out 递减），再判 out。
+ *   dtor != NULL 且 heap → 先析构（栈值对象走退域 RAII drop，不在此重复析构，故 heap 守卫）。
+ *   out != 0（析构后仍持出边）→ 报「未清理」，不释放（释放会令其子目标 in 计数失衡）。
+ *   out == 0 && heap → 释放整块（--check=mem 经 canary 校验）。 */
+void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *)) {
     sc_ref *r = (sc_ref *)f->tar;          /* in 为 sc_ref 首成员，故 &ref->in == ref == 块首 */
     if (!r) return;
-    if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 仍持出边 → 报未清理，不释放 */
+    if (dtor && r->heap) dtor(f->p);       /* 堆对象 in→0：先析构，让其清理子成员（out 递减） */
+    if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 析构后仍持出边 → 报未清理，不释放 */
     if (!r->heap) return;                  /* 栈/全局对象：不释放 */
     if (r->flags & SC_REF_CANARY) { sc_canary_free(r); return; }  /* --check=mem：校验头尾哨兵 */
     free(r);                               /* 堆对象 in==0 && out==0 → 释放整块（含头） */
