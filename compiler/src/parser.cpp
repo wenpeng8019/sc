@@ -59,7 +59,7 @@ bool isAssignOp(const std::string& op) {
 // 用于成员名位置容忍关键字拼写：成员/方法名永不可能是语句关键字，
 // 故 .run() / .done() 等与语句关键字同名的方法可被正常解析。
 bool isKeywordTok(Tok k) {
-    return k >= Tok::KwDef && k <= Tok::KwOffsetof;
+    return k >= Tok::KwDef && k <= Tok::KwDim;
 }
 
 // Parser 内部类 —— 封装所有语法分析状态
@@ -331,13 +331,40 @@ struct Parser {
         return d;
     }
 
+    // 解析类维度声明：dim Name: tril, params...  \n\tbody
+    // + 仅在 cls 类体内合法；提升为带 methodOwner 的顶层 FuncD（isDim=true），
+    //   codegen 折叠进所属类唯一分派器的 switch 分支。返回类型恒为 tril。
+    DeclPtr parseDim() {
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        d->isDim = true;
+        advance();                                  // 跳过 dim 关键字
+        if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望维度名");
+        d->methodName = advance().text;
+        if (accept(Tok::Colon)) {                   // : tril, params...
+            if (!at(Tok::Newline))
+                parseFncVars(d->structCommon);
+        } else if (!at(Tok::Newline))
+            err("期望 ':' 或换行");
+        // 维度必有缩进函数体（同 name: fnc 成员体：当前为 Newline、下一为 Indent；
+        // 不可先 expect(Newline)，否则会吃掉仅有的换行致缩进检测失败）
+        if (!at(Tok::Newline) || peek().kind != Tok::Indent)
+            err("维度（dim）必须有缩进函数体");
+        d->kind = Decl::FuncD;
+        advance(); advance();  // Newline + Indent
+        parseStmts(d->body);
+        accept(Tok::Dedent);
+        return d;
+    }
+
     // 解析字段块：{ fields } 或 ( fields )，字段间以逗号或换行分隔。
     // + methodsOut 非空（顶层 def 结构体）时：
     //   > 函数签名字段后跟缩进块，则是成员函数实现
     //     此时提升为带 methodOwner 的顶层 FuncD（且该 field 不计入字段列表）
     //   > 无函数体则仍是普通函数指针字段 
     void parseFieldBlock(std::vector<Field>& out,
-                         std::vector<DeclPtr>* methodsOut = nullptr) {
+                         std::vector<DeclPtr>* methodsOut = nullptr,
+                         bool allowDim = false) {
 
         Tok close = at(Tok::LBrace) ? Tok::RBrace : Tok::RParen;
         bool inParen = at(Tok::LParen);
@@ -348,9 +375,17 @@ struct Parser {
             if (at(close)) break;
             if (at(Tok::End)) err("结构/联合未闭合");
 
+            // dim 关键字 → 类维度声明（仅 cls 类体内合法）
+            if (at(Tok::KwDim)) {
+                if (!allowDim) err("dim（维度）只能在 cls 类体内声明");
+                methodsOut->push_back(parseDim());
+                skipLayout();
+                accept(Tok::Comma);
+                continue;
+            }
+
             // fnc 关键字 → 成员函数声明（fnc name:: 或 fnc name:）
-            if (at(Tok::KwFnc)) {
-                auto m = parseMemberFnc();
+            if (at(Tok::KwFnc)) {                auto m = parseMemberFnc();
                 if (m->cImpl) {
                     // C 实现成员函数：提升为顶层方法（extern 原型 + 方法调用糖），
                     // 结构体本身不含函数指针字段（与 @fnc T::m 旧形态语义一致，
@@ -507,16 +542,18 @@ struct Parser {
     //   def name: ( fields )          → 联合体
     //   def name: base \n\titem...    → 枚举
 
-    DeclPtr parseDef() {
+    DeclPtr parseDef(bool asClass = false) {
 
         auto d = std::make_unique<Decl>();
         d->line = cur().line;
-        advance();                                      // 跳过 def 关键字
+        d->isClass = asClass;
+        advance();                                      // 跳过 def / cls 关键字
         if (!at(Tok::Ident)) err("期望类型名");           // 当前 token 必须是标识符（类型名）   
         d->name = foldMacroSpelling(advance().text);    // 类型名（宏体内折叠 \ 粘贴，支持 def T_\N 泛型实例化）
 
         // 1. 对于 -> 箭头语法：类型别名  def name -> target
         if (accept(Tok::Arrow)) {
+            if (asClass) err("cls 类只支持 { 字段块 } 形态（不支持别名 ->）");
             d->kind = Decl::AliasD;
             d->structCommon.type = std::make_shared<TypeRef>(parseTypeRef());
             expect(Tok::Newline, "换行");
@@ -602,8 +639,8 @@ struct Parser {
                 else if (angleNames.size() == 2) { isAdt = true; adtColl = angleNames[0]; adtItem = angleNames[1]; }
                 else err("结构体尖括号标记仅支持 <S>（分身/切片）或 <C, I>（ADT 容器）");
             }
-            parseFieldBlock(d->structCommon.fields, &pendingMethods);    // 解析字段块
-            for (auto& m : pendingMethods) {                // 处理成员函数：补齐 methodOwner 和 name（mangle 后）
+            parseFieldBlock(d->structCommon.fields, &pendingMethods, /*allowDim*/ asClass);    // 解析字段块
+            for (auto& m : pendingMethods) {                // 处理成员函数/维度：补齐 methodOwner 和 name（mangle 后）
                 m->methodOwner = d->name;
                 m->name = mangleMethodName(d->name, m->methodName);
             }
@@ -648,9 +685,27 @@ struct Parser {
             // 分身/切片实体：记录 S 类型名，回指字段 _self 由注入 pass 在 S 上补齐
             d->projectSelf = projectSelf;
 
+            // cls 类：在 synthetic 前缀（_prev/_next 或 _adt）之后注入分派器指针 _class。
+            if (asClass) {
+                for (auto& f : d->structCommon.fields)
+                    if (f.name == "_class")
+                        err("_class 为类（cls）内置成员，不可显式定义");
+                size_t at = 0;
+                while (at < d->structCommon.fields.size() && d->structCommon.fields[at].synthetic) at++;
+                Field f;
+                f.name = "_class";
+                f.type.name = "sc_hyper";       // 通用分派器指针 typedef（C 序言提供）
+                f.synthetic = true;
+                f.line = d->line;
+                d->structCommon.fields.insert(d->structCommon.fields.begin() + at, std::move(f));
+            }
+
             expect(Tok::Newline, "换行");
             return d;
         }
+
+        // cls 类只支持 { 字段块 }
+        if (asClass) err("cls 类只支持 { 字段块 } 形态");
 
         // 只有结构体支持链表标记 '~'
         if (linked) err("'~' 链表标记仅支持结构体 {}");
@@ -1715,6 +1770,14 @@ struct Parser {
                 return s;
             }
 
+            case Tok::KwCls: {
+                auto s = mkStmt(Stmt::DeclS);
+                s->decl = parseDef(/*asClass*/ true);
+                if (!pendingMethods.empty())
+                    err("局部类型不支持成员函数/维度");
+                return s;
+            }
+
             // mix 宏展开语句：mix name(args) → 展开为 C 宏调用（无分号包裹，宏体自含）
             case Tok::KwMix: {
                 auto s = mkStmt(Stmt::MixS);
@@ -2037,6 +2100,17 @@ struct Parser {
 
                     // 对于结构体内的成员函数，提升为顶层 Decl（随所属类型导出）
                     for (auto& m : pendingMethods) {
+                        m->exported = exported;
+                        prog.decls.push_back(std::move(m));
+                    }
+                    pendingMethods.clear();
+                    break;
+
+                // 类定义（cls）：复用 def 结构体机制 + 维度 dim
+                case Tok::KwCls:
+                    prog.decls.push_back(parseDef(/*asClass*/ true));
+                    prog.decls.back()->exported = exported;
+                    for (auto& m : pendingMethods) {        // 成员函数 + 维度提升为顶层
                         m->exported = exported;
                         prog.decls.push_back(std::move(m));
                     }

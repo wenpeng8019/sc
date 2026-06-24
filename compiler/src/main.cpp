@@ -1431,6 +1431,29 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (!th.empty() && !writeTextFile(tmpDir / "type.h", th)) return 1;
     }
 
+    // cls/dim 全局选择子聚合：跨所有单元取类名/维度名并集（去重、首见序），写出工程级
+    //   class.h，各使用类机制的单元 .c 已 #include "class.h"。保证 SC_CLS_<T>/SC_DIM_<Name>
+    //   在不同单元取同一编号（同名类/维度跨单元一致），从而跨模块 instanceOf / 动态分派正确。
+    {
+        std::vector<std::string> allCls, allDims;
+        bool anyClassRt = false;
+        for (auto& kv : units) {
+            if (programUsesClassRuntime(kv.second.prog)) anyClassRt = true;
+            for (auto& d : kv.second.prog.decls) {
+                if (d->kind == Decl::StructD && d->isClass &&
+                    std::find(allCls.begin(), allCls.end(), d->name) == allCls.end())
+                    allCls.push_back(d->name);
+                if (d->kind == Decl::FuncD && d->isDim &&
+                    std::find(allDims.begin(), allDims.end(), d->methodName) == allDims.end())
+                    allDims.push_back(d->methodName);
+            }
+        }
+        if (anyClassRt) {
+            const std::string ch = emitClassHeader(allCls, allDims);
+            if (!writeTextFile(tmpDir / "class.h", ch)) return 1;
+        }
+    }
+
     // 第二阶段：统一编译所有 .c -> .o（含已拼接进 .c 的源实现 <stem>_impl.c）
     for (auto& a : arts) {
         // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到；
@@ -1989,6 +2012,24 @@ int main(int argc, char** argv) {
             std::filesystem::path thPath =
                 std::filesystem::path(output).parent_path() / "type.h";
             if (!th.empty() && !writeTextFile(thPath, th)) return 1;
+        }
+
+        // 3f''-class. --emit-c 到文件且程序用到类机制：在同目录写出 class.h（SC_CLS_/
+        //   SC_DIM_ 选择子枚举，由 .c #include "class.h"）。转译工程自包含所需。
+        if (mode == "c" && !output.empty() && programUsesClassRuntime(prog)) {
+            std::vector<std::string> cls, dims;
+            for (auto& d : prog.decls) {
+                if (d->kind == Decl::StructD && d->isClass &&
+                    std::find(cls.begin(), cls.end(), d->name) == cls.end())
+                    cls.push_back(d->name);
+                if (d->kind == Decl::FuncD && d->isDim &&
+                    std::find(dims.begin(), dims.end(), d->methodName) == dims.end())
+                    dims.push_back(d->methodName);
+            }
+            const std::string ch = emitClassHeader(cls, dims);
+            std::filesystem::path chPath =
+                std::filesystem::path(output).parent_path() / "class.h";
+            if (!writeTextFile(chPath, ch)) return 1;
         }
 
         // 3f''. --emit-c 到文件：为每个用户 .sc 模块依赖生成同级 scm_<token>.h，

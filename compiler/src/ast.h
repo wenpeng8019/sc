@@ -437,6 +437,11 @@ struct Decl {
 
     bool linked = false;            // 链表结构体 def T: ~ {}：头部注入 _prev/_next 双向链指针
 
+    bool isClass = false;           // cls 类定义（StructD）：首部注入 synthetic _class 分派器指针，
+                                    // 各 dim 折叠进唯一分派器 T_hyper_impl 的 switch 分支
+    bool isDim = false;             // 维度（FuncD，methodOwner=类名、methodName=维度名）：
+                                    // 不单独生成函数，codegen 折叠进所属类的分派器 case；返回恒 tril
+
     bool tagged = false;            // 标签联合 def T: @( v1 / v2:T / ... )：UnionD 加隐藏 tag，
                                     // 安全构造 T.Variant(payload) + case 解构（Variant as x）。
                                     // 字段即变体：type.name 为空表示无载荷变体。

@@ -40,12 +40,18 @@ const KEYWORDS = [
     ['continue', '继续下一次循环'],
     ['run', '以 rpc 调用创建线程或入池（run 调用[, &t|pool]，需 inc m.sc）'],
     ['this', '方法体内的接收者指针（fnc T::m 中访问 this->字段）'],
+    ['cls', '定义类（单一分派器 + 全局维度选择子 + 三态应答 + 类型擦除引用）'],
+    ['dim', '声明维度（类的方法，返回值恒 tril，真正输出经指针出参回填）'],
+    ['instanceOf', 'O(1) 身份判定：instanceOf(o: object, TypeName) -> bool'],
 ];
 
 const LITERALS = [
     ['true', '布尔真'],
     ['false', '布尔假'],
     ['nil', '空指针常量'],
+    ['positive', '三态 tril：正/应答（+1）'],
+    ['negative', '三态 tril：负/否定（-1）'],
+    ['unknown', '三态 tril：未知/不应答（0）'],
 ];
 
 const TYPES = [
@@ -54,6 +60,8 @@ const TYPES = [
     ['bool', '布尔（u1 语义别名，true/false）'],
     ['char', '字符（与 C 字符串互操作，区别于 i1/u1）'],
     ['f4', 'float'], ['f8', 'double'],
+    ['tril', '三态基础类型（int8_t；字面量 positive/negative/unknown）'],
+    ['object', '类型擦除引用（指向任意类对象 _class 槽，既是身份又是分派入口）'],
     ['va_list', '可变参数列表类型（透传 stdarg.h）'],
     ['adt_obj', '内置 ADT 公共对象头'],
     ['string', '内置 ADT 字符串对象；string(值[, 缓存, 大小]) 为格式化关键字'],
@@ -145,7 +153,7 @@ function buildIndex(ast) {
     for (const n of ast.c || []) {
         idx.topLevel.push(n);
         switch (n.k) {
-            case 'struct': case 'union': case 'alias': case 'fnctype':
+            case 'struct': case 'cls': case 'union': case 'alias': case 'fnctype':
                 // fnctype 含两类：方法/函数声明（C 侧实现，如 builtins）与函数类型定义
                 if (n.k === 'fnctype' && n.n && n.n.includes('::')) idx.methods.set(n.n, n);
                 else idx.types.set(n.n, n);
@@ -157,6 +165,7 @@ function buildIndex(ast) {
                     idx.globals.set(it.n, { kind: 'enum-item', detail: n.n, line: it.l });
                 break;
             case 'fnc':
+            case 'dim':
             case 'rpc':
                 if (n.n && n.n.includes('::')) idx.methods.set(n.n, n);
                 else idx.funcs.set(n.n, n);
@@ -799,11 +808,13 @@ function activate(context) {
             if (!ast) return [];
             const kindMap = {
                 struct: vscode.SymbolKind.Struct,
+                cls: vscode.SymbolKind.Class,
                 union: vscode.SymbolKind.Struct,
                 enum: vscode.SymbolKind.Enum,
                 alias: vscode.SymbolKind.TypeParameter,
                 fnctype: vscode.SymbolKind.Interface,
                 fnc: vscode.SymbolKind.Function,
+                dim: vscode.SymbolKind.Method,
                 var: vscode.SymbolKind.Variable,
                 let: vscode.SymbolKind.Constant,
             };

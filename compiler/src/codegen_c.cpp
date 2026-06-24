@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -63,6 +64,9 @@ std::string mapBase(const std::string& n) {
         {"bool", "uint8_t"},  // 布尔：u1 的语义别名（true/false 即 1/0）
         {"char", "char"},     // 字符：与 C 字符串字面量/接口互操作用（区别于 i1/u1）
         {"ret", "int32_t"},   // ADT 接口返回码：i4 的语义别名（ok=0 表成功，非 0 表失败）
+        {"tril", "int8_t"},   // 三态：negative/-1 unknown/0 positive/+1（维度 dim 应答状态）
+        {"object", "object"}, // 类型擦除引用：sc_hyper*（指向类对象 _class 槽，见 class.md）
+        {"sc_hyper", "sc_hyper"}, // 通用分派器函数指针 typedef（类首成员 _class 的类型）
         {"va_list", "va_list"},  // 透传：可变参数列表类型
     };
     auto it = m.find(n);
@@ -137,6 +141,50 @@ struct CGen {
     bool usesRun = false;       // 程序中出现 run 语句：需输出 thread_run 原型
     int  usesStrof = 0;         // stringify(值) 格式化关键字首次出现行号（需 adt string 可见；stringify_t 在 op.h 默认带入）
 
+    // ---- 类机制（cls / dim / object）支撑 ----
+    std::vector<const Decl*> classDecls;                       // 本单元所有 cls 类（StructD, isClass）
+    std::set<std::string> classNames;                          // 类名集合（含外部）：dim 调用 / instanceOf / object 强转识别
+    std::set<std::string> externalClassNames;                  // 外部（其它单元定义）cls 类名：本单元仅引用其分派器（extern 原型）
+    std::map<std::string, std::vector<const Decl*>> classDims; // 类名 → 用户 dim 声明（源序）
+    std::map<std::string, int> dimSelectors;                   // 全局维度名 → 选择子 id（用户 dim 从 5 起）
+    int nextDimSel = 5;                                        // 下一个用户维度选择子（0..4 保留）
+    bool usesClassRt = false;                                  // 本单元需输出类机制运行时序言（tril/object/cls）
+
+    // 维度名 → 全局选择子 id（保留：CLS_ID=0 / OBJ_KEY=1 / OBJ_NAME=2 / RLT_KEY=3 / RLT_NAME=4；
+    // 其余按首现顺序从 5 起）
+    int dimId(const std::string& name) {
+        if (name == "CLS_ID")   return 0;
+        if (name == "OBJ_KEY")  return 1;
+        if (name == "OBJ_NAME") return 2;
+        if (name == "RLT_KEY")  return 3;
+        if (name == "RLT_NAME") return 4;
+        auto it = dimSelectors.find(name);
+        if (it != dimSelectors.end()) return it->second;
+        int id = nextDimSel++;
+        dimSelectors[name] = id;
+        return id;
+    }
+    // cls 类是否含某名字的真实字段（跳过 synthetic 注入成员）
+    bool classHasField(const Decl& c, const std::string& fname) const {
+        for (auto& f : c.structCommon.fields)
+            if (!f.synthetic && f.name == fname) return true;
+        return false;
+    }
+    // (owner, dimName) 是否为该类的维度（含用户覆盖的保留维度）
+    bool isDimOf(const std::string& owner, const std::string& name) const {
+        auto it = classDims.find(owner);
+        if (it != classDims.end())
+            for (auto* d : it->second) if (d->methodName == name) return true;
+        // 保留维度：任意类皆可调用（未实现走 default 返回 unknown）
+        return false;
+    }
+    // 名字是否为可分派维度名（保留维度 或 已注册的用户维度选择子）
+    bool isDimCallName(const std::string& name) const {
+        return name == "CLS_ID" || name == "OBJ_KEY" || name == "OBJ_NAME" ||
+               name == "RLT_KEY" || name == "RLT_NAME" ||
+               dimSelectors.count(name) > 0;
+    }
+
     // ---- 静态全局对象 / 模块级生命周期（init/drop）支撑 ----
     // 入口单元（含非外部 main）：main 序言注入全局/模块 init，尾声注入 drop。
     // 库模块（无 main）：emit 模块级 sc_mod_<token>_init/drop，由 main 与父模块递归调用。
@@ -148,6 +196,9 @@ struct CGen {
     struct GLife { std::string var; std::string fn; std::string ownArg; };  // 全局对象名 + init/drop 方法 C 名（+init 隐藏 own 实参）
     std::vector<GLife> gInits;      // 本单元自有全局 init（源序，逆序 drop）
     std::vector<GLife> gDrops;      // 本单元自有全局 drop（源序登记，发出时逆序）
+    // 全局（非函数内）cls 实例：模块 init 序言安装分派器指针 _class（须早于 gInits，
+    //   使全局对象的 init 体内类型查询/dim 调用可用）。pair = {对象名, 类名}。
+    std::vector<std::pair<std::string, std::string>> gClassInstalls;
 
     // ---- 单元测试（--test）支撑 ----
     struct TestCase { const Decl* d; std::string cname; };  // tst 用例 + 生成的 C 函数名
@@ -389,6 +440,46 @@ struct CGen {
         for (auto& a : e.args) scanExprForNew(*a);
     }
 
+    // 类机制：本单元是否引用 tril/object 类型或类字面量（无 cls 定义时也可能需运行时序言）
+    bool unitUsesClassTypes() {
+        bool used = false;
+        auto chkTy = [&](const TypeRef& t) { if (t.name == "tril" || t.name == "object") used = true; };
+        std::function<void(const Expr&)> chkExpr = [&](const Expr& e) {
+            if (e.kind == Expr::Ident &&
+                (e.text == "negative" || e.text == "unknown" || e.text == "positive")) used = true;
+            if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.a->text == "instanceOf") used = true;
+            if (e.a) chkExpr(*e.a);
+            if (e.b) chkExpr(*e.b);
+            if (e.c) chkExpr(*e.c);
+            for (auto& a : e.args) chkExpr(*a);
+        };
+        std::function<void(const Stmt&)> chkStmt = [&](const Stmt& s) {
+            for (auto& f : s.decls) { chkTy(f.type); if (f.init) chkExpr(*f.init); }
+            if (s.expr) chkExpr(*s.expr);
+            for (auto& a : s.printArgs) chkExpr(*a);
+            if (s.forInit) chkExpr(*s.forInit);
+            if (s.forCond) chkExpr(*s.forCond);
+            if (s.forStep) chkExpr(*s.forStep);
+            for (auto& b : s.body) chkStmt(*b);
+            for (auto& b : s.elseBody) chkStmt(*b);
+        };
+        for (auto& d : prog.decls) {
+            if (d->external) continue;
+            if (d->structCommon.type) chkTy(*d->structCommon.type);
+            for (auto& f : d->structCommon.fields) chkTy(f.type);
+            for (auto& s : d->body) chkStmt(*s);
+        }
+        return used;
+    }
+
+    // 本单元是否需要类机制运行时（定义了 cls 类，或引用 tril/object/类字面量/instanceOf）。
+    //   供工程管线判定是否写出共享 class.h 并让本单元 #include 之（与 usesClassRt 同义）。
+    bool computeUsesClassRuntime() {
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::StructD && d->isClass && !d->external) return true;
+        return unitUsesClassTypes();
+    }
+
     void scanStmtForNew(const Stmt& s) {
         if (s.kind == Stmt::RunS) usesRun = true;
         if (s.kind == Stmt::PrintS) {
@@ -444,6 +535,8 @@ struct CGen {
                 out << "        *_p = " << tn << "__default();\n";
             else
                 out << "        memset(_p, 0, sizeof(" << tn << "));\n";
+            if (sd->isClass)
+                out << "        _p->_class = " << tn << "_hyper_impl;\n";
             const Decl* im = findMethod(tn, "init");
             if (im && im->structCommon.fields.empty())
                 out << "        " << im->name << "(_p"
@@ -475,6 +568,8 @@ struct CGen {
                     out << "    *_p = " << tn << "__default();\n";
                 else
                     out << "    memset(_p, 0, sizeof(" << tn << "));\n";
+                if (sd->isClass)
+                    out << "    _p->_class = " << tn << "_hyper_impl;\n";
                 if (im && im->structCommon.fields.empty())
                     out << "    " << im->name << "(_p"
                         << (typeHasFatMember(tn) ? ", &_h->out" : "") << ");\n";
@@ -515,6 +610,11 @@ struct CGen {
     //   枚举写入独立 type.h 由 main 落盘）；空=内联模式（枚举就地写进 .c，自包含）。
     std::string typeHeaderName;
     bool usesFutureId = false;          // 出现 future<ID>() 构造：需生成 future__new_tagged 辅助
+
+    // cls/dim 全局选择子（SC_CLS_<T> / SC_DIM_<Name>）的承载头：非空=头文件模式
+    //   （.c #include 它，枚举由工程级 class.h 提供，跨单元一致编号）；空=内联模式
+    //   （枚举就地写进 .c，单文件自包含）。由 emitC 工程/文件模式置为 "class.h"。
+    std::string classHeaderName;
 
     // 根模块导出注入：非空时本单元 .c 在所有 inc 之后追加 #include 该接口头（scm_<root>.h），
     //   使根（集成单元）的 @导出 类型/操作在依赖单元 C 层可见。仅项目构建的非根单元设置。
@@ -1349,6 +1449,12 @@ struct CGen {
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
                 else if (e.text == "ok" && !localsT.count("ok") && !globalsT.count("ok"))
                     out << "0";                            // ADT 接口成功返回码（类型 ret）
+                else if (e.text == "negative" && !localsT.count("negative") && !globalsT.count("negative"))
+                    out << "SC_TRIL_NEG";                  // tril 三态字面量
+                else if (e.text == "unknown" && !localsT.count("unknown") && !globalsT.count("unknown"))
+                    out << "SC_TRIL_UNK";
+                else if (e.text == "positive" && !localsT.count("positive") && !globalsT.count("positive"))
+                    out << "SC_TRIL_POS";
                 else if (curRpc && rpcParams.count(e.text))
                     out << "_p->" << e.text;               // rpc 实际函数内：参数即结构体成员
                 else out << e.text;                        // true/false 由 stdbool.h 提供
@@ -1495,6 +1601,19 @@ struct CGen {
                         }
                     }
                 }
+                // instanceOf(o, TypeName) → ((*(o)) == TypeName_hyper_impl)：O(1) 类型判定
+                if (e.a->kind == Expr::Ident && e.a->text == "instanceOf"
+                    && !localsT.count("instanceOf") && !globalsT.count("instanceOf")
+                    && !funcs.count("instanceOf")) {
+                    if (e.args.size() != 2 || e.args[1]->kind != Expr::Ident)
+                        throw CompileError{"instanceOf(o, 类名) 需要 2 个实参且第二实参为类名", e.line};
+                    // 不加外层冗余括号（== 优先级高于 && / || / 三元；一元 ! 自带操作数括号），
+                    // 既保证语义优先级又避免 if 条件直接套等式的 -Wparentheses-equality 告警。
+                    out << "*(";
+                    emitExpr(*e.args[0], true);
+                    out << ") == " << e.args[1]->text << "_hyper_impl";
+                    break;
+                }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
                 if (const Decl* td = typeCallee(e)) {
                     // <atom> 仅用于自动指针 T@ 目标构造（赋给 T@ 变量/成员，经 emitFatBind）；
@@ -1557,6 +1676,25 @@ struct CGen {
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
+                        // 维度调用糖：cls 实例 o.Dim(args) → T_hyper_impl(&o._class, SC_DIM_Dim, args)
+                        if (classNames.count(base.name) && isDimCallName(e.a->text)) {
+                            out << base.name << "_hyper_impl(&";
+                            if (base.fat) { out << "("; emitFatBaseAsRaw(*e.a->a, base.name); out << ")->_class"; }
+                            else if (e.a->op == ".") { out << "("; emitExpr(*e.a->a); out << ")._class"; }
+                            else { out << "("; emitExpr(*e.a->a); out << ")->_class"; }
+                            out << ", SC_DIM_" << e.a->text;
+                            for (auto& a : e.args) { out << ", "; emitExpr(*a, true); }
+                            out << ")";
+                            break;
+                        }
+                        // 维度调用糖：object 动态接收者 ob.Dim(args) → (*ob)(ob, SC_DIM_Dim, args)
+                        if (base.name == "object" && isDimCallName(e.a->text)) {
+                            out << "(*("; emitExpr(*e.a->a); out << "))(";
+                            emitExpr(*e.a->a); out << ", SC_DIM_" << e.a->text;
+                            for (auto& a : e.args) { out << ", "; emitExpr(*a, true); }
+                            out << ")";
+                            break;
+                        }
                         if (const Decl* md = findMethod(base.name, e.a->text)) {
                             out << md->name << "(";   // 修饰名 T_m
                             if (base.fat) {
@@ -1836,6 +1974,17 @@ struct CGen {
                 // 中被拆解）；出现在其他表达式位置则是误用。
                 if (e.castIsFmt)
                     throw CompileError{"格式说明符 (expr: \"%fmt\") 只能用于 print 实参", e.line};
+                // (inst: object) → &inst._class（类实例 → 类型擦除分派器槽地址）
+                if (e.op == "object" && e.castPtr == 0) {
+                    VType vt; bool ok = exprVType(*e.a, vt);
+                    if (ok && vt.name == "object") { out << "("; emitExpr(*e.a, true); out << ")"; break; }
+                    out << "(&";
+                    if (ok && vt.fat) { out << "("; emitFatBaseAsRaw(*e.a, vt.name); out << ")->_class"; }
+                    else if (ok && vt.ptr >= 1) { out << "("; emitExpr(*e.a, true); out << ")->_class"; }
+                    else { out << "("; emitExpr(*e.a, true); out << ")._class"; }
+                    out << ")";
+                    break;
+                }
                 // (expr: type&) → ((T*)(expr))；含类型限定符 (expr: const T&) → ((const T*)(expr))
                 out << "((";
                 if (e.castConst) out << "const ";
@@ -2397,6 +2546,14 @@ struct CGen {
                 }
             }
             out << ";\n";
+            // cls 实例：安装分派器指针 _class（须早于 init，使 init 内类型查询/dim 调用可用）
+            if (inFunc && f.type.ptr == 0 && f.type.arrayDims.empty()
+                && !f.type.fat && !f.type.project && !f.type.hasInline) {
+                if (const Decl* cd = aggrOf(f.type.name); cd && cd->isClass) {
+                    indent();
+                    out << f.name << "._class = " << cd->name << "_hyper_impl;\n";
+                }
+            }
             // 声明即构造：函数内无初值的结构变量，若类型有无参 init 方法则自动调用
             // （tls 除外：static 存储期只初始化一次，此处会每次进函数重执行）
             if (inFunc && !isTls && !f.init && f.type.ptr == 0 && f.type.arrayDims.empty()
@@ -3700,6 +3857,7 @@ struct CGen {
         out << "int main(int argc, char **argv) {\n";
         out << "    (void)argc; (void)argv;\n";
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
+        for (auto& ci : gClassInstalls) out << "    " << ci.first << "._class = " << ci.second << "_hyper_impl;\n";
         for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
         for (auto& tc : testCases)
             out << "    sc__run_case(\"" << tc.d->name << "\", &" << tc.cname
@@ -4160,6 +4318,146 @@ struct CGen {
         curFnSig = nullptr;
         curMethodOwner.clear();
         curInFatInit = false;
+        out << "}\n\n";
+    }
+
+    // ---------------- 类机制：运行时序言与分派器 ----------------
+    // tril / object / sc_hyper 类型定义 + 全局类 id 枚举 + 全局维度选择子枚举。
+    void emitClassRuntimePrelude() {
+        if (!usesClassRt) return;
+        out << "/* 类机制运行时（cls / dim / object） */\n";
+        out << "#include <stdarg.h>\n#include <stdio.h>\n#include <string.h>\n";
+        // 类型/枚举：头文件模式由工程级 class.h 提供（已于文件头 #include，跨单元一致编号，
+        //   且模块头可见 tril/sc_hyper/object）；内联模式则就地输出（单文件自包含）。
+        if (!classHeaderName.empty()) {
+            out << "\n";
+            return;
+        }
+        out << "typedef int8_t tril;\n";
+        out << "#define SC_TRIL_NEG ((tril)-1)\n";
+        out << "#define SC_TRIL_UNK ((tril)0)\n";
+        out << "#define SC_TRIL_POS ((tril)1)\n";
+        out << "typedef tril (*sc_hyper)(void *, uint32_t, ...);\n";
+        out << "typedef sc_hyper *object;\n";
+        if (!classNames.empty()) {
+            out << "enum { SC_CLS_NONE = 0";
+            int i = 1;
+            for (auto& n : classNames) out << ", SC_CLS_" << n << " = " << i++;
+            out << " };\n";
+        }
+        out << "enum { SC_DIM_CLS_ID = 0, SC_DIM_OBJ_KEY = 1, SC_DIM_OBJ_NAME = 2"
+               ", SC_DIM_RLT_KEY = 3, SC_DIM_RLT_NAME = 4";
+        std::vector<std::pair<int, std::string>> ds;
+        for (auto& kv : dimSelectors) ds.push_back({kv.second, kv.first});
+        std::sort(ds.begin(), ds.end());
+        for (auto& p : ds) out << ", SC_DIM_" << p.second << " = " << p.first;
+        out << " };\n\n";
+    }
+
+    // 维度参数从可变实参提取的 C 类型（含默认实参提升：小整数→int，float→double）。
+    std::string dimVaType(const Field& f) {
+        if (f.type.ptr > 0 || f.type.fat || f.type.project)
+            return cTypeOf(f.type.name, f.type.ptr > 0 ? f.type.ptr : 1);
+        std::string n = resolveAliasName(f.type.name);
+        if (n == "f4") return "double";
+        if (n == "i1" || n == "i2" || n == "u1" || n == "u2" ||
+            n == "bool" || n == "tril" || n == "char")
+            return "int";
+        return cTypeOf(f.type.name, 0);
+    }
+
+    // 单条维度 case：提取实参为具名局部，va_end，再发出维度体（this→_this，curMethodOwner=T）。
+    void emitDimCase(const Decl& dim) {
+        out << "    case SC_DIM_" << dim.methodName << ": {\n";
+        localsT.clear(); fnVarsL.clear(); varDimsL.clear(); projVarsL.clear();
+        inFunc = true; retDollarDeclared = false;
+        const Decl* sig = &dim;
+        for (auto& p : sig->structCommon.fields) regVar(p);
+        curFnSig = sig;
+        curMethodOwner = dim.methodOwner;
+        curInFatInit = false;
+        for (auto& p : sig->structCommon.fields) {
+            out << "        ";
+            emitDeclarator(p);
+            std::string vt = dimVaType(p);
+            std::string dt = cTypeOf(p.type.name, p.type.ptr);
+            out << " = ";
+            if (p.type.ptr == 0 && vt != dt) out << "(" << dt << ")";
+            out << "va_arg(_va, " << vt << ");\n";
+        }
+        out << "        va_end(_va);\n";
+        preScanFatBorrows(dim.body);
+        scanManualDrops(dim.body);
+        depth = 2;
+        emitStmts(dim.body);
+        depth = 0;
+        out << "        return SC_TRIL_UNK;\n";  // 安全网：维度体未显式 return tril
+        out << "    }\n";
+        inFunc = false; curFnSig = nullptr; curMethodOwner.clear(); curInFatInit = false;
+    }
+
+    // cls 的分派器：T_hyper_impl(void *_slot, uint32_t _dim, ...) → switch(_dim)。
+    // _slot 指向对象内 _class 槽，container_of 回算出 _this。每个 case 自含 va_end+return。
+    void emitDispatcher(const Decl& c) {
+        const std::string& T = c.name;
+        out << "tril " << T << "_hyper_impl(void *_slot, uint32_t _dim, ...) {\n";
+        out << "    " << T << " *_this = (" << T << " *)((char *)_slot - offsetof("
+            << T << ", _class));\n";
+        out << "    (void)_this;\n";
+        out << "    va_list _va; va_start(_va, _dim);\n";
+        out << "    switch (_dim) {\n";
+        out << "    case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); "
+            << "va_end(_va); *_id = SC_CLS_" << T << "; return SC_TRIL_POS; }\n";
+        bool hasKey = false, hasName = false, hasRltKey = false, hasRltName = false;
+        auto it = classDims.find(T);
+        if (it != classDims.end())
+            for (auto* dim : it->second) {
+                if (dim->methodName == "OBJ_KEY")  hasKey = true;
+                if (dim->methodName == "OBJ_NAME") hasName = true;
+                if (dim->methodName == "RLT_KEY")  hasRltKey = true;
+                if (dim->methodName == "RLT_NAME") hasRltName = true;
+            }
+        // OBJ_KEY 默认：存在 obj_key 字段则取字段值，否则取对象基址。
+        if (!hasKey) {
+            out << "    case SC_DIM_OBJ_KEY: { void **_k = va_arg(_va, void **); va_end(_va); *_k = ";
+            if (classHasField(c, "obj_key"))
+                out << "(void *)(uintptr_t)_this->obj_key";
+            else
+                out << "(void *)_this";
+            out << "; return SC_TRIL_POS; }\n";
+        }
+        // OBJ_NAME 默认：存在 obj_name 字段则取字段值（%s），否则 snprintf "<类名>@<地址>"。
+        if (!hasName) {
+            out << "    case SC_DIM_OBJ_NAME: { char *_b = va_arg(_va, char *); "
+                << "int32_t _cap = va_arg(_va, int); va_end(_va); ";
+            if (classHasField(c, "obj_name"))
+                out << "snprintf(_b, (size_t)_cap, \"%s\", _this->obj_name); ";
+            else
+                out << "snprintf(_b, (size_t)_cap, \"" << T << "@%p\", (void *)_this); ";
+            out << "return SC_TRIL_POS; }\n";
+        }
+        // RLT_KEY 默认：取自身与另一对象的 key（经 OBJ_KEY，尊重覆盖），比大小返回三态。
+        if (!hasRltKey)
+            out << "    case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); "
+                << "void *_ka = (void *)0, *_kb = (void *)0; "
+                << T << "_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); "
+                << "if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); "
+                << "if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; "
+                << "if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; "
+                << "return SC_TRIL_UNK; }\n";
+        // RLT_NAME 默认：取自身与另一对象的 name（经 OBJ_NAME，尊重覆盖），strcmp 返回三态。
+        if (!hasRltName)
+            out << "    case SC_DIM_RLT_NAME: { object _other = va_arg(_va, object); va_end(_va); "
+                << "char _na[256], _nb[256]; _na[0] = 0; _nb[0] = 0; "
+                << T << "_hyper_impl(_slot, SC_DIM_OBJ_NAME, _na, (int32_t)sizeof(_na)); "
+                << "if (_other) (*_other)(_other, SC_DIM_OBJ_NAME, _nb, (int32_t)sizeof(_nb)); "
+                << "int _r = strcmp(_na, _nb); "
+                << "if (_r < 0) return SC_TRIL_NEG; if (_r > 0) return SC_TRIL_POS; "
+                << "return SC_TRIL_UNK; }\n";
+        if (it != classDims.end())
+            for (auto* dim : it->second) emitDimCase(*dim);
+        out << "    default: va_end(_va); return SC_TRIL_UNK;\n";
+        out << "    }\n";
         out << "}\n\n";
     }
 
@@ -4924,6 +5222,9 @@ struct CGen {
                     || f.type.fat || f.type.project
                     || f.type.fnKind != TypeRef::FncKind::None)
                     continue;
+                // 全局 cls 实例：登记 _class 安装（早于 init）。
+                if (const Decl* cd = aggrOf(f.type.name); cd && cd->isClass)
+                    gClassInstalls.push_back({f.name, cd->name});
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->structCommon.fields.empty())
                     gInits.push_back({f.name, im->name,
@@ -4959,6 +5260,7 @@ struct CGen {
         out << "void sc_mod_" << modToken << "_init(void) {\n";
         out << "    static int _done = 0; if (_done) return; _done = 1;\n";
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
+        for (auto& ci : gClassInstalls) out << "    " << ci.first << "._class = " << ci.second << "_hyper_impl;\n";
         for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
         out << "}\n";
         out << "void sc_mod_" << modToken << "_drop(void) {\n";
@@ -4973,6 +5275,7 @@ struct CGen {
     // main 序言：递归各直接依赖模块 init，再构造入口自有全局（源序）。
     void emitMainPrologue() {
         for (auto& t : depTokens) { indent(); out << "sc_mod_" << t << "_init();\n"; }
+        for (auto& ci : gClassInstalls) { indent(); out << ci.first << "._class = " << ci.second << "_hyper_impl;\n"; }
         for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n"; }
     }
 
@@ -5028,6 +5331,12 @@ struct CGen {
         if (!typeHeaderName.empty() && !prog.futureIds.empty())
             out << "#include \"" << typeHeaderName << "\"\n";
 
+        // cls/dim 全局类型与选择子：头文件模式下由独立 class.h 提供（tril/sc_hyper/object
+        //   类型 + SC_CLS_/SC_DIM_ 跨单元一致编号）。须先于用户 inc 头引入，使引用 _class
+        //   字段/object 形参的模块头可见这些类型。内联模式则在运行时序言就地输出。
+        if (!classHeaderName.empty() && computeUsesClassRuntime())
+            out << "#include \"" << classHeaderName << "\"\n";
+
         // 用户 inc 引入的头文件
         for (auto& d : prog.decls)
             if (d->kind == Decl::IncD) emitInclude(*d);
@@ -5055,6 +5364,24 @@ struct CGen {
 
         // 静态全局对象 / 模块级生命周期采集（依赖 methods/aliases 注册表已填充）
         collectLifecycle();
+
+        // 类机制采集：cls 类、各 dim（分配全局选择子，源序）。
+        for (auto& d : prog.decls) {
+            if (d->kind == Decl::StructD && d->isClass) {
+                classNames.insert(d->name);
+                if (!d->external) classDecls.push_back(d.get());
+                else externalClassNames.insert(d->name);
+            }
+        }
+        for (auto& d : prog.decls) {
+            if (d->kind == Decl::FuncD && d->isDim) {
+                if (d->methodName == "CLS_ID")
+                    throw CompileError{"CLS_ID 维度由编译器生成，不可自定义", d->line};
+                classDims[d->methodOwner].push_back(d.get());
+                (void)dimId(d->methodName);    // 注册全局选择子（保留名映射到 0/1/2）
+            }
+        }
+        usesClassRt = !classDecls.empty() || unitUsesClassTypes();
 
         // 单元测试目标：收集 tst 用例并分配 C 函数名（源序）。
         if (g_testMode) {
@@ -5142,6 +5469,17 @@ struct CGen {
                                        + " 要求 alloc/free）", d->line};
         }
 
+        // 类机制运行时序言（tril/object/sc_hyper 类型 + 全局类 id / 维度选择子枚举）
+        emitClassRuntimePrelude();
+        // 每个 cls 的分派器原型（构造点安装 _class 指针、object 强转、dim 调用均引用之）
+        for (auto* c : classDecls)
+            out << "tril " << c->name << "_hyper_impl(void *, uint32_t, ...);\n";
+        // 外部（其它单元定义）cls 类：分派器在彼单元导出，本单元 extern 引用（跨单元
+        //   instanceOf / dim 调用 / object 强转 / _class 安装）。
+        for (auto& n : externalClassNames)
+            out << "extern tril " << n << "_hyper_impl(void *, uint32_t, ...);\n";
+        if (!classDecls.empty() || !externalClassNames.empty()) out << "\n";
+
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
         for (auto& d : prog.decls) {
             // future_id 聚合枚举：头文件模式下由 type.h 提供（已 #include），不再内联
@@ -5200,6 +5538,7 @@ struct CGen {
                     break;
                 case Decl::FuncD:
                     if (d->isRpc) { emitRpcInterface(*d, shouldStaticize(*d)); break; }
+                    if (d->isDim) break;  // 维度：折叠进分派器，无独立原型/定义
                     if (d->name != "main") {
                         if (shouldStaticize(*d)) out << "static ";
                         emitFuncSig(*d);
@@ -5234,6 +5573,7 @@ struct CGen {
         out = std::ostringstream();
         for (auto& d : prog.decls) {
             if (d->kind != Decl::FuncD || d->external) continue;
+            if (d->isDim) continue;  // 维度：折叠进分派器（emitDispatcher）
             // 测试模式：屏蔽用户 main（由合成 runner main 取代）
             if (g_testMode && !d->isRpc && d->name == "main") continue;
             emitFunc(*d);
@@ -5246,6 +5586,8 @@ struct CGen {
         emitSofHelpers();
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
+        // 类机制分派器定义（每个 cls 一个 T_hyper_impl，折叠其全部 dim + 保留维度）
+        for (auto* c : classDecls) emitDispatcher(*c);
         // 库模块（无 main）：sc_mod_<token>_init/drop 定义（在方法/全局声明之后）。
         emitLifecycleDefs();
         // 测试 runner main（--test）：串起模块 init / 各 tst 用例 / drop，失败数即退出码。
@@ -5285,7 +5627,13 @@ struct CGen {
         out << "/* 由 scc 生成，请勿手工修改 —— @导出对象声明 */\n"
             << "#ifndef " << guard << "\n"
             << "#define " << guard << "\n\n"
-            << "#include \"platform.h\"\n\n";
+            << "#include \"platform.h\"\n";
+
+        // 模块若使用类机制，导出的 cls 结构含 _class(sc_hyper) 字段、导出函数可能以 object
+        //   为形参，故头文件须先引入 class.h 提供 tril/sc_hyper/object 类型与全局选择子。
+        if (computeUsesClassRuntime())
+            out << "#include \"class.h\"\n";
+        out << "\n";
 
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
         emitForwardAggrDecls(true);
@@ -5369,6 +5717,7 @@ std::string emitC(const Program& prog, const std::string& srcFile,
     g.sofHeaderName = stringifyHeaderName;
     g.rootPreludeHeader = rootPreludeHeader;  // 根模块导出接口头（末位 include）；空=禁用
     if (!prog.futureIds.empty()) g.typeHeaderName = "type.h";  // 文件模式：.c #include "type.h"
+    g.classHeaderName = "class.h";  // 工程/文件模式：cls/dim 选择子由共享 class.h 提供（跨单元一致）
     std::string c = g.run();
     if (stringifyHeaderOut) *stringifyHeaderOut = g.sofHeaderOut;
     return c;
@@ -5392,4 +5741,45 @@ std::string emitFutureIdHeader(const std::vector<std::string>& ids) {
     }
     s += "} future_id;\n\n#endif\n";
     return s;
+}
+
+// cls/dim 全局选择子头 class.h：转译/构建管线在工程输出同级落盘，各使用类机制的 .c
+//   #include 它。跨所有单元取类名/维度名并集后由此生成，保证 SC_CLS_<T>/SC_DIM_<Name>
+//   在不同单元取同一编号（同名类/维度跨单元一致）。
+std::string emitClassHeader(const std::vector<std::string>& clsNames,
+                            const std::vector<std::string>& dimNames) {
+    std::string s = "/* 由 scc 生成：cls 类 id 与 dim 维度选择子（跨单元一致），请勿手工修改 */\n"
+                    "#ifndef SCC_CLASS_H\n#define SCC_CLASS_H\n\n";
+    // 类机制运行时类型：tril / sc_hyper / object（跨模块共享，供模块头引用 _class 字段
+    //   与 object 形参；故置于 class.h 而非各 .c 中段序言，确保 inc 头先于其使用可见）。
+    s += "#include <stdint.h>\n";
+    s += "typedef int8_t tril;\n";
+    s += "#define SC_TRIL_NEG ((tril)-1)\n";
+    s += "#define SC_TRIL_UNK ((tril)0)\n";
+    s += "#define SC_TRIL_POS ((tril)1)\n";
+    s += "typedef tril (*sc_hyper)(void *, uint32_t, ...);\n";
+    s += "typedef sc_hyper *object;\n\n";
+    // 全局类 id 枚举（SC_CLS_NONE=0，各类从 1 起，首见序）
+    s += "enum { SC_CLS_NONE = 0";
+    int ci = 1;
+    for (auto& n : clsNames) s += ", SC_CLS_" + n + " = " + std::to_string(ci++);
+    s += " };\n";
+    // 全局维度选择子枚举（保留 0..4，用户维度从 5 起，首见序；跳过保留名）
+    s += "enum { SC_DIM_CLS_ID = 0, SC_DIM_OBJ_KEY = 1, SC_DIM_OBJ_NAME = 2, "
+         "SC_DIM_RLT_KEY = 3, SC_DIM_RLT_NAME = 4";
+    int di = 5;
+    for (auto& n : dimNames) {
+        if (n == "CLS_ID" || n == "OBJ_KEY" || n == "OBJ_NAME" ||
+            n == "RLT_KEY" || n == "RLT_NAME")
+            continue;  // 保留维度已占 0..4
+        s += ", SC_DIM_" + n + " = " + std::to_string(di++);
+    }
+    s += " };\n\n#endif\n";
+    return s;
+}
+
+// 程序是否需要类机制运行时（供工程管线判定是否写出共享 class.h）。
+bool programUsesClassRuntime(const Program& prog) {
+    CGen g(prog);
+    return g.computeUsesClassRuntime();
 }

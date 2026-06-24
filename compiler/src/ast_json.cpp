@@ -232,7 +232,7 @@ std::string declNode(const Decl& d) {
             else if (d.linked) sd += "~";
             else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";
             else if (!d.projectSelf.empty()) sd += "<" + d.projectSelf + ">";
-            return nodeExt(d.kind == Decl::StructD ? "struct" : "union",
+            return nodeExt(d.kind == Decl::StructD ? (d.isClass ? "cls" : "struct") : "union",
                            d.name, sd, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::AliasD:
@@ -266,7 +266,7 @@ std::string declNode(const Decl& d) {
             const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
             const std::string dtail = d.methodOwner.empty() ? (X + detail)
                                                            : (X + d.methodOwner + "::" + detail);
-            return nodeExt(d.isRpc ? "rpc" : "fnc", n, dtail, d.line, d.external, d.origin, d.used, c);
+            return nodeExt(d.isRpc ? "rpc" : d.isDim ? "dim" : "fnc", n, dtail, d.line, d.external, d.origin, d.used, c);
         }
         case Decl::VarD:
         case Decl::LetD:

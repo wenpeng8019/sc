@@ -73,3 +73,13 @@ std::string emitCHeader(const Program& prog, const std::string& guardName);
 //   ids 为去重后的事件 ID 列表（默认值 0,1,2...，各单元按名引用即一致）。
 //   ids 为空时返回空字符串。由转译/构建管线在工程输出同级落盘，各 .c #include "type.h"。
 std::string emitFutureIdHeader(const std::vector<std::string>& ids);
+
+// 生成 cls/dim 全局选择子头 class.h 内容：SC_CLS_<T> 与 SC_DIM_<Name> 枚举（含 include guard）。
+//   clsNames/dimNames 为跨所有单元去重后的类名/维度名（首见序）。由转译/构建管线在工程
+//   输出同级落盘，各使用类机制的 .c #include "class.h"，保证选择子编号跨单元一致。
+std::string emitClassHeader(const std::vector<std::string>& clsNames,
+                            const std::vector<std::string>& dimNames);
+
+// 程序是否需要类机制运行时（定义 cls 类，或引用 tril/object/类字面量/instanceOf）。
+//   供工程/文件管线判定是否写出共享 class.h。
+bool programUsesClassRuntime(const Program& prog);

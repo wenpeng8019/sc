@@ -61,6 +61,8 @@ enum class Tok {
     KwAssert,   // assert — 测试断言（assert 表达式[, "消息"]，失败记录并中止当前用例）
     KwSizeof,   // sizeof
     KwOffsetof, // offsetof
+    KwCls,      // cls  — 定义类（复用 def 结构体机制 + 注入分派器 _class）
+    KwDim,      // dim  — 类维度（折叠进唯一分派器的 switch 分支，返回恒 tril）
 
     // ---- 特殊 ----
     Ellipsis,   // ...  可变参数占位

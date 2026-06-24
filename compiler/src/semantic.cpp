@@ -386,6 +386,7 @@ struct Checker {
         static const std::unordered_set<std::string> p = {
             "i1", "i2", "i4", "i8", "u1", "u2", "u4", "u8",
             "f4", "f8", "bool", "char", "ret", "c1", "va_list",
+            "tril", "object", "sc_hyper",
         };
         return p.count(n) != 0;
     }
@@ -554,6 +555,8 @@ struct Checker {
                 if (e.cBridge) return Ty{};  // C 桥接 ::name：C 侧符号，类型不跟踪，跳过解析
                 if (e.text == "nil") return Ty{"", 0, 0, true, true};
                 if (e.text == "true" || e.text == "false") return Ty{"bool", 0, 0, true, false};
+                if (e.text == "negative" || e.text == "unknown" || e.text == "positive")
+                    return Ty{"tril", 0, 0, true, false};  // 三态字面量（-1/0/+1）
                 if (e.text == "ok" && locals.find("ok") == locals.end()
                     && globals.find("ok") == globals.end())
                     return Ty{"ret", 0, 0, true, false};  // ADT 接口成功返回码（= 0）
@@ -621,7 +624,13 @@ struct Checker {
                 if (memberCheckable(*sd, base)) {
                     auto mit = structMethods.find(sd->name);
                     const bool isMethod = mit != structMethods.end() && mit->second.count(e.text);
-                    if (!isMethod)
+                    // cls 类的保留维度（CLS_ID/OBJ_KEY/OBJ_NAME/RLT_KEY/RLT_NAME）由编译器生成，
+                    // 无显式成员声明，但可作为维度静态调用 o.OBJ_NAME(...)，此处放行
+                    // （用户覆盖的维度已在 structMethods）。
+                    const bool isReservedDim = sd->isClass &&
+                        (e.text == "CLS_ID" || e.text == "OBJ_KEY" || e.text == "OBJ_NAME" ||
+                         e.text == "RLT_KEY" || e.text == "RLT_NAME");
+                    if (!isMethod && !isReservedDim)
                         err(e.line, std::string(sd->kind == Decl::UnionD ? "联合 '" : "结构体 '")
                             + base.name + "' 没有成员 '" + e.text + "'" + hintMember(*sd, e.text));
                 }
@@ -641,9 +650,17 @@ struct Checker {
                     for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                     return Ty{};
                 }
+                // instanceOf(o, TypeName) 伪函数：第二实参是类名（非值），结果 bool
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "instanceOf"
+                    && !locals.count("instanceOf") && !globals.count("instanceOf")) {
+                    if (e.args.size() != 2) err(e.line, "instanceOf 需要 2 个实参（对象, 类名）");
+                    (void)inferExpr(*e.args[0], locals, line);   // 第一实参：object/类实例
+                    if (e.args[1]->kind != Expr::Ident || !resolveStruct(e.args[1]->text))
+                        err(e.line, "instanceOf 第二实参须为类（cls）名");
+                    return Ty{"bool", 0, 0, true, false};
+                }
                 // base(x) 伪函数：等价于 *(T*)&x，结果类型为 T*+1 层指针
-                if (e.a && e.a->kind == Expr::Ident && e.a->text == "base"
-                    && !locals.count("base") && !globals.count("base")) {
+                if (e.a && e.a->kind == Expr::Ident && e.a->text == "base"                    && !locals.count("base") && !globals.count("base")) {
                     if (e.args.size() != 1) err(e.line, "base 需要 1 个实参");
                     if (e.args[0]->kind == Expr::Cast) {
                         Ty t = inferExpr(*e.args[0]->a, locals, line);
@@ -1923,10 +1940,39 @@ struct Checker {
         }
     }
 
+    // 维度无歧义：维度名是全局选择子，同名维度（跨类）共享一条分派消息，
+    //   因此其参数签名必须一致（参数个数与各参数类型逐一相同），否则动态分派会错位。
+    static bool sameDimParam(const TypeRef& a, const TypeRef& b) {
+        return a.name == b.name && a.ptr == b.ptr && a.fat == b.fat &&
+               a.project == b.project && a.arrayDims.size() == b.arrayDims.size();
+    }
+    void checkDimConsistency() {
+        std::unordered_map<std::string, const Decl*> seen;  // 维度名 → 首次声明
+        for (auto& d : prog.decls) {
+            if (d->kind != Decl::FuncD || !d->isDim) continue;
+            auto it = seen.find(d->methodName);
+            if (it == seen.end()) { seen[d->methodName] = d.get(); continue; }
+            const Decl* a = it->second;
+            const Decl* b = d.get();
+            const auto& fa = a->structCommon.fields;
+            const auto& fb = b->structCommon.fields;
+            bool same = fa.size() == fb.size();
+            if (same)
+                for (size_t i = 0; i < fa.size(); i++)
+                    if (!sameDimParam(fa[i].type, fb[i].type)) { same = false; break; }
+            if (!same)
+                err(b->line, "维度 '" + b->methodName + "'（" + b->methodOwner
+                    + "）参数签名与 " + a->methodOwner + " 中的定义不一致："
+                    "同名维度是同一全局消息，参数须完全一致（另一处见第 "
+                    + std::to_string(a->line) + " 行）");
+        }
+    }
+
     // ---- 主入口：三阶段检查 ---------------------------------
     void run() {
         collectTop();                   // 1. 收集顶层符号 + 检查全局初值
         checkDuplicateDefs();           // 1.5 同名顶层符号重复定义检测
+        checkDimConsistency();          // 1.55 维度无歧义：同名维度参数签名须一致
         checkDeclTypes();               // 1.6 顶层声明的类型位置校验（返回/形参/字段/全局）
         checkAggregateByValueCycles();  // 2. 按值包含环检测
         checkFatBoundaries();           // 2.5 自动指针 T@ 边界检查

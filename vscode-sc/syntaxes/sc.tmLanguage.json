@@ -9,6 +9,7 @@
         { "include": "#root-marker" },
         { "include": "#export-prefix" },
         { "include": "#def-decl" },
+        { "include": "#cls-decl" },
         { "include": "#fnc-decl" },
         { "include": "#for-in" },
         { "include": "#var-decl" },
@@ -75,6 +76,17 @@
                     "name": "punctuation.separator.parameter.sc",
                     "match": "[:,]"
                 }
+            ]
+        },
+        "cls-decl": {
+            "begin": "\\b(cls)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "beginCaptures": {
+                "1": { "name": "keyword.declaration.def.sc" },
+                "2": { "name": "entity.name.type.sc" }
+            },
+            "end": "(?=[{(\\[<~=:]|->|$)",
+            "patterns": [
+                { "include": "#comment" }
             ]
         },
         "fnc-decl": {
@@ -144,7 +156,11 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|tls|inc|add|tst)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|tls|inc|add|tst|cls)\\b"
+                },
+                {
+                    "name": "keyword.declaration.sc",
+                    "match": "^\\s*(dim)\\b"
                 },
                 {
                     "name": "storage.modifier.qualifier.sc",
@@ -160,7 +176,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.sc",
-                    "match": "\\b(sizeof|offsetof|base)\\b"
+                    "match": "\\b(sizeof|offsetof|base|instanceOf)\\b"
                 },
                 {
                     "name": "variable.language.linked.sc",
@@ -172,7 +188,7 @@
             "patterns": [
                 {
                     "name": "constant.language.sc",
-                    "match": "\\b(true|false|nil|ok)\\b"
+                    "match": "\\b(true|false|nil|ok|positive|negative|unknown)\\b"
                 },
                 {
                     "name": "variable.language.ret-result.sc",
@@ -190,7 +206,7 @@
             "patterns": [
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret)\\b"
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret|tril|object)\\b"
                 },
                 {
                     "name": "entity.name.type.library.sc",
@@ -198,7 +214,7 @@
                 },
                 {
                     "name": "storage.type.primitive.sc",
-                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret)\\b(?!\\s*[:(])"
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret|tril|object)\\b(?!\\s*[:(])"
                 },
                 {
                     "name": "entity.name.type.library.sc",
