@@ -17,7 +17,7 @@ typedef struct com__project {
 
 
 static inline node *node__new(void) {
-    node *_p = (node *)malloc(sizeof(node));
+    node *_p = (node *)sc_alloc(sizeof(node));
     if (_p) {
         memset(_p, 0, sizeof(node));
     }

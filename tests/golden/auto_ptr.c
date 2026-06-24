@@ -17,7 +17,7 @@ typedef struct com__project {
 
 
 static inline node *node__new(void) {
-    node *_p = (node *)malloc(sizeof(node));
+    node *_p = (node *)sc_alloc(sizeof(node));
     if (_p) {
         memset(_p, 0, sizeof(node));
     }
@@ -25,7 +25,7 @@ static inline node *node__new(void) {
 }
 
 static inline node *node__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(node));
+    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(node));
     if (!_h) return 0;
     _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
     node *_p = (node *)((char *)_h + SC_REF_HDR);

@@ -63,7 +63,7 @@ void sc_mod_m_init(void); void sc_mod_m_drop(void);
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
 static inline future *future__new(void) {
-    future *_p = (future *)malloc(sizeof(future));
+    future *_p = (future *)sc_alloc(sizeof(future));
     if (_p) {
         memset(_p, 0, sizeof(future));
         future_init(_p);

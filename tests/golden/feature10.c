@@ -21,7 +21,7 @@ typedef struct com__project {
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
 
 static inline string *string__new(void) {
-    string *_p = (string *)malloc(sizeof(string));
+    string *_p = (string *)sc_alloc(sizeof(string));
     if (_p) {
         memset(_p, 0, sizeof(string));
         string_init(_p);

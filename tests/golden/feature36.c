@@ -25,7 +25,7 @@ typedef struct com__project {
 
 
 static inline node *node__new(void) {
-    node *_p = (node *)malloc(sizeof(node));
+    node *_p = (node *)sc_alloc(sizeof(node));
     if (_p) {
         memset(_p, 0, sizeof(node));
     }
@@ -33,7 +33,7 @@ static inline node *node__new(void) {
 }
 
 static inline node *node__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(node));
+    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(node));
     if (!_h) return 0;
     _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
     node *_p = (node *)((char *)_h + SC_REF_HDR);
@@ -42,7 +42,7 @@ static inline node *node__new_ref(int32_t _atom) {
 }
 
 static inline tree *tree__new(void) {
-    tree *_p = (tree *)malloc(sizeof(tree));
+    tree *_p = (tree *)sc_alloc(sizeof(tree));
     if (_p) {
         memset(_p, 0, sizeof(tree));
         tree_init(_p, SC_OWN_RAW);
@@ -51,7 +51,7 @@ static inline tree *tree__new(void) {
 }
 
 static inline tree *tree__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(tree));
+    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(tree));
     if (!_h) return 0;
     _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
     tree *_p = (tree *)((char *)_h + SC_REF_HDR);

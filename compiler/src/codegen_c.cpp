@@ -602,7 +602,7 @@ struct CGen {
             if (it == aggrs.end()) continue;
             const Decl* sd = it->second;
             out << "static inline " << tn << " *" << tn << "__new(void) {\n"
-                << "    " << tn << " *_p = (" << tn << " *)malloc(sizeof(" << tn << "));\n"
+                << "    " << tn << " *_p = (" << tn << " *)sc_alloc(sizeof(" << tn << "));\n"
                 << "    if (_p) {\n";
             if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
                 out << "        *_p = " << tn << "__default();\n";
@@ -632,7 +632,7 @@ struct CGen {
                         << "    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tn << ")) = _m;\n"
                         << "    " << tn << " *_p = (" << tn << " *)(_b + SC_CANARY + SC_REF_HDR);\n";
                 } else {
-                    out << "    sc_ref *_h = (sc_ref *)malloc(SC_REF_HDR + sizeof(" << tn << "));\n"
+                    out << "    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(" << tn << "));\n"
                         << "    if (!_h) return 0;\n"
                         << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;\n"
                         << "    " << tn << " *_p = (" << tn << " *)((char *)_h + SC_REF_HDR);\n";
@@ -1783,14 +1783,14 @@ struct CGen {
                     VType base;
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
                         // 堆专属类型 NAME& 的普通指针 .drop()：先调用户 drop（释放内部资源，
-                        // 若有），再 free 结构体块本身。无用户 drop → 仅 free（默认析构）。
+                        // 若有），再 sc_free 结构体块本身。无用户 drop → 仅 sc_free（默认析构）。
                         // 胖指针 NAME@ 由运行时 sc_fat_on_zero_d 释放，不在此拦截。
                         if (e.a->text == "drop" && e.args.empty() && !base.fat
                             && base.ptr == 1 && isHeapOnly(base.name)) {
                             const Decl* dm = findMethod(base.name, "drop");
                             out << "(";
                             if (dm) { out << dm->name << "("; emitExpr(*e.a->a); out << "), "; }
-                            out << "free(";
+                            out << "sc_free(";
                             emitExpr(*e.a->a);
                             out << "))";
                             break;

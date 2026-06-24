@@ -31,7 +31,7 @@ typedef struct com__project {
 void sc_mod_feature4_lib_init(void); void sc_mod_feature4_lib_drop(void);
 
 static inline point *point__new(void) {
-    point *_p = (point *)malloc(sizeof(point));
+    point *_p = (point *)sc_alloc(sizeof(point));
     if (_p) {
         memset(_p, 0, sizeof(point));
         point_init(_p);

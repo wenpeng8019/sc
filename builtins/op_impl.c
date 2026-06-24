@@ -35,8 +35,18 @@ void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *)) {
     if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 析构后仍持出边 → 报未清理，不释放 */
     if (!r->heap) return;                  /* 栈/全局对象：不释放 */
     if (r->flags & SC_REF_CANARY) { sc_canary_free(r); return; }  /* --check=mem：校验头尾哨兵 */
-    free(r);                               /* 堆对象 in==0 && out==0 → 释放整块（含头） */
+    sc_free(r);                            /* 堆对象 in==0 && out==0 → 释放整块（含头；经分配间接层） */
 }
+
+/* ---------------- 分配间接层（SC_POOL）—— 转发到 mem 池 ----------------
+ * 默认（未定义 SC_POOL）：sc_alloc/sc_realloc/sc_free 为 op.h 里直通 libc 的宏，
+ * 本文件无需出现定义。开启 -DSC_POOL 时才编译下述函数，转发给 mem 三件套。 */
+#ifdef SC_POOL
+#include "mem/mem.h"
+void *sc_alloc(size_t n)            { return chunk((uint64_t)n); }
+void *sc_realloc(void *p, size_t n) { return refit(p, (uint64_t)n); }
+void  sc_free(void *p)              { recycle(p); }
+#endif
 
 /* --check=mem：ref 头堆对象带头尾 canary。块首 = (char*)r - SC_CANARY；
  * 头哨兵 {魔数, 实体字节数}，尾哨兵在实体之后。校验越界损坏后释放整块。 */

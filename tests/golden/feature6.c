@@ -34,7 +34,7 @@ typedef struct com__project {
 
 
 static inline task *task__new(void) {
-    task *_p = (task *)malloc(sizeof(task));
+    task *_p = (task *)sc_alloc(sizeof(task));
     if (_p) {
         memset(_p, 0, sizeof(task));
     }

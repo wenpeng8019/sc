@@ -67,6 +67,24 @@ void sc_ref_check(sc_ref *r, const char *who);
 void sc_fat_on_zero(sc_fat *f);
 void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *));
 
+/* ---------------- 分配间接层 sc_alloc / sc_realloc / sc_free ----------------
+ * 语言内核生成的堆对象（T() / T@ / 堆专属 NAME&）与 adt 缓冲（string/list）的
+ * 分配·重分配·释放统一经此三件套，便于整体切换分配器。
+ *   默认（未定义 SC_POOL）：宏直通 libc malloc/realloc/free —— 零开销。
+ *     全生命周期静态堆对象用 libc 即可，速度与资源利用率俱佳。
+ *   启用池化（编译期 -DSC_POOL，需链接 builtins/mem）：转发到 mem 的
+ *     chunk/refit/recycle（size-class 每线程私有堆，减碎片、支持跨线程回收）。
+ * 注：--check=mem（canary）与 SC_POOL 互斥——canary 路径自带块算术，恒走 libc。 */
+#ifndef SC_POOL
+#  define sc_alloc(n)       malloc((size_t)(n))
+#  define sc_realloc(p, n)  realloc((p), (size_t)(n))
+#  define sc_free(p)        free(p)
+#else
+void *sc_alloc(size_t n);
+void *sc_realloc(void *p, size_t n);
+void  sc_free(void *p);
+#endif
+
 /* ---------------- --check=mem 越界 canary（头尾哨兵 + 地址派生魔数） ----------------
  * 仅在 --check=mem 构建下，T__new_ref 把 ref 头堆对象扩成：
  *   [ 头哨兵 SC_CANARY | sc_ref 头 SC_REF_HDR | T 实体 | 尾哨兵 SC_CANARY ]

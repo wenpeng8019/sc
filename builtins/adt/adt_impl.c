@@ -17,7 +17,7 @@ static uint8_t str_grow(string *s, uint64_t need) {
     if (s->cap > need) return 1;
     uint64_t cap = s->cap ? s->cap : 16;
     while (cap <= need) cap *= 2;
-    char *p = (char *)realloc(s->data, cap);
+    char *p = (char *)sc_realloc(s->data, cap);
     if (!p) return 0;
     s->data = p;
     s->cap = cap;
@@ -31,7 +31,7 @@ void string_init(string *_this) {
 }
 
 void string_drop(string *_this) {
-    free(_this->data);
+    sc_free(_this->data);
     string_init(_this);
 }
 
@@ -172,7 +172,7 @@ static uint8_t list_grow(list *l, uint64_t need) {
     if (l->cap >= need) return 1;
     uint64_t cap = l->cap ? l->cap : 8;
     while (cap < need) cap *= 2;
-    void **p = (void **)realloc(l->items, cap * sizeof(void *));
+    void **p = (void **)sc_realloc(l->items, cap * sizeof(void *));
     if (!p) return 0;
     l->items = p;
     l->cap = cap;
@@ -186,7 +186,7 @@ void list_init(list *_this) {
 }
 
 void list_drop(list *_this) {
-    free(_this->items);
+    sc_free(_this->items);
     list_init(_this);
 }
 
