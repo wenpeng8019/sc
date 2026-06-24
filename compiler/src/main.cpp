@@ -1049,8 +1049,12 @@ static void expandGenericMixes(Program& prog) {
         std::string specialized = substGenericText(bodyText, binds);
         try {
             Program sp = parse(lex(specialized));
-            for (auto& nd : sp.decls)
+            for (auto& nd : sp.decls) {
+                // 泛型实例产物打标：其类型定义跨模块时聚合进 generic.h（去重、一致）。
+                //   对象定义宏（非泛型）不打标——其全局对象本就属各单元自身。
+                if (isGeneric) { nd->genericInst = true; nd->genericKey = key; }
                 out.push_back(std::move(nd));
+            }
         } catch (CompileError& e) {
             if (e.hint.empty())
                 e.hint = "宏 '" + m->name + "' 实例化 " + key + " 时其特化体解析失败";
@@ -1452,6 +1456,17 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             const std::string ch = emitClassHeader(allCls, allDims);
             if (!writeTextFile(tmpDir / "class.h", ch)) return 1;
         }
+    }
+
+    // 泛型实例类型聚合：跨所有单元收集泛型单态化产物——全部实例前向 typedef + 自包含实例
+    //   完整定义（按类型名去重），写出工程级 generic.h，各含实例的单元 .c 与模块头已
+    //   #include "generic.h"（-I tmpDir 可见）。保证实例类型跨模块一致可见（导出签名引用、
+    //   按值/指针传递），无需在引用单元重复定义。
+    {
+        std::vector<const Program*> progs;
+        for (auto& kv : units) progs.push_back(&kv.second.prog);
+        const std::string gh = emitGenericHeader(progs);
+        if (!gh.empty() && !writeTextFile(tmpDir / "generic.h", gh)) return 1;
     }
 
     // 第二阶段：统一编译所有 .c -> .o（含已拼接进 .c 的源实现 <stem>_impl.c）
@@ -2030,6 +2045,17 @@ int main(int argc, char** argv) {
             std::filesystem::path chPath =
                 std::filesystem::path(output).parent_path() / "class.h";
             if (!writeTextFile(chPath, ch)) return 1;
+        }
+
+        // 3f''-generic. --emit-c 到文件且程序含泛型实例：在同目录写出 generic.h（实例类型
+        //   前向 typedef + 自包含实例完整定义，由 .c #include "generic.h"）。转译工程自包含所需。
+        if (mode == "c" && !output.empty() && programHasGenericInst(prog)) {
+            const std::string gh = emitGenericHeader({&prog});
+            if (!gh.empty()) {
+                std::filesystem::path ghPath =
+                    std::filesystem::path(output).parent_path() / "generic.h";
+                if (!writeTextFile(ghPath, gh)) return 1;
+            }
         }
 
         // 3f''. --emit-c 到文件：为每个用户 .sc 模块依赖生成同级 scm_<token>.h，

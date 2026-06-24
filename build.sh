@@ -75,6 +75,9 @@ do_test() {
     # 根模块标记（@@）子目录示例：feature30 与其消费单元同目录
     echo "--- feature30/feature30.sc（默认模式）---"
     "$BUILD_DIR/scc" "$ROOT/examples/feature30/feature30.sc"
+    # 跨模块泛型实例化：附属模块定义/实例化泛型模板并导出实例签名函数，入口跨模块调用
+    echo "--- feature38/feature38.sc（默认模式 跨模块泛型）---"
+    "$BUILD_DIR/scc" "$ROOT/examples/feature38/feature38.sc"
     # 根模块标记（@@）+ ARGS 原生机制：子模块经注入直接访问根的 mix 展开全局 ARGS_verbose
     echo "--- args_native/args_native.sc（默认模式 @@ 注入）---"
     "$BUILD_DIR/scc" "$ROOT/tests/cases/args_native/args_native.sc" -- -v -n 3 -i data.txt -f a b c x y

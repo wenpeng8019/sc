@@ -385,6 +385,67 @@ struct CGen {
         return !d.exported && !d.external;
     }
 
+    // 泛型实例类型是否「自包含」（仅依赖 platform.h：基本类型/指针，不按值内嵌用户聚合）。
+    //   自包含者其完整定义可安全聚合进早含的 generic.h（跨单元一致、消除导出签名引用未定义）；
+    //   否则（按值内嵌用户聚合/胖指针/切片）仅各单元内联，模块头改以前向 typedef 暴露（指针签名可用）。
+    bool isSelfContainedInstance(const Decl& d) const {
+        if (d.kind == Decl::EnumD) return true;
+        if (d.kind == Decl::AliasD)
+            return !aggrOf(d.structCommon.type ? d.structCommon.type->name : std::string{});
+        if (d.kind != Decl::StructD && d.kind != Decl::UnionD) return false;
+        for (auto& f : d.structCommon.fields) {
+            if (f.synthetic) continue;
+            if (f.type.ptr > 0) continue;                     // 指针字段：仅需前向，自包含
+            if (f.type.fat || f.type.project) return false;   // 胖指针/切片句柄：依赖运行时定义
+            if (f.type.hasInline) return false;               // 内联匿名聚合：保守内联
+            if (aggrOf(f.type.name)) return false;            // 值内嵌用户聚合：非自包含
+        }
+        return true;
+    }
+
+    // 本单元是否存在任何泛型实例声明（决定是否需要 #include generic.h）。
+    bool unitHasGenericInst() const {
+        for (auto& d : prog.decls) if (d->genericInst) return true;
+        return false;
+    }
+
+    // 向工程级 generic.h 追加本单元贡献：所有泛型实例聚合的前向 typedef（fwdOut）+ 自包含
+    //   实例（仅基本类型/指针字段）的完整类型定义（defOut）。跨单元按类型名去重（seen*）。
+    //   非自包含实例（按值内嵌用户聚合）不入头，仅各单元内联，其指针签名靠前向 typedef 跨模块可见。
+    void appendGenericFragment(std::set<std::string>& seenFwd,
+                               std::set<std::string>& seenDef,
+                               std::string& fwdOut, std::string& defOut) {
+        // 渲染 emitTypeDecl 所需的最小类型索引（聚合/别名/枚举），不影响 .c 主流程。
+        for (auto& d : prog.decls) {
+            if (d->kind == Decl::StructD || d->kind == Decl::UnionD) aggrs[d->name] = d.get();
+            else if (d->kind == Decl::AliasD && d->structCommon.type)
+                aliases[d->name] = d->structCommon.type->name;
+            if (d->kind == Decl::EnumD) enums.insert(d->name);
+        }
+        // 1) 前向 typedef：所有泛型实例 struct/union（保证指针签名跨模块可见）
+        for (auto& d : prog.decls) {
+            if (!d->genericInst) continue;
+            if (d->kind != Decl::StructD && d->kind != Decl::UnionD) continue;
+            if (!seenFwd.insert(d->name).second) continue;
+            const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
+            fwdOut += std::string("typedef ") + (asUnion ? "union" : "struct")
+                    + " " + d->name + " " + d->name + ";\n";
+        }
+        // 2) 完整定义：自包含实例（struct/union/enum/alias）
+        for (auto& d : prog.decls) {
+            if (!d->genericInst || !isSelfContainedInstance(*d)) continue;
+            if (d->kind != Decl::StructD && d->kind != Decl::UnionD &&
+                d->kind != Decl::EnumD && d->kind != Decl::AliasD) continue;
+            if (!seenDef.insert(d->name).second) continue;
+            out.str("");
+            out.clear();
+            emitTypeDecl(*d);
+            defOut += out.str();
+        }
+        out.str("");
+        out.clear();
+    }
+
     // ---------------- 伪 class：类型查询与方法识别 ----------------
     // 类型名 → struct/union 节点（穿透别名，最多 8 层防环）
     const Decl* aggrOf(std::string name) const {
@@ -615,6 +676,12 @@ struct CGen {
     //   （.c #include 它，枚举由工程级 class.h 提供，跨单元一致编号）；空=内联模式
     //   （枚举就地写进 .c，单文件自包含）。由 emitC 工程/文件模式置为 "class.h"。
     std::string classHeaderName;
+
+    // 泛型单态化实例类型（struct/union/enum/alias）的承载头：非空=头文件模式（自包含
+    //   实例类型定义聚合进工程级 generic.h，跨单元去重一致，模块导出签名引用实例类型时
+    //   可见）；空=内联模式（实例类型就地写进 .c，单文件自包含）。由 emitC 工程/文件模式
+    //   置为 "generic.h"。注意：实例的成员函数始终随各单元 .c 以 static 发出（不进头）。
+    std::string genericHeaderName;
 
     // 根模块导出注入：非空时本单元 .c 在所有 inc 之后追加 #include 该接口头（scm_<root>.h），
     //   使根（集成单元）的 @导出 类型/操作在依赖单元 C 层可见。仅项目构建的非根单元设置。
@@ -5160,6 +5227,9 @@ struct CGen {
             //   op 单元：自身全部聚合（含非导出机制类型）均由 op.h 提供，整体跳过。
             if (unitOpModule) continue;
             if (unitHeaderBacked && d->exported) continue;
+            // 泛型自包含实例聚合：头文件模式下前向 typedef 由 generic.h 提供，避免重复。
+            if (!genericHeaderName.empty() && d->genericInst && isSelfContainedInstance(*d))
+                continue;
             if (!emitted.insert(d->name).second) continue;
             // 标签联合展开为 struct（带 tag + union），前向声明须与定义一致用 struct
             const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
@@ -5337,6 +5407,12 @@ struct CGen {
         if (!classHeaderName.empty() && computeUsesClassRuntime())
             out << "#include \"" << classHeaderName << "\"\n";
 
+        // 泛型实例自包含类型：头文件模式下由工程级 generic.h 提供（跨单元去重、一致），
+        //   须先于用户 inc 头引入，使引用实例类型（含按值/指针）的模块头可见其定义/前向。
+        //   内联模式则随 decls 就地输出。
+        if (!genericHeaderName.empty() && unitHasGenericInst())
+            out << "#include \"" << genericHeaderName << "\"\n";
+
         // 用户 inc 引入的头文件
         for (auto& d : prog.decls)
             if (d->kind == Decl::IncD) emitInclude(*d);
@@ -5510,6 +5586,14 @@ struct CGen {
                     (d->cImpl || !d->methodOwner.empty()))
                     continue;   // :: 接口原型由 op.h 提供
             }
+            // 泛型自包含实例类型：头文件模式下由工程级 generic.h 提供（跨单元一致、去重），
+            //   本单元跳过内联定义（其成员函数仍随下方 FuncD 以 static 就地发出）。
+            //   非自包含实例（按值内嵌用户聚合等）仍内联，generic.h 仅给前向 typedef。
+            if (!genericHeaderName.empty() && d->genericInst &&
+                isSelfContainedInstance(*d) &&
+                (d->kind == Decl::StructD || d->kind == Decl::UnionD ||
+                 d->kind == Decl::EnumD   || d->kind == Decl::AliasD))
+                continue;
             switch (d->kind) {
                 case Decl::EnumD: case Decl::AliasD:
                     emitTypeDecl(*d);
@@ -5633,6 +5717,11 @@ struct CGen {
         //   为形参，故头文件须先引入 class.h 提供 tril/sc_hyper/object 类型与全局选择子。
         if (computeUsesClassRuntime())
             out << "#include \"class.h\"\n";
+
+        // 模块导出签名可能引用泛型实例类型（如 fnc fill(v: Vec_int&)）。自包含实例完整定义
+        //   与全部实例前向 typedef 由工程级 generic.h 提供，头文件引入它即可让导出原型可编译。
+        if (unitHasGenericInst())
+            out << "#include \"generic.h\"\n";
         out << "\n";
 
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
@@ -5718,6 +5807,7 @@ std::string emitC(const Program& prog, const std::string& srcFile,
     g.rootPreludeHeader = rootPreludeHeader;  // 根模块导出接口头（末位 include）；空=禁用
     if (!prog.futureIds.empty()) g.typeHeaderName = "type.h";  // 文件模式：.c #include "type.h"
     g.classHeaderName = "class.h";  // 工程/文件模式：cls/dim 选择子由共享 class.h 提供（跨单元一致）
+    g.genericHeaderName = "generic.h";  // 工程/文件模式：泛型实例类型由共享 generic.h 提供（跨单元一致）
     std::string c = g.run();
     if (stringifyHeaderOut) *stringifyHeaderOut = g.sofHeaderOut;
     return c;
@@ -5782,4 +5872,35 @@ std::string emitClassHeader(const std::vector<std::string>& clsNames,
 bool programUsesClassRuntime(const Program& prog) {
     CGen g(prog);
     return g.computeUsesClassRuntime();
+}
+
+// 程序是否含泛型单态化实例（供工程管线判定是否写出共享 generic.h）。
+bool programHasGenericInst(const Program& prog) {
+    for (auto& d : prog.decls) if (d->genericInst) return true;
+    return false;
+}
+
+// 泛型实例类型头 generic.h：转译/构建管线在工程输出同级落盘，各含实例的单元 .c 与模块头
+//   #include 它。跨所有单元收集泛型单态化产物：全部实例聚合的前向 typedef + 自包含实例
+//   （仅基本类型/指针字段）的完整定义（按类型名去重），保证实例类型跨模块一致可见
+//   （导出签名引用、按值/指针传递）。无任何实例则返回空串（不落盘）。
+std::string emitGenericHeader(const std::vector<const Program*>& progs) {
+    std::set<std::string> seenFwd, seenDef;
+    std::string fwd, defs;
+    bool any = false;
+    for (const Program* p : progs) {
+        if (!programHasGenericInst(*p)) continue;
+        any = true;
+        CGen g(*p);
+        g.appendGenericFragment(seenFwd, seenDef, fwd, defs);
+    }
+    if (!any) return "";
+    std::string s = "/* 由 scc 生成：泛型实例类型（跨单元一致、去重），请勿手工修改 */\n"
+                    "#ifndef SCC_GENERIC_H\n#define SCC_GENERIC_H\n\n"
+                    "#include \"platform.h\"\n\n";
+    s += fwd;
+    if (!fwd.empty()) s += "\n";
+    s += defs;
+    s += "#endif\n";
+    return s;
 }

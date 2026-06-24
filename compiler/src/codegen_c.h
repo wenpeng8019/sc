@@ -83,3 +83,13 @@ std::string emitClassHeader(const std::vector<std::string>& clsNames,
 // 程序是否需要类机制运行时（定义 cls 类，或引用 tril/object/类字面量/instanceOf）。
 //   供工程/文件管线判定是否写出共享 class.h。
 bool programUsesClassRuntime(const Program& prog);
+
+// 程序是否含泛型单态化实例（任一声明 genericInst=true）。供工程/文件管线判定是否写出
+//   共享 generic.h。
+bool programHasGenericInst(const Program& prog);
+
+// 生成泛型实例类型头 generic.h 内容：跨所有单元收集泛型单态化产物——全部实例的前向 typedef
+//   + 自包含实例（仅基本类型/指针字段）的完整定义（按类型名去重）。含 include guard。
+//   保证实例类型跨模块一致可见（导出签名引用、按值/指针传递）。无实例则返回空字符串。
+//   由转译/构建管线在工程输出同级落盘，各含实例的 .c 与模块头 #include "generic.h"。
+std::string emitGenericHeader(const std::vector<const Program*>& progs);

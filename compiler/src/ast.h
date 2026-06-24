@@ -480,6 +480,11 @@ struct Decl {
                                     // 普通文本宏此列表为空（保持 #define 行为）。
     bool macroConsumed = false;     // MixD: 该 mix 已被泛型单态化消费（已生成具体声明），codegen 不再输出。
 
+    bool genericInst = false;       // 泛型单态化产物（StructD/FuncD/EnumD/AliasD/...）：
+                                    // 跨模块编译时其类型定义聚合进工程级 generic.h（跨单元一致、
+                                    // 去重），使模块导出签名引用实例类型时可见。普通声明为 false。
+    std::string genericKey;         // 所属泛型实例键（如 "Vec<i4,int>"），跨单元去重用。
+
     //---------
 
     StructCommon structCommon;
