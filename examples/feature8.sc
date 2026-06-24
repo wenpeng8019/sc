@@ -47,14 +47,14 @@ fnc main: i4
     # stringify<compact:1>(值) 紧凑单行；默认多行美化（2 空格缩进）
     # 结构体指针 → "类型名@0x地址"；标量指针 → "&值"
 
-    var s: string
+    var s: string&                            # 堆专属：每次 stringify 返回新堆指针，用后即 drop
 
     var p: point
     p.x = 3
     p.y = 4
     s = stringify<compact:1>(p)
-    print "point 值: ", s.cstr()              # s.cstr() 返回 char& → %s
-    s.drop()
+    print "point 值: ", s->cstr()             # s->cstr() 返回 char& → %s
+    s->drop()
 
     var n: node
     n.id = 1
@@ -67,18 +67,18 @@ fnc main: i4
     n.ok = true
     n.tag = "hot"
     s = stringify<compact:1>(n)
-    print "node 值: ", s.cstr()
-    s.drop()
+    print "node 值: ", s->cstr()
+    s->drop()
 
     # 默认（无选项）多行美化
     s = stringify(n)
-    print "node 美化:\n", s.cstr()
-    s.drop()
+    print "node 美化:\n", s->cstr()
+    s->drop()
 
     var pn: node& = &n
     s = stringify<compact:1>(pn)       # 一级指针自动解引用
-    print "node 指针: ", s.cstr()
-    s.drop()
+    print "node 指针: ", s->cstr()
+    s->drop()
 
     # 数组 / 枚举 stringify
     var arr[4]: i4
@@ -86,13 +86,13 @@ fnc main: i4
     for i = 0; i < 4; i++
         arr[i] = (i + 1) * 10
     s = stringify<compact:1>(arr)
-    print "一维数组: ", s.cstr()
-    s.drop()
+    print "一维数组: ", s->cstr()
+    s->drop()
 
     var c: color = Green
     s = stringify<compact:1>(c)        # 枚举按整数格式化
-    print "枚举: ", s.cstr()
-    s.drop()
+    print "枚举: ", s->cstr()
+    s->drop()
 
     # 缓存形态：在给定缓存内构建，返回 char&（截断保证 NUL 结尾）
     var buf[64]: char

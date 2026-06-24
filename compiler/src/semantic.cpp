@@ -699,14 +699,14 @@ struct Checker {
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
                 // stringify 格式化关键字：
-                //   stringify(x) → string（单参数格式化）
+                //   stringify(x) → string&（单参数格式化，堆构造返回指针，调用方 .drop()）
                 //   stringify(x, buf, n) → char&（三参数，结果写入 buf）
                 if (e.a->kind == Expr::Ident && e.a->text == "stringify" && !e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()) {
                     for (auto& a : e.args) (void)inferExpr(*a, locals, line);
                     if (e.args.size() == 3) return Ty{"char", 1, 0, true, false};
-                    return Ty{"string", 0, 0, true, false};
+                    return Ty{"string", 1, 0, true, false};
                 }
                 // 普通函数调用：直接 name(...) 形态 → 未定义/实参检查
                 if (e.a->kind == Expr::Ident) {

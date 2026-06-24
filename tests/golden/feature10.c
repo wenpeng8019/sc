@@ -54,27 +54,25 @@ int32_t main(void) {
     /* line 29 */
     printf("counter: init=%d add(5)=%d\n", c.n, counter_add(&c, 5));
     /* line 32 */
-    string s = {0};
-    string_init(&s);
+    string *s = string__new();
     /* line 33 */
-    string_append(&s, "Hello");
+    string_append(s, "Hello");
     /* line 34 */
-    string_append(&s, ", sc!");
+    string_append(s, ", sc!");
     /* line 35 */
-    printf("s=%s len=%llu\n", string_cstr(&s), string_len(&s));
+    printf("s=%s len=%llu\n", string_cstr(s), string_len(s));
     /* line 36 */
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(&s, "sc", 0), string_starts_with(&s, "Hello"));
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(s, "sc", 0), string_starts_with(s, "Hello"));
     /* line 38 */
-    string part = {0};
-    string_init(&part);
+    string *part = string__new();
     /* line 39 */
-    string_slice(&s, -(3), -(1), &(part));
+    string_slice(s, -(3), -(1), part);
     /* line 40 */
-    printf("slice(-3,-1)=%s\n", string_cstr(&part));
+    printf("slice(-3,-1)=%s\n", string_cstr(part));
     /* line 41 */
-    string_upper(&s);
+    string_upper(s);
     /* line 42 */
-    printf("upper=%s\n", string_cstr(&s));
+    printf("upper=%s\n", string_cstr(s));
     /* line 45 */
     list l = {0};
     list_init(&l);
@@ -98,9 +96,9 @@ int32_t main(void) {
     /* line 56 */
     list_drop(lp);
     /* line 57 */
-    string_drop(&part);
+    (string_drop(part), sc_free(part));
     /* line 58 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 61 */
     string *hs = string__new();
     /* line 62 */
@@ -108,10 +106,8 @@ int32_t main(void) {
     /* line 63 */
     printf("heap: %s\n", string_cstr(hs));
     /* line 64 */
-    string_drop(hs);
+    (string_drop(hs), sc_free(hs));
     /* line 65 */
-    free(hs);
-    /* line 66 */
     {
         int32_t _ret = 0;
         sc_mod_adt_drop();

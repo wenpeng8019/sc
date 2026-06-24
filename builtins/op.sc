@@ -591,8 +591,8 @@ def io: [
 # ---------------- stringify(...)：JSON 字符串格式化（语言关键字）----------------
 # 语言底层机制（默认导入，无需 inc）：编译器按实参静态类型生成格式化器（写入独立
 # stringify.h 由生成的 .c include），区别于类型 string 与堆构造 string()。选项类型
-# stringify_t 的 C ABI 见 op.h；格式化器返回 adt string，故仍依赖 inc adt.sc。
-#   var s: string = stringify(x)        # 返回 adt string（JSON 文本），用完需 s.drop()
+# stringify_t 的 C ABI 见 op.h；格式化器返回堆专属 string&，故仍依赖 inc adt.sc。
+#   var s: string& = stringify(x)       # 返回堆构造 string&（JSON 文本），用完需 s->drop()
 #   var b[256]: char
 #   var p: char& = stringify(x, b, 256) # 在给定缓存内构建（截断保证 NUL 结尾），
 #                                       # 返回 char&（即缓存首址，无需 drop）

@@ -28,18 +28,18 @@ fnc main: i4
     var c: counter
     printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
 
-    # string：动态字符串
-    var s: string
-    s.append("Hello")
-    s.append(", sc!")
-    printf("s=%s len=%llu\n", s.cstr(), s.len())
+    # string：动态字符串（堆专属：string() 构造，drop 释放缓冲+块体）
+    var s: string& = string()
+    s->append("Hello")
+    s->append(", sc!")
+    printf("s=%s len=%llu\n", s->cstr(), s->len())
     printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
-           s.find("sc", 0), s.starts_with("Hello"))
-    var part: string
-    s.slice(-3, -1, &part)              # 负索引切片
-    printf("slice(-3,-1)=%s\n", part.cstr())
-    s.upper()
-    printf("upper=%s\n", s.cstr())
+           s->find("sc", 0), s->starts_with("Hello"))
+    var part: string& = string()
+    s->slice(-3, -1, part)              # 负索引切片
+    printf("slice(-3,-1)=%s\n", part->cstr())
+    s->upper()
+    printf("upper=%s\n", s->cstr())
 
     # list：动态指针数组（元素 v&，不拥有元素）
     var l: list
@@ -51,16 +51,15 @@ fnc main: i4
     for i = 0; i < l.len(); i++
         printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
 
-    # 析构：手动 drop（指针接收者用 ->）
+    # 析构：手动 drop（指针接收者用 ->；string 堆专属，drop 连块体一并释放）
     var lp: list& = &l
     lp->drop()
-    part.drop()
-    s.drop()
+    part->drop()
+    s->drop()
 
-    # 堆构造：T() 伪调用 → malloc + init，释放顺序 drop 再 free
+    # 堆构造：string() 伪调用 → sc_alloc + init，drop 释放缓冲并 sc_free 块体
     var hs: string& = string()
     hs->append("on the heap")
     printf("heap: %s\n", hs->cstr())
     hs->drop()
-    free(hs)
     return 0

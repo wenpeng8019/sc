@@ -14,8 +14,10 @@
 
 # ---------------- string：动态字符串 ----------------
 # 内部保证 NUL 结尾，cstr() 可直接交给 C 接口
+# 堆专属（def string&）：不存在 string 值类型，只能用 string&（普通指针）/string@（自动指针）。
+#   string() 堆构造，末尾 s.drop() 释放（drop 释放缓冲 + 结构体块）。
 
-@def string: {
+@def string&: {
     data: char&     # 缓冲区（NUL 结尾；空串可为 nil）
     size: u8      # 字符数（不含 NUL）
     cap: u8       # 缓冲区容量

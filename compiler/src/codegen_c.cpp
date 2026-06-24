@@ -506,6 +506,9 @@ struct CGen {
         // print / stringify 格式化关键字使用标记（原型/辅助函数需先于函数体输出）
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             if (e.a->text == "stringify" && !e.args.empty() && !usesStrof) usesStrof = e.line;
+            // stringify 单参数包装堆构造 string&，需保证 string__new 生成
+            if (e.a->text == "stringify" && !e.args.empty())
+                if (const Decl* ss = aggrOf("string")) heapNews.insert(ss->name);
         }
         if (e.a) scanExprForNew(*e.a);
         if (e.b) scanExprForNew(*e.b);
@@ -971,10 +974,11 @@ struct CGen {
         out << "    string_append(_o, \"}\");\n}\n\n";
     }
 
-    // 顶层包装：string stringify_KEY(T, stringify_t) —— 构造 string、格式化、按值返回
+    // 顶层包装：string *stringify_KEY(T, stringify_t) —— 堆构造 string、格式化、返回指针
+    //（string 为堆专属类型，调用方负责 .drop()/sc_free）
     void emitSofWrapper(const SofReq& r) {
-        out << "static string stringify_" << r.key << "(" << r.cParam << ", stringify_t _opt) {\n"
-            << "    string _s;\n    string_init(&_s);\n    string *_o = &_s;\n";
+        out << "static string *stringify_" << r.key << "(" << r.cParam << ", stringify_t _opt) {\n"
+            << "    string *_o = string__new();\n";
         const Decl* sd = aggrOf(r.name);
         if (r.dims.empty() && r.ptr == 1 && sd) {
             // 聚合一级指针：解引用展开内容（nil → "nil"）
@@ -984,17 +988,18 @@ struct CGen {
         } else {
             emitSofValue("_v", r.name, r.ptr, r.dims, 0, 1, "0");
         }
-        out << "    return _s;\n}\n\n";
+        out << "    return _o;\n}\n\n";
         if (!r.needBuf) return;
         // 缓存变体：char *stringify_KEY_buf(T, 缓存, 大小, stringify_t) —— 截断拷贝进缓存，返回缓存首址
         out << "static char *stringify_" << r.key << "_buf(" << r.cParam
             << ", char *_buf, uint64_t _n, stringify_t _opt) {\n"
             << "    if (!_buf || !_n) return _buf;\n"
-            << "    string _s = stringify_" << r.key << "(_v, _opt);\n"
-            << "    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;\n"
-            << "    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);\n"
+            << "    string *_s = stringify_" << r.key << "(_v, _opt);\n"
+            << "    uint64_t _l = _s->size < _n - 1 ? _s->size : _n - 1;\n"
+            << "    if (_l && _s->data) memcpy(_buf, _s->data, (size_t)_l);\n"
             << "    _buf[_l] = 0;\n"
-            << "    string_drop(&_s);\n"
+            << "    string_drop(_s);\n"
+            << "    sc_free(_s);\n"
             << "    return _buf;\n}\n\n";
     }
 

@@ -40,6 +40,15 @@ typedef struct com__project {
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
 void sc_mod_io_init(void); void sc_mod_io_drop(void);
 
+static inline string *string__new(void) {
+    string *_p = (string *)sc_alloc(sizeof(string));
+    if (_p) {
+        memset(_p, 0, sizeof(string));
+        string_init(_p);
+    }
+    return _p;
+}
+
 /* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */
 static inline void sc__sof_i64(string *_o, long long _v) {
     char _b[24]; snprintf(_b, sizeof(_b), "%lld", _v); string_append(_o, _b); }
@@ -136,18 +145,14 @@ static void sc__sof_point(string *_o, point *_v, stringify_t _opt, int _depth) {
     string_append(_o, "}");
 }
 
-static string stringify_color(color _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
+static string *stringify_color(color _v, stringify_t _opt) {
+    string *_o = string__new();
     sc__sof_i64(_o, (long long)(_v));
-    return _s;
+    return _o;
 }
 
-static string stringify_i4_a4(int32_t *_v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
+static string *stringify_i4_a4(int32_t *_v, stringify_t _opt) {
+    string *_o = string__new();
     string_append_char(_o, '[');
     for (size_t _i0 = 0; _i0 < (size_t)(4); _i0++) {
         if (_i0) string_append(_o, ",");
@@ -156,41 +161,36 @@ static string stringify_i4_a4(int32_t *_v, stringify_t _opt) {
     }
     if ((size_t)(4)) sc__sof_nl(_o, _opt, 0);
     string_append_char(_o, ']');
-    return _s;
+    return _o;
 }
 
-static string stringify_node(node _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
+static string *stringify_node(node _v, stringify_t _opt) {
+    string *_o = string__new();
     sc__sof_node(_o, &(_v), _opt, 0);
-    return _s;
+    return _o;
 }
 
-static string stringify_node_p(node *_v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
+static string *stringify_node_p(node *_v, stringify_t _opt) {
+    string *_o = string__new();
     if (!_v) string_append(_o, "nil");
     else sc__sof_node(_o, _v, _opt, 0);
-    return _s;
+    return _o;
 }
 
-static string stringify_point(point _v, stringify_t _opt) {
-    string _s;
-    string_init(&_s);
-    string *_o = &_s;
+static string *stringify_point(point _v, stringify_t _opt) {
+    string *_o = string__new();
     sc__sof_point(_o, &(_v), _opt, 0);
-    return _s;
+    return _o;
 }
 
 static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t _opt) {
     if (!_buf || !_n) return _buf;
-    string _s = stringify_point(_v, _opt);
-    uint64_t _l = _s.size < _n - 1 ? _s.size : _n - 1;
-    if (_l && _s.data) memcpy(_buf, _s.data, (size_t)_l);
+    string *_s = stringify_point(_v, _opt);
+    uint64_t _l = _s->size < _n - 1 ? _s->size : _n - 1;
+    if (_l && _s->data) memcpy(_buf, _s->data, (size_t)_l);
     _buf[_l] = 0;
-    string_drop(&_s);
+    string_drop(_s);
+    sc_free(_s);
     return _buf;
 }
 
@@ -216,8 +216,7 @@ int32_t main(void) {
     /* line 44 */
     print((uint8_t)(0), "默认浮点=%f 定点=%.2f", (double)(pi), pi);
     /* line 50 */
-    string s = {0};
-    string_init(&s);
+    string *s = {0};
     /* line 52 */
     point p = {0};
     /* line 53 */
@@ -227,9 +226,9 @@ int32_t main(void) {
     /* line 55 */
     s = stringify_point(p, (stringify_t){ .compact = 1 });
     /* line 56 */
-    print((uint8_t)(0), "point 值: %s", string_cstr(&s));
+    print((uint8_t)(0), "point 值: %s", string_cstr(s));
     /* line 57 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 59 */
     node n = {0};
     /* line 60 */
@@ -253,23 +252,23 @@ int32_t main(void) {
     /* line 69 */
     s = stringify_node(n, (stringify_t){ .compact = 1 });
     /* line 70 */
-    print((uint8_t)(0), "node 值: %s", string_cstr(&s));
+    print((uint8_t)(0), "node 值: %s", string_cstr(s));
     /* line 71 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 74 */
     s = stringify_node(n, (stringify_t){ .compact = 0 });
     /* line 75 */
-    print((uint8_t)(0), "node 美化:\n%s", string_cstr(&s));
+    print((uint8_t)(0), "node 美化:\n%s", string_cstr(s));
     /* line 76 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 78 */
     node *pn = &(n);
     /* line 79 */
     s = stringify_node_p(pn, (stringify_t){ .compact = 1 });
     /* line 80 */
-    print((uint8_t)(0), "node 指针: %s", string_cstr(&s));
+    print((uint8_t)(0), "node 指针: %s", string_cstr(s));
     /* line 81 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 84 */
     int32_t arr[4];
     /* line 85 */
@@ -282,17 +281,17 @@ int32_t main(void) {
     /* line 88 */
     s = stringify_i4_a4(arr, (stringify_t){ .compact = 1 });
     /* line 89 */
-    print((uint8_t)(0), "一维数组: %s", string_cstr(&s));
+    print((uint8_t)(0), "一维数组: %s", string_cstr(s));
     /* line 90 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 92 */
     color c = Green;
     /* line 93 */
     s = stringify_color(c, (stringify_t){ .compact = 1 });
     /* line 94 */
-    print((uint8_t)(0), "枚举: %s", string_cstr(&s));
+    print((uint8_t)(0), "枚举: %s", string_cstr(s));
     /* line 95 */
-    string_drop(&s);
+    (string_drop(s), sc_free(s));
     /* line 98 */
     char buf[64];
     /* line 99 */
