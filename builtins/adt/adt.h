@@ -37,6 +37,7 @@ uint8_t  string_assign(string *_this, const char *s);
 uint8_t  string_append(string *_this, const char *s);
 uint8_t  string_append_n(string *_this, const char *s, uint64_t n);
 uint8_t  string_append_char(string *_this, char c);
+uint8_t  string_printf(string *_this, const char *fmt, ...);  /* 追加格式化文本（自动扩容） */
 uint8_t  string_insert(string *_this, uint64_t index, const char *s);
 uint8_t  string_erase(string *_this, uint64_t index, uint64_t n);
 char     string_at(string *_this, uint64_t index);    /* 越界返回 0 */

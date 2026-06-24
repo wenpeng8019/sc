@@ -32,6 +32,7 @@
     fnc append:: bool, s: const char&             # 追加 C 字符串
     fnc append_n:: bool, s: const char&, n: u8    # 追加前 n 字节
     fnc append_char:: bool, c: char               # 追加单字符
+    fnc printf:: bool, fmt: const char&, ...      # 追加格式化文本（vsnprintf 探测扩容）
     fnc insert:: bool, index: u8, s: const char&  # 指定位置插入
     fnc erase:: bool, index: u8, n: u8            # 删除 n 字节
     fnc at:: char, index: u8                      # 取字符（越界返回 0）

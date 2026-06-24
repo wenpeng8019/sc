@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 /* ---------------- string ---------------- */
 
@@ -96,20 +98,100 @@ char string_at(string *_this, uint64_t index) {
     return index < _this->size ? _this->data[index] : 0;
 }
 
+/* ---- KMP 双向子串搜索（移植自 uthash/utstring.h）---- */
+
+/* 左→右 KMP 失配表（needle 长 n，表长 n+1）。 */
+static void sc__kmp_build(const char *p, size_t n, long *t) {
+    long i = 0, j = -1;
+    t[0] = -1;
+    while (i < (long)n) {
+        while (j > -1 && p[i] != p[j]) j = t[j];
+        i++; j++;
+        if (i < (long)n && p[i] == p[j]) t[i] = t[j];
+        else t[i] = j;
+    }
+}
+
+/* 右→左 KMP 失配表。 */
+static void sc__kmp_buildR(const char *p, size_t n, long *t) {
+    long i = (long)n - 1, j = (long)n;
+    t[i + 1] = j;
+    while (i >= 0) {
+        while (j < (long)n && p[i] != p[j]) j = t[j + 1];
+        i--; j--;
+        if (i >= 0 && p[i] == p[j]) t[i + 1] = t[j + 1];
+        else t[i + 1] = j;
+    }
+}
+
+/* 左→右搜索：命中返回相对 haystack 的偏移，未命中 -1。 */
+static long sc__kmp_find(const char *hay, size_t hlen, const char *ndl,
+                         size_t nlen, const long *t) {
+    long i = 0, j = 0;
+    while (j < (long)hlen && ((long)hlen - j + i) >= (long)nlen) {
+        while (i > -1 && ndl[i] != hay[j]) i = t[i];
+        i++; j++;
+        if (i >= (long)nlen) return j - i;
+    }
+    return -1;
+}
+
+/* 右→左搜索：命中返回相对 haystack 的偏移，未命中 -1。 */
+static long sc__kmp_findR(const char *hay, size_t hlen, const char *ndl,
+                          size_t nlen, const long *t) {
+    long i = (long)nlen - 1, j = (long)hlen - 1;
+    while (j >= 0 && j >= i) {
+        while (i < (long)nlen && ndl[i] != hay[j]) i = t[i + 1];
+        i--; j--;
+        if (i < 0) return j + 1;
+    }
+    return -1;
+}
+
 int64_t string_find(string *_this, const char *sub, uint64_t start) {
-    if (!sub || start > _this->size) return -1;
-    if (!_this->data) return *sub ? -1 : 0;
-    const char *p = strstr(_this->data + start, sub);
-    return p ? (int64_t)(p - _this->data) : -1;
+    if (!sub) return -1;
+    uint64_t nlen = strlen(sub);
+    if (nlen == 0) return start <= _this->size ? (int64_t)start : -1;
+    if (start > _this->size || _this->size - start < nlen) return -1;
+    long *t = (long *)sc_alloc(sizeof(long) * (nlen + 1));
+    if (!t) return -1;
+    sc__kmp_build(sub, nlen, t);
+    long pos = sc__kmp_find(_this->data + start, _this->size - start, sub, nlen, t);
+    sc_free(t);
+    return pos >= 0 ? (int64_t)(pos + (long)start) : -1;
 }
 
 int64_t string_rfind(string *_this, const char *sub) {
-    if (!sub || !_this->data) return -1;
-    uint64_t n = strlen(sub);
-    if (n > _this->size) return -1;
-    for (int64_t i = (int64_t)(_this->size - n); i >= 0; i--)
-        if (memcmp(_this->data + i, sub, n) == 0) return i;
-    return -1;
+    if (!sub) return -1;
+    uint64_t nlen = strlen(sub);
+    if (nlen == 0) return (int64_t)_this->size;
+    if (nlen > _this->size || !_this->data) return -1;
+    long *t = (long *)sc_alloc(sizeof(long) * (nlen + 1));
+    if (!t) return -1;
+    sc__kmp_buildR(sub, nlen, t);
+    long pos = sc__kmp_findR(_this->data, _this->size, sub, nlen, t);
+    sc_free(t);
+    return (int64_t)pos;
+}
+
+/* 追加 printf 格式化文本：vsnprintf 探测所需长度→扩容→重试（移植 utstring_printf_va）。 */
+uint8_t string_printf(string *_this, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    uint8_t ok = 1;
+    for (;;) {
+        va_list cp;
+        va_copy(cp, ap);
+        uint64_t avail = _this->cap > _this->size ? _this->cap - _this->size : 0;
+        int n = vsnprintf(_this->data ? _this->data + _this->size : NULL,
+                          (size_t)avail, fmt, cp);
+        va_end(cp);
+        if (n < 0) { ok = 0; break; }
+        if ((uint64_t)n < avail) { _this->size += (uint64_t)n; break; }
+        if (!str_grow(_this, _this->size + (uint64_t)n)) { ok = 0; break; }
+    }
+    va_end(ap);
+    return ok;
 }
 
 uint8_t string_equals(string *_this, const char *s) {
