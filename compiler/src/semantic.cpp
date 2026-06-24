@@ -430,6 +430,14 @@ struct Checker {
             return;                                       // void&/void** ≡ void*/void**：放行
         }
         if (n.empty()) return;                            // 省略类型名：void*/char* 由 codegen 兜底
+        // 堆专属类型 def/cls NAME&: {}：应用层无 NAME 值类型，只允许指针形态（NAME&/NAME@）。
+        // 值形态判据：ptr==0 && !fat（值数组 [N]NAME 同为 ptr==0，一并禁止）。
+        if (t.ptr == 0 && !t.fat) {
+            const Decl* sd = resolveStruct(n);
+            if (sd && sd->heapOnly)
+                err(line, "堆专属类型 '" + n + "' 不能作值类型使用（def " + n +
+                          "& 定义）：请用指针 '" + n + "&' 或自动指针 '" + n + "@'");
+        }
         if (lenientCalls) return;                         // 存在未枚举 C 头 / add：可能引入未知类型
         if (!isKnownTypeName(n))
             err(line, "未定义的类型 '" + n + "'" + hintTypeName(n));
@@ -630,7 +638,9 @@ struct Checker {
                     const bool isReservedDim = sd->isClass &&
                         (e.text == "CLS_ID" || e.text == "OBJ_KEY" || e.text == "OBJ_NAME" ||
                          e.text == "RLT_KEY" || e.text == "RLT_NAME");
-                    if (!isMethod && !isReservedDim)
+                    // 堆专属类型 NAME&：未提供 drop 时，.drop() 默认析构（codegen 注入 free）→ 放行。
+                    const bool isAutoDrop = sd->heapOnly && e.text == "drop";
+                    if (!isMethod && !isReservedDim && !isAutoDrop)
                         err(e.line, std::string(sd->kind == Decl::UnionD ? "联合 '" : "结构体 '")
                             + base.name + "' 没有成员 '" + e.text + "'" + hintMember(*sd, e.text));
                 }

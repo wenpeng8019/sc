@@ -1,6 +1,6 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-def Cat: {
+cls Cat: {
     age: i4
     init: fnc
         this->age = 3
@@ -12,7 +12,7 @@ def Cat: {
         return positive
 }
 
-def Dog: {
+cls Dog: {
     age: i4
     init: fnc
         this->age = 5
@@ -24,7 +24,7 @@ def Dog: {
         return positive
 }
 
-def Fish: {
+cls Fish: {
     age: i4
     init: fnc
         this->age = 1
@@ -33,7 +33,7 @@ def Fish: {
         return positive
 }
 
-def Item: {
+cls Item: {
     obj_key: i4
     obj_name[16]: char
     init: fnc

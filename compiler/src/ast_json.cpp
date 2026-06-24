@@ -228,6 +228,7 @@ std::string declNode(const Decl& d) {
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
             std::string sd = X;
+            if (d.heapOnly) sd += "&";   // 堆专属类型 def/cls NAME&
             if (d.tagged) sd += "@";
             else if (d.linked) sd += "~";
             else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";

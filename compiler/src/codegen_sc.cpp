@@ -240,7 +240,8 @@ struct SGen {
                     : (!d.adtItem.empty() ? ("<" + d.adtColl + ", " + d.adtItem + "> ")
                     : (!d.projectSelf.empty() ? ("<" + d.projectSelf + "> ") : ""));
                 if (d.tagged) mark = "@";  // 标签联合：def T: @( ... )
-                ind(); out << X << "def " << d.name << ": "
+                ind(); out << X << (d.isClass ? "cls " : "def ") << d.name
+                           << (d.heapOnly ? "&" : "") << ": "
                            << mark << open << "\n";
                 depth++;
                 for (auto& f : d.structCommon.fields) {

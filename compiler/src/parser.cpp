@@ -551,6 +551,10 @@ struct Parser {
         if (!at(Tok::Ident)) err("期望类型名");           // 当前 token 必须是标识符（类型名）   
         d->name = foldMacroSpelling(advance().text);    // 类型名（宏体内折叠 \ 粘贴，支持 def T_\N 泛型实例化）
 
+        // 堆专属标记：def/cls NAME&: {} —— 名字后紧跟 & → 该类型只可作指针（NAME&/NAME@），
+        // 禁止一切值形态。仅对结构体/联合体（{ }/( ) 字段块）有效，别名/枚举形态后续校验报错。
+        if (acceptOp("&")) d->heapOnly = true;
+
         // 1. 对于 -> 箭头语法：类型别名  def name -> target
         if (accept(Tok::Arrow)) {
             if (asClass) err("cls 类只支持 { 字段块 } 形态（不支持别名 ->）");

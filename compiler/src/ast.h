@@ -439,6 +439,12 @@ struct Decl {
 
     bool isClass = false;           // cls 类定义（StructD）：首部注入 synthetic _class 分派器指针，
                                     // 各 dim 折叠进唯一分派器 T_hyper_impl 的 switch 分支
+
+    bool heapOnly = false;          // 堆专属类型 def/cls NAME&: {}（名后紧跟 &）：
+                                    // 应用层不存在 NAME 值类型，仅 NAME&（普通指针）/NAME@（自动指针）。
+                                    // 禁止一切值形态（局部/全局 var、值成员、值参、值返回、值数组）。
+                                    // NAME() 仍堆构造（malloc+init）产出 NAME& 指针；
+                                    // 普通指针 .drop() 由 codegen 注入结构体块释放。
     bool isDim = false;             // 维度（FuncD，methodOwner=类名、methodName=维度名）：
                                     // 不单独生成函数，codegen 折叠进所属类的分派器 case；返回恒 tril
 

@@ -465,6 +465,12 @@ struct CGen {
         return nullptr;
     }
 
+    // 堆专属类型 def/cls NAME&: {}：只可作指针，普通指针 .drop() 由 codegen 注入块释放。
+    bool isHeapOnly(const std::string& name) const {
+        const Decl* d = aggrOf(name);
+        return d && d->heapOnly;
+    }
+
     // prev/next 上下文关键字：链表结构体上映射到内置 _prev/_next
     static std::string memberFieldName(const Decl& sd, const std::string& name) {
         if (sd.linked && (name == "prev" || name == "next")) return "_" + name;
@@ -1776,7 +1782,21 @@ struct CGen {
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
+                        // 堆专属类型 NAME& 的普通指针 .drop()：先调用户 drop（释放内部资源，
+                        // 若有），再 free 结构体块本身。无用户 drop → 仅 free（默认析构）。
+                        // 胖指针 NAME@ 由运行时 sc_fat_on_zero_d 释放，不在此拦截。
+                        if (e.a->text == "drop" && e.args.empty() && !base.fat
+                            && base.ptr == 1 && isHeapOnly(base.name)) {
+                            const Decl* dm = findMethod(base.name, "drop");
+                            out << "(";
+                            if (dm) { out << dm->name << "("; emitExpr(*e.a->a); out << "), "; }
+                            out << "free(";
+                            emitExpr(*e.a->a);
+                            out << "))";
+                            break;
+                        }
                         // 维度调用糖：cls 实例 o.Dim(args) → T_hyper_impl(&o._class, SC_DIM_Dim, args)
+
                         if (classNames.count(base.name) && isDimCallName(e.a->text)) {
                             out << base.name << "_hyper_impl(&";
                             if (base.fat) { out << "("; emitFatBaseAsRaw(*e.a->a, base.name); out << ")->_class"; }

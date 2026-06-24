@@ -755,6 +755,52 @@ def point: {
 def rect: { lt: point, rb: point }
 ```
 
+### 10.2.1 堆专属结构体 `def Name&`
+
+类型名后紧跟 `&`（`def Name&: {...}` / `cls Name&: {...}`）声明**堆专属结构体**：
+在应用层**不存在 `Name` 值类型**，只存在指针 `Name&` 与自动指针 `Name@`。
+凡以**值形态**使用——局部/全局 `var x: Name`、值成员 `f: Name`、值参 `p: Name`、
+值返回 `:: Name`、值数组 `[N]Name`——一律**编译报错**，只能写 `Name&` / `Name@`。
+
+```sc
+@def buf&: {
+    data: char&
+    cap:  u8
+    init: fnc                       # 构造：可缺省
+        this->cap = 0
+    drop: fnc                       # 析构：可缺省（释放内部资源）
+        free(this->data)
+}
+
+@fnc main: i4
+    let b: buf& = buf()             # 堆构造，得 buf& 普通指针
+    b->cap = 16
+    b->drop()                       # 析构 + 回收块本身
+    return 0
+```
+
+**为什么要它。** 没有 `Name` 值实例，就**没有可按值拷贝的对象**——天然规避「拷贝
+一份内部持有指针/自动指针的结构体」带来的双重释放/记账错乱。共享只能经 `Name&`
+（裸引用，不追踪）或 `Name@`（自动指针，引用图记账）。`string` 等内建可变缓冲类型
+即以此定义。
+
+**生命周期：两环节而非四环节。** 普通结构体对象的生命周期分四环节
+`alloc + init + drop + free`，各自独立；堆专属结构体把 **alloc 融进 `Name()`**、
+**free 融进 `.drop()`**，用户只需关心 `init` / `drop` 两个方法：
+
+| 操作 | 等价展开 | 说明 |
+|---|---|---|
+| `Name()` | `malloc` + 清零 + `init`（若有） | **alloc + init** 融合；无 `init` 则仅 calloc |
+| `p->drop()` | `Name_drop(p)`（若有）+ `free(p)` | **drop + free** 融合；无 `drop` 则仅 free |
+
+- 用户 `init` / `drop` **均可缺省**：无 `init` → `Name()` 仅分配清零；无 `drop` →
+  `.drop()` 自动提供默认析构（仅 `free` 块本身）。
+- 用户 `drop` 只负责释放**内部资源**（如上例 `this->data`）；**外层块的 `free`
+  始终由编译器注入**，用户 `drop` 内不要再 `free(this)`。
+- 经 `Name@`（自动指针）持有时，析构与回收改由引用图 ARC 驱动（§5.1）：`in→0`
+  触发用户 `drop` 清理内部资源，`out==0` 时自动 `free` 块——此时**不要**再手动
+  `.drop()`，避免二次释放。
+
 ### 10.3 联合体
 
 ```sc
@@ -2681,9 +2727,15 @@ flowchart TD
 ### 19.2 cls 类定义与 dim 维度
 
 `cls` 为新顶级关键字，与 `def` 并列，**完全复用 `def` 结构体机制**（`~` 链表、`<C,I>` 容器、
-`<S>` 分身、内联类型、成员函数 `fnc`、`init`/`drop`、自动指针成员 `T@` 均可用）。额外在结构体
-首部注入隐藏 synthetic 成员 `_class`（分派函数指针；与 `~` 共存置于 `_prev/_next` 之后，
-与 `<C,I>` 共存置于 `_adt` 之后）。`base(o)` 自动跳过 `_class`。
+`<S>` 分身、内联类型、成员函数 `fnc`、`init`/`drop`、自动指针成员 `T@`、堆专属 `&` 标记
+均可用）。额外在结构体首部注入隐藏 synthetic 成员 `_class`（分派函数指针；与 `~` 共存置于
+`_prev/_next` 之后，与 `<C,I>` 共存置于 `_adt` 之后）。`base(o)` 自动跳过 `_class`。
+
+> **堆专属类 `cls Name&`**（见 §10.2.1）：类名后紧跟 `&` 同样适用于 `cls`，得**堆专属类**——
+> 应用层无 `Name` 值类型，只能经 `Name&` / `Name@` / `object` 持有，禁一切值形态。`Name()`
+> 融合 alloc+init、`.drop()` 融合 drop+free（二者均可缺省）。动态多态分派与 `instanceOf`
+> 经指针/`object` 正常工作（`_class` 在 `Name()` 堆构造点自动安装）。
+
 
 `dim` 声明维度（类比成员函数，但返回值恒 `tril`，真正输出经**指针出参**回填）：维度**不各自生成
 函数**，折叠进唯一分派器 `T_hyper_impl` 的 `switch` 分支；维度名 → 全局选择子枚举 `SC_DIM_<Name>`。
