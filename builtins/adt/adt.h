@@ -23,11 +23,11 @@ extern "C" {
 
 typedef struct string {
     char    *data;     /* 缓冲区（NUL 结尾；空串可为 NULL） */
-    uint64_t size;     /* 字符数（不含 NUL） */
-    uint64_t cap;      /* 缓冲区容量 */
+    uint32_t size;     /* 字符数（不含 NUL） */
+    uint32_t cap;      /* 缓冲区容量 */
 } string;
 
-void     string_init(string *_this);                  /* 构造为空串 */
+void     string_init(string *_this, const char *s);   /* 构造（s 为 NULL → 空串） */
 void     string_drop(string *_this);                  /* 释放缓冲区 */
 uint64_t string_len(string *_this);
 char    *string_cstr(string *_this);                  /* 始终非 NULL */
@@ -58,8 +58,8 @@ typedef int32_t (*list_cmp)(void *a, void *b);        /* sort 比较回调（函
 
 typedef struct list {
     void   **items;    /* 元素数组 */
-    uint64_t size;     /* 元素个数 */
-    uint64_t cap;      /* 已分配槽位 */
+    uint32_t size;     /* 元素个数 */
+    uint32_t cap;      /* 已分配槽位 */
 } list;
 
 void     list_init(list *_this);

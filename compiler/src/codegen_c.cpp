@@ -497,7 +497,9 @@ struct CGen {
     std::set<std::string> heapNews;
 
     void scanExprForNew(const Expr& e) {
-        if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.args.empty())
+        // T() / T(args) 堆构造糖：登记 T 以生成 T__new（带参时再生成 T__new_init）。
+        // futureId 形态走下方 future 专路；stringify 不是类型名（aggrOf 为空）自然跳过。
+        if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident && e.futureId.empty())
             if (const Decl* sd = aggrOf(e.a->text)) heapNews.insert(sd->name);
         if (!e.futureId.empty()) {
             usesFutureId = true;  // future<ID>(ctx?) → 需 future__new_tagged
@@ -618,6 +620,23 @@ struct CGen {
                 out << "        " << im->name << "(_p"
                     << (typeHasFatMember(tn) ? ", SC_OWN_RAW" : "") << ");\n";
             out << "    }\n    return _p;\n}\n\n";
+
+            // 带参堆构造 T__new_init：T(args) → T__new() 分配 + init(args) 转发
+            // （仅当 init 带用户参数时生成；无参 init 的构造仍走 T__new() 自动 init）
+            if (im && !im->structCommon.fields.empty()) {
+                out << "static inline " << tn << " *" << tn << "__new_init(";
+                for (size_t i = 0; i < im->structCommon.fields.size(); i++) {
+                    if (i) out << ", ";
+                    emitDeclarator(im->structCommon.fields[i]);
+                }
+                out << ") {\n"
+                    << "    " << tn << " *_p = " << tn << "__new();\n"
+                    << "    if (_p) " << im->name << "(_p";
+                for (auto& f : im->structCommon.fields)
+                    out << ", " << (f.name == "this" ? "_this" : f.name);
+                if (typeHasFatMember(tn)) out << ", SC_OWN_RAW";
+                out << ");\n    return _p;\n}\n\n";
+            }
 
             // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
             // _atom 参数（T<atom>() 传 SC_REF_ATOM）→ 头 flags 置原子位，引用计数走原子 RMW。
@@ -1176,8 +1195,7 @@ struct CGen {
     // → 堆构造糖，返回解析后的聚合类型 Decl（否则 nullptr）
     const Decl* typeCallee(const Expr& call) const {
         if (!call.a || call.a->kind != Expr::Ident) return nullptr;
-        // 普通 T() 须无参；future<ID>(ctx) 允许一个 ctx 实参
-        if (!call.args.empty() && call.futureId.empty()) return nullptr;
+        // 普通 T()/T(args)：T(args) 经 init 转发构造；future<ID>(ctx) 走 future 专路
         const std::string& n = call.a->text;
         if (localsT.count(n) || globalsT.count(n)) return nullptr;
         return aggrOf(n);
@@ -1290,16 +1308,9 @@ struct CGen {
                     return exprVType(*e.a, vt);
                 return false;
             case Expr::Call:
-                // T() 伪调用结果类型：T&（使链式方法调用可推断）
+                // T() 伪调用结果类型：T&（使链式方法调用可推断；T(args) 同样为 T&）
                 if (const Decl* td = typeCallee(e)) {
                     vt = {td->name, 1, 0};
-                    return true;
-                }
-                // string(值[, 缓存, 大小]) 结果类型：string / char*（使声明初值/方法调用可推断）
-                if (e.a && e.a->kind == Expr::Ident && e.a->text == "string" && !e.args.empty()
-                    && !localsT.count("string") && !globalsT.count("string")) {
-                    if (e.args.size() == 3) vt = {"char", 1, 0};
-                    else vt = {"string", 0, 0};
                     return true;
                 }
                 // stringify(值[, 缓存, 大小]) 结果类型：char*（缓存形态）/ string（使 print 可推断）
@@ -1736,6 +1747,21 @@ struct CGen {
                         out << td->name << "__new_tagged(" << e.futureId << ", ";
                         if (e.args.empty()) out << "(void *)0";
                         else emitExpr(*e.args[0], true);
+                        out << ")";
+                    } else if (!e.args.empty()) {
+                        // T(args) → T__new_init(args)：分配 + init(args) 转发
+                        const Decl* im = findMethod(td->name, "init");
+                        if (!im || im->structCommon.fields.empty())
+                            throw CompileError("类型 '" + td->name +
+                                "' 的 init 无参数，不支持带参构造 T(...)", e.line);
+                        if (e.args.size() != im->structCommon.fields.size())
+                            throw CompileError("构造 '" + td->name +
+                                "(...)' 实参个数与 init 形参不符", e.line);
+                        out << td->name << "__new_init(";
+                        for (size_t i = 0; i < e.args.size(); i++) {
+                            if (i) out << ", ";
+                            emitMethodArg(*e.args[i], &im->structCommon.fields[i]);
+                        }
                         out << ")";
                     } else
                         out << td->name << "__new()";
@@ -2267,6 +2293,8 @@ struct CGen {
         if (!isInit) emitFatUnbind(lv, dtorArg);
         // T() → 带头分配 + 绑定
         if (const Decl* td = typeCallee(init)) {
+            if (!init.args.empty())
+                throw CompileError("自动指针 T@ 暂不支持带参构造 T(...)", init.line);
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
             indent();
             out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
@@ -2342,6 +2370,8 @@ struct CGen {
         // 重新赋值先拆旧边（own 字段保留，解绑用成员自带 own/tar）
         emitFatUnbind(lv, fatDtorArg(tt));
         const Decl* td = typeCallee(init);
+        if (td && !init.args.empty())
+            throw CompileError("自动指针 T@ 暂不支持带参构造 T(...)", init.line);
         indent(); out << "if (SC_OWN_REAL(_self_own)) {\n";
         depth++;
         if (td) {

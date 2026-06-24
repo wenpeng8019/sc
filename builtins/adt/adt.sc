@@ -8,9 +8,10 @@
 # 自定义实现：scc --adt <x.c|x.o|x.a>（按同目录 adt.h 契约实现）
 #
 # 构造/析构约定：
-#   init —— 构造。函数内 `var s: string` 声明即自动调用 string_init(&s)
-#           （仅限无初值、非指针、非数组的局部变量；全局变量需手动 init）
-#   drop —— 析构。需手动调用 s.drop()（命名保留，未来支持自动插入）
+#   init —— 构造。值类型（如 list）函数内 `var l: list` 声明即自动调用 list_init(&l)
+#           （仅限无初值、非指针、非数组的局部变量；全局变量需手动 init）。
+#           堆专属 string 经 string()/string("初值") 构造（带参转发 init）。
+#   drop —— 析构。需手动调用 s->drop()/l.drop()（命名保留，未来支持自动插入）
 
 # ---------------- string：动态字符串 ----------------
 # 内部保证 NUL 结尾，cstr() 可直接交给 C 接口
@@ -19,10 +20,10 @@
 
 @def string&: {
     data: char&     # 缓冲区（NUL 结尾；空串可为 nil）
-    size: u8      # 字符数（不含 NUL）
-    cap: u8       # 缓冲区容量
+    size: u4      # 字符数（不含 NUL）
+    cap: u4       # 缓冲区容量
 
-    fnc init::                                     # 构造为空串
+    fnc init:: s: const char&                      # 构造（s 为 nil → 空串）
     fnc drop::                                     # 释放缓冲区
     fnc len:: u8                                  # 字符数
     fnc cstr:: char&                              # C 字符串视图（始终非 nil）
@@ -55,8 +56,8 @@
 
 @def list: {
     items: &&      # 元素数组
-    size: u8      # 元素个数
-    cap: u8       # 已分配槽位
+    size: u4      # 元素个数
+    cap: u4       # 已分配槽位
 
     fnc init::                                       # 构造为空列表
     fnc drop::                                       # 释放槽位数组（不释放元素）

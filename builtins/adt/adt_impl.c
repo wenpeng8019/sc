@@ -26,15 +26,16 @@ static uint8_t str_grow(string *s, uint64_t need) {
     return 1;
 }
 
-void string_init(string *_this) {
+void string_init(string *_this, const char *s) {
     _this->data = NULL;
     _this->size = 0;
     _this->cap = 0;
+    if (s) string_append(_this, s);
 }
 
 void string_drop(string *_this) {
     sc_free(_this->data);
-    string_init(_this);
+    string_init(_this, NULL);
 }
 
 uint64_t string_len(string *_this) { return _this->size; }

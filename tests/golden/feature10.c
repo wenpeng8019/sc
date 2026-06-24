@@ -24,8 +24,13 @@ static inline string *string__new(void) {
     string *_p = (string *)sc_alloc(sizeof(string));
     if (_p) {
         memset(_p, 0, sizeof(string));
-        string_init(_p);
     }
+    return _p;
+}
+
+static inline string *string__new_init(const char *s) {
+    string *_p = string__new();
+    if (_p) string_init(_p, s);
     return _p;
 }
 

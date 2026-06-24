@@ -692,12 +692,21 @@ struct Checker {
                     (void)inferExpr(*e.args[0], locals, line);
                     return Ty{"void", 1, 0, true, false};
                 }
-                // T() 无参伪调用：堆分配构造糖，结果类型为 T&
+                // T() 无参伪调用：堆分配构造糖，结果类型为 T&（future<ID>() 同样匹配）
                 if (e.a->kind == Expr::Ident && e.args.empty()
                     && locals.find(e.a->text) == locals.end()
                     && globals.find(e.a->text) == globals.end()
                     && resolveStruct(e.a->text))
                     return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
+                // T(args) 带参构造：实参转发给 init（codegen 层 T__new_init）。
+                //   future<ID>(ctx) 仍走下方普通调用旧路径（futureId 非空时排除）。
+                if (e.a->kind == Expr::Ident && !e.args.empty() && e.futureId.empty()
+                    && locals.find(e.a->text) == locals.end()
+                    && globals.find(e.a->text) == globals.end()
+                    && resolveStruct(e.a->text)) {
+                    for (auto& a : e.args) (void)inferExpr(*a, locals, line);
+                    return Ty{resolveAliasToName(e.a->text), 1, 0, true, false};
+                }
                 // stringify 格式化关键字：
                 //   stringify(x) → string&（单参数格式化，堆构造返回指针，调用方 .drop()）
                 //   stringify(x, buf, n) → char&（三参数，结果写入 buf）
