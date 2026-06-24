@@ -15,6 +15,11 @@ typedef struct com__project {
 } com__project;
 
 
+#if !SC_HAVE_AUTO_HOOKS
+static void __sc_gcanary_init(void);
+static void __sc_gcanary_fini(void);
+#endif
+
 static void fill_buf(void) {
     /* line 10 */
     int32_t tmp[(8) + SC_CANARY_ELEMS(int32_t)];
@@ -116,6 +121,9 @@ static int32_t use_globals(void) {
 }
 
 int32_t main(void) {
+#if !SC_HAVE_AUTO_HOOKS
+    __sc_gcanary_init();
+#endif
     /* line 56 */
     fill_buf();
     /* line 57 */
@@ -127,7 +135,13 @@ int32_t main(void) {
     /* line 60 */
     printf("glob=%d\n", use_globals());
     /* line 61 */
-    return 0;
+    {
+        int32_t _ret = 0;
+#if !SC_HAVE_AUTO_HOOKS
+        __sc_gcanary_fini();
+#endif
+        return _ret;
+    }
 }
 
 

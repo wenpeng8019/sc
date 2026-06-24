@@ -477,6 +477,7 @@ static inline void sc_unbind(T_fat* f){
 16. ✓ 全局 `T@`（标量 + 一维/多维数组）：进程退出 `destructor` 钩子 `__sc_gfat_fini`
     逐个 / 逐元素 `sc_fat_unbind`（带 `drop`）——保证全局对象退出前触发 `drop` 释放
     其持有的系统资源（文件 / 锁 / socket 等）。启动/退出钩子经 `platform.h` 的
-    `SC_CONSTRUCTOR` / `SC_DESTRUCTOR` 可移植宏发出（GCC/Clang `__attribute__`、MSVC `.CRT$XCU` + `atexit`）。
+    `SC_CONSTRUCTOR` / `SC_DESTRUCTOR` 可移植宏发出（GCC/Clang `__attribute__`、MSVC `.CRT$XCU` + `atexit`；
+    未知编译器 `SC_HAVE_AUTO_HOOKS==0` 退化为具名函数 + `main` 序言/尾声及 `sc_mod_*_init/drop` 显式调用）。
 17. ✓ sc 内部按值拷贝守卫：内嵌 `T@` 的按值聚合禁止整体赋值 / 拷贝构造 / 按值传参 / 按值返回
     （填补原先仅有跨 C ABI 边界守卫的空洞；sc 内部拷贝同样会破坏 in/out 记账）。

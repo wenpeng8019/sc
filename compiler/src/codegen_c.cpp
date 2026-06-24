@@ -239,6 +239,9 @@ struct CGen {
     // 全局 T@（文件作用域 var/let，标量或数组）：进程退出由 destructor 钩子逐元素拆边
     // （带 drop），释放其持有的系统资源（文件/锁/socket 等）。dims 为空=标量。
     std::vector<FatArrayVar> globalFatVars;
+    // 容器下标糖 t[k,...]：用到的 find 方法（按首用顺序去重），为各自生成 _find__idx
+    // 内联包装（出参回填 + 命中判定），使下标糖退化为一次普通函数调用而非 GNU 语句表达式。
+    std::vector<const Decl*> indexHelperFinds;
     // 与 fatScopes 平行：每层本块内登记的 final 域退出钩子（按源序）。退出点（正常落出/
     // return/break/continue）先于本块胖边拆解，按 LIFO 逐块发出其 body（§16.2 defer 等价）。
     std::vector<std::vector<const Stmt*>> fatFinalScopes;
@@ -646,6 +649,33 @@ struct CGen {
                 << "    future *_p = future__new();\n"
                 << "    if (_p) { _p->id = _id; _p->ctx = _ctx; }\n"
                 << "    return _p;\n}\n\n";
+        }
+    }
+
+    // 容器下标糖包装：为每个被 t[k,...] 用到的 find 方法生成一次性内联包装
+    //   static inline I *C_find__idx(C *_self, 键...) {
+    //       I *_o = (void*)0; return (C_find(_self, &_o, 键...) == 0) ? _o : (void*)0;
+    //   }
+    // 把出参回填 + 命中判定收进普通函数调用，替代原先依赖 GNU 语句表达式 ({...}) 的实现，
+    // 使生成代码在 MSVC 等不支持语句表达式的编译器上同样可编译。须在 find 原型之后输出。
+    void emitIndexHelpers() {
+        for (const Decl* fm : indexHelperFinds) {
+            const TypeRef& ot = fm->structCommon.fields[0].type;        // out: I&&
+            const std::string itemTy = mapBase(resolveAliasName(ot.name));
+            auto elemPtrStars = [&]{ for (int i = 1; i < ot.ptr; i++) out << "*"; };  // _o 比 out 少一级指针
+            out << "static inline " << itemTy << " ";
+            elemPtrStars();
+            out << fm->name << "__idx(" << fm->methodOwner << " *_self";
+            for (size_t i = 1; i < fm->structCommon.fields.size(); i++) {
+                out << ", ";
+                emitDeclarator(fm->structCommon.fields[i]);
+            }
+            out << ") {\n    " << itemTy << " ";
+            elemPtrStars();
+            out << "_o = (void *)0;\n    return (" << fm->name << "(_self, &_o";
+            for (size_t i = 1; i < fm->structCommon.fields.size(); i++)
+                out << ", " << fm->structCommon.fields[i].name;
+            out << ") == 0) ? _o : (void *)0;\n}\n\n";
         }
     }
 
@@ -1903,19 +1933,18 @@ struct CGen {
                 break;
             }
             case Expr::Index:
-                // 容器下标糖：t[key,...] → ({ I *_o=nil; C_find(&t,&_o,key,...)==ok ? _o : nil; })
-                // 即对容器实例执行 find，命中得元素节点 I&（用 : T& 下转回元素），未命中/出错为 nil。
+                // 容器下标糖：t[key,...] → C_find__idx(&t, key,...)，即对容器实例执行 find，
+                // 命中得元素节点 I&（用 : T& 下转回元素），未命中/出错为 nil。包装函数把出参
+                // 回填与命中判定收进一次普通调用，避免 GNU 语句表达式（MSVC 不支持）。
                 {
                     VType recv;
                     if (const Decl* fm = containerFindOf(e, &recv)) {
-                        const TypeRef& ot = fm->structCommon.fields[0].type;  // out: I&&
-                        const std::string itemTy = mapBase(resolveAliasName(ot.name));
-                        out << "(__extension__ ({ " << itemTy << " ";
-                        for (int i = 2; i < ot.ptr; i++) out << "*";   // _o 比 out 少一级指针
-                        out << "*_scfo = (void *)0; (" << fm->name << "(";
+                        bool seen = false;
+                        for (const Decl* h : indexHelperFinds) if (h == fm) { seen = true; break; }
+                        if (!seen) indexHelperFinds.push_back(fm);
+                        out << fm->name << "__idx(";
                         if (recv.ptr == 0) out << "&";                 // 值接收者自动取址
                         emitExpr(*e.a);
-                        out << ", &_scfo";
                         // 检索键（首键 e.b + 其余 e.args）逐一过 find 参数（自动 T&⟷I& 转换）
                         size_t keyi = 1;  // fields[0] 为 out，键从 fields[1] 起
                         auto emitKey = [&](const Expr& k) {
@@ -1927,7 +1956,7 @@ struct CGen {
                         };
                         if (e.b) emitKey(*e.b);
                         for (auto& a : e.args) emitKey(*a);
-                        out << ") == 0) ? _scfo : (void *)0; }))";
+                        out << ")";
                         break;
                     }
                 }
@@ -3358,7 +3387,7 @@ struct CGen {
                     else if (s.expr && s.expr->kind == Expr::Ident)
                         skip = s.expr->text;
                     if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop
-                        && !(inMainFunc && mainHasTeardown)) {
+                        && !(inMainFunc && (mainHasTeardown || hasGcanaryHook() || hasGfatHook()))) {
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
@@ -5338,6 +5367,12 @@ struct CGen {
         if (isEntryUnit || modToken.empty()) return;
         out << "void sc_mod_" << modToken << "_init(void) {\n";
         out << "    static int _done = 0; if (_done) return; _done = 1;\n";
+        // 退化路径：本模块启动钩子（栈哨兵填充）须先于自有全局构造。
+        if (hasGcanaryHook()) {
+            out << "#if !SC_HAVE_AUTO_HOOKS\n";
+            out << "    __sc_gcanary_init();\n";
+            out << "#endif\n";
+        }
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
         for (auto& ci : gClassInstalls) out << "    " << ci.first << "._class = " << ci.second << "_hyper_impl;\n";
         for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
@@ -5348,11 +5383,24 @@ struct CGen {
             out << "    " << it->fn << "(&" << it->var << ");\n";
         for (auto it = depTokens.rbegin(); it != depTokens.rend(); ++it)
             out << "    sc_mod_" << *it << "_drop();\n";
+        // 退化路径：本模块退出钩子（哨兵校验 / 全局 T@ 拆边）最后运行。
+        if (hasGcanaryHook() || hasGfatHook()) {
+            out << "#if !SC_HAVE_AUTO_HOOKS\n";
+            if (hasGcanaryHook()) out << "    __sc_gcanary_fini();\n";
+            if (hasGfatHook())    out << "    __sc_gfat_fini();\n";
+            out << "#endif\n";
+        }
         out << "}\n\n";
     }
 
     // main 序言：递归各直接依赖模块 init，再构造入口自有全局（源序）。
     void emitMainPrologue() {
+        // 退化路径：栈哨兵填充须先于任何全局构造（捕获构造期溢出）。
+        if (hasGcanaryHook()) {
+            out << "#if !SC_HAVE_AUTO_HOOKS\n";
+            indent(); out << "__sc_gcanary_init();\n";
+            out << "#endif\n";
+        }
         for (auto& t : depTokens) { indent(); out << "sc_mod_" << t << "_init();\n"; }
         for (auto& ci : gClassInstalls) { indent(); out << ci.first << "._class = " << ci.second << "_hyper_impl;\n"; }
         for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n"; }
@@ -5367,6 +5415,30 @@ struct CGen {
         for (auto it = depTokens.rbegin(); it != depTokens.rend(); ++it) {
             indent(); out << "sc_mod_" << *it << "_drop();\n";
         }
+        // 退化路径：进程退出钩子（哨兵校验 / 全局 T@ 拆边）在所有用户析构之后运行。
+        if (hasGcanaryHook() || hasGfatHook()) {
+            out << "#if !SC_HAVE_AUTO_HOOKS\n";
+            if (hasGcanaryHook()) { indent(); out << "__sc_gcanary_fini();\n"; }
+            if (hasGfatHook())    { indent(); out << "__sc_gfat_fini();\n"; }
+            out << "#endif\n";
+        }
+    }
+
+    // 退化路径（platform.h SC_HAVE_AUTO_HOOKS==0）：本单元是否产出对应启动/退出钩子。
+    bool hasGcanaryHook() const { return g_memCheck && !globalCanaries.empty(); }
+    bool hasGfatHook()    const { return !globalFatVars.empty(); }
+
+    // 退化路径：钩子函数前置声明（具名 static，定义在文件末尾），供 main / sc_mod_* 显式
+    // 调用。以 #if !SC_HAVE_AUTO_HOOKS 包裹——GCC/Clang/MSVC 由平台机制自动触发，不产出。
+    void emitHookFwdDecls() {
+        if (!hasGcanaryHook() && !hasGfatHook()) return;
+        out << "#if !SC_HAVE_AUTO_HOOKS\n";
+        if (hasGcanaryHook()) {
+            out << "static void __sc_gcanary_init(void);\n";
+            out << "static void __sc_gcanary_fini(void);\n";
+        }
+        if (hasGfatHook()) out << "static void __sc_gfat_fini(void);\n";
+        out << "#endif\n\n";
     }
 
     std::string run() {
@@ -5677,6 +5749,8 @@ struct CGen {
         std::string funcsPart = out.str();
         out = std::move(mainOut);
         emitSofHelpers();
+        emitIndexHelpers();      // 容器下标糖 _find__idx 包装（在 find 原型之后、函数体之前）
+        emitHookFwdDecls();      // 退化路径：启动/退出钩子前置声明（供 main/sc_mod 显式调用）
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
         // 类机制分派器定义（每个 cls 一个 T_hyper_impl，折叠其全部 dim + 保留维度）

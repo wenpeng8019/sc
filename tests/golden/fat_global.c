@@ -35,6 +35,10 @@ static inline node *node__new_ref(int32_t _atom) {
     return _p;
 }
 
+#if !SC_HAVE_AUTO_HOOKS
+static void __sc_gfat_fini(void);
+#endif
+
 void node_drop(node *_this) {
     /* line 7 */
     printf("drop v=%d\n", _this->v);
@@ -67,7 +71,13 @@ int32_t main(void) {
     /* line 23 */
     printf("%d %d %d\n", ((node *)(g).p)->v, ((node *)(arr[2]).p)->v, ((node *)(grid[0][0]).p)->v);
     /* line 24 */
-    return 0;
+    {
+        int32_t _ret = 0;
+#if !SC_HAVE_AUTO_HOOKS
+        __sc_gfat_fini();
+#endif
+        return _ret;
+    }
 }
 
 

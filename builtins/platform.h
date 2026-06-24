@@ -312,8 +312,14 @@ static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
  *     SC_CONSTRUCTOR(my_init) { ... }
  *     SC_DESTRUCTOR(my_fini)  { ... }
  * 可移植性：GCC / Clang 用 __attribute__；MSVC 经 .CRT$XCU 段放置 ctor 指针、
- * 经 atexit 注册 dtor（需 <stdlib.h>，本头已含）。 */
+ * 经 atexit 注册 dtor（需 <stdlib.h>，本头已含）。
+ * SC_HAVE_AUTO_HOOKS：本平台是否具备「进入 main 前 / 退出后自动运行」能力。
+ *   为 1（GCC/Clang/MSVC）：钩子由平台机制自动触发；scc 生成的显式调用以
+ *     #if !SC_HAVE_AUTO_HOOKS 包裹，不参与编译。
+ *   为 0（未知编译器）：宏仅定义「具名函数」而不自动注册，改由 scc 生成的
+ *     main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用。 */
 #if defined(__GNUC__) || defined(__clang__)
+#   define SC_HAVE_AUTO_HOOKS 1
 #   define SC_CONSTRUCTOR(f) \
         static void f(void) __attribute__((constructor)); \
         static void f(void)
@@ -321,6 +327,7 @@ static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
         static void f(void) __attribute__((destructor)); \
         static void f(void)
 #elif defined(_MSC_VER)
+#   define SC_HAVE_AUTO_HOOKS 1
 #   pragma section(".CRT$XCU", read)
     /* ctor：把函数指针放入 CRT 初始化段；/include 链接器指令防止被裁剪。
      * x86 下 C 符号带前导下划线，故 32 位加 "_" 前缀。 */
@@ -340,7 +347,12 @@ static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
         SC_CONSTRUCTOR(f##_reg) { atexit(f); } \
         static void f(void)
 #else
-#   error "constructor/destructor hooks not supported on this compiler"
+    /* 未知编译器：无自动 ctor/dtor 注册能力。退化为「仅定义具名函数」，
+     * 由 scc 生成的 main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用，
+     * 调用点以 #if !SC_HAVE_AUTO_HOOKS 包裹。 */
+#   define SC_HAVE_AUTO_HOOKS 0
+#   define SC_CONSTRUCTOR(f) static void f(void)
+#   define SC_DESTRUCTOR(f)  static void f(void)
 #endif
 
 /* ---------------- CPU 核数 ---------------- */

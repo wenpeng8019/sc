@@ -35,6 +35,11 @@ typedef struct com__project {
 } com__project;
 
 
+static inline tnode *slist_find__idx(slist *_self, int32_t key) {
+    tnode *_o = (void *)0;
+    return (slist_find(_self, &_o, key) == 0) ? _o : (void *)0;
+}
+
 static void slist_init(slist *_this) {
     /* line 33 */
     _this->head = NULL;
@@ -197,14 +202,14 @@ int32_t main(void) {
         printf("find 20 -> id=%d\n", found->id);
     }
     /* line 132 */
-    task *hit = ((task*)((__extension__ ({ tnode *_scfo = (void *)0; (slist_find(&lst, &_scfo, 30) == 0) ? _scfo : (void *)0; }))));
+    task *hit = ((task*)(slist_find__idx(&lst, 30)));
     /* line 133 */
     if (hit != NULL) {
         /* line 134 */
         printf("lst[30] -> id=%d\n", hit->id);
     }
     /* line 135 */
-    task *miss = ((task*)((__extension__ ({ tnode *_scfo = (void *)0; (slist_find(&lst, &_scfo, 99) == 0) ? _scfo : (void *)0; }))));
+    task *miss = ((task*)(slist_find__idx(&lst, 99)));
     /* line 136 */
     if (miss == NULL) {
         /* line 137 */
