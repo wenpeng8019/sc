@@ -74,6 +74,7 @@ POSITIVE=(
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc
     tests/cases/fat_array.sc
+    tests/cases/fat_global.sc
     tests/cases/final.sc
     tests/cases/atom.sc
     tests/cases/stack_canary.sc
@@ -104,6 +105,7 @@ NEGATIVE=(
     tests/cases/goto_bad_cross.sc
     tests/cases/abi_fat_bad.sc
     tests/cases/fat_array_bad.sc
+    tests/cases/fat_copy_bad.sc
     tests/cases/undef_func_bad.sc
     tests/cases/undef_var_bad.sc
     tests/cases/arg_count_bad.sc

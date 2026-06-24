@@ -131,13 +131,11 @@ int32_t main(void) {
 }
 
 
-static void __sc_gcanary_init(void) __attribute__((constructor));
-static void __sc_gcanary_init(void) {
+SC_CONSTRUCTOR(__sc_gcanary_init) {
     sc_stack_canary_fill((unsigned char*)gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), gtable);
     sc_stack_canary_fill((unsigned char*)gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, gmat);
 }
-static void __sc_gcanary_fini(void) __attribute__((destructor));
-static void __sc_gcanary_fini(void) {
+SC_DESTRUCTOR(__sc_gcanary_fini) {
     sc_stack_canary_check((unsigned char*)gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), gtable, "gtable@stack_canary.sc:6");
     sc_stack_canary_check((unsigned char*)gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, gmat, "gmat@stack_canary.sc:7");
 }

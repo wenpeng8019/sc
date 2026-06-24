@@ -306,6 +306,43 @@ static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
 #error "TLS not supported on this compiler"
 #endif
 
+/* ---------------- 启动 / 退出钩子（constructor / destructor） ---------------- */
+/* 进入 main 前自动执行 SC_CONSTRUCTOR，退出（main 返回 / exit）后自动执行 SC_DESTRUCTOR。
+ * 用法（宏紧跟函数体，宏展开为「前置声明 + 定义签名」，其后的 { ... } 即钩子体）：
+ *     SC_CONSTRUCTOR(my_init) { ... }
+ *     SC_DESTRUCTOR(my_fini)  { ... }
+ * 可移植性：GCC / Clang 用 __attribute__；MSVC 经 .CRT$XCU 段放置 ctor 指针、
+ * 经 atexit 注册 dtor（需 <stdlib.h>，本头已含）。 */
+#if defined(__GNUC__) || defined(__clang__)
+#   define SC_CONSTRUCTOR(f) \
+        static void f(void) __attribute__((constructor)); \
+        static void f(void)
+#   define SC_DESTRUCTOR(f) \
+        static void f(void) __attribute__((destructor)); \
+        static void f(void)
+#elif defined(_MSC_VER)
+#   pragma section(".CRT$XCU", read)
+    /* ctor：把函数指针放入 CRT 初始化段；/include 链接器指令防止被裁剪。
+     * x86 下 C 符号带前导下划线，故 32 位加 "_" 前缀。 */
+#   define SC_CTOR_PLACE_(f, pfx) \
+        static void f(void); \
+        __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
+        __pragma(comment(linker, "/include:" pfx #f "_")) \
+        static void f(void)
+#   ifdef _WIN64
+#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "")
+#   else
+#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "_")
+#   endif
+    /* dtor：在 ctor 内 atexit 注册，进程退出时 LIFO 调用。 */
+#   define SC_DESTRUCTOR(f) \
+        static void f(void); \
+        SC_CONSTRUCTOR(f##_reg) { atexit(f); } \
+        static void f(void)
+#else
+#   error "constructor/destructor hooks not supported on this compiler"
+#endif
+
 /* ---------------- CPU 核数 ---------------- */
 
 /* 逻辑核数（至少返回 1） */

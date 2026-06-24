@@ -236,6 +236,9 @@ struct CGen {
     std::vector<std::vector<MemCanaryVar>> memCanaryScopes;
     // 全局栈数组（文件作用域）尾哨兵：超额分配后由 constructor 填充、destructor 退出时校验。
     std::vector<MemCanaryVar> globalCanaries;
+    // 全局 T@（文件作用域 var/let，标量或数组）：进程退出由 destructor 钩子逐元素拆边
+    // （带 drop），释放其持有的系统资源（文件/锁/socket 等）。dims 为空=标量。
+    std::vector<FatArrayVar> globalFatVars;
     // 与 fatScopes 平行：每层本块内登记的 final 域退出钩子（按源序）。退出点（正常落出/
     // return/break/continue）先于本块胖边拆解，按 LIFO 逐块发出其 body（§16.2 defer 等价）。
     std::vector<std::vector<const Stmt*>> fatFinalScopes;
@@ -2499,6 +2502,12 @@ struct CGen {
                     fatArrayScopes.back().push_back({f.name, f.type.arrayDims, fatDtorArg(f.type.name)});
                 continue;
             }
+            // 全局 T@（文件作用域 var/let，标量或数组）：声明仍走下方通用路径（已验证
+            // 正确发出 `static sc_fat NAME[..] = {0};`），但登记入 globalFatVars，由进程退出
+            // destructor 钩子逐元素拆边（带 drop），释放其持有的系统资源。tls 为每线程存储期，
+            // 单次 destructor 无法逐线程清理 → 不登记。
+            if (f.type.fat && !inFunc && !isTls)
+                globalFatVars.push_back({f.name, f.type.arrayDims, fatDtorArg(f.type.name)});
             // --check=mem：函数内栈数组 → 超额分配尾哨兵 + 退域校验，捕获栈数组越界写。
             // 一维与多维均支持（多维仅外层超额若干「行」覆盖尾哨兵区，内层维度不变）；
             // 非 const/static/tls/分身/胖/内联/函数指针；尾哨兵紧贴有效元素就地拦截。
@@ -5683,19 +5692,37 @@ struct CGen {
                     ? "SC_CANARY_ELEMS(" + mc.elemTy + ") * sizeof(" + mc.elemTy + ")"
                     : std::string("SC_CANARY");
             };
-            out << "\nstatic void __sc_gcanary_init(void) __attribute__((constructor));\n";
-            out << "static void __sc_gcanary_init(void) {\n";
+            out << "\nSC_CONSTRUCTOR(__sc_gcanary_init) {\n";
             for (auto& mc : globalCanaries)
                 out << "    sc_stack_canary_fill((unsigned char*)" << mc.name
                     << " + (" << canaryElems(mc.dims) << ") * sizeof(" << mc.elemTy << "), "
                     << canaryLen(mc) << ", " << mc.name << ");\n";
             out << "}\n";
-            out << "static void __sc_gcanary_fini(void) __attribute__((destructor));\n";
-            out << "static void __sc_gcanary_fini(void) {\n";
+            out << "SC_DESTRUCTOR(__sc_gcanary_fini) {\n";
             for (auto& mc : globalCanaries)
                 out << "    sc_stack_canary_check((unsigned char*)" << mc.name
                     << " + (" << canaryElems(mc.dims) << ") * sizeof(" << mc.elemTy << "), "
                     << canaryLen(mc) << ", " << mc.name << ", \"" << mc.site << "\");\n";
+            out << "}\n";
+        }
+        // 全局 T@（标量/数组）退出清理：进程退出（main 返回后）逐个 / 逐元素拆边，
+        // in→0 触发 drop（释放系统资源），与「全局根指针域退出自动拆」语义一致。
+        if (!globalFatVars.empty()) {
+            out << "\nSC_DESTRUCTOR(__sc_gfat_fini) {\n";
+            for (auto& gv : globalFatVars) {
+                out << "    ";
+                std::string sub;
+                for (size_t d = 0; d < gv.dims.size(); d++) {   // 数组：逐维 for 遍历全部标量元素
+                    std::string k = "_k" + std::to_string(d);
+                    out << "for (size_t " << k << " = (" << gv.dims[d] << "); "
+                        << k << "-- > 0; ) ";
+                    sub += "[" + k + "]";
+                }
+                if (gv.dtorArg.empty())
+                    out << "sc_fat_unbind(&" << gv.name << sub << ");\n";
+                else
+                    out << "sc_fat_unbind_d(&" << gv.name << sub << ", " << gv.dtorArg << ");\n";
+            }
             out << "}\n";
         }
         return out.str();

@@ -1111,6 +1111,13 @@ struct Checker {
             if (f.init) {
                 Ty rhs = inferExpr(*f.init, locals, f.line);
                 checkAssignable(lhs, rhs, f.line);
+                // sc 内部按值拷贝守卫：用初值「拷贝构造」一个内嵌 T@ 的按值聚合 →
+                // 复制胖指针字节而不更新记账 → 禁止。按值聚合应以「无初值 + init 钩子」
+                // 就地构造（var x: T），或经 T@/& 引用共享。
+                if (valueAggrEmbedsFat(lhs))
+                    err(f.line, "禁止以初值拷贝构造内嵌自动指针 T@ 的按值聚合 '" + lhs.name +
+                        "'：会复制胖指针字段而不更新引用记账；请用 'var " + f.name +
+                        ": " + lhs.name + "' 就地构造（init 钩子），或改用 T@/& 引用");
                 // 仅当有显式目标类型时查越界：无类型声明的 lhs 由字面量自身推断
                 // （含后缀/大值），按构造必然容纳，且 inferExpr 对字面量统一记 i4
                 // 会误判，故跳过。
@@ -1161,6 +1168,15 @@ struct Checker {
                     if (containsAddrOfLocal(*s.expr->b, locals) &&
                         rootedAtGlobal(*s.expr->a, locals)) {
                         err(s.line, "禁止将局部变量地址写入全局存储");
+                    }
+                    // sc 内部按值拷贝守卫：整体赋值一个内嵌 T@ 的按值聚合 → 复制胖指针
+                    // 字节而不更新 in/out 记账（重复解绑、悬垂）→ 禁止。
+                    if (s.expr->op == "=") {
+                        Ty lhs = inferExpr(*s.expr->a, locals, s.line);
+                        if (valueAggrEmbedsFat(lhs))
+                            err(s.line, "禁止整体赋值内嵌自动指针 T@ 的按值聚合 '" + lhs.name +
+                                "'：会复制胖指针字段而不更新引用记账，请逐字段经 T@ 绑定操作，"
+                                "或改用 T@/& 引用共享");
                     }
                 }
                 (void)inferExpr(*s.expr, locals, s.line);
@@ -1657,6 +1673,31 @@ struct Checker {
         return false;
     }
 
+    // sc 内部按值拷贝守卫：判断「按值聚合」是否内嵌 T@。
+    //   · 直接 T@（t.fat）：走 bind/move 记账机制，按值「拷贝」即绑定/移动 → 放行（返回 false）。
+    //   · 指针 / 数组：拷贝的是地址而非内嵌胖指针字节 → 放行。
+    //   · 仅「按值聚合（ptr==0 且非数组）且递归内嵌 T@」才返回 true：整体按值拷贝会把
+    //     胖指针字段当裸字节复制，绕过 in/out 记账，造成重复解绑与悬垂 → 禁止。
+    bool valueAggrEmbedsFat(const TypeRef& t) const {
+        if (t.fat) return false;
+        if (t.ptr != 0 || !t.arrayDims.empty()) return false;
+        std::unordered_set<std::string> visited;
+        return typeEmbedsFat(t, visited);
+    }
+
+    // 同上，作用于已推断的 Ty（用于赋值/变量初始化等拷贝点）。
+    bool valueAggrEmbedsFat(const Ty& t) const {
+        if (!t.valid || t.fat || t.ptr != 0 || t.arr != 0 || t.name.empty()) return false;
+        std::unordered_set<std::string> visited;
+        const std::string base = resolveAliasToName(t.name);
+        if (!visited.insert(base).second) return false;
+        const Decl* sd = resolveStruct(base);
+        if (sd && (sd->kind == Decl::StructD || sd->kind == Decl::UnionD))
+            for (auto& f : sd->structCommon.fields)
+                if (typeEmbedsFat(f.type, visited)) return true;
+        return false;
+    }
+
     // 跨 C ABI 守卫：检查导出/rpc/C 实现函数的单个参数/返回类型。
     //   · 直接 T@：仅 rpc / cImpl 拒绝（导出 @fnc 允许以 T@ 移交所有权）。
     //   · 按值结构体内嵌 T@：导出 / rpc / cImpl 一律拒绝（C 侧无法维护 ARC）。
@@ -1702,14 +1743,36 @@ struct Checker {
 
     void checkFatBoundaries() const {
         for (auto& d : prog.decls) {
+            // 全局 var/let 的 T@ 数组：进程退出由 destructor 钩子逐元素拆边（带 drop），
+            // 与局部数组同等放行；结构字段 / 函数参数 / tls 仍未实现引用图清理 → 报错。
+            const bool globalVarArr = (d->kind == Decl::VarD || d->kind == Decl::LetD);
             // 结构/联合字段 + 全局变量类型 + 函数参数/返回类型
             for (auto& f : d->structCommon.fields)
                 checkFatTypeRef(f.type, f.line ? f.line : d->line,
-                                d->kind == Decl::FuncD ? "函数参数" : "结构字段/全局变量");
+                                d->kind == Decl::FuncD ? "函数参数" : "结构字段/全局变量",
+                                /*allowLocalArray*/ globalVarArr);
             if (d->structCommon.type)
                 checkFatTypeRef(*d->structCommon.type, d->line, "返回类型");
-            if (d->kind == Decl::FuncD)
-                for (auto& s : d->body) checkFatBoundariesStmt(*s);
+            if (d->kind == Decl::FuncD) for (auto& s : d->body) checkFatBoundariesStmt(*s);
+            // sc 内部按值拷贝守卫：函数按值传参/返回内嵌 T@ 的聚合 → 调用/返回时整体
+            // 拷贝会复制胖指针字节而不更新 in/out 记账（重复解绑、悬垂）→ 禁止。
+            // （直接 T@ 参数/返回为所有权移交，不在此列；详见 valueAggrEmbedsFat。）
+            // 导出/rpc/cImpl 函数由 checkAbiFatFn 以更贴切的「跨 C ABI」诊断覆盖，此处跳过。
+            if ((d->kind == Decl::FuncD || d->kind == Decl::FuncTypeD)
+                && !(d->exported || d->isRpc || d->cImpl)) {
+                for (auto& p : d->structCommon.fields)
+                    if (valueAggrEmbedsFat(p.type))
+                        err(p.line ? p.line : d->line,
+                            "函数参数 '" + p.name + "'（按值聚合 '" + p.type.name +
+                            "'）内嵌自动指针 T@：按值传参会复制胖指针字节而不更新引用记账，"
+                            "请改用 & 引用传参（或将该成员改为裸指针 T&）");
+                if (d->structCommon.type && valueAggrEmbedsFat(*d->structCommon.type))
+                    err(d->line,
+                        "返回类型（按值聚合 '" + d->structCommon.type->name +
+                        "'）内嵌自动指针 T@：按值返回会复制胖指针字节而不更新引用记账，"
+                        "请改用 T@（移交所有权）或 & 引用返回");
+            }
+
             // 跨 C ABI 守卫：导出 / rpc / C 实现函数的参数/返回不得跨边界携带 T@（详见 §18）
             if ((d->kind == Decl::FuncD || d->kind == Decl::FuncTypeD)
                 && (d->exported || d->isRpc || d->cImpl))
