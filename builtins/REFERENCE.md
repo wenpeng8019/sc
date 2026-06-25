@@ -532,6 +532,11 @@ fnc main: i4
 | append_to | `dst&: chain` | 整链接到 dst 尾部，自身清空 |
 | push_to | `dst&: chain` | 整链接到 dst 头部，自身清空 |
 | cut | `from&:, to&:, out&: chain` | 截取 `[from..to]` 段为新链 out（out 被覆盖） |
+| sort | `cmp: chain_cmp` | Simon Tatham 自底向上 O(n log n) 归并排序（稳定、原地，与 utlist `DL_SORT` 同源） |
+
+比较回调类型 `@fnc chain_cmp: i4, a: &, b: &`：实参为元素节点首址，用 `(a: T&)`
+还原回元素再比较，返回 `<0 / 0 / >0`（升序时 `a` 应在 `b` 前则负值，取相反符号
+得降序）；等键保持原序，排序后 `head._prev`/`rear._next` 约定不变。
 
 ```sc
 def task: ~ { id: i4 }

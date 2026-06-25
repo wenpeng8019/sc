@@ -186,6 +186,8 @@ typedef struct chain {
     void    *head;     /* 首元素（空链为 NULL） */
 } chain;
 
+typedef int32_t (*chain_cmp)(void *a, void *b);       /* sort 比较回调：实参为元素节点首址（含注入 _prev/_next），sc 侧 (a: T&) 还原 */
+
 void *chain_prev(void *it);                           /* 边界安全逻辑前驱：head→NULL（内置 prev(o) 后端） */
 void  chain_append(chain *_this, void *it);           /* 队尾 */
 void  chain_push(chain *_this, void *it);             /* 队首 */
@@ -199,6 +201,7 @@ void  chain_revert(chain *_this);
 void  chain_append_to(chain *_this, chain *dst);     /* 自身清空 */
 void  chain_push_to(chain *_this, chain *dst);       /* 自身清空 */
 void  chain_cut(chain *_this, void *from, void *to, chain *out);
+void  chain_sort(chain *_this, chain_cmp cmp);       /* Simon Tatham 自底向上 O(n log n) 归并排序（稳定，原地不分配） */
 
 /* ---------------- thread：线程（run 语句原语，语言内核） ----------------
  * thread 是 run 语句创建的线程实体。run 依赖它，故属语言内核（op.sc 默认导入、

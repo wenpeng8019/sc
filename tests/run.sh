@@ -84,6 +84,7 @@ POSITIVE=(
     tests/cases/lru_at.sc
     tests/cases/print_str_chn.sc
     tests/cases/forin_adt.sc
+    tests/cases/chain_sort.sc
     tests/cases/array.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc

@@ -951,6 +951,20 @@ while it != nil
 尾元素的 `next` 为 `nil`。同一 `chain` 只能存放同一种结构体；chain 不拥有
 元素，移除操作不释放元素内存。
 
+`chain` 还提供 `sort(cmp)`：**Simon Tatham 自底向上 O(n log n) 归并排序**
+（与 uthash/utlist `DL_SORT` 同源），稳定、原地、不额外分配内存。`cmp` 为
+`@fnc chain_cmp: i4, a: &, b: &`，实参是元素节点首址，用 `(a: T&)` 还原回
+元素再比较，返回 `<0 / 0 / >0`（升序时 `a` 应排在 `b` 前则返回负值；取相反
+符号即得降序）。等键元素保持原相对次序；排序后 `head._prev`/`rear._next`
+约定不变（正反双向遍历均自洽）。
+
+```sc
+@fnc by_id: i4, a: &, b: &
+    return (a: task&)->id - (b: task&)->id
+
+l.sort(by_id)                   # 按 id 升序，稳定
+```
+
 内置伪函数 `base(o)`：返回对象**首个真实成员**的地址（跳过前置注入的隐藏
 成员），用于在已知节点指针时取回业务数据首址。`base(o: T&)` 形式则把节点
 首址直接重解释为 `T*`（零偏移）。

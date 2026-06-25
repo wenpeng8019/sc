@@ -252,6 +252,50 @@ void chain_cut(chain *_this, void *from, void *to, chain *out) {
     LNEXT(to) = NULL;
 }
 
+/* Simon Tatham 自底向上 O(n log n) 归并排序（utlist DL_SORT2 改写）。
+ * 稳定、原地、不分配内存：每趟把长 insize 的相邻有序段两两归并，insize 倍增至全表有序。
+ * cmp(a, b) <= 0 视 a 不大于 b（升序）；实参为元素节点首址（含注入 _prev/_next），sc 侧 (a: T&) 还原。
+ * 算法仅沿 _next 前向游走，故中途 _prev 可暂不一致；每趟末按 chain 约定补正：head._prev = rear、rear._next = NULL。 */
+void chain_sort(chain *_this, chain_cmp cmp) {
+    void *list = _this->head;
+    if (!list || !cmp) return;
+    int insize = 1, looping = 1;
+    while (looping) {
+        void *p = list;
+        list = NULL;
+        void *tail = NULL;
+        int nmerges = 0;
+        while (p) {
+            nmerges++;
+            void *q = p;
+            int psize = 0;
+            for (int i = 0; i < insize; i++) {   /* q 越过 p 段（长 insize）抵达后半段首 */
+                psize++;
+                q = LNEXT(q);
+                if (!q) break;
+            }
+            int qsize = insize;
+            while (psize > 0 || (qsize > 0 && q)) {   /* 归并 p 段与 q 段 */
+                void *e;
+                if (psize == 0)                  { e = q; q = LNEXT(q); qsize--; }
+                else if (qsize == 0 || !q)       { e = p; p = LNEXT(p); psize--; }
+                else if (cmp(p, q) <= 0)         { e = p; p = LNEXT(p); psize--; }
+                else                             { e = q; q = LNEXT(q); qsize--; }
+                if (tail) LNEXT(tail) = e;
+                else      list = e;
+                LPREV(e) = tail;
+                tail = e;
+            }
+            p = q;   /* 下一对待归并段 */
+        }
+        LPREV(list) = tail;   /* head._prev = rear（chain 约定） */
+        LNEXT(tail) = NULL;   /* rear._next = NULL */
+        if (nmerges <= 1) looping = 0;   /* 单趟仅一次归并即全表有序 */
+        insize *= 2;
+    }
+    _this->head = list;
+}
+
 /* ---------------- ioq：com 读写缓存队列（自膨胀循环缓冲）---------------- */
 /* 槽统一为 void*（size 以 (void*)(uintptr_t) 编码）。_head/_tail 为单调递增的
  * 逻辑槽计数，物理下标取 % _cap。每项变长，靠首槽 tag/size 自身区分：

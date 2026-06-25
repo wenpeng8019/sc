@@ -168,6 +168,8 @@ def operand: {
 # 链表头部由 chain 结构体管理
 # ! 注意，chain 集合并不拥有元素：remove/pop/cut 也不释放元素本身
 
+@fnc chain_cmp: i4, a: &, b: &                      # sort 比较回调类型（实参为元素节点首址，(a: T&) 还原）
+
 @def chain: {
     head: &        # 首元素（空链为 nil）
 
@@ -183,6 +185,7 @@ def operand: {
     fnc append_to:: dst: chain&                     # 整链接到 dst 尾部（自身清空）
     fnc push_to:: dst: chain&                       # 整链接到 dst 头部（自身清空）
     fnc cut:: from: &, to: &, out: chain&           # 截取 [from..to] 段为新链 out（out 被覆盖）
+    fnc sort:: cmp: chain_cmp                        # Simon Tatham 自底向上归并排序（O(n log n)，稳定，原地）
 }
 
 # 分身/切片机制
