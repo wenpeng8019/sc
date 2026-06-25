@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树/堆/前缀树）
+# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树/堆/前缀树/LRU 缓存）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -317,6 +317,42 @@
     fnc each:: fn: trie_each_fn, ctx: &             # 按字典序遍历全部键（回调返 false 即停）
     fnc each_prefix:: prefix: const char&, fn: trie_each_fn, ctx: &  # 按字典序遍历 prefix 开头的键（自动补全）
     fnc longest_prefix:: i8, text: const char&       # text 的最长「键前缀」长度（无则 -1；空串键返 0）
+}
+
+
+# ---------------- lru：LRU 缓存（有界容量 + 最近最少使用淘汰） ----------------
+# 组合容器：内嵌 dict（key → 节点指针，O(1) 查找） + 侵入双向链表（head=最近使用 MRU、tail=最久未用 LRU）。
+# value 为裸自动指针 @，lru 拥有每键一份 retain（put 插入/替换 retain、remove/淘汰/clear/drop release）。
+# 访问语义：get 命中则「触顶」（移到 MRU）并借用 value；peek 不改最近度；has 不触顶。
+# cap=0 表无界（退化为可保插入顺序的 dict）；cap>0 时 put 新键超容即淘汰队尾（LRU）；set_cap 缩容立即淘汰至达标。
+# key 三态同 dict：key_size >0 定长数值 / ==0 引用字符串（候误差由 value 自持）/ ==-1 拷贝字符串。
+# 取出语义同 dict「取用分离」：get/peek 借用（返句柄），remove 删除并 release（返 bool）。
+# each 按 MRU→LRU 顺序遍历。因 init 带参，不参与「声明即构造」——须显式 c.init(key_size, cap)。
+
+@fnc lru_each_fn: bool, key: const &, value: @, ctx: &    # 遍历回调（MRU→LRU；返 false 提前终止）
+
+@def lru: {
+    map: dict        # 内嵌字典：key → 节点指针（借用句柄、不计数）
+    head: &          # MRU 端节点（不透明 lru_node*；空为 nil）
+    tail: &          # LRU 端节点（下一个被淘汰）
+    cap: u8          # 容量上限（0 = 无界）
+    key_size: i4     # 原始三态（>0 定长 / 0 引用串 / -1 拷贝串）
+
+    fnc init:: key_size: i4, cap: u8                 # 构造（key 模式 + 容量；cap=0 无界）
+    fnc drop::                                       # 释放全部 retain + 回收全部节点/字典
+    fnc len:: u8                                    # 当前键数
+    fnc is_empty:: bool                             # 是否空
+    fnc cap:: u8                                    # 当前容量上限（0 = 无界）
+    fnc set_cap:: cap: u8                           # 调整容量（缩容立即淘汰 LRU 至 len<=cap）
+    fnc has:: bool, key: const &                     # 是否含键（不触顶）
+    fnc get:: @, key: const &                        # 取值并触顶（移至 MRU；未命中空句柄；借用）
+    fnc peek:: @, key: const &                       # 取值不触顶（未命中空句柄；借用）
+    fnc put:: bool, key: const &, value: @           # 插入/替换 + 触顶（retain 新、替换 release 旧；超容淘汰）
+    fnc remove:: bool, key: const &                  # 删除并 release（未命中 false）
+    fnc clear::                                      # 清空并 release 全部 value（保留容量）
+    fnc mru_key:: const &                            # 最近使用键（空返 nil）
+    fnc lru_key:: const &                            # 最久未用键（下一被淘汰；空返 nil）
+    fnc each:: fn: lru_each_fn, ctx: &              # 按 MRU→LRU 遍历（回调返 false 即停）
 }
 
 

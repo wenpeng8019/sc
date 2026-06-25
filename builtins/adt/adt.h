@@ -314,6 +314,43 @@ void     trie_each(trie *_this, trie_each_fn fn, void *ctx);  /* 按字典序遍
 void     trie_each_prefix(trie *_this, const char *prefix, trie_each_fn fn, void *ctx);  /* 字典序遍历 prefix 开头的键 */
 int64_t  trie_longest_prefix(trie *_this, const char *text); /* text 的最长「键前缀」长度；无 -1；空串键 0 */
 
+/* ---------------- lru：LRU 缓存（有界容量 + 最近最少使用淘汰） ---------------- */
+/* 组合容器：内嵌 dict（key → 节点指针，O(1) 查找）+ 侵入双向链表（head=MRU、tail=LRU）。
+ * value 为裸自动指针 @，lru 拥有每键一份 retain（put 插入/替换 retain、remove/淘汰/clear/drop release）。
+ * 节点独立 chunk 分配（地址稳定，不随 dict rehash 移动）：dict 仅存「借用句柄」（不计数）指向节点，
+ *   节点拥有 value 与键拷贝（按 key_size 三态，dict 在字符串模式借用节点的键、定长模式各存一份）。
+ * 访问语义：get 命中即「触顶」（移到 MRU）并借用 value；peek 不改最近度；has 不触顶。
+ * cap=0 表无界（退化为可保插入顺序的 dict）；cap>0 时 put 新键超容即淘汰队尾（LRU）；
+ *   set_cap 缩容立即淘汰至 len<=cap。key 三态同 dict。
+ * 取出语义同 dict「取用分离」：get/peek 借用（返回句柄，不改计数），remove 删除并 release（返回 bool）。
+ * each 按 MRU→LRU 顺序遍历。因 init 带参数，不参与「声明即构造」——须显式 c.init(key_size, cap)。 */
+
+typedef uint8_t (*lru_each_fn)(const void *key, sc_afat value, void *ctx);  /* 遍历回调（MRU→LRU）：返回 0 提前终止 */
+
+typedef struct lru {
+    dict     map;      /* 内嵌字典：key → 节点指针（借用句柄，不计数） */
+    void    *head;     /* MRU 端节点（lru_node*；空为 NULL） */
+    void    *tail;     /* LRU 端节点（下一个被淘汰） */
+    uint64_t cap;      /* 容量上限（0 = 无界） */
+    int32_t  key_size; /* 原始三态（>0 定长 / 0 引用串 / -1 拷贝串） */
+} lru;
+
+void     lru_init(lru *_this, int32_t key_size, uint64_t cap);  /* 构造（key 模式 + 容量；cap=0 无界） */
+void     lru_drop(lru *_this);                        /* 释放全部 retain + 回收全部节点/字典 */
+uint64_t lru_len(lru *_this);
+uint8_t  lru_is_empty(lru *_this);
+uint64_t lru_cap(lru *_this);                         /* 当前容量上限（0 = 无界） */
+void     lru_set_cap(lru *_this, uint64_t cap);       /* 调整容量（缩容立即淘汰 LRU 至 len<=cap） */
+uint8_t  lru_has(lru *_this, const void *key);        /* 是否含键（不触顶） */
+sc_afat  lru_get(lru *_this, const void *key);        /* 取值并触顶（移至 MRU）；未命中空句柄；借用 */
+sc_afat  lru_peek(lru *_this, const void *key);       /* 取值不触顶；未命中空句柄；借用 */
+uint8_t  lru_put(lru *_this, const void *key, sc_afat value);  /* 插入/替换 + 触顶：retain 新、替换 release 旧；超容淘汰 */
+uint8_t  lru_remove(lru *_this, const void *key);     /* 删除并 release value；未命中返回 0 */
+void     lru_clear(lru *_this);                       /* 清空并 release 全部 value（保留容量） */
+const void *lru_mru_key(lru *_this);                  /* 最近使用键（空返回 NULL） */
+const void *lru_lru_key(lru *_this);                  /* 最久未用键（下一被淘汰；空返回 NULL） */
+void     lru_each(lru *_this, lru_each_fn fn, void *ctx);  /* 按 MRU→LRU 遍历；回调返 0 即停 */
+
 
 #ifdef __cplusplus
 }

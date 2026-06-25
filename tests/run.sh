@@ -81,6 +81,7 @@ POSITIVE=(
     tests/cases/bst_at.sc
     tests/cases/heap_at.sc
     tests/cases/trie_at.sc
+    tests/cases/lru_at.sc
     tests/cases/array.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc

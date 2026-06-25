@@ -2043,4 +2043,177 @@ void trie_each(trie *_this, trie_each_fn fn, void *ctx) {
     trie_each_prefix(_this, "", fn, ctx);
 }
 
+/* ==================================================================== */
+/* lru —— LRU 缓存（有界容量 + 最近最少使用淘汰）                         */
+/* 组合容器：内嵌 dict（key → 节点指针，O(1) 查找）+ 侵入双向链表（MRU↔LRU）。
+ * 节点独立 chunk 分配（地址稳定，不随 dict rehash 移动）；dict 仅存「借用句柄」
+ *   （tar=NULL/own=RAW，绑定/解绑均不计数）指向节点。节点拥有 value（retain）与键：
+ *     key_size  > 0：键尾随节点内联拷贝；dict 定长模式另存一份（小键，可忽略）；
+ *     key_size == 0：节点借用用户串指针；dict 引用模式借用同一指针；
+ *     key_size == -1：键尾随节点拷贝；dict 引用模式借用节点的拷贝（生命周期 = 节点）。
+ *   故 dict 一律以 (key_size>0 ? key_size : 0) 初始化——字符串两态均借用节点的键。
+ * 链表：head=MRU、tail=LRU；get 命中触顶、put 插入/触顶、超容淘汰 tail。 */
+
+typedef struct lru_node {
+    sc_afat          value;   /* 拥有（retain） */
+    struct lru_node *prev;    /* 朝 MRU（head）方向 */
+    struct lru_node *next;    /* 朝 LRU（tail）方向 */
+    const void      *key;     /* 逻辑键：>0/-1 指向尾随拷贝、0 借用用户串 */
+} lru_node;
+
+static inline sc_afat lru_empty_afat(void) {
+    sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e;
+}
+/* 借用句柄：存节点指针入 dict，绑定/解绑均不触发计数（tar=NULL、own=RAW） */
+static inline sc_afat lru_node_handle(lru_node *n) {
+    sc_afat h; h.p = n; h.tar = NULL; h.own = SC_OWN_RAW; h.dtor = NULL; return h;
+}
+
+static lru_node *lru_node_new(lru *l, const void *key, sc_afat value) {
+    size_t extra = 0;
+    lru_node *n;
+    if (l->key_size > 0) extra = (size_t)l->key_size;
+    else if (l->key_size == -1) { const char *s = (const char *)key; extra = (s ? strlen(s) : 0) + 1; }
+    n = (lru_node *)chunk0(sizeof(lru_node) + extra);
+    if (!n) return NULL;
+    if (l->key_size > 0) {
+        memcpy(n + 1, key, extra);
+        n->key = (const void *)(n + 1);
+    } else if (l->key_size == -1) {
+        if (extra > 1) memcpy(n + 1, key, extra - 1);
+        ((char *)(n + 1))[extra - 1] = 0;
+        n->key = (const void *)(n + 1);
+    } else {
+        n->key = key;                               /* 借用用户串 */
+    }
+    sc_afat_bind(&n->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);  /* retain */
+    return n;
+}
+
+/* 释放节点：先 release value（caller 已确保从链表/字典摘除），再回收（键尾随随之回收） */
+static void lru_node_free(lru_node *n) {
+    sc_afat_unbind(&n->value);
+    recycle(n);
+}
+
+static void lru_link_front(lru *l, lru_node *n) {
+    n->prev = NULL;
+    n->next = (lru_node *)l->head;
+    if (l->head) ((lru_node *)l->head)->prev = n;
+    l->head = n;
+    if (!l->tail) l->tail = n;
+}
+static void lru_unlink(lru *l, lru_node *n) {
+    if (n->prev) n->prev->next = n->next; else l->head = n->next;
+    if (n->next) n->next->prev = n->prev; else l->tail = n->prev;
+    n->prev = n->next = NULL;
+}
+static void lru_move_front(lru *l, lru_node *n) {
+    if ((lru_node *)l->head == n) return;
+    lru_unlink(l, n);
+    lru_link_front(l, n);
+}
+/* 淘汰队尾（LRU）：摘链 + 删字典 + 释放节点 */
+static void lru_evict_tail(lru *l) {
+    lru_node *n = (lru_node *)l->tail;
+    if (!n) return;
+    lru_unlink(l, n);
+    dict_remove(&l->map, n->key);                   /* 借用句柄解绑无副作用 */
+    lru_node_free(n);                               /* release value + 回收 */
+}
+
+void lru_init(lru *_this, int32_t key_size, uint64_t cap) {
+    dict_init(&_this->map, key_size > 0 ? key_size : 0);  /* 字符串两态走引用模式借用节点键 */
+    _this->head = NULL;
+    _this->tail = NULL;
+    _this->cap = cap;
+    _this->key_size = key_size;
+}
+
+void lru_clear(lru *_this) {
+    lru_node *n = (lru_node *)_this->head, *nx;
+    while (n) { nx = n->next; lru_node_free(n); n = nx; }  /* 逐节点 release value + 回收 */
+    _this->head = NULL;
+    _this->tail = NULL;
+    dict_clear(&_this->map);                        /* 清空字典槽（借用句柄无副作用） */
+}
+
+void lru_drop(lru *_this) {
+    lru_clear(_this);
+    dict_drop(&_this->map);                         /* 回收字典桶/控制块 */
+}
+
+uint64_t lru_len(lru *_this) { return dict_len(&_this->map); }
+uint8_t  lru_is_empty(lru *_this) { return _this->head == NULL; }
+uint64_t lru_cap(lru *_this) { return _this->cap; }
+
+void lru_set_cap(lru *_this, uint64_t cap) {
+    _this->cap = cap;
+    if (cap) while (dict_len(&_this->map) > cap) lru_evict_tail(_this);
+}
+
+uint8_t lru_has(lru *_this, const void *key) {
+    return (uint8_t)(dict_get(&_this->map, key).p != NULL);
+}
+
+sc_afat lru_get(lru *_this, const void *key) {
+    sc_afat got = dict_get(&_this->map, key);
+    if (!got.p) return lru_empty_afat();
+    lru_move_front(_this, (lru_node *)got.p);       /* 触顶 */
+    return ((lru_node *)got.p)->value;              /* 借用 */
+}
+
+sc_afat lru_peek(lru *_this, const void *key) {
+    sc_afat got = dict_get(&_this->map, key);
+    if (!got.p) return lru_empty_afat();
+    return ((lru_node *)got.p)->value;              /* 借用，不触顶 */
+}
+
+uint8_t lru_put(lru *_this, const void *key, sc_afat value) {
+    sc_afat got = dict_get(&_this->map, key);
+    lru_node *n;
+    if (got.p) {                                    /* 命中：替换 value（先 retain 新、再 release 旧）+ 触顶 */
+        sc_afat old;
+        n = (lru_node *)got.p;
+        old = n->value;
+        sc_afat_bind(&n->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+        sc_afat_unbind(&old);
+        lru_move_front(_this, n);
+        return 1;
+    }
+    n = lru_node_new(_this, key, value);            /* 新建（已 retain value） */
+    if (!n) return 0;
+    if (!dict_put(&_this->map, n->key, lru_node_handle(n))) {  /* 索引：key → 节点借用句柄 */
+        lru_node_free(n);                           /* 失败回滚（release + 回收） */
+        return 0;
+    }
+    lru_link_front(_this, n);
+    if (_this->cap && dict_len(&_this->map) > _this->cap) lru_evict_tail(_this);  /* 超容淘汰 LRU */
+    return 1;
+}
+
+uint8_t lru_remove(lru *_this, const void *key) {
+    sc_afat got = dict_get(&_this->map, key);
+    lru_node *n;
+    if (!got.p) return 0;
+    n = (lru_node *)got.p;
+    lru_unlink(_this, n);
+    dict_remove(&_this->map, n->key);
+    lru_node_free(n);                               /* release value + 回收 */
+    return 1;
+}
+
+const void *lru_mru_key(lru *_this) {
+    return _this->head ? ((lru_node *)_this->head)->key : NULL;
+}
+const void *lru_lru_key(lru *_this) {
+    return _this->tail ? ((lru_node *)_this->tail)->key : NULL;
+}
+
+void lru_each(lru *_this, lru_each_fn fn, void *ctx) {
+    lru_node *n;
+    if (!fn) return;
+    for (n = (lru_node *)_this->head; n; n = n->next)   /* MRU → LRU */
+        if (!fn(n->key, n->value, ctx)) return;
+}
 
