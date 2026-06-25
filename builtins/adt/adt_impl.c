@@ -1085,7 +1085,10 @@ sc_afat dict_value_at(dict *_this, int64_t cur) {
 typedef struct bst_node bst_node;
 struct bst_node {
     sc_afat   value;     /* 裸 @ 值（32B，置首保 8 对齐） */
-    const void *key;     /* 字符串模式：char*（借用或拷贝）；数值模式：未用（内联键紧随节点尾） */
+    union {              /* key 存储三态共用 8B（与 left/right 同 cache line） */
+        const void *kptr;    /* 字符串模式：char*（借用或拷贝）；key_size>8：指向尾随存储 */
+        char        kbuf[8]; /* 数值模式 key_size<=8：内联键（查找下降仅触一条 cache line） */
+    } k;
     bst_node *parent;    /* 父节点（根节点为 NULL） */
     bst_node *left;
     bst_node *right;
@@ -1095,9 +1098,12 @@ struct bst_node {
     int8_t    balance;   /* AVL: -1/0/1；红黑: 'B'/'R' */
 };
 
-/* 数值键内联存于节点尾部（自然 8 对齐）；字符串键存 node->key 指针 */
+/* 键装载点（logkey）：key_size<=8 数值内联于 k.kbuf（首 cache line，与 left/right 同行）；
+   key_size>8 尾随节点（n+1，自然 8 对齐）；字符串模式取 k.kptr。 */
 static inline const void *bst_logkey(bst *t, bst_node *n) {
-    return t->key_size > 0 ? (const void *)(n + 1) : n->key;
+    if (t->key_size > 8) return (const void *)(n + 1);
+    if (t->key_size > 0) return n->k.kbuf;
+    return n->k.kptr;
 }
 
 /* 比较：返回 sign(probe - node_key)。cmp 非空走自定义；否则内置数值（有符号，按宽度装载）/字符串。 */
@@ -1122,18 +1128,19 @@ static int bst_cmp_key(bst *t, const void *probe, bst_node *n) {
 }
 
 static bst_node *bst_node_new(bst *t) {
-    size_t extra = t->key_size > 0 ? (size_t)t->key_size : 0;
+    size_t extra = t->key_size > 8 ? (size_t)t->key_size : 0;   /* 仅 key_size>8 才尾随分配 */
     return (bst_node *)chunk(sizeof(bst_node) + extra);
 }
 static uint8_t bst_storekey(bst *t, bst_node *n, const void *key) {
-    if (t->key_size > 0) { memcpy((char *)(n + 1), key, (size_t)t->key_size); return 1; }
-    if (t->key_size == 0) { n->key = (const char *)key; return 1; }   /* 借用 */
+    if (t->key_size > 8) { memcpy((char *)(n + 1), key, (size_t)t->key_size); return 1; }  /* 大数值键尾随 */
+    if (t->key_size > 0) { memcpy(n->k.kbuf, key, (size_t)t->key_size); return 1; }          /* 小数值键内联 */
+    if (t->key_size == 0) { n->k.kptr = (const char *)key; return 1; }   /* 借用 */
     { const char *s = (const char *)key; size_t len = s ? strlen(s) : 0;
       char *cp = (char *)chunk(len + 1); if (!cp) return 0;
-      if (len) memcpy(cp, s, len); cp[len] = 0; n->key = cp; return 1; }
+      if (len) memcpy(cp, s, len); cp[len] = 0; n->k.kptr = cp; return 1; }
 }
 static inline void bst_freekey(bst *t, bst_node *n) {
-    if (t->key_size == -1) recycle((void *)n->key);
+    if (t->key_size == -1) recycle((void *)n->k.kptr);
 }
 
 /* ---------------- 旋转（内部父指针版；同时维护 weight_l） ---------------- */
@@ -1495,8 +1502,9 @@ uint8_t bst_remove(bst *_this, const void *key) {
         child = node->prev;
         --node->weight_l;                            /* 前驱在 node 左子树，仅此一处需调 */
         node->value = child->value;                  /* 裸搬移（所有权转移，不改计数） */
-        if (_this->key_size > 0) memcpy((char *)(node + 1), (const char *)(child + 1), (size_t)_this->key_size);
-        else node->key = child->key;                 /* 移交字符串指针（-1 模式所有权随之转移） */
+        if (_this->key_size > 8) memcpy((char *)(node + 1), (const char *)(child + 1), (size_t)_this->key_size);
+        else if (_this->key_size > 0) memcpy(node->k.kbuf, child->k.kbuf, (size_t)_this->key_size);
+        else node->k.kptr = child->k.kptr;           /* 移交字符串指针（-1 模式所有权随之转移） */
         node = child;                                /* 实际物理删除前驱 */
     }
 
