@@ -35,4 +35,13 @@ fnc main: i4
     printf("node legs=%d\n", nk)
     var back: Node@ = (ok: Node@)
     printf("back age=%d\n", back->age)
+    var be:@ = ok
+    var back2: Node@ = (be: Node@)
+    printf("back2 age=%d\n", back2->age)
+    var d2: Dog@ = Dog()
+    var bd:@ = d2
+    var od2: object@ = (bd: object@)
+    var nd2: i4
+    od2.LEGS(&nd2)
+    printf("od2 legs=%d\n", nd2)
     return 0

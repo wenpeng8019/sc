@@ -138,9 +138,38 @@ int32_t main(void) {
     sc_fat_bind(&back, (({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).p, (sc_ref *)(({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).tar, SC_OWN_ROOT);
     /* line 45 */
     printf("back age=%d\n", ((Node *)(back).p)->age);
-    /* line 46 */
+    /* line 50 */
+    sc_afat be = {0};
+    sc_afat_bind(&be, (ok).p, (sc_ref *)(ok).tar, SC_OWN_ROOT, (void (*)(void *))sc_obj_drop);
+    /* line 51 */
+    sc_fat back2 = {0};
+    sc_fat_bind(&back2, (({ sc_afat _rc3 = be; (sc_fat){ (_rc3.dtor == (void (*)(void *))sc_obj_drop) ? (void *)((char *)_rc3.p - offsetof(Node, _class)) : _rc3.p, _rc3.tar, _rc3.own }; })).p, (sc_ref *)(({ sc_afat _rc3 = be; (sc_fat){ (_rc3.dtor == (void (*)(void *))sc_obj_drop) ? (void *)((char *)_rc3.p - offsetof(Node, _class)) : _rc3.p, _rc3.tar, _rc3.own }; })).tar, SC_OWN_ROOT);
+    /* line 52 */
+    printf("back2 age=%d\n", ((Node *)(back2).p)->age);
+    /* line 56 */
+    sc_fat d2 = {0};
+    Dog *_fat4 = Dog__new_ref(0);
+    sc_fat_bind(&d2, _fat4, (sc_ref *)((char *)_fat4 - SC_REF_HDR), SC_OWN_ROOT);
+    /* line 57 */
+    sc_afat bd = {0};
+    sc_afat_bind(&bd, (void *)&((Dog *)(d2).p)->_class, (sc_ref *)(d2).tar, SC_OWN_ROOT, (void (*)(void *))sc_obj_drop);
+    /* line 58 */
+    sc_fat od2 = {0};
+    sc_fat_bind(&od2, (({ sc_afat _rc5 = bd; (sc_fat){_rc5.p, _rc5.tar, _rc5.own}; })).p, (sc_ref *)(({ sc_afat _rc5 = bd; (sc_fat){_rc5.p, _rc5.tar, _rc5.own}; })).tar, SC_OWN_ROOT);
+    /* line 59 */
+    int32_t nd2;
+    /* line 60 */
+    (*(object)(od2).p)((object)(od2).p, SC_DIM_LEGS, &(nd2));
+    /* line 61 */
+    printf("od2 legs=%d\n", nd2);
+    /* line 62 */
     {
         int32_t _ret = 0;
+        sc_fat_unbind_d(&od2, (void (*)(void *))sc_obj_drop);
+        sc_afat_unbind(&bd);
+        sc_fat_unbind_d(&d2, (void (*)(void *))Dog_drop);
+        sc_fat_unbind_d(&back2, (void (*)(void *))Node_drop);
+        sc_afat_unbind(&be);
         sc_fat_unbind_d(&back, (void (*)(void *))Node_drop);
         sc_fat_unbind_d(&ok, (void (*)(void *))sc_obj_drop);
         sc_fat_unbind_d(&k, (void (*)(void *))Node_drop);

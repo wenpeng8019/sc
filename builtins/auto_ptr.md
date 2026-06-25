@@ -129,10 +129,13 @@ typedef struct sc_afat { void* p; int32_t* tar; int32_t* own; void (*dtor)(void*
 ```
 
 - `p / tar / own` —— 与 `sc_fat` 完全一致（首序列同构，可 `(sc_fat*)&af` 复用 `sc_fat_bind/unbind`）。
-  `p` 存**实体基址**（同 `T@`，而非 `object@` 的 `&_class` 槽）：不派发方法、回转 `(T*)p` 零偏移，
-  故没有 `object@` 的 base 偏移问题；头经 `tar`（即 `p - SC_REF_HDR`）直接定位。
-- `dtor` —— 目标析构器。在**擦除点**由静态类型 `T` 填入（`T_drop` 或 `NULL`）：`T()` 构造、
-  `T@ → @`、`@ → @` 重绑时随句柄携带。**入边归零时读 `dtor` 自析构**，故容器无需知道具体类型即可正确释放。
+  `p` 的内容**按擦除来源分两种「风味」**（见下表）：非 class 类型存实体基址；class 类型存 `&_class`
+  派发槽（与 `object@` 一致）。头始终经 `tar`（`= p - SC_REF_HDR` 仅对实体基址成立；对 `&_class`
+  风味则 `tar` 由擦除点直接携带，与 `p` 无关），故块释放与 `p` 风味无关。
+- `dtor` —— 目标析构器，**擦除点**填入、随句柄携带，入边归零时读它自析构：
+  - 非 class 类型 → `T_drop`（无 `drop` 则 `NULL`），`dtor(p)` 直接析构实体；
+  - class 类型 → 通用蹦床 `sc_obj_drop`，`dtor(&_class)` 经 `SC_DIM_DROP` 动态派发到正确析构。
+
   这是类型擦除的唯一信息缺口——其余记账（引用头、块释放）皆与类型无关。
 
 用法（取出后显式恢复类型再用）：
@@ -148,28 +151,46 @@ var f: @ = nil           # 声明 + nil 解绑
 强转 `(e: T@)` 把裸 `@` 恢复为 `T@` 视图（取前 24B，丢 `dtor`）；`(e: @)` 把 `T@` 擦除为裸 `@`
 （`dtor` 由 `e` 静态类型定）。退域时裸 `@` 根经 `sc_afat_unbind`（dtor 随句柄）逐根解绑。
 
-#### `.p` 的两种「风味」与转换矩阵
+#### `.p` 的两种「风味」
 
-裸 `@` 的 `.p` 按擦除来源有两种内容，二者**不可静态区分**（类型已擦除），由 `dtor` 间接标记：
+裸 `@` 的 `.p` 按擦除来源有两种内容，二者**不可静态区分**（类型已擦除），由 `dtor` 间接标记。
+**判别风味的关键在「源类型是否为 class」，而非「写法是 `T@` 还是 `object@`」**——凡 class
+类型（无论经 `T@` 还是 `object@` 擦除）统一走 object 风味，使裸 `@` 始终携带派发能力：
 
-| 擦除来源 | `.p` | `.dtor` | 可安全恢复为 |
+| 擦除来源 | `.p` | `.dtor` | 风味 |
 |---|---|---|---|
-| `T@ → @`（具体擦除） | 实体基址 | `T_drop` / `NULL` | `(e: T@)` |
-| `object@ → @`（多态擦除） | `&_class` 槽 | `sc_obj_drop` | `(e: object@)` |
+| 非 class 类型 `T@ → @`（普通 struct，如 `@def`） | 实体基址 | `T_drop` / `NULL` | concrete |
+| class 类型 `T@ → @` | `&_class` 槽（`+offsetof(T,_class)`） | `sc_obj_drop` | object |
+| `object@ → @` | `&_class` 槽 | `sc_obj_drop` | object |
 
-**同风味往返**（具体↔具体、多态↔多态）恒正确；**跨风味恢复**（如把多态风味裸 `@` 转成具体
-`T@`）因 `_class` 偏移未知而**不安全**，属调用方责任（等同 C 里乱用 union 成员）。
+> `dtor == sc_obj_drop` 即 object 风味的运行时判别式：还原 `T@` 时据此**自动减 `offsetof(T,_class)`**
+> 回算实体基址，还原 `object@` 时**直取** `&_class`。这是恢复点不必静态知道源风味的依据。
 
-`object@ ↔ T@`/`@` 的转换（风味已知，编译器正确处理）：
+#### 转换矩阵（class 类型四向对称）
+
+class 类型统一 object 风味后，过桥（经裸 `@` 中转）四个方向**全部无损**——擦除点把 `.p` 归一到
+`&_class`、`dtor` 归一到 `sc_obj_drop`，恢复点据 `dtor` 自动补/减偏移：
+
+| 过桥方向 | 结果 | 机制 |
+|---|---|---|
+| `T@ → @ → T@` | ✅ | 还原 `(e: T@)` 据 `dtor==sc_obj_drop` 减 `offsetof(T,_class)` |
+| `object@ → @ → object@` | ✅ | 还原 `(e: object@)` 直取 `&_class` |
+| `object@ → @ → T@` | ✅ | 同 `T@→@→T@`：减偏移回算实体基址 |
+| `T@ → @ → object@` | ✅ | 擦除即归一 object 风味，还原 `(e: object@)` 直取 `&_class` |
+
+直转（不经裸 `@`）：
 
 - **`T@ → object@`**：`.p` 取 `&_class` 槽（`object@` 须经此派发方法 / `sc_obj_drop`）。
 - **`object@ → T@`**（向下还原）：`.p` 经 `container_of` 回算实体基址
   `(T*)((char*)o.p - offsetof(T, _class))`，故 `_class` 偏移≠0 的 `~` 链表类 / `<C,I>` 容器类亦正确。
-- **`object@ → @`**：擦除为多态风味裸 `@`（`.p=&_class`，`dtor=sc_obj_drop`），仅可恢复回 `object@`。
-- **`@ → object@`**：恒等透传，仅当该裸 `@` 本就是多态风味时正确（跨风味为调用方责任）。
+
+**唯一不可还原方向**：非 class 普通 struct 经 concrete 风味擦除的裸 `@`，再还原为 `object@`——
+普通 struct 无 `_class` 派发槽，`object@` 形态对它无意义。这属调用方误用（等同 C 里乱用 union
+成员），`--check=ref` 在恢复点断言 `dtor == sc_obj_drop`，命中即报错 abort 并定位。
 
 > `object@` 自身的 `SC_DIM_REF`/`SC_DIM_DROP`：`DROP` 在用（`sc_obj_drop` 归零时动态派发析构）；
 > `REF` 为预留维度——当前每次绑定都从携带 `.tar` 的源复制，未走经派发器反推头的路径。
+
 
 ---
 

@@ -2167,15 +2167,34 @@ struct CGen {
                     if (e.op.empty()) {
                         // 擦除为裸 @
                         if (srcFat && srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }  // 已是裸 @：恒等
+                        // class 类型 T@ → object 风味擦除：.p 偏移到 &_class（+offsetof(T,_class)）、
+                        // dtor 取通用蹦床 sc_obj_drop（运行时经 SC_DIM_DROP 动态派发析构）。使裸 @ 始终
+                        // 携带派发能力，四向过桥对称：T@→@→object@ 亦无损（还原 object@ 直取 &_class）。
+                        // object@ 源已是该形态（.p=&_class、dtor=sc_obj_drop），落入下方通用分支直透。
+                        if (srcFat && srcT != "object" && classNames.count(srcT)) {
+                            out << "({ sc_fat _ec" << n << " = ";
+                            emitExpr(*e.a, true);
+                            out << "; (sc_afat){(void *)((char *)_ec" << n << ".p + offsetof("
+                                << srcT << ", _class)), _ec" << n << ".tar, _ec" << n
+                                << ".own, (void (*)(void *))sc_obj_drop}; })";
+                            break;
+                        }
+                        // object@ 源（已 object 风味）/ 非 class 类型（concrete 风味）：.p 原样，
+                        // dtor 取静态析构（object→sc_obj_drop；普通 struct→T_drop/NULL）。
                         std::string d = fatDtorArg(srcT);
                         out << "({ sc_fat _ec" << n << " = ";
                         emitExpr(*e.a, true);
                         out << "; (sc_afat){_ec" << n << ".p, _ec" << n << ".tar, _ec" << n
                             << ".own, " << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
                     } else {
-                        // 恢复为 T@（sc_fat 视图）：源为裸 @（sc_afat）取前 24B；源为 T@ 直透
-                        // object@ → 具体类 T@：源 .p 是擦除的 _class 槽指针，须 container_of
-                        // 回算实体基址（_class 偏移≠0 时，如 ~ 链表前缀/<C,I> 容器前缀）。
+                        // 恢复为 T@（sc_fat 视图）。按源风味分流：
+                        //   · 源为命名 object@ → 具体类 T@：.p 是擦除的 _class 槽，container_of
+                        //     回算实体基址（_class 偏移≠0 时，如 ~ 链表前缀/<C,I> 容器前缀）。
+                        //   · 源为命名 T@/object@（同名还原）：直透。
+                        //   · 源为裸 @：风味已擦除，运行时按 dtor==sc_obj_drop 判：
+                        //       object 风味（.p=&_class，凡 class 类型擦除均属此）→ 具体类还原减
+                        //       offsetof(T,_class)、object@ 还原直取；
+                        //       concrete 风味（.p=实体基址，仅非 class struct）→ 直接取。
                         if (srcFat && srcT == "object" && classNames.count(e.op)) {
                             out << "({ sc_fat _oc" << n << " = ";
                             emitExpr(*e.a, true);
@@ -2185,6 +2204,34 @@ struct CGen {
                             break;
                         }
                         if (srcFat && !srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
+                        // —— 源为裸 @（srcT 空）——
+                        if (e.op == "object") {
+                            // 还原为 object@：要求该裸 @ 为 object 风味（.p 已是 &_class、
+                            // dtor=sc_obj_drop）。凡 class 类型擦除均属此，故 class 源恒可还原。
+                            // --check=ref：断言 dtor==sc_obj_drop，捕获「非 class struct 擦除的裸 @
+                            // 误还原 object@」（concrete 风味无 _class 派发槽，object@ 无意义）。
+                            out << "({ sc_afat _rc" << n << " = ";
+                            emitExpr(*e.a, true);
+                            out << ";";
+                            if (g_refCheck)
+                                out << " if (_rc" << n << ".dtor != (void (*)(void *))sc_obj_drop) "
+                                    << "{ fprintf(stderr, \"sc: 裸 @ 还原 object@ 失败：源非 class 类型"
+                                    << "（无 _class 派发槽，object@ 无意义）\\n\"); abort(); }";
+                            out << " (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, _rc" << n
+                                << ".own}; })";
+                            break;
+                        }
+                        if (classNames.count(e.op)) {
+                            // 还原为具体类 T@：运行时按风味补偏移（object 风味 .p=&_class 须减偏移）。
+                            out << "({ sc_afat _rc" << n << " = ";
+                            emitExpr(*e.a, true);
+                            out << "; (sc_fat){ (_rc" << n << ".dtor == (void (*)(void *))sc_obj_drop)"
+                                << " ? (void *)((char *)_rc" << n << ".p - offsetof(" << e.op
+                                << ", _class)) : _rc" << n << ".p, _rc" << n << ".tar, _rc" << n
+                                << ".own }; })";
+                            break;
+                        }
+                        // 还原为非类具体类型（普通 struct）：不可能是 object 风味，直接取 .p。
                         out << "({ sc_afat _rc" << n << " = ";
                         emitExpr(*e.a, true);
                         out << "; (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, _rc" << n
@@ -2372,8 +2419,16 @@ struct CGen {
             out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
                 << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             indent();
-            // 裸 @ 目标：擦除类型，p 取实体基址（同 T@），dtor 取构造类型 T 的析构（随句柄）。
+            // 裸 @ 目标：擦除类型。class 类型走 object 风味（p 偏移到 &_class、dtor=sc_obj_drop），
+            // 使裸 @ 携带派发能力、可无损还原 object@；非 class struct 走 concrete 风味（p=实体基址、
+            // dtor=T_drop/NULL）。两者均随句柄存 dtor。
             if (bare) {
+                if (classNames.count(td->name)) {
+                    out << "sc_afat_bind(&" << lv << ", (void *)&" << tmp << "->_class"
+                        << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own
+                        << ", (void (*)(void *))sc_obj_drop);\n";
+                    return;
+                }
                 std::string d = fatDtorArg(td->name);
                 out << "sc_afat_bind(&" << lv << ", " << tmp
                     << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own << ", "
@@ -2433,10 +2488,25 @@ struct CGen {
         std::string tt;
         if (isFatExpr(init, &tt)) {
             std::string rhs = captureExpr(init);
-            // 裸 @ 目标：擦除绑定。源为 T@ → dtor 取源静态类型；源已是裸 @ → dtor 随其句柄。
+            // 裸 @ 目标：擦除绑定，按源风味分流：
+            //   · 源已是裸 @（tt 空）→ p/dtor 随其句柄直透；
+            //   · 源为具体类 T@（tt 为 class）→ object 风味：p 偏移到 &_class、dtor=sc_obj_drop；
+            //   · 源为 object@（已 &_class）/ 非 class struct → p 原样，dtor 取静态析构。
             if (bare) {
-                std::string d = tt.empty() ? ("(" + rhs + ").dtor")
-                    : (fatDtorArg(tt).empty() ? "(void (*)(void *))0" : fatDtorArg(tt));
+                if (tt.empty()) {
+                    indent();
+                    out << "sc_afat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
+                        << rhs << ").tar, " << own << ", (" << rhs << ").dtor);\n";
+                    return;
+                }
+                if (tt != "object" && classNames.count(tt)) {
+                    indent();
+                    out << "sc_afat_bind(&" << lv << ", (void *)&((" << tt << " *)(" << rhs
+                        << ").p)->_class, (sc_ref *)(" << rhs << ").tar, " << own
+                        << ", (void (*)(void *))sc_obj_drop);\n";
+                    return;
+                }
+                std::string d = fatDtorArg(tt).empty() ? "(void (*)(void *))0" : fatDtorArg(tt);
                 indent();
                 out << "sc_afat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
                     << rhs << ").tar, " << own << ", " << d << ");\n";
