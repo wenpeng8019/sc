@@ -1353,8 +1353,10 @@ struct CGen {
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
                         if (const Decl* md = findMethod(base.name, e.a->text)) {
                             const auto& rt = md->structCommon.type;
-                            if (rt && !(rt->name.empty() && rt->ptr == 0)) {
+                            // 胖返回（T@/裸 @）：name 可空（裸 @），按 fat 判定非 void
+                            if (rt && (rt->fat || !(rt->name.empty() && rt->ptr == 0))) {
                                 vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                                vt.fat = rt->fat;
                                 return true;
                             }
                         }
@@ -1364,8 +1366,9 @@ struct CGen {
                 if (e.a && e.a->kind == Expr::Member) {
                     if (const Field* cf = callableField(*e.a)) {
                         const auto& rt = cf->type.structCommon.type;
-                        if (rt && !(rt->name.empty() && rt->ptr == 0)) {
+                        if (rt && (rt->fat || !(rt->name.empty() && rt->ptr == 0))) {
                             vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                            vt.fat = rt->fat;
                             return true;
                         }
                     }
@@ -2251,15 +2254,21 @@ struct CGen {
                     break;
                 }
                 // (expr: type&) → ((T*)(expr))；含类型限定符 (expr: const T&) → ((const T*)(expr))
-                out << "((";
-                if (e.castConst) out << "const ";
-                if (e.castVolatile) out << "volatile ";
-                out << (e.op.empty() ? "void" : mapBase(e.op));   // op 为空 → 裸 &/&&（void*/void**）
-                for (int i = 0; i < e.castPtr; i++) out << "*";
-                if (e.castRestrict) out << " restrict";
-                out << ")(";
-                emitExpr(*e.a, true);
-                out << "))";
+                // 源为自动指针（T@/object@/裸 @）→ 裸指针：取 .p（实体基址，零成本借用读，
+                //   不改引用记账）。sc_fat/sc_afat 首成员即 p，故 (expr).p 通用。
+                {
+                    bool srcFat = isFatExpr(*e.a);
+                    out << "((";
+                    if (e.castConst) out << "const ";
+                    if (e.castVolatile) out << "volatile ";
+                    out << (e.op.empty() ? "void" : mapBase(e.op));   // op 为空 → 裸 &/&&（void*/void**）
+                    for (int i = 0; i < e.castPtr; i++) out << "*";
+                    if (e.castRestrict) out << " restrict";
+                    out << ")(";
+                    if (srcFat) { out << "("; emitExpr(*e.a, true); out << ").p"; }
+                    else emitExpr(*e.a, true);
+                    out << "))";
+                }
                 break;
             }
             case Expr::InitList: {
@@ -3604,11 +3613,17 @@ struct CGen {
                     for (auto& dc : dropScopes) if (!dc.empty()) { anyDrop = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
                     // return v（v 为栈值对象）= 移动：跳过其自动 drop，所有权移交调用方
+                    // return (t: @) / (t: T@)：擦除/还原 cast 同样把胖左值移交返回值，
+                    //   须穿透 cast 取内层胖标识符，否则尾部清理会 unbind 掉它致返回值悬垂。
                     std::string skip;
-                    if (s.expr && s.expr->kind == Expr::Ident && isFatExpr(*s.expr))
-                        skip = s.expr->text;
-                    else if (s.expr && s.expr->kind == Expr::Ident)
-                        skip = s.expr->text;
+                    const Expr* mv = s.expr.get();
+                    if (mv && mv->kind == Expr::Cast && mv->a
+                        && isFatExpr(*mv) && mv->a->kind == Expr::Ident && isFatExpr(*mv->a))
+                        mv = mv->a.get();
+                    if (mv && mv->kind == Expr::Ident && isFatExpr(*mv))
+                        skip = mv->text;
+                    else if (mv && mv->kind == Expr::Ident)
+                        skip = mv->text;
                     if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop
                         && !(inMainFunc && (mainHasTeardown || hasGcanaryHook() || hasGfatHook()))) {
                         indent();
@@ -4563,11 +4578,12 @@ struct CGen {
     // ---------------- 函数 ----------------
     void emitRetType(const Decl& d) {
         const auto& rt = d.structCommon.type;
-        if (!rt || (rt->name.empty() && rt->ptr == 0)) {
+        if (!rt || (rt->name.empty() && rt->ptr == 0 && !rt->fat)) {
             out << "void"; // 空指针 / 省略返回类型 = void
             return;
         }
-        if (rt->fat) { out << "sc_fat"; return; }  // 返回自动指针 T@ → 胖指针
+        // 返回自动指针：T@ → sc_fat；裸 @（name 空，类型擦除）→ sc_afat（带 dtor 槽）
+        if (rt->fat) { out << (rt->name.empty() ? "sc_afat" : "sc_fat"); return; }
         std::string base; int ptr;
         resolveType(*rt, base, ptr);
         out << base;

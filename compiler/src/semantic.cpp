@@ -1165,7 +1165,7 @@ struct Checker {
             const auto& rt = it->second->structCommon.type;
             if (!rt) return Ty{"v", 0, 0, true, false};
             Ty t = fromTypeRef(*rt);
-            if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
+            if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0 && !t.fat))
                 return Ty{"v", 0, 0, true, false};
             return t;
         }
@@ -1173,7 +1173,7 @@ struct Checker {
         const auto& rt = d.structCommon.type;
         if (!rt) return Ty{"v", 0, 0, true, false};
         Ty t = fromTypeRef(*rt);
-        if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0))
+        if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0 && !t.fat))
             return Ty{"v", 0, 0, true, false};
         return t;
     }
@@ -1727,6 +1727,15 @@ struct Checker {
     void checkAbiFatType(const TypeRef& t, int line, const Decl& fn, const char* slot) const {
         const bool transport = fn.isRpc || fn.cImpl;   // 跨传输 / 跨 C 实现
         if (t.fat) {
+            // 裸 @（类型擦除 sc_afat）：自带 dtor 的自洽句柄，C 实现接口可经它跨 C ABI 传递，
+            //   由 C 侧自行 sc_afat_bind/unbind 维护记账（通用容器如 list 即靠此）。
+            //   但 rpc 跨网络无法搬运对象本体 → 仍拒绝。
+            if (t.name.empty()) {
+                if (fn.isRpc)
+                    err(line, std::string("rpc '") + fn.name + "' 的" + slot +
+                        "为裸自动指针 @：对象本体无法跨网络传输，请改用裸指针 T& 或值类型");
+                return;
+            }
             if (transport)
                 err(line, std::string(fn.isRpc ? "rpc '" : "C 实现接口 '") + fn.name +
                     "' 的" + slot + "为自动指针 T@：跨传输/跨 C ABI 无法维护胖指针引用图与 ARC，"

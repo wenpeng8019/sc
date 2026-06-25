@@ -7,7 +7,10 @@
  * 约定：
  *   - string 内部始终 NUL 结尾，cstr() 永不返回 NULL（空串返回 ""）
  *   - array 元素为定长值块（逐字节复制），以 elem_sz 参数化；get/find 返回内部指针
- *   - list 不拥有元素：drop/clear/remove_at 不释放元素指针本身
+ *   - list 拥有元素：元素为裸自动指针 @（sc_afat），push 取一份 retain（目标 in++），
+ *     pop/remove_at/set/clear/drop 释放对应 retain（目标 in--，触零自析构）。取出语义
+ *     「取用分离」：get 借用（返回句柄，不改计数），pop/remove_at 仅删除并 release（返回
+ *     bool）；要取并保留先 get 借用、还原绑入 T@（retain）再 pop（release）。
  *   - 返回 uint8_t（sc 的 b 类型）的函数：1 成功 / 0 失败（内存不足等）
  */
 #ifndef SC_ADT_H
@@ -15,6 +18,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "op.h"        /* sc_afat / sc_afat_bind / sc_afat_unbind / SC_OWN_RAW（list 元素为裸 @） */
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,30 +96,34 @@ uint8_t  array_clone(array *_this, array *out);       /* 深拷贝 */
 void     array_sort(array *_this, array_cmp cmp);     /* qsort */
 void    *array_bsearch(array *_this, void *key, array_cmp cmp);  /* bsearch（须已排序），未找到 NULL */
 
-/* ---------------- list：动态指针数组 ---------------- */
+/* ---------------- list：段式裸 @ 自动指针容器 ---------------- */
+/* 元素为裸自动指针 @（sc_afat，32B）；list 拥有元素（每元素一份 retain）。
+ * 段式存储：元素 i 住 segs[i / LIST_SEG][i % LIST_SEG]，段索引表与各段内存均来自
+ * mem chunk（不受全局 -DSC_POOL 影响）。≈ array 的接口，区别仅在元素是 ref 句柄而非值块。 */
 
-typedef int32_t (*list_cmp)(void *a, void *b);        /* sort 比较回调（函数指针，与 adt.sc @fnc 生成形一致） */
+typedef int32_t (*list_cmp)(void *a, void *b);        /* sort 比较回调（实参为元素 .p 实体基址；与 adt.sc @fnc 生成形一致） */
 
 typedef struct list {
-    void   **items;    /* 元素数组 */
-    uint32_t size;     /* 元素个数 */
-    uint32_t cap;      /* 已分配槽位 */
+    sc_afat **segs;    /* 段索引表（每段 LIST_SEG 个 sc_afat 槽；段内存来自 mem chunk） */
+    uint32_t  nsegs;   /* 已分配段数 */
+    uint32_t  size;    /* 元素个数 */
+    uint32_t  cap;     /* 总槽位（nsegs * LIST_SEG） */
 } list;
 
 void     list_init(list *_this);
-void     list_drop(list *_this);                      /* 不释放元素本身 */
+void     list_drop(list *_this);                      /* 释放全部 retain + 回收段内存 */
 uint64_t list_len(list *_this);
-void     list_clear(list *_this);
+void     list_clear(list *_this);                     /* 释放全部 retain，保留段容量 */
 uint8_t  list_reserve(list *_this, uint64_t n);
-uint8_t  list_push(list *_this, void *value);
-void    *list_pop(list *_this);                       /* 空返回 NULL */
-void    *list_get(list *_this, uint64_t index);       /* 越界返回 NULL */
-uint8_t  list_set(list *_this, uint64_t index, void *value);
-uint8_t  list_insert(list *_this, uint64_t index, void *value);
-void    *list_remove_at(list *_this, uint64_t index);
-int64_t  list_index_of(list *_this, void *value);     /* 未找到 -1 */
+uint8_t  list_push(list *_this, sc_afat value);       /* 尾部追加，retain 元素 */
+uint8_t  list_pop(list *_this);                       /* 删除并 release 尾元素；空返回 0 */
+sc_afat  list_get(list *_this, uint64_t index);       /* 借用视图（不改计数）；越界返回空句柄 */
+uint8_t  list_set(list *_this, uint64_t index, sc_afat value);  /* 改写：retain 新、release 旧 */
+uint8_t  list_insert(list *_this, uint64_t index, sc_afat value);
+uint8_t  list_remove_at(list *_this, uint64_t index); /* 删除并 release 该元素；越界返回 0 */
+int64_t  list_index_of(list *_this, sc_afat value);   /* 按 .p 实体基址比对；未找到 -1 */
 void     list_reverse(list *_this);
-uint8_t  list_clone(list *_this, list *out);
+uint8_t  list_clone(list *_this, list *out);          /* 逐元素 retain 到 out */
 void     list_sort(list *_this, list_cmp cmp);
 
 #ifdef __cplusplus

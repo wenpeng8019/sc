@@ -770,6 +770,17 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
             d->external = false;
         }
     }
+    // adt → mem 隐式硬依赖：adt 的 list 段式存储直接走 mem 三件套（chunk/recycle），
+    // 不受全局 -DSC_POOL 开关影响。故编译 adt.sc 时自动把 builtins/mem/mem.sc 纳入单元图
+    // （等同隐式 inc mem.sc）：递归加载使 mem 单元生成并拼接链接 mem_impl.c，导出声明
+    // （chunk/refit/recycle…）一并合并为 external，供 adt_impl.c 调用。
+    if (srcPath.stem().string() == "adt") {
+        const auto memPath = std::filesystem::weakly_canonical(
+            baseDir.parent_path() / "mem" / "mem.sc");
+        if (std::filesystem::exists(memPath)
+            && std::find(deps.begin(), deps.end(), memPath) == deps.end())
+            deps.push_back(memPath);
+    }
     // 合并直接依赖的 @导出声明（external 标记）：供跨模块语法糖
     //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成。
     // 宏定义（def 宏）一律并入（无论是否 @导出）：宏经 C #define 由模块头透传，

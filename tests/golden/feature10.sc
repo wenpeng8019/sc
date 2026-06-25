@@ -11,8 +11,8 @@ def counter: {
         return this->n
 }
 
-fnc str_cmp -> list_cmp
-    return strcmp((a: char&), (b: char&))
+fnc cnt_cmp -> list_cmp
+    return (a: counter&)->n - (b: counter&)->n
 
 fnc main: i4
     var c: counter
@@ -28,13 +28,19 @@ fnc main: i4
     s->upper()
     printf("upper=%s\n", s->cstr())
     var l: list
-    l.push("banana")
-    l.push("apple")
-    l.push("cherry")
-    l.sort(str_cmp)
+    var c1: counter@ = counter()
+    c1->add(30)
+    var c2: counter@ = counter()
+    c2->add(10)
+    var c3: counter@ = counter()
+    c3->add(20)
+    l.push((c1: @))
+    l.push((c2: @))
+    l.push((c3: @))
+    l.sort(cnt_cmp)
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, (l.get(i): char&))
+        printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)
     var lp: list& = &l
     lp->drop()
     part->drop()

@@ -20,8 +20,8 @@ def counter: {
         return this->n
 }
 
-fnc str_cmp -> list_cmp
-    return strcmp(a: char&, b: char&)    # 裸强转：实参位置免括号
+fnc cnt_cmp -> list_cmp
+    return (a: counter&)->n - (b: counter&)->n    # cmp 收元素 .p 实体基址，裸强转读 n
 
 fnc main: i4
     # 声明即构造：自动调用 counter_init/string_init/list_init
@@ -41,17 +41,23 @@ fnc main: i4
     s->upper()
     printf("upper=%s\n", s->cstr())
 
-    # list：动态指针数组（元素 v&，不拥有元素）
+    # list：段式裸 @ 自动指针容器（拥有元素：push retain、pop/drop release）
     var l: list
-    l.push("banana")
-    l.push("apple")
-    l.push("cherry")
-    l.sort(str_cmp)
+    var c1: counter@ = counter()
+    c1->add(30)
+    var c2: counter@ = counter()
+    c2->add(10)
+    var c3: counter@ = counter()
+    c3->add(20)
+    l.push((c1: @))                         # T@ 擦除为裸 @ 入列，list 取一份 retain
+    l.push((c2: @))
+    l.push((c3: @))
+    l.sort(cnt_cmp)                         # 按 n 升序
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%s\n", i, l.get(i): char&)    # 裸强转作实参
+        printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)    # 借用 + 裸强转读取
 
-    # 析构：手动 drop（指针接收者用 ->；string 堆专属，drop 连块体一并释放）
+    # 析构：手动 drop（释放 list 持有的全部 retain；c1/c2/c3 退域时各自归零自释放）
     var lp: list& = &l
     lp->drop()
     part->drop()

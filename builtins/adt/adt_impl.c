@@ -5,6 +5,7 @@
  */
 #include "adt.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
+#include "mem/mem.h"    /* list 段式存储用 chunk/chunk0/refit/recycle（不受全局 -DSC_POOL 影响） */
 
 #include <stdlib.h>
 #include <string.h>
@@ -446,108 +447,146 @@ void *array_bsearch(array *_this, void *key, array_cmp cmp) {
                    (int (*)(const void *, const void *))cmp);
 }
 
-/* ---------------- list ---------------- */
+/* ---------------- list：段式裸 @ 自动指针容器 ----------------
+ * 元素为 sc_afat（裸自动指针 @），list 拥有每元素一份 retain（own=SC_OWN_RAW，
+ * 仅经目标 in++/in-- 记账，不挂 out 边）。段式存储：元素 i 住 segs[i/LIST_SEG][i%LIST_SEG]，
+ * 段索引表与各段均经 mem chunk/refit/recycle 分配（不受全局 -DSC_POOL 影响）。
+ * 句柄在槽间搬移（insert/remove_at/reverse/sort）按裸字节移动——边记在目标/持有者对象上、
+ * 不在句柄里，故搬移不改任何计数；仅 push/set/clone 经 bind 增计数，pop/remove_at/set/clear/drop
+ * 经 unbind 减计数（触零读句柄自带 dtor 自析构）。 */
 
+#define LIST_SEG 64    /* 每段元素数（64 * sizeof(sc_afat)=64*32=2KiB，命中 mem 尺寸类） */
+
+static inline sc_afat *list_slot(list *l, uint64_t i) {
+    return &l->segs[i / LIST_SEG][i % LIST_SEG];
+}
+
+/* 确保总容量至少 need 个槽位（按段粒度增长，段内存来自 mem chunk0 清零）。 */
 static uint8_t list_grow(list *l, uint64_t need) {
     if (l->cap >= need) return 1;
-    uint64_t cap = l->cap ? l->cap : 8;
-    while (cap < need) cap *= 2;
-    void **p = (void **)sc_realloc(l->items, cap * sizeof(void *));
-    if (!p) return 0;
-    l->items = p;
-    l->cap = cap;
+    uint64_t want = (need + LIST_SEG - 1) / LIST_SEG;   /* 所需段数 */
+    sc_afat **t = (sc_afat **)refit(l->segs, want * sizeof(sc_afat *));
+    if (!t) return 0;
+    l->segs = t;
+    while (l->nsegs < want) {
+        sc_afat *seg = (sc_afat *)chunk0(LIST_SEG * sizeof(sc_afat));
+        if (!seg) return 0;                              /* 部分增长：nsegs/cap 反映已分配段 */
+        l->segs[l->nsegs++] = seg;
+        l->cap = (uint32_t)((uint64_t)l->nsegs * LIST_SEG);
+    }
     return 1;
 }
 
 void list_init(list *_this) {
-    _this->items = NULL;
+    _this->segs = NULL;
+    _this->nsegs = 0;
     _this->size = 0;
     _this->cap = 0;
 }
 
+void list_clear(list *_this) {
+    for (uint64_t i = 0; i < _this->size; i++)
+        sc_afat_unbind(list_slot(_this, i));            /* release 每条 retain */
+    _this->size = 0;
+}
+
 void list_drop(list *_this) {
-    sc_free(_this->items);
+    list_clear(_this);
+    for (uint32_t s = 0; s < _this->nsegs; s++)
+        recycle(_this->segs[s]);
+    recycle(_this->segs);
     list_init(_this);
 }
 
 uint64_t list_len(list *_this) { return _this->size; }
 
-void list_clear(list *_this) { _this->size = 0; }
-
 uint8_t list_reserve(list *_this, uint64_t n) { return list_grow(_this, n); }
 
-uint8_t list_push(list *_this, void *value) {
+uint8_t list_push(list *_this, sc_afat value) {
     if (!list_grow(_this, _this->size + 1)) return 0;
-    _this->items[_this->size++] = value;
-    return 1;
-}
-
-void *list_pop(list *_this) {
-    return _this->size ? _this->items[--_this->size] : NULL;
-}
-
-void *list_get(list *_this, uint64_t index) {
-    return index < _this->size ? _this->items[index] : NULL;
-}
-
-uint8_t list_set(list *_this, uint64_t index, void *value) {
-    if (index >= _this->size) return 0;
-    _this->items[index] = value;
-    return 1;
-}
-
-uint8_t list_insert(list *_this, uint64_t index, void *value) {
-    if (index > _this->size) return 0;
-    if (!list_grow(_this, _this->size + 1)) return 0;
-    memmove(_this->items + index + 1, _this->items + index,
-            (_this->size - index) * sizeof(void *));
-    _this->items[index] = value;
+    sc_afat_bind(list_slot(_this, _this->size), value.p,
+                 (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);   /* retain：目标 in++ */
     _this->size++;
     return 1;
 }
 
-void *list_remove_at(list *_this, uint64_t index) {
-    if (index >= _this->size) return NULL;
-    void *v = _this->items[index];
-    memmove(_this->items + index, _this->items + index + 1,
-            (_this->size - index - 1) * sizeof(void *));
-    _this->size--;
-    return v;
+uint8_t list_pop(list *_this) {
+    if (!_this->size) return 0;
+    sc_afat_unbind(list_slot(_this, --_this->size));    /* release 尾元素 */
+    return 1;
 }
 
-int64_t list_index_of(list *_this, void *value) {
+sc_afat list_get(list *_this, uint64_t index) {
+    if (index < _this->size) return *list_slot(_this, index);  /* 借用：原样返回，不改计数 */
+    sc_afat empty; empty.p = NULL; empty.tar = NULL; empty.own = NULL; empty.dtor = NULL;
+    return empty;
+}
+
+uint8_t list_set(list *_this, uint64_t index, sc_afat value) {
+    if (index >= _this->size) return 0;
+    sc_afat *slot = list_slot(_this, index);
+    sc_afat old = *slot;                                /* 复制旧边记录 */
+    sc_afat_bind(slot, value.p, (sc_ref *)value.tar,    /* 先 retain 新（防同元素自赋时瞬时归零 UAF） */
+                 SC_OWN_RAW, value.dtor);
+    sc_afat_unbind(&old);                               /* 再 release 旧 */
+    return 1;
+}
+
+uint8_t list_insert(list *_this, uint64_t index, sc_afat value) {
+    if (index > _this->size) return 0;
+    if (!list_grow(_this, _this->size + 1)) return 0;
+    for (uint64_t i = _this->size; i > index; i--)      /* 尾→前裸搬移让位（不改计数） */
+        *list_slot(_this, i) = *list_slot(_this, i - 1);
+    sc_afat_bind(list_slot(_this, index), value.p,      /* retain 新元素 */
+                 (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+    _this->size++;
+    return 1;
+}
+
+uint8_t list_remove_at(list *_this, uint64_t index) {
+    if (index >= _this->size) return 0;
+    sc_afat_unbind(list_slot(_this, index));            /* release 该元素 */
+    for (uint64_t i = index; i + 1 < _this->size; i++)  /* 后续裸搬移前移（不改计数） */
+        *list_slot(_this, i) = *list_slot(_this, i + 1);
+    _this->size--;
+    sc_afat *last = list_slot(_this, _this->size);      /* 清空腾出的尾槽，防重复 unbind */
+    last->p = NULL; last->tar = NULL; last->own = NULL; last->dtor = NULL;
+    return 1;
+}
+
+int64_t list_index_of(list *_this, sc_afat value) {
     for (uint64_t i = 0; i < _this->size; i++)
-        if (_this->items[i] == value) return (int64_t)i;
+        if (list_slot(_this, i)->p == value.p) return (int64_t)i;
     return -1;
 }
 
 void list_reverse(list *_this) {
     for (uint64_t i = 0, j = _this->size; i + 1 < j; i++, j--) {
-        void *t = _this->items[i];
-        _this->items[i] = _this->items[j - 1];
-        _this->items[j - 1] = t;
+        sc_afat t = *list_slot(_this, i);               /* 裸交换句柄（不改计数） */
+        *list_slot(_this, i) = *list_slot(_this, j - 1);
+        *list_slot(_this, j - 1) = t;
     }
 }
 
 uint8_t list_clone(list *_this, list *out) {
     list_clear(out);
     if (!list_grow(out, _this->size)) return 0;
-    if (_this->size)
-        memcpy(out->items, _this->items, _this->size * sizeof(void *));
-    out->size = _this->size;
+    for (uint64_t i = 0; i < _this->size; i++)
+        if (!list_push(out, *list_slot(_this, i))) return 0;  /* 逐元素 retain 到 out */
     return 1;
 }
 
-/* 插入排序：元素数通常不大，且保持稳定。cmp 为 list_cmp（函数指针） */
+/* 插入排序：元素数通常不大，且保持稳定。cmp 收元素 .p（实体基址）。句柄裸搬移不改计数。 */
 void list_sort(list *_this, list_cmp cmp) {
     if (!cmp) return;
     for (uint64_t i = 1; i < _this->size; i++) {
-        void *v = _this->items[i];
+        sc_afat v = *list_slot(_this, i);
         uint64_t j = i;
-        while (j > 0 && cmp(_this->items[j - 1], v) > 0) {
-            _this->items[j] = _this->items[j - 1];
+        while (j > 0 && cmp(list_slot(_this, j - 1)->p, v.p) > 0) {
+            *list_slot(_this, j) = *list_slot(_this, j - 1);
             j--;
         }
-        _this->items[j] = v;
+        *list_slot(_this, j) = v;
     }
 }
+

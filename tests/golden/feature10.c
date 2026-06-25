@@ -10,7 +10,7 @@ typedef struct counter {
 
 static void counter_init(counter *_this);
 static int32_t counter_add(counter *_this, int32_t k);
-static int32_t str_cmp(void *a, void *b);
+static int32_t cnt_cmp(void *a, void *b);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -19,6 +19,25 @@ typedef struct com__project {
 
 
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
+
+static inline counter *counter__new(void) {
+    counter *_p = (counter *)sc_alloc(sizeof(counter));
+    if (_p) {
+        memset(_p, 0, sizeof(counter));
+        counter_init(_p);
+    }
+    return _p;
+}
+
+static inline counter *counter__new_ref(int32_t _atom) {
+    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(counter));
+    if (!_h) return 0;
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
+    counter *_p = (counter *)((char *)_h + SC_REF_HDR);
+    memset(_p, 0, sizeof(counter));
+    counter_init(_p);
+    return _p;
+}
 
 static inline string *string__new(void) {
     string *_p = (string *)sc_alloc(sizeof(string));
@@ -46,9 +65,9 @@ static int32_t counter_add(counter *_this, int32_t k) {
     return _this->n;
 }
 
-static int32_t str_cmp(void *a, void *b) {
+static int32_t cnt_cmp(void *a, void *b) {
     /* line 24 */
-    return strcmp(((char*)(a)), ((char*)(b)));
+    return ((counter*)(a))->n - ((counter*)(b))->n;
 }
 
 int32_t main(void) {
@@ -82,39 +101,60 @@ int32_t main(void) {
     list l = {0};
     list_init(&l);
     /* line 46 */
-    list_push(&l, "banana");
+    sc_fat c1 = {0};
+    counter *_fat0 = counter__new_ref(0);
+    sc_fat_bind(&c1, _fat0, (sc_ref *)((char *)_fat0 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 47 */
-    list_push(&l, "apple");
+    counter_add(((counter *)(c1).p), 30);
     /* line 48 */
-    list_push(&l, "cherry");
+    sc_fat c2 = {0};
+    counter *_fat1 = counter__new_ref(0);
+    sc_fat_bind(&c2, _fat1, (sc_ref *)((char *)_fat1 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 49 */
-    list_sort(&l, str_cmp);
+    counter_add(((counter *)(c2).p), 10);
     /* line 50 */
-    uint64_t i = 0;
+    sc_fat c3 = {0};
+    counter *_fat2 = counter__new_ref(0);
+    sc_fat_bind(&c3, _fat2, (sc_ref *)((char *)_fat2 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 51 */
-    for (i = 0; i < list_len(&l); i++) {
-        /* line 52 */
-        printf("list[%llu]=%s\n", i, ((char*)(list_get(&l, i))));
-    }
+    counter_add(((counter *)(c3).p), 20);
+    /* line 52 */
+    list_push(&l, ({ sc_fat _ec3 = c1; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))0}; }));
+    /* line 53 */
+    list_push(&l, ({ sc_fat _ec4 = c2; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))0}; }));
+    /* line 54 */
+    list_push(&l, ({ sc_fat _ec5 = c3; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))0}; }));
     /* line 55 */
-    list *lp = &(l);
+    list_sort(&l, cnt_cmp);
     /* line 56 */
-    list_drop(lp);
+    uint64_t i = 0;
     /* line 57 */
-    (string_drop(part), sc_free(part));
-    /* line 58 */
-    (string_drop(s), sc_free(s));
+    for (i = 0; i < list_len(&l); i++) {
+        /* line 58 */
+        printf("list[%llu]=%d\n", i, ((counter*)((list_get(&l, i)).p))->n);
+    }
     /* line 61 */
-    string *hs = string__new();
+    list *lp = &(l);
     /* line 62 */
-    string_append(hs, "on the heap");
+    list_drop(lp);
     /* line 63 */
-    printf("heap: %s\n", string_cstr(hs));
+    (string_drop(part), sc_free(part));
     /* line 64 */
+    (string_drop(s), sc_free(s));
+    /* line 67 */
+    string *hs = string__new();
+    /* line 68 */
+    string_append(hs, "on the heap");
+    /* line 69 */
+    printf("heap: %s\n", string_cstr(hs));
+    /* line 70 */
     (string_drop(hs), sc_free(hs));
-    /* line 65 */
+    /* line 71 */
     {
         int32_t _ret = 0;
+        sc_fat_unbind(&c3);
+        sc_fat_unbind(&c2);
+        sc_fat_unbind(&c1);
         sc_mod_adt_drop();
         return _ret;
     }

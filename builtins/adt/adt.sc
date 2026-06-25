@@ -97,30 +97,36 @@
     fnc bsearch:: &, key: &, cmp: array_cmp          # bsearch 检索（须已排序，未找到 nil）
 }
 
-# ---------------- list：动态指针数组 ----------------
-# 元素为裸指针（&），不拥有元素：drop/clear/remove 不释放元素本身
+# ---------------- list：段式裸 @ 自动指针容器 ----------------
+# 元素为裸自动指针 @（sc_afat），list 拥有元素（每元素一份 retain）。
+# 段式存储：元素 i 住第 i/LIST_SEG 段的第 i%LIST_SEG 槽；段索引表与各段内存均来自 mem
+#   chunk（不受全局 -DSC_POOL 影响）。核心接口与 array 一致，区别仅在元素是 ref 句柄而非值块。
+# 取出语义「取用分离」：get 借用（返回句柄、不改计数）；pop/remove_at 仅删除并 release（返回
+#   bool）。要取并保留：先 get 借用 → (x: T@) 还原绑定（retain）→ 再 pop（release）。
+# push retain（目标 in++）、pop/remove_at/set/clear/drop release（in--，触零自析构，dtor 随句柄）。
 
-@fnc list_cmp: i4, a: &, b: &                           # sort 比较回调类型
+@fnc list_cmp: i4, a: &, b: &                           # sort 比较回调类型（实参为元素 .p 实体基址）
 
 @def list: {
-    items: &&      # 元素数组
+    segs: &&      # 段索引表（sc_afat**；内部，sc 侧不直接访问）
+    nsegs: u4     # 已分配段数
     size: u4      # 元素个数
-    cap: u4       # 已分配槽位
+    cap: u4       # 总槽位（nsegs * LIST_SEG）
 
     fnc init::                                       # 构造为空列表
-    fnc drop::                                       # 释放槽位数组（不释放元素）
+    fnc drop::                                       # 释放全部 retain + 回收段内存
     fnc len:: u8                                    # 元素个数
-    fnc clear::                                      # 清空（保留容量）
+    fnc clear::                                      # 清空并 release 全部元素（保留段容量）
     fnc reserve:: bool, n: u8                       # 预留槽位
-    fnc push:: bool, value: &                        # 尾部追加
-    fnc pop:: &                                     # 弹出尾元素（空返回 nil）
-    fnc get:: &, index: u8                          # 取元素（越界返回 nil）
-    fnc set:: bool, index: u8, value: &              # 改写元素
-    fnc insert:: bool, index: u8, value: &           # 指定位置插入
-    fnc remove_at:: &, index: u8                    # 删除并返回该元素
-    fnc index_of:: i8, value: &                      # 查找元素位置（未找到 -1）
+    fnc push:: bool, value: @                         # 尾部追加（retain 元素）
+    fnc pop:: bool                                   # 删除并 release 尾元素（空返回 false）
+    fnc get:: @, index: u8                           # 借用元素句柄（越界返回空句柄；不改计数）
+    fnc set:: bool, index: u8, value: @               # 改写元素（retain 新、release 旧）
+    fnc insert:: bool, index: u8, value: @            # 指定位置插入（retain 元素）
+    fnc remove_at:: bool, index: u8                  # 删除并 release 该元素（越界返回 false）
+    fnc index_of:: i8, value: @                       # 按 .p 实体基址查找（未找到 -1）
     fnc reverse::                                    # 原地反转
-    fnc clone:: bool, out: list&                    # 浅拷贝到 out
+    fnc clone:: bool, out: list&                    # 逐元素 retain 到 out
     fnc sort:: cmp: list_cmp                         # 按比较回调排序
 }
 
