@@ -582,6 +582,8 @@ def io: [
 #                               # 变量按静态类型自动补 printf 说明符（i4→%d, char&→%s ...）
 #   print("x = %d", x)          # 有括号=C printf 兼容模式：首参格式串，实参原样传递
 #   print<3> "通道 3 的日志"     # <chn> 指定 u1 日志通道（默认 0）
+#   print<s> "x = ", x          # <chn> 为 string 变量 → 不输出 stdout，改「追加进该串」
+#                               # （等价 s.printf(...)：无时间戳/级别/通道修饰，纯格式化文本）
 #   print "E: open ", p, " 失败" # fmt 文本前缀 "X:" 指定级别，X ∈ F/E/W/I/D/V
 #   - 输出格式：HH:MM:SS.mmm L| 文本（chn!=0 时加通道标记；自动补换行）
 #   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；高于该级别的输出被丢弃）

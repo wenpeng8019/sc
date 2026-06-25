@@ -3955,10 +3955,27 @@ struct CGen {
     //   (expr: "%fmt") 显式格式覆盖（值原样传入，不再自动加 cast）。
     //   <chn> 通道 u1 透传给 C print 首参（默认 0）。
     void emitPrintStmt(const Stmt& s) {
+        // <chn> 为 string 变量时：路由到 string_printf —— 把格式化文本「追加进该串」而非
+        // 输出到 stdout（无时间戳/级别/通道修饰，等价直接调用 string 的 printf）。其余
+        // 拼接糖/格式自动补全逻辑与 print 完全一致，仅调用目标不同。
+        std::string strChn;   // 非空=string 通道目标（已规整为 string* 实参文本）
+        if (s.printChn != "0") {
+            const VType* cvt = nullptr;
+            { auto a = localsT.find(s.printChn);
+              if (a != localsT.end()) cvt = &a->second;
+              else { auto b = globalsT.find(s.printChn); if (b != globalsT.end()) cvt = &b->second; } }
+            if (cvt && cvt->arr == 0 && resolveAliasName(cvt->name) == "string" && aggrOf("string")) {
+                if (cvt->fat)           strChn = "((string *)(" + s.printChn + ").p)";  // string@ 胖指针解 .p
+                else if (cvt->ptr >= 1) strChn = s.printChn;                            // string& 裸指针直传
+                else                    strChn = "&(" + s.printChn + ")";               // string 值取址（理论上不会出现）
+            }
+        }
+
         // 括号形式 print(...) = C printf 兼容模式：实参原样传递（首参为格式串）
         if (s.printCompat) {
             indent();
-            out << "print((uint8_t)(" << s.printChn << ")";
+            if (!strChn.empty()) out << "string_printf(" << strChn;
+            else                 out << "print((uint8_t)(" << s.printChn << ")";
             for (auto& argp : s.printArgs) {
                 out << ", ";
                 emitExpr(*argp, true);
@@ -4034,7 +4051,8 @@ struct CGen {
         if (!lit.empty() || fmtExpr.empty()) flush();
 
         indent();
-        out << "print((uint8_t)(" << s.printChn << "), " << fmtExpr;
+        if (!strChn.empty()) out << "string_printf(" << strChn << ", " << fmtExpr;
+        else                 out << "print((uint8_t)(" << s.printChn << "), " << fmtExpr;
         for (auto& pv : pvs) {
             out << ", " << pv.pre;
             emitExpr(*pv.e, true);

@@ -370,6 +370,7 @@ void     async_io(void);
  * print 属语言内核：声明在此（默认带入每个 C 单元），运行时实现在 op_impl.c
  * （始终随工程编译链接）——无需 inc。
  *   - chn：日志通道（透传），chn==0 为默认通道；F/E/W/I/D/V 级别与通道正交
+ *   - 特例：<chn> 为 string 变量时编译器改生成 string_printf（追加进该串，不走本函数）
  *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定日志级别，无前缀默认 D（调试）
  *   - 输出 stdout：HH:MM:SS.mmm L| 文本（chn!=0 时加 通道标记；自动补换行）
  *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取 */
