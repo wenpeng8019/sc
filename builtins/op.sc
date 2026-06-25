@@ -250,10 +250,17 @@ def operand: {
 # 语法：
 #   for name[: T&] [, i [, j ...]] in 集合 [revert] [step <expr>] [offset <expr>] [num <expr>]
 #       体...
-# 集合分三类：
+# 集合分五类：
 #   ① 值序列：范围 [a, b]（闭区间，含 b）/ [a, b)（半开，不含 b）；整数 n（== [0, n)）
 #   ② 索引序列：静态数组（编译期已知长度，支持多维）；字符串（char& / char[]，按 '\0' 终止）
-#   ③ 链式序列：双向链 chain；ADT 容器（def T: <C, I>），经 first/next 游标遍历
+#   ③ 链式序列：双向链 chain；ADT 容器（def T: <C, I>），经 first/next 游标遍历单值
+#   ④ 序列协议：实现 len + 整型取值器（get/at，单整型参数）的容器（list/array），
+#        for v in c 按下标 0..len) 取元素；支持 , i 真实下标与 revert/offset/num/step
+#   ⑤ 映射协议：实现 first/next + key_at + value_at 的容器（dict/bst/lru），
+#        for k, v in c 游标遍历键值对：k=键（默认 const void&，可注解 k: T& 下转），
+#        v=借用值 @（以 (v: T&) 读取）；终止判据=value_at 空句柄（.p == nil），与游标
+#        哨兵无关（dict -1 / bst·lru 0 通用）；支持 revert/num，不支持 step/offset。
+#        按容器实现了哪些方法自动选择协议，编译器不内置任何库类型名。
 # 循环变量类型：
 #   - 默认按集合元素类型推断：范围/整数→i4；数组→元素类型；字符串→char；
 #     链→void&（须显式下转）；容器→注入节点 I&（须显式 : T& 下转回元素）。
@@ -276,6 +283,10 @@ def operand: {
 #   for v, i, j in mat     <==>  for i.. { for j.. { var v = mat[i][j]; ... } }
 #   for c in s             <==>  for var _i = 0; s[_i] != '\0'; _i++ { var c = s[_i]; ... }
 #   for it: T& in l        <==>  for var p = l.first(); p != nil; p = next(p) { var it = p: T&; ... }
+#   for v in c             <==>  for var _i = 0; _i < c.len(); _i++ { var v = c.get(_i); ... }   # 序列协议
+#   for k, v in c          <==>  for var _u = c.first();; _u = c.next(_u) {                       # 映射协议
+#                                    var v = c.value_at(_u); if v.p == nil break
+#                                    var k = c.key_at(_u); ... }
 
 
 #  run / thread 机制（抢占式并发内核）

@@ -2217,3 +2217,25 @@ void lru_each(lru *_this, lru_each_fn fn, void *ctx) {
         if (!fn(n->key, n->value, ctx)) return;
 }
 
+/* 游标双向遍历（游标 = 不透明节点 token；空集/越界返回 0）。MRU → LRU（first=MRU、last=LRU），
+ * 只读借用、不触顶（不 move_front）；value_at 无效返回空句柄。put/remove/淘汰会回收节点使游标
+ * 失效，遍历期间勿增删。供 for k, v in lru 映射协议降解。 */
+int64_t lru_first(lru *_this) { return (int64_t)(intptr_t)_this->head; }   /* MRU 端 */
+int64_t lru_last(lru *_this)  { return (int64_t)(intptr_t)_this->tail; }   /* LRU 端 */
+int64_t lru_next(lru *_this, int64_t cur) {
+    lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
+    return n ? (int64_t)(intptr_t)n->next : 0;     /* MRU → LRU 方向 */
+}
+int64_t lru_prev(lru *_this, int64_t cur) {
+    lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
+    return n ? (int64_t)(intptr_t)n->prev : 0;
+}
+const void *lru_key_at(lru *_this, int64_t cur) {
+    lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
+    return n ? n->key : NULL;
+}
+sc_afat lru_value_at(lru *_this, int64_t cur) {
+    lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
+    return n ? n->value : lru_empty_afat();         /* 借用，不改计数 */
+}
+

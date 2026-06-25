@@ -1907,13 +1907,26 @@ for name[: T&] [, i [, j ...]] in 集合 [revert] [step <expr>] [offset <expr>] 
     体...
 ```
 
-**集合分三类**：
+**集合分五类**：
 
 | 类别 | 形式 | 说明 |
 |------|------|------|
 | 值序列 | `[a, b]` / `[a, b)` / 整数 `n` | 范围闭区间/半开区间；`n` 等价 `[0, n)` |
 | 索引序列 | 静态数组 / 字符串 | 数组编译期已知长度（支持多维）；字符串 `char&`/`char[]` 按 `\0` 终止 |
-| 链式序列 | `chain` / 容器 | 双向链；ADT 容器（`def T: <C, I>`），经 `first`/`next` 游标遍历 |
+| 链式序列 | `chain` / 容器 | 双向链；ADT 容器（`def T: <C, I>`），经 `first`/`next` 游标遍历单值 |
+| 序列协议 | 实现 `len` + 整型取值器（`get`/`at`，单整型参数）的容器 | `for v in c`：按下标 `0..len)` 取元素（如 `list`/`array`） |
+| 映射协议 | 实现 `first`/`next` + `key_at` + `value_at` 的容器 | `for k, v in c`：游标遍历键值对（如 `dict`/`bst`/`lru`） |
+
+**两套容器遍历协议**（按类型实现了哪些方法自动选择，编译器不内置任何库类型名）：
+
+- **序列协议** `for v in c`：容器提供 `len::整型` 与整型取值器（恰一个整型标量参数的
+  `get`/`at`，返回元素 `&` 或 `@`）。等价按 `0..len)` 计数取元素，支持
+  `revert`/`offset`/`num`/`step` 与 `, i` 索引（真实下标）。
+- **映射协议** `for k, v in c`：容器提供 `first`/`next` 游标与 `key_at`/`value_at`。
+  须恰好两个循环变量：`k`=键（默认 `const void&`，可注解 `k: T&` 下转），`v`=值
+  （借用 `@`，以 `(v: T&)` 读取）。**终止判据为 `value_at` 返回空句柄**（`.p == nil`），
+  与底层游标哨兵无关（`dict` 用 `-1`、`bst`/`lru` 用 `0` 均通用），故无 API 破坏。
+  支持 `revert`/`num`，不支持 `step`/`offset`。遍历期间值为借用，不改变引用计数。
 
 **循环变量类型**：默认按集合元素类型推断——范围/整数→`i4`；数组→元素类型；
 字符串→`char`；链→`void&`（须显式下转）；容器→注入节点 `I&`（须 `: T&` 下转回
@@ -1967,6 +1980,17 @@ for x, i in a                    # 数组：i 为真实下标，x == a[i] 恒等
 for it: task&, i in lst          # 容器：i 为 0,1,2... 递增计数
     printf("#%d=%d ", i, it->id)
 
+# 序列协议：实现 len + 整型 get/at 的容器（list/array），for v in 按下标取元素
+for v in arr                     # array：元素指针，(v: i4&)[0] 读值
+    printf("%d ", (v: i4&)[0])
+for v, i in lst                  # list：@ 借用元素 + 真实下标
+    printf("[%d]=%d ", i, (v: node&)->v)
+
+# 映射协议：实现 first/next + key_at/value_at 的容器（dict/bst/lru），for k, v 取键值
+for k: i4&, v in d               # k 注解下转回 i4&，v 为借用 @
+    printf("%d=%d ", k[0], (v: node&)->v)
+for k: i4&, v in t revert num 3  # bst 逆序、至多 3 对
+
 # 多维数组：N 维 → N 个坐标变量，嵌套遍历全部标量
 var m[2][3]: i4
 for v, i, j in m
@@ -1982,6 +2006,10 @@ for x, i in arr        <==>  for var i = 0; i < len(arr); i++ { var x = arr[i]; 
 for v, i, j in mat     <==>  for i.. { for j.. { var v = mat[i][j]; ... } }
 for c in s             <==>  for var _i = 0; s[_i] != '\0'; _i++ { var c = s[_i]; ... }
 for it: T& in l        <==>  for var p = l.first(); p != nil; p = next(p) { var it = p: T&; ... }
+for v in c             <==>  for var _i = 0; _i < c.len(); _i++ { var v = c.get(_i); ... }   # 序列协议
+for k, v in c          <==>  for var _u = c.first();; _u = c.next(_u) {                       # 映射协议
+                                 var v = c.value_at(_u); if v.p == nil break
+                                 var k = c.key_at(_u); ... }
 ```
 
 ### 15.2 run 语句（多线程）

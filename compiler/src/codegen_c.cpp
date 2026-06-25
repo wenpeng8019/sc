@@ -1135,6 +1135,32 @@ struct CGen {
         return nullptr;
     }
 
+    // ── for-in 容器协议探测（按方法约定，不绑定具体库类型名）─────────────────────
+    // 映射协议（键值）：类型 T 同时具备 first + key_at + value_at（游标 + 键值取值）。
+    //   for k, v in map 降解：游标遍历、key_at/value_at 取键值，value_at 空句柄即终止
+    //   （哨兵无关——dict 的 -1 与 bst/lru 的 0 皆通用）。dict/bst/lru 实现之。
+    bool isMapProto(const std::string& T) const {
+        return findMethod(T, "first") && findMethod(T, "key_at") && findMethod(T, "value_at");
+    }
+    // 序列索引协议（单值）：类型 T 具 len + 单「整型参」的 get/at 取值方法（按下标遍历）。
+    //   for v in seq [, i] 降解为计数循环。返回取值方法 Decl*（无则 nullptr）。list/array 实现之。
+    //   注意整型参判定排除 dict/lru 的 get(key:&)（指针参）——它们走映射协议。
+    const Decl* idxGetterOf(const std::string& T) const {
+        if (!findMethod(T, "len")) return nullptr;
+        const char* names[2] = {"get", "at"};
+        for (int k = 0; k < 2; k++) {
+            const Decl* g = findMethod(T, names[k]);
+            if (!g) continue;
+            const auto& ps = g->structCommon.fields;
+            if (ps.size() != 1) continue;
+            const TypeRef& pt = ps[0].type;
+            if (pt.ptr != 0 || !pt.arrayDims.empty()) continue;
+            char c = scalarClass(pt.name);
+            if (c == 'i' || c == 'u') return g;
+        }
+        return nullptr;
+    }
+
     // 类型 T 是否含 ≥1 个自动指针 T@ 成员（决定其 init 是否需隐藏 _self_own 参数：
     // init 经 this 给胖成员绑「新边」时，own 取自该参数携带的持有者出边上下文，见 §7.4）。
     bool typeHasFatMember(const std::string& typeName) const {
@@ -3001,8 +3027,10 @@ struct CGen {
     }
 
     // for-in 糖：把 for name[: T&] in 集合 [revert][step][offset][num] 降解为 C 循环。
-    // 集合分三类：① 值序列（范围 [a,b]/[a,b)、整数计数 n=[0,n)）；② 索引序列（静态数组、
-    // 字符串按 '\0' 终止）；③ 链式序列（双向链 chain、ADT 容器，经 first/next 游标遍历）。
+    // 集合按协议分类：① 值序列（范围 [a,b]/[a,b)、整数计数 n=[0,n)）；② 索引序列（静态数组、
+    // 字符串按 '\0' 终止）；③ 链式序列（双向链 chain、<C,I> 投影容器，经 first/next 指针游标）；
+    // ④ 序列索引协议（len + 整型 get/at：list/array，for v in seq[, i]）；⑤ 映射协议（first/next
+    // 游标 + key_at/value_at：dict/bst/lru，for k, v in map）。后两类按方法约定探测，不绑库类型名。
     void emitForIn(const Stmt& s) {
         const int n = forSeq++;
         const std::string FI = "_fi" + std::to_string(n);   // 游标 / 索引
@@ -3020,7 +3048,7 @@ struct CGen {
         const bool hasNum = (bool)s.forNumE;
 
         // 集合分类
-        enum Kind { KRange, KInt, KArray, KString, KChain, KContainer } kind = KRange;
+        enum Kind { KRange, KInt, KArray, KString, KChain, KContainer, KMap, KIndexSeq } kind = KRange;
         VType ct; bool ctok = false;
         if (s.forIsRange) kind = KRange;
         else {
@@ -3030,6 +3058,8 @@ struct CGen {
             else if (ctok && ct.arr > 0) kind = KArray;
             else if (ctok && ct.arr == 0 && ct.ptr <= 1 && adtColls.count(cn)) kind = KContainer;
             else if (ctok && ct.arr == 0 && ct.ptr <= 1 && cn == "chain") kind = KChain;
+            else if (ctok && ct.arr == 0 && ct.ptr <= 1 && aggrOf(cn) && isMapProto(cn)) kind = KMap;
+            else if (ctok && ct.arr == 0 && ct.ptr <= 1 && aggrOf(cn) && idxGetterOf(cn)) kind = KIndexSeq;
             else if (ctok && ct.arr == 0 && ct.ptr == 0
                      && (scalarClass(ct.name) == 'i' || scalarClass(ct.name) == 'u')) kind = KInt;
             else throw CompileError{"for-in 不支持的集合类型", s.line};
@@ -3165,6 +3195,92 @@ struct CGen {
             emitIdx(kind == KString ? FC : FI);
             emitForInBody(s, vBase, vPtr);
             depth--; indent(); out << "}\n";
+        } else if (kind == KIndexSeq) {
+            // ---- 序列索引协议：len + 整型下标 get/at 取值（list / array）----
+            //   for v in seq [, i]：v=元素（list 为借用 @、array 为元素指针 &），i=下标。
+            const Decl* mLen = findMethod(ct.name, "len");
+            const Decl* mGet = idxGetterOf(ct.name);
+            const TypeRef* grt = mGet->structCommon.type.get();
+            const bool getFat = grt && grt->fat;              // get 返回 @（如 list）→ 借用胖句柄
+            std::string elemBase = grt ? grt->name : "";
+            int elemPtr = grt ? grt->ptr : 1;
+            std::string recvTy = cTypeOf(ct.name, 1);
+            indent(); out << recvTy << " " << FR << " = ";
+            if (ct.ptr == 0) out << "&";
+            emitExpr(*s.forColl, true); out << ";\n";
+            indent(); out << "long " << FE << " = (long)" << mLen->name << "(" << FR << ");\n";
+            indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
+            indent(); out << "for (long " << FI << " = ";
+            if (!s.forRevert) { emitOpt(s.forOffsetE, "0"); }
+            else { out << FE << " - 1 - "; emitOpt(s.forOffsetE, "0"); }
+            out << "; ";
+            out << (s.forRevert ? FI + " >= 0" : FI + " < " + FE);
+            if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+            out << "; " << FI << (s.forRevert ? " -= " : " += "); emitOpt(s.forStepE, "1");
+            out << ", " << FC << "++) {\n";
+            depth++;
+            // 循环变量：默认取 get 返回类型（@ → sc_afat 借用；& → 元素指针）；显式注解则下转。
+            bool vFat;
+            std::string declTy;
+            if (cast) { declTy = cTypeOf(vBase, vPtr); vFat = false; }
+            else {
+                declTy = getFat ? "sc_afat" : cTypeOf(elemBase, elemPtr);
+                vBase = elemBase; vPtr = getFat ? 0 : elemPtr; vFat = getFat;
+            }
+            indent(); out << declTy << " " << s.forVar << " = ";
+            if (cast && getFat && vPtr > 0)
+                out << "(" << declTy << ")(" << mGet->name << "(" << FR << ", " << FI << ")).p";
+            else if (cast)
+                out << "(" << declTy << ")" << mGet->name << "(" << FR << ", " << FI << ")";
+            else
+                out << mGet->name << "(" << FR << ", " << FI << ")";
+            out << ";\n";
+            emitIdx(FI);                        // 可索引 → 真实下标 FI（revert 时倒序）
+            emitForInBody(s, vBase, vPtr, vFat);
+            depth--; indent(); out << "}\n";
+        } else if (kind == KMap) {
+            // ---- 映射协议：first/next 游标 + key_at/value_at（dict / bst / lru）----
+            //   for k, v in map：k=键（默认 const void&，注解可下转），v=值（借用 @）。
+            //   终止判据=value_at 返回空句柄（.p==NULL），与游标哨兵无关（dict -1 / bst·lru 0 通用）。
+            if (s.forIdxVars.size() != 1)
+                throw CompileError{"for-in 映射容器需 `k, v` 两个变量（键, 值）", s.line};
+            if (s.forStepE || s.forOffsetE)
+                throw CompileError{"for-in 映射暂不支持 step/offset 选项", s.line};
+            const Decl* mFirst = findMethod(ct.name, s.forRevert ? "last" : "first");
+            const Decl* mAdv   = findMethod(ct.name, s.forRevert ? "prev" : "next");
+            const Decl* mKey   = findMethod(ct.name, "key_at");
+            const Decl* mVal   = findMethod(ct.name, "value_at");
+            if (!mFirst || !mAdv)
+                throw CompileError{"for-in 映射缺少 " + std::string(s.forRevert ? "last/prev" : "first/next") + " 方法", s.line};
+            std::string recvTy = cTypeOf(ct.name, 1);
+            indent(); out << recvTy << " " << FR << " = ";
+            if (ct.ptr == 0) out << "&";
+            emitExpr(*s.forColl, true); out << ";\n";
+            indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
+            indent(); out << "for (int64_t " << FI << " = " << mFirst->name << "(" << FR << "); ; "
+                          << FI << " = " << mAdv->name << "(" << FR << ", " << FI << "), " << FC << "++) {\n";
+            depth++;
+            // value 变量（forIdxVars[0]）：借用 @（sc_afat），空句柄即终止；不参与作用域回收。
+            indent(); out << "sc_afat " << s.forIdxVars[0] << " = " << mVal->name
+                          << "(" << FR << ", " << FI << ");\n";
+            indent(); out << "if (" << s.forIdxVars[0] << ".p == (void *)0) break;\n";
+            if (hasNum) { indent(); out << "if (" << FC << " >= "; emitOpt(s.forNumE, "0"); out << ") break;\n"; }
+            // key 变量（forVar）：默认 const void*，显式注解 name: T& 则下转。
+            std::string kBase; int kPtr; std::string kty;
+            if (cast) { kBase = vBase; kPtr = vPtr; kty = cTypeOf(kBase, kPtr); }
+            else { kBase = ""; kPtr = 1; kty = "const void *"; }
+            indent(); out << kty << " " << s.forVar << " = (" << kty << ")"
+                          << mKey->name << "(" << FR << ", " << FI << ");\n";
+            // 登记两变量轻量类型 → 发体 → 还原（k=键指针、v=裸 @ 借用）。
+            auto& tbl = inFunc ? localsT : globalsT;
+            bool hk = tbl.count(s.forVar); VType ok; if (hk) ok = tbl[s.forVar];
+            tbl[s.forVar] = VType{kBase, kPtr, 0, false};
+            bool hv = tbl.count(s.forIdxVars[0]); VType ov; if (hv) ov = tbl[s.forIdxVars[0]];
+            tbl[s.forIdxVars[0]] = VType{"", 0, 0, true};
+            emitLoopBody(s.body);
+            if (hv) tbl[s.forIdxVars[0]] = ov; else tbl.erase(s.forIdxVars[0]);
+            if (hk) tbl[s.forVar] = ok; else tbl.erase(s.forVar);
+            depth--; indent(); out << "}\n";
         } else {
             // ---- 链式序列：first/next 游标遍历（chain / 容器）----
             const bool isChain = (kind == KChain);
@@ -3228,11 +3344,11 @@ struct CGen {
     }
 
     // for-in 体：登记循环变量轻量类型（供体内方法糖/成员访问解析），发出体语句，再还原。
-    void emitForInBody(const Stmt& s, const std::string& vBase, int vPtr) {
+    void emitForInBody(const Stmt& s, const std::string& vBase, int vPtr, bool vFat = false) {
         auto& tbl = inFunc ? localsT : globalsT;
         bool had = tbl.count(s.forVar);
         VType old; if (had) old = tbl[s.forVar];
-        tbl[s.forVar] = VType{vBase, vPtr, 0};
+        tbl[s.forVar] = VType{vBase, vPtr, 0, vFat};
         // 索引/坐标变量：登记为 i4（整型计数）
         std::vector<std::pair<bool, VType>> savedIdx;
         for (auto& iv : s.forIdxVars) {

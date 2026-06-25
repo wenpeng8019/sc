@@ -353,6 +353,15 @@
     fnc mru_key:: const &                            # 最近使用键（空返 nil）
     fnc lru_key:: const &                            # 最久未用键（下一被淘汰；空返 nil）
     fnc each:: fn: lru_each_fn, ctx: &              # 按 MRU→LRU 遍历（回调返 false 即停）
+
+    # 游标双向遍历（游标 = 不透明节点 token；空集/越界返回 0）。MRU→LRU，只读借用、不触顶。
+    # 游标在只读期间稳定；put/remove/淘汰会回收节点使其失效，遍历期间勿增删。供 for k, v in lru。
+    fnc first:: i8                                  # MRU 端节点游标（空集 0）
+    fnc last:: i8                                   # LRU 端节点游标（空集 0）
+    fnc next:: i8, cur: i8                          # MRU→LRU 后继（无则 0）
+    fnc prev:: i8, cur: i8                          # 反向前驱（无则 0）
+    fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
+    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
 }
 
 
