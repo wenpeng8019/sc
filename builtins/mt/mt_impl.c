@@ -356,6 +356,94 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params) {
     return 0;
 }
 
+/* async 方法（协议指针）：非阻塞带回复——把 rpc 调用投递给某消费者（另一线程 pull 或池
+ * 工作线程）执行，立即返回 promise&（mt-future 句柄），消费者执行完后兑现，调用方经
+ * p->wait() 阻塞取结果。与 sync 不同：async 不阻塞，故参数缓冲与返回槽不能放调用方栈，
+ * 改由 promise 堆拥有（promise_box 联合分配 [promise_box][rpc 参数缓冲]）。
+ *   - 参数缓冲拷入 box，投递蹦床只携带 box 指针（post 拷贝该指针）。
+ *   - 消费者跑 q_async_run：在 box 缓冲上实跑 rpc（写返回槽 _）→ 类型擦除结果首 8 字节
+ *     存入 box->result → 置位并唤醒 wait。
+ *   - 返回 promise&（失败 NULL）；调用方须先 p->wait() 取结果再 p->drop()（消费者兑现前
+ *     drop 会 UAF——引用计数化安全释放待后续）。同线程对自己消费的队列 async+wait 会死锁。 */
+typedef struct promise_box {
+    promise     base;       /* op 层 promise 协议（首字段：与 promise_box 同址，可互转） */
+    mtx_state   mu;
+    cnd_state   done_cv;
+    uint8_t     done;       /* 消费者兑现后置 1 */
+    void       *result;     /* 类型擦除结果（返回槽首 sizeof(void*) 字节） */
+    void      (*fn)(void *);/* 真正的 rpc worker */
+    /* rpc 参数缓冲紧随本结构体之后：[promise_box][参数 max(psize, sizeof(void*))] */
+} promise_box;
+
+static uint8_t promise_ready(promise *_this) {
+    promise_box *b = (promise_box *)_this;
+    if (!b) return 0;
+    sc_mutex_lock(&b->mu);
+    uint8_t d = b->done;
+    sc_mutex_unlock(&b->mu);
+    return d;
+}
+
+static void *promise_wait(promise *_this) {
+    promise_box *b = (promise_box *)_this;
+    if (!b) return NULL;
+    sc_mutex_lock(&b->mu);
+    while (!b->done)
+        sc_cond_wait(&b->done_cv, &b->mu, 0, 0);      /* 无限阻塞等兑现（超时待后续） */
+    void *r = b->result;
+    sc_mutex_unlock(&b->mu);
+    return r;
+}
+
+static void promise_drop(promise *_this) {
+    promise_box *b = (promise_box *)_this;
+    if (!b) return;
+    sc_mutex_final(&b->mu);
+    sc_cond_final(&b->done_cv);
+    free(b);                /* 整块回收（promise 对象 + 堆参数缓冲同生命周期） */
+}
+
+/* 消费者侧蹦床：在 box 的堆缓冲上实跑 rpc，擦除结果后置位并唤醒 wait。 */
+static void q_async_run(void *arg) {
+    promise_box *b = *(promise_box **)arg;            /* post 拷贝的是 box 指针 */
+    void *buf = (void *)(b + 1);                      /* 参数缓冲紧随 box */
+    b->fn(buf);                                       /* 在堆缓冲上执行（写入返回槽 _） */
+    memcpy(&b->result, buf, sizeof(void *));          /* 类型擦除：返回槽首 8 字节（buf ≥8 已保证） */
+    sc_mutex_lock(&b->mu);
+    b->done = 1;
+    sc_cond_one(&b->done_cv);
+    sc_mutex_unlock(&b->mu);
+}
+
+static struct promise *que_async(queue *_this, void (*fn)(void *), const void *params, size_t psize) {
+    que_state *q = (que_state *)_this;
+    if (!q || !fn) return NULL;
+    /* 缓冲至少 sizeof(void*)：q_async_run 擦除结果时读首 8 字节，避免越界。 */
+    size_t bufsz = psize < sizeof(void *) ? sizeof(void *) : psize;
+    promise_box *b = (promise_box *)malloc(sizeof(promise_box) + bufsz);
+    if (!b) return NULL;
+    memset(b, 0, sizeof(promise_box) + bufsz);
+    b->base.h     = b;       /* 私有区即本盒子（方法经 (promise_box*)_this 回取） */
+    b->base.ready = promise_ready;
+    b->base.wait  = promise_wait;
+    b->base.drop  = promise_drop;
+    sc_mutex_init(&b->mu);
+    sc_cond_init(&b->done_cv);
+    b->done   = 0;
+    b->result = NULL;
+    b->fn     = fn;
+    if (params && psize) memcpy(b + 1, params, psize);
+    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷贝 box 指针（参数已在 box 堆缓冲里） */
+    uint8_t ok = q->base.post(&q->base, q_async_run, &b, sizeof(b));
+    if (!ok) {
+        sc_mutex_final(&b->mu);
+        sc_cond_final(&b->done_cv);
+        free(b);
+        return NULL;
+    }
+    return &b->base;
+}
+
 /* pull 方法：取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
  * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。 */
 static int32_t que_pull(queue *_this, int64_t timeout_ms) {
@@ -414,6 +502,7 @@ struct queue *default_queue(struct pool *host) {
     q->base.h    = q;        /* 私有区即本盒子（方法实际经 (que_state*)_this 回取） */
     q->base.post = que_post;
     q->base.sync = que_sync;
+    q->base.async = que_async;
     q->base.pull = que_pull;
     q->base.drop = que_drop;
     sc_mutex_init(&q->mu);

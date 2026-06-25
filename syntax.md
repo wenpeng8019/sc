@@ -2161,6 +2161,43 @@ q->drop(); p->drop()
   参数缓冲上实跑 rpc 后置位并唤醒调用方（参数/应答靠调用方阻塞期间存活保证）。
 - 示例：线程池宿主 + 专用消费线程两种消费路径见 `examples/feature40.sc`。
 
+#### 队列非阻塞调用 `async work(args), q`（返 promise&）
+
+`async` 除「无目标 = 登记进事件循环（libuv 协作式，见 §15.3）」外，还可带一个队列
+目标：把 rpc 调用**非阻塞投递**给 `q`，立即返回 `promise&`（线程世界的未来句柄）；
+某消费者（另一线程 `pull` / 线程池工作线程）执行完成后兑现该 promise，调用方经
+`p->wait()` 阻塞取回结果（或 `p->ready()` 非阻塞轮询）：
+
+```sc
+rpc compute: i4, a: i4, b: i4         # 首类型 i4 = 返回类型，return 值即回复
+    return a + b
+
+var pool: pool& = default_pool(2)
+var q: queue& = default_queue(pool)
+var f1: promise& = async compute(3, 4), q     # 非阻塞投递，立即得 promise
+var f2: promise& = async compute(100, 23), q  # 可连发多个，再逐个取
+var r1: i4 = f1->wait(): i4                    # 阻塞取回 7（类型擦除，: i4 还原）
+var r2: i4 = f2->wait(): i4                    # 123
+f1->drop(); f2->drop()
+q->drop(); pool->drop()
+```
+
+- **与 `sync ..., q` 对照**：`sync` 立即阻塞等回复；`async` 先拿 `promise`，可并发发起
+  多个、做别的事，再逐个 `wait` —— 投递与取值解耦正是 `async` 的价值。
+- **`promise`（mt-future）**：线程世界的阻塞型未来，与 `future`（§15.3 libuv 协作式、绑
+  事件循环）不同。方法：`p->ready(): bool`（非阻塞轮询）、`p->wait(): T`（阻塞取结果，
+  类型擦除 `void*`，调用点 `: T` 还原，与 `future.get()` 同语义）、`p->drop()`（释放）。
+  `promise&` 是协议指针，方法用箭头。
+- **逗号紧绑 async**：`async work(args), q` 中的 `, q` 属于 async。实参列表内用须加括号。
+- **生命周期**：参数缓冲与返回槽由 `promise` 堆拥有，投递后调用方无需保活；须先
+  `p->wait()` 取结果再 `p->drop()`（消费者兑现前 `drop` 会 UAF，引用计数化安全释放为后续）。
+- **消费者前提**：`q` 须由别的线程/池消费；同线程 `async` 到自己消费的队列再 `wait` 会死锁。
+- 转 C：语句表达式求值 `({ struct W _ap = {0}; 填实参; q->async(q,(void(*)(void*))W_rpc,&_ap,sizeof(_ap)); })`
+  ——求值为 `promise*`，语言内核零 emit mt 符号。实现上 `q->async` 堆分配
+  promise 盒子（嵌返回缓冲），经 `post` 投递蹦床，消费者在堆缓冲上实跑 rpc 后兑现并唤醒。
+- **超时 / 优先级 / 取消**：本阶段仅基础非阻塞投递 + 取值；为后续阶段。
+- 示例：线程池宿主 + 专用消费线程两种消费路径见 `examples/feature41.sc`。
+
 ### 15.3 异步（async / await / done）
 
 与 `run`（抢占式、多线程）相对的**第二套并发模型**：单线程协作式异步——

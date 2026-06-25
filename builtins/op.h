@@ -257,6 +257,10 @@ typedef struct pool {
  *           工作线程）执行完成，结果回填 params 首字段（返回槽 _）；sync work(args), q
  *           → q->sync(q, work_rpc, &参数)。返回 0 成功 / -1 队列已关闭或投递失败。
  *           同线程 sync 到自身会死锁（需别的消费者）；超时/优先级/死锁替代待后续。
+ *   - async：非阻塞带回复——把 rpc 调用投递给队列，立即返回 promise&（mt-future 句柄）；
+ *           消费者执行完成后兑现 promise，调用方经 p->wait() 阻塞取结果（或 p->ready() 轮询）。
+ *           async work(args), q → q->async(q, work_rpc, &参数, sizeof(参数))。参数缓冲堆
+ *           分配并由 promise 拥有（drop 回收）；返回 NULL=投递失败。
  *   - pull：从队列取一条消息在当前线程执行；timeout_ms <0 无限等 / 0 立即返回 / >0 毫秒超时；
  *           返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）
  *   - drop：析构，解绑宿主 → 排空残留消息 → 回收（含 queue 对象本身）
@@ -264,13 +268,35 @@ typedef struct pool {
  *   pull 循环消费）、&pool=线程池消费（池工作线程持续 pull）。
  * 消息节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，投递点无需保活。
  * 默认实现见 mt_impl.c 的 default_queue(host)；投递帧与 thread_run/pool.run 同形。 */
+struct promise;  /* 前置声明：queue.async 返回 promise&（mt-future，定义见下） */
 typedef struct queue {
     void   *h;       /* 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有） */
     uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
     int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params);
+    struct promise *(*async)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
     int32_t (*pull)(struct queue *_this, int64_t timeout_ms);
     void    (*drop)(struct queue *_this);
 } queue;
+
+/* ---------------- promise：mt-future（async 投递的结果句柄，op 层声明） ----------------
+ * promise 是 op 层定义的「异步结果句柄接口协议」——仿 queue/pool：成员均为「每对象方法
+ * 指针」构成的 vtable（无具体实现），由实现模块（mt）的 queue.async 具名构造并返回
+ * promise&。与 libuv future（单线程协作、绑事件循环）不同，promise 是线程世界的阻塞型
+ * 未来：内部 mutex+cond，消费者（另一线程 pull / 池工作线程）执行完 rpc 后兑现，调用方
+ * p->wait() 阻塞取结果。如此语言内核（async 投递）经协议指针派发、零 emit mt 符号。
+ *   - ready：非阻塞轮询，是否已完成（bool）
+ *   - wait：阻塞至完成，返回结果——类型擦除为 void*（返回槽首 8 字节），调用点 : T 还原
+ *           （标量 p->wait(): i4，指针 p->wait(): char&，与 future.get() 同语义）
+ *   - drop：释放（含堆参数缓冲与 promise 对象本身）
+ * 生命周期：参数缓冲与返回槽由 promise 堆拥有，async 投递后调用方无需保活；须先 wait()
+ *   取结果再 drop()——消费者兑现前 drop 会 UAF（引用计数化的安全释放待后续阶段）。
+ * 默认实现见 mt_impl.c（queue.async 构造 promise_box）。 */
+typedef struct promise {
+    void   *h;       /* 实现私有区指针（同步原语 + 堆参数缓冲 + 结果，实现私有） */
+    uint8_t (*ready)(struct promise *_this);  /* 非阻塞轮询：是否已完成 */
+    void   *(*wait)(struct promise *_this);   /* 阻塞至完成，返回结果（类型擦除 void*，调用点 : T 还原） */
+    void    (*drop)(struct promise *_this);   /* 释放（含堆参数缓冲与 promise 对象本身） */
+} promise;
 
 /* ---------------- future / async：单线程协作式异步机制 ----------------
  * 语言底层机制：future 类型 + async/await/done 关键字 + async_init/loop/final。

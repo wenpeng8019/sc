@@ -2334,8 +2334,46 @@ struct CGen {
                 }
                 break;
             }
-            // async E：把 rpc 调用 E 登记进事件循环，立即返回 future&（调 X__async 启动器）
+            // async E[, q]：异步驱动 rpc。
+            //   无目标 ⇒ 登记进当前线程事件循环，立即返回 future&（libuv 协作式，调 X__async）。
+            //   带队列 q ⇒ 非阻塞带回复：投递给 q，立即返回 promise&（mt-future）；消费者执行完后
+            //     兑现，调用方 p->wait() 阻塞取结果。语句表达式求值（参数缓冲由 promise 堆拥有）：
+            //     ({ struct W _ap = {0}; 填实参; q->async(q,(void(*)(void*))W_rpc,&_ap,sizeof(_ap)); })
             case Expr::Async: {
+                if (e.b) {                           // 带队列目标：非阻塞带回复，求值为 promise&
+                    if (!e.a || e.a->kind != Expr::Call ||
+                        !e.a->a || e.a->a->kind != Expr::Ident ||
+                        !rpcs.count(e.a->a->text))
+                        throw CompileError{"async ..., q 期望 rpc 调用形式 name(args)", e.line};
+                    const Decl* r = rpcs.at(e.a->a->text);
+                    if (r->hasAwait)
+                        throw CompileError{"async ..., q 不能驱动协程 rpc '" + e.a->a->text +
+                                           "'（含 await，请用无目标 async）", e.line};
+                    if (r->structCommon.variadic)
+                        throw CompileError{"async ..., q 暂不支持可变参数 rpc：" + r->name, e.line};
+                    const Expr& call = *e.a;
+                    if (call.args.size() > r->structCommon.fields.size())
+                        throw CompileError{"rpc 实参数量超出：" + r->name, e.line};
+                    VType qvt;
+                    if (!exprVType(*e.b, qvt) || qvt.name != "queue" || !aggrOf("queue"))
+                        throw CompileError{"async ..., q 的目标须为 queue 端点", e.line};
+                    const bool isPtr = qvt.ptr >= 1;
+                    out << "({ struct " << r->name << " _ap = {0}; ";
+                    for (size_t i = 0; i < call.args.size(); i++) {
+                        const Field& f = r->structCommon.fields[i];
+                        out << "_ap." << f.name << " = ";
+                        emitExpr(*call.args[i], true); out << "; ";
+                        if (!f.type.arrayDims.empty()) {   // 数组实参：额外装填 size（字节数）
+                            out << "_ap." << rpcArraySizeName(f) << " = ";
+                            emitRpcArraySizeof(f); out << "; ";
+                        }
+                    }
+                    emitComBasePtr(*e.b, isPtr);
+                    out << "->async(";
+                    emitComBasePtr(*e.b, isPtr);
+                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap)); })";
+                    break;
+                }
                 if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
                     const Expr& call = *e.a;
                     out << call.a->text << "__async(";

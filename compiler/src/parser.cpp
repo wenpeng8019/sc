@@ -1318,11 +1318,17 @@ struct Parser {
     ExprPtr parseUnary() {
 
         skipNlInBracket();
-        // async E：把 rpc 调用登记进事件循环，返回 future&（不阻塞）
+        // async E[, q]：异步驱动 rpc。
+        //   无目标 `async work(args)`     → 登记进当前线程事件循环，返回 future&（libuv 协作式）。
+        //   带队列 `async work(args), q`  → 非阻塞投递给 q，立即返回 task&（mt-future），消费者
+        //                                  执行完后兑现，t->wait() 阻塞取结果。
+        //   逗号紧绑 async（同 sync）；故实参列表内用 async 须加括号。
         if (at(Tok::KwAsync)) {
             auto e = mk(Expr::Async);
             advance();
             e->a = parseUnary();                // 操作数：rpc 调用
+            if (accept(Tok::Comma))
+                e->b = parseUnary();            // 可选队列目标 q（非阻塞带回复，返 task&）
             return e;
         }
         // sync E[, q]：同步驱动 rpc 流程。

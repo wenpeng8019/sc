@@ -24,7 +24,8 @@ extern "C" {
  * default_pool(n)，填充 run/join/drop 指针并返回 pool&（犹如 io 的 file() 之于
  * com）。其入池帧（fn/params/psize）与 thread_run 同形。queue 亦为语言内核声明的
  * 接口协议（vtable，见 op.h）；本模块按「默认 FIFO」策略提供具名构造 default_queue
- * (host)，填充 post/pull/drop 指针并返回 queue&。 */
+ * (host)，填充 post/sync/async/pull/drop 指针并返回 queue&。async 投递构造并返回 promise&
+ * （mt-future，op 层接口协议，见 op.h），由消费者执行完后兑现、调用方 p->wait() 阻塞取。 */
 
 /* ---------------- pool：线程池协议的「默认」实现（构造入口） ---------------- */
 

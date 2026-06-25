@@ -355,8 +355,28 @@ def operand: {
 
     fnc post:            # << 投递一个 rpc 消息（编译器经 << 派发；签名见 op.h）
     fnc sync:            # sync work(args), q 阻塞带回复（编译器经 sync 派发；签名见 op.h）
+    fnc async:           # async work(args), q 非阻塞带回复，返 promise&（编译器经 async 派发；签名见 op.h）
     fnc pull: i4, timeout_ms: i8   # 取一条消息执行：<0 无限 / 0 立即 / >0 毫秒；返回 1/0/-1
     fnc drop:            # 析构：解绑宿主 → 排空残留 → 回收（含 queue 对象本身）
+}
+
+# ---------------- promise：mt-future（async 投递的结果句柄） ----------------
+# promise 是 op 层「异步结果句柄接口协议」，仿 queue/pool：成员均为「每对象方法指针」
+# （单冒号 fnc name: 即方法指针槽，无 C 实现），由 queue.async 具名构造并返回 promise&。
+# 与 libuv future（单线程协作、绑事件循环）不同，promise 是线程世界的阻塞型未来：内部
+# mutex+cond，消费者（另一线程 pull / 池工作线程）执行完 rpc 后兑现，调用方 p->wait()
+# 阻塞取结果。故语言内核（async 投递）经协议指针派发、零 emit mt 符号。
+#   var p: promise& = async work(a, b), q   # 非阻塞投递，立即得 promise&
+#   var r: i4 = p->wait(): i4               # 阻塞至完成，取结果（类型擦除，: T 还原）
+#   p->drop()                              # 释放（须先 wait 再 drop）
+# 生命周期：参数缓冲与返回槽由 promise 堆拥有，投递后调用方无需保活；须先 wait() 取结果
+#   再 drop()。C 结构体（vtable）见 op.h，默认带入每个 C 单元；构造与同步见 mt_impl.c。
+@def promise: {
+    h: &                 # 实现私有区指针（同步原语 + 堆参数缓冲 + 结果，实现私有）
+
+    fnc ready: bool      # 非阻塞轮询：是否已完成
+    fnc wait: &          # 阻塞至完成，返回结果（类型擦除 &，调用点用 : T 还原）
+    fnc drop:            # 释放（含堆参数缓冲与 promise 对象本身）
 }
 
 
