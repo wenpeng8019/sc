@@ -205,6 +205,28 @@
         "types": {
             "patterns": [
                 {
+                    "match": "(?:(?<=[A-Za-z0-9_&)\\]]:)|(?<=::))\\s*((?:const|volatile|restrict)(?:\\s+(?:const|volatile|restrict))*)\\s+(@)(?=\\s*(?:,|#|$|\\)|\\]|\\}))",
+                    "captures": {
+                        "1": { "name": "storage.modifier.qualifier.sc" },
+                        "2": { "name": "storage.type.primitive.sc" }
+                    }
+                },
+                {
+                    "name": "storage.type.primitive.sc",
+                    "match": "(?:(?<=[A-Za-z0-9_&)\\]]:)|(?<=::))\\s*@(?=\\s*(?:,|#|$|\\)|\\]|\\}))"
+                },
+                {
+                    "match": "(?:(?<=[A-Za-z0-9_&)\\]]:)|(?<=::))\\s*((?:const|volatile|restrict)(?:\\s+(?:const|volatile|restrict))*)\\s+(&&?)(?=\\s*(?:,|#|$|\\)|\\]|\\}))",
+                    "captures": {
+                        "1": { "name": "storage.modifier.qualifier.sc" },
+                        "2": { "name": "storage.type.primitive.sc" }
+                    }
+                },
+                {
+                    "name": "storage.type.primitive.sc",
+                    "match": "(?:(?<=[A-Za-z0-9_&)\\]]:)|(?<=::))\\s*&&?(?=\\s*(?:,|#|$|\\)|\\]|\\}))"
+                },
+                {
                     "name": "storage.type.primitive.sc",
                     "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|ret|tril|object)\\b"
                 },
@@ -267,10 +289,6 @@
         },
         "meta-suffix": {
             "patterns": [
-                {
-                    "name": "storage.type.primitive.sc",
-                    "match": "(?<![A-Za-z0-9_\\]@])@(?![A-Za-z0-9_@])"
-                },
                 {
                     "name": "storage.modifier.pointer.sc",
                     "match": "(?<=[A-Za-z0-9_\\]])&"
