@@ -1,4 +1,4 @@
-/* m.h —— sc 多线程支持标准的 C ABI 契约（与 builtins/m/m.sc 同步维护）
+/* mt.h —— sc 多线程支持标准的 C ABI 契约（与 builtins/mt/mt.sc 同步维护）
  *
  * 约定：
  *   - thread 与 run 线程创建（thread_run/thread_join）已下沉至语言内核（op.h/op_impl.c）

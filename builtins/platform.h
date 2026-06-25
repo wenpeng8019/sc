@@ -1,6 +1,6 @@
 /* platform.h —— sc 内置库的跨平台基础头（单头文件，参考摘取自 stdc）
  *
- * 角色：builtins 内其他内置模块的 C 实现（adt_impl.c / m_impl.c ...）
+ * 角色：builtins 内其他内置模块的 C 实现（adt_impl.c / mt_impl.c ...）
  *       统一经由本头文件实现跨平台，不直接散落 #ifdef。
  * 内容：常用标准 C 头（scc 生成的 C 统一由本头带入）、平台判定宏、
  *       平台基础头、路径分隔符、TLS、字节序、

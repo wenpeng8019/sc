@@ -38,7 +38,7 @@ const KEYWORDS = [
     ['print', 'C 风格日志输出（print("E: %d", n)，级别前缀 F/E/W/I/D/V，需 inc io.sc）'],
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
-    ['run', '以 rpc 调用创建线程或入池（run 调用[, &t|pool]，需 inc m.sc）'],
+    ['run', '以 rpc 调用创建线程或入池（run 调用[, &t|pool]，需 inc mt.sc）'],
     ['this', '方法体内的接收者指针（fnc T::m 中访问 this->字段）'],
     ['cls', '定义类（单一分派器 + 全局维度选择子 + 三态应答 + 类型擦除引用）'],
     ['dim', '声明维度（类的方法，返回值恒 tril，真正输出经指针出参回填）'],
@@ -69,10 +69,10 @@ const TYPES = [
     ['dict', '内置 ADT 字典对象'],
     ['dim', '内置 ADT 多维数组对象'],
     ['json', '内置 ADT JSON 对象'],
-    ['thread', '内置线程对象（run 语句出参，需 inc m.sc）'],
-    ['mutex', '内置互斥锁对象（需 inc m.sc）'],
-    ['cond', '内置条件变量对象（c.wait(&mu) 等待，需 inc m.sc）'],
-    ['pool', '内置线程池对象（run 语句第二参入池，需 inc m.sc）'],
+    ['thread', '内置线程对象（run 语句出参，需 inc mt.sc）'],
+    ['mutex', '内置互斥锁对象（需 inc mt.sc）'],
+    ['cond', '内置条件变量对象（c.wait(&mu) 等待，需 inc mt.sc）'],
+    ['pool', '内置线程池对象（run 语句第二参入池，需 inc mt.sc）'],
 ];
 
 // ---------------- scc 调用与 AST 缓存 ----------------

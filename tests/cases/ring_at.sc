@@ -4,7 +4,7 @@
 #   2. 并发 SPSC：一个生产者线程 push 1..N、一个消费者线程 pop N 个，校验计数与校验和
 #      （与调度无关，输出确定）——验证 acquire/release 跨线程可见性与无锁正确性。
 inc adt.sc
-inc m.sc
+inc mt.sc
 
 @def shared: {
     q: ring

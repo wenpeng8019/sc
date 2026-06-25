@@ -41,7 +41,7 @@ do_dist() {
     tmp="$(mktemp -d)"
     cat > "$tmp/t.sc" <<'EOF'
 inc adt.sc
-inc m.sc
+inc mt.sc
 inc mem.sc
 fnc main: i4
     var s: string

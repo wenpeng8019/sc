@@ -264,7 +264,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 
 ### 5.6 run 语句（多线程）
 
-`run rpc调用[, &t]` 以 rpc 调用创建线程（目标必须是 rpc，需 `inc m.sc`）：
+`run rpc调用[, &t]` 以 rpc 调用创建线程（目标必须是 rpc，需 `inc mt.sc`）：
 
 ```c
 {   /* run work(a, b), &t */
@@ -275,7 +275,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 ```
 
 出参为空（无 `, &t`）时传 `NULL` → detach 自释放。`thread_run` 为线程原语
-（m_impl 实现）：单次 `malloc(sizeof(thread) + psize + 实现私有区)` 的联合
+（op_impl 实现）：单次 `malloc(sizeof(thread) + psize + 实现私有区)` 的联合
 实体，参数 memcpy 到 thread 紧随位置；joinable 由 `thread_join` 等待并整块
 回收。程序含 run 语句时自动输出 `thread_run` 的 extern 原型。
 

@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/m/m.h"
+#include "builtins/mt/mt.h"
 #include "builtins/async/async.h"
 
 typedef struct pool pool;
@@ -59,7 +59,7 @@ typedef struct com__project {
 } com__project;
 
 
-void sc_mod_m_init(void); void sc_mod_m_drop(void);
+void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
 static inline future *future__new(void) {
@@ -180,7 +180,7 @@ static void compute_rpc(struct compute *_p) {
 }
 
 int32_t main(void) {
-    sc_mod_m_init();
+    sc_mod_mt_init();
     sc_mod_async_init();
     /* line 183 */
     async_init();
@@ -212,7 +212,7 @@ int32_t main(void) {
     {
         int32_t _ret = 0;
         sc_mod_async_drop();
-        sc_mod_m_drop();
+        sc_mod_mt_drop();
         return _ret;
     }
 }

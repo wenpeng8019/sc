@@ -1,7 +1,7 @@
-/* m_impl.c —— sc 多线程支持标准（m.h 契约）默认实现
+/* mt_impl.c —— sc 多线程支持标准（mt.h 契约）默认实现
  * 跨平台经由 builtins/platform.h：POSIX pthread / Windows 线程 API
  */
-#include "m.h"
+#include "mt.h"
 #include "platform.h"
 #include <stdlib.h>
 #include <string.h>

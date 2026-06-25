@@ -1,6 +1,6 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-inc m.sc
+inc mt.sc
 
 def ctx: {
     mu: mutex

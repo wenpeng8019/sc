@@ -300,14 +300,14 @@ def operand: {
 # 语法（第二参数决定执行形态，按类型静态分派）：
 #   run work(a, b)        # detach：独立线程，结束后自释放
 #   run work(a, b), &t    # joinable：t: thread&，须 t->join() 等待并回收
-#   run work(a, b), p     # 入池：p 为 pool（需 inc m.sc），任务排队执行
+#   run work(a, b), p     # 入池：p 为 pool（需 inc mt.sc），任务排队执行
 # 机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
 #   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），线程实体与参数
 #   同生命周期；语法层面能拿到的 thread 必为 joinable。
 # 分工：thread 类型是语言内核机制，声明在此（默认导入）；C 结构体/原型见 op.h
 #   （默认带入每个 C 单元），运行时（thread_run/thread_join，跨平台 pthread↔Win32）
 #   见 builtins/op_impl.c（始终随工程编译链接）。pool 执行目标属多线程模块
-#   （inc m.sc）。
+#   （inc mt.sc）。
 
 # ---------------- thread：线程（run 创建，不可手工构造） ----------------
 @def thread: {

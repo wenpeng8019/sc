@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/m/m.h"
+#include "builtins/mt/mt.h"
 
 typedef struct ctx ctx;
 typedef struct sig sig;
@@ -90,7 +90,7 @@ typedef struct com__project {
 } com__project;
 
 
-void sc_mod_m_init(void); void sc_mod_m_drop(void);
+void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
 static void work_rpc(struct work *_p) {
     /* line 29 */
@@ -169,7 +169,7 @@ static void bwork_rpc(struct bwork *_p) {
 }
 
 int32_t main(void) {
-    sc_mod_m_init();
+    sc_mod_mt_init();
     /* line 88 */
     ctx c = {0};
     /* line 89 */
@@ -376,7 +376,7 @@ int32_t main(void) {
     /* line 183 */
     {
         int32_t _ret = 0;
-        sc_mod_m_drop();
+        sc_mod_mt_drop();
         return _ret;
     }
 }

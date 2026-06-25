@@ -9,7 +9,7 @@
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
 | adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射）、ring（SPSC 无锁循环队列）、bst（AVL/红黑融合有序映射）、heap（数组背二叉堆/优先队列）、trie（前缀树）、lru（LRU 缓存） |
-| m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
+| mt | `inc mt.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
 | mem | `inc mem.sc` | 内存池：chunk/chunk0/chunk_array/chunk_aligned/refit/recycle（替代 malloc/calloc/realloc/free）、mem_usable、mem_trim（空闲页归还 OS）、mem_stat（统计快照含峰值）、mem_teardown、arena（竞技场批量分配）、shm（跨进程命名共享内存，支持只读/独占标志）；每线程 TLS 堆无锁、跨线程释放安全、线程退出堆自动回收复用 |
 | op | 默认导入（无需 inc） | 语言底层（语法层面）机制：operand（设备操作数 `.` 透传为 `platform.h` 的 `sc_<op>` 宏）、chain（侵入式双向链表，C 运行时由 `op.h`/`op_impl.c` 自动提供）、stringify（类型 JSON 格式化关键字，选项类型 `stringify_t` 见 `op.h`）；platform.h 的 sc 侧入口 |
@@ -280,7 +280,7 @@ SCC_CFLAGS="-DDICT_HASH=dict_hash_mur" scc app.sc   # 切到 MurmurHash3
 
 ```sc
 inc adt.sc
-inc m.sc
+inc mt.sc
 
 @def shared: { q: ring ; ... }
 
@@ -600,8 +600,8 @@ print("t=%s", stringify<compact:1>(t, b, 256)) # 紧凑 + 缓存：截断保证 
 多线程将逐步成为 sc 语言特性的一部分，本模块是其支持标准；后续按
 语言特性需要扩展（条件变量/原子操作/线程局部存储等）。
 
-目录结构（`builtins/m/`）：m.sc（sc 侧接口声明）、m.h（C ABI 契约）、
-m_impl.c（默认实现，跨平台经由 `platform.h`：POSIX pthread / Windows 线程）。
+目录结构（`builtins/mt/`）：mt.sc（sc 侧接口声明）、mt.h（C ABI 契约）、
+mt_impl.c（默认实现，跨平台经由 `platform.h`：POSIX pthread / Windows 线程）。
 Linux 等平台链接时自动追加 `-lpthread`。
 
 句柄约定：`h&:` 为实现私有指针（void 指针），调用方不直接访问；结构布局因此
@@ -695,7 +695,7 @@ pool 对象或指针 → 生成 `pool_run(&p, fn, &参数, sizeof)` 入池；其
 完整示例见 `examples/feature7.sc`：
 
 ```sc
-inc m.sc
+inc mt.sc
 
 def ctx: {
     mu: mutex
@@ -952,7 +952,7 @@ fnc main: i4
 ## platform.h —— 跨平台基础头
 
 `builtins/platform.h` 不是 sc 模块，而是面向用户的单头文件 C 跨平台层
-（参考摘取自 stdc），builtins 内各 C 实现（adt_impl.c / m_impl.c ...）
+（参考摘取自 stdc），builtins 内各 C 实现（adt_impl.c / mt_impl.c ...）
 也统一经由它做平台适配。builtins 根目录默认加入编译 `-I`，因此
 用户代码中 `inc "platform.h"` 与 `inc stdint.h` 一样开箱即用；
 随其他 builtins 资源一并内嵌/释放。

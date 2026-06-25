@@ -1,7 +1,7 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 #include "builtins/adt/adt.h"
-#include "builtins/m/m.h"
+#include "builtins/mt/mt.h"
 
 typedef struct shared shared;
 
@@ -46,7 +46,7 @@ typedef struct com__project {
 
 
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
-void sc_mod_m_init(void); void sc_mod_m_drop(void);
+void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
 void producer_rpc(struct producer *_p) {
     /* line 16 */
@@ -81,7 +81,7 @@ void consumer_rpc(struct consumer *_p) {
 
 int32_t main(void) {
     sc_mod_adt_init();
-    sc_mod_m_init();
+    sc_mod_mt_init();
     /* line 32 */
     int32_t x = 0;
     /* line 33 */
@@ -178,7 +178,7 @@ int32_t main(void) {
     /* line 83 */
     {
         int32_t _ret = 0;
-        sc_mod_m_drop();
+        sc_mod_mt_drop();
         sc_mod_adt_drop();
         return _ret;
     }

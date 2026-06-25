@@ -2,7 +2,7 @@
 
 inc adt.sc
 
-inc m.sc
+inc mt.sc
 
 @def shared: {
     q: ring

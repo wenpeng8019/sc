@@ -1,6 +1,6 @@
 # 特性 9：内置多线程支持
 # > 语言层面的支持：run/tls（条件等待为 cond.wait 方法）
-# > builtins/m 模块：线程/互斥锁/条件变量/线程池等基本多线程原语的实现
+# > builtins/mt 模块：线程/互斥锁/条件变量/线程池等基本多线程原语的实现
 #
 #   - run 语句以 rpc 调用创建线程（rpc 参数天然可打包，正好作线程上下文）：
 #       run work(&c, 10000), &t1   # joinable：t1: thread&，join 等待并回收
@@ -16,7 +16,7 @@
 #   - run<stack:N, prio:M> 选项块：设置线程属性（栈字节数 u4 / 优先级 u1），
 #     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
 #
-inc m.sc
+inc mt.sc
 
 # 共享上下文：互斥锁保护计数器
 def ctx: {

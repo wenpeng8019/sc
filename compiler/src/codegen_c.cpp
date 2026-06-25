@@ -3958,7 +3958,7 @@ struct CGen {
     //   run worker(a, b), &t →
     //   { struct worker _rp = {0}; _rp.x = a; ...;
     //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
-    // thread_run 在 m_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
+    // thread_run 在 op_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
     // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
     // run 语句 → 装填 rpc 参数结构体 + 线程原语调用（第二参按类型静态分派）
     //   run worker(a, b), &t →
@@ -3966,7 +3966,7 @@ struct CGen {
     //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
     //   run worker(a, b), p（p 为 pool 对象或指针，对象自动取地址）→
     //     pool_run(&p, (void (*)(void *))worker_rpc, &_rp, sizeof(_rp));
-    // thread_run 在 m_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
+    // thread_run 在 op_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
     // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
     // pool_run 同哲学：参数拷贝入任务节点，调用点无需保活。
     void emitRunStmt(const Stmt& s) {
@@ -3978,7 +3978,7 @@ struct CGen {
         if (call.args.size() > r->structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出: " + r->name + " 期望至多 " +
                                std::to_string(r->structCommon.fields.size()) + " 个", s.line};
-        // thread 类型属语言内核（op.sc 默认导入），detach/joinable 形态无需 inc m.sc。
+        // thread 类型属语言内核（op.sc 默认导入），detach/joinable 形态无需 inc mt.sc。
         // run<stack:N, prio:M> 选项：透传给 C（stack=u4 栈字节数，prio=u1 优先级；
         //   0 表示由 C 取默认）。键在此校验，值越界（u4/u1）报错。
         long long optStack = 0, optPrio = 0;
@@ -5965,7 +5965,7 @@ struct CGen {
         }
 
         // run 语句线程原语：thread 类型与 thread_run 已属语言内核（op.h 默认带入，
-        // op_impl.c 始终链接），无需在此声明。pool 目标仍属 m 模块（m.h，inc m.sc）。
+        // op_impl.c 始终链接），无需在此声明。pool 目标仍属 mt 模块（mt.h，inc mt.sc）。
         if (usesRun && aggrOf("pool")) {
             out << "typedef struct pool pool;\n"
                 << "extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);\n\n";

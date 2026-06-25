@@ -2029,11 +2029,11 @@ for k, v in c          <==>  for var _u = c.first();; _u = c.next(_u) {         
 ### 15.2 run 语句（多线程）
 
 `run` 以 **rpc 调用**创建线程：rpc 的参数天然可打包（见 §12），正好作
-线程上下文，无需额外定义入口函数类型。需要 `inc m.sc`（thread 类型与
+线程上下文，无需额外定义入口函数类型。需要 `inc mt.sc`（thread 类型与
 线程原语实现）。第二参数决定执行形态（按类型静态分派）：
 
 ```sc
-inc m.sc
+inc mt.sc
 
 rpc work: c: ctx&, rounds: i4    # rpc 即线程体（省略返回类型）
     ...
@@ -2063,7 +2063,8 @@ fnc main: i4
   `id`（跨平台统一线程 id）与 `join` 方法。不可手工构造。
 - 转 C：装填 rpc 参数结构体后按第二参类型改发线程原语——独立线程
   `thread_run(入口, &参数, sizeof(参数), 出参|NULL, stack, prio)`，入池
-  `pool_run(&池, 入口, &参数, sizeof(参数))`（均 m_impl 提供，
+  `pool_run(&池, 入口, &参数, sizeof(参数))`（thread_run 由 op_impl、
+  pool_run 由 mt_impl 提供，
   POSIX pthread / Windows 线程；C 侧是两个普通函数，无运行时多态）。
 
 #### 线程属性选项 `run<...>`
@@ -2153,7 +2154,7 @@ async_final()      # 销毁事件循环
 接入 `await`。下例把后台线程（`run`）桥接进事件循环，证明 `delay` 并非特例：
 
 ```sc
-inc m.sc                                 # 后台线程（run）
+inc mt.sc                                # 后台线程（run）
 inc async.sc
 
 rpc square_worker: f: future&, n: i4

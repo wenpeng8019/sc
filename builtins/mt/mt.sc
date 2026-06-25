@@ -1,11 +1,11 @@
-# m —— sc 多线程语言支持标准（mutex/cond/barrier/pool；thread 与 run 线程创建已下沉至 op.sc 内核）
+# mt —— sc 多线程语言支持标准（mutex/cond/barrier/pool；thread 与 run 线程创建已下沉至 op.sc 内核）
 #
-# 本文件是 m 的唯一事实源：
+# 本文件是 mt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
 #   fnc name:: 方法声明（无函数体）：extern 原型，实现在 C 侧
 #   @rpc 仅声明：调用包装由编译器生成，实际函数（*_rpc）在 C 侧实现
 #
-# 默认实现：同目录 m_impl.c（编译器自动编译并链接，
+# 默认实现：同目录 mt_impl.c（编译器自动编译并链接，
 #           跨平台经由 builtins/platform.h：POSIX pthread / Windows 线程）
 #
 # 线程由 run 语句创建（语言特性，目标必须是 rpc 调用），
