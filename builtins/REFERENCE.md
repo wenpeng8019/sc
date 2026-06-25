@@ -8,7 +8,7 @@
 
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
-| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射）、ring（SPSC 无锁循环队列） |
+| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射）、ring（SPSC 无锁循环队列）、bst（AVL/红黑融合有序映射） |
 | m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
 | mem | `inc mem.sc` | 内存池：chunk/chunk0/chunk_array/chunk_aligned/refit/recycle（替代 malloc/calloc/realloc/free）、mem_usable、mem_trim（空闲页归还 OS）、mem_stat（统计快照含峰值）、mem_teardown、arena（竞技场批量分配）、shm（跨进程命名共享内存，支持只读/独占标志）；每线程 TLS 堆无锁、跨线程释放安全、线程退出堆自动回收复用 |
@@ -306,6 +306,58 @@ fnc main: i4
 ```
 
 完整用例见 `tests/cases/ring_at.sc`（单线程 FIFO/满空语义 + 并发 SPSC 校验和压力）。
+
+### bst —— AVL/红黑 融合有序映射
+
+key→`@`（裸自动指针）的**有序**映射，与 dict 同为**拥有 value**（每条一份 retain，put 替换/remove/clear/drop 自动 release），
+但额外维护 key 全序：中序遍历升序、支持 index_of/at 序号换算与 most(≤)/least(≥) 最接近项查询。因 `init` 带参，**不参与「声明即构造」**，须显式 `t.init(...)`。
+
+**创新点：一棵树同时是 AVL 与红黑**——`init` 的 `red_depth` 参数切换平衡策略（本质是「容忍的不平衡深度」）：
+
+| red_depth | 等价 | 平衡限度 |
+|-----------|------|----------|
+| `0` | **AVL** | 左右子树高差≤ 1；查找最快、写旋转最勤 |
+| `1`（典型） | **红黑** | 允许多一层不平衡（红节点）；写旋转/变色更少 |
+
+`key_size` 三态同 dict（接口 key 均为 `const &` 裸指针）；数值键默认**按宽度有符号比较**（memcpy 载入，对齐安全），可传自定 comparator 覆盖：
+
+| key_size | 含义 | 存储 | 比较 |
+|----------|------|------|------|
+| `> 0` | 定长数值/POD（i4=4、指针=8） | 内联拷贝 key_size 字节 | 宽度 1/2/4/8 按有符号值，其余 memcmp |
+| `== 0` | 引用字符串 | 仅存借用指针，本体由 value 自持 | strcmp |
+| `== -1` | 拷贝字符串 | put 时复制一份，remove/clear/drop 回收 | strcmp |
+
+传入 `cmp`（非 nil）时忽略以上内置规则，全走自定比较：`bst_cmp_fn: i4, a: const &, b: const &, ctx: &`（返回负/0/正，a 为待查 key、b 为节点 key）。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `red_depth: u1, key_size: i4, cmp: bst_cmp_fn, ctx: &` | 构造（red_depth、key 模式、可选 comparator；无则传 nil/nil） |
+| drop | | 释放全部 retain + 回收节点 |
+| len | `u8` | 元素个数 |
+| has | `bool, key: const &` | 是否含 key |
+| get | `@, key: const &` | 借用 value 句柄（未命中返回空句柄，不改计数） |
+| put | `bool, key: const &, value: @` | 插入/替换（retain 新、替换 release 旧；插入后自动重平衡） |
+| remove | `bool, key: const &` | 删除并 release value（未命中返回 false；自动重平衡） |
+| clear | | 清空并 release 全部 value |
+| each | `fn: bst_each_fn, ctx: &` | **中序（升序）**遍历，回调返 false 即停 |
+| first / last | `i8` | 最小/最大 key 游标（空集 0） |
+| next / prev | `i8, cur: i8` | 中序后继/前驱游标（无则 0） |
+| key_at | `const &, cur: i8` | 游标处 key（无效返回 nil） |
+| value_at | `@, cur: i8` | 游标处 value 借用（无效返回空句柄） |
+| index_of | `i8, key: const &` | key 的 0 起中序序号（不存在 -1） |
+| at | `i8, index: u8` | 第 index（0 起）个中序节点游标（越界 0） |
+| most | `i8, key: const &` | ≤ key 的最大项游标（前驱或相等；无则 0） |
+| least | `i8, key: const &` | ≥ key 的最小项游标（后继或相等；无则 0） |
+
+回调类型 `bst_each_fn: bool, key: const &, value: @, ctx: &`（返回 false 提前终止）。游标为节点指针的 `i8` 表示（0 为终端），中序链表维护 prev/next，`first/next` 与 `each` 同序。
+
+#### 对齐安全与崩溃根因
+
+bst 采**父指针节点**设计（每节点含 `parent`，旋转/重平衡沿父链上溯），**无外部搜索栈**；数值 key 一律经 `memcpy` 载入后比较，不做错位重解释强转。
+
+> 这正是从 C 原型移植时修复的崩溃根因：原型在 `SUPPORT_PARENT_FIELD==0` 分支用 `#pragma pack(1)` 的搜索栈数组（`{node* p; int8_t i;}` sizeof=9、align=1），数组元素使 `node* p` 落在非对齐偏移（+9/+18…）。高通 Cortex-A 允许非对齐访问故无事，TI 严格对齐核访问即 SIGBUS。父指针设计（节点自然对齐、无 packed 数组）+ memcpy 载入同时消除了该崩溃与「地址转换未考虑对齐」问题。
+
+完整用例见 `tests/cases/bst_at.sc`（AVL/红黑 双模式、三态 key、中序/游标/index_of/most/least 全接口）。
 
 ### 使用示例
 

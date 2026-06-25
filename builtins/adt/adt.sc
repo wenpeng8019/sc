@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典）
+# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -200,6 +200,55 @@
     fnc prev:: i8, cur: i8                          # cur 之前的占用桶（无则 -1）
     fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
     fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+}
+
+# ---------------- bst：AVL/红黑 融合的有序映射 ----------------
+# 单棵树以 red_depth 区分 AVL(0) 与红黑(1)——本质是「容忍不平衡的深度」不同（AVL 最多差 1 层，
+#   红黑多容忍 1 层）。value 为裸自动指针 @（sc_afat），bst 拥有每节点一份 retain；key 三态同 dict：
+#   key_size  > 0：定长数值/POD，内联拷贝；默认按宽度（1/2/4/8）做有符号整数比较，其余宽度退化字节序；
+#                  浮点/无符号/复合键须传 cmp 自定义比较器；
+#   key_size == 0：引用字符串，仅存 const char& 借用指针（bst 不拥有）；strcmp 比较；
+#   key_size == -1：拷贝字符串，put 时 chunk 复制、remove/clear/drop 时 recycle；strcmp 比较。
+# cmp 非空时一律走自定义比较（返回 sign(a-b)，a/b 为逻辑键：数值模式为键字节指针、字符串模式为 char&）。
+# 对齐安全：节点用内部父指针自然对齐设计，无 pack(1) 外置检索栈，数值比较经 memcpy 装载，杜绝非对齐 UB。
+# 取出语义同 dict「取用分离」：get 借用（返回句柄不改计数）；remove 删除并 release（返回 bool）。
+# 因 init 带参数，不参与「声明即构造」——须显式 t.init(red_depth, key_size, cmp, ctx)。
+
+@fnc bst_cmp_fn: i4, a: const &, b: const &, ctx: &      # 自定义比较器（返回 sign(a-b)；nil=内置）
+@fnc bst_each_fn: bool, key: const &, value: @, ctx: &   # 中序遍历回调（返回 false 提前终止）
+
+@def bst: {
+    root: &          # 根节点（不透明 bst_node*；内部）
+    head: &          # 中序首节点
+    rear: &          # 中序末节点
+    cmp: &           # 自定义比较器指针（nil = 内置）
+    cmp_ctx: &       # 比较器上下文
+    size: u8         # 元素数
+    key_size: i4     # >0 定长数值 / 0 引用字符串 / -1 拷贝字符串
+    red_depth: u1    # 0 = AVL / 1 = 红黑（>1 预留，按红黑处理）
+
+    fnc init:: red_depth: u1, key_size: i4, cmp: bst_cmp_fn, ctx: &   # 构造（红黑/AVL + key 模式 + 比较器）
+    fnc drop::                                       # 释放全部 retain + 回收全部节点
+    fnc len:: u8                                    # 元素个数
+    fnc has:: bool, key: const &                     # 是否含 key
+    fnc get:: @, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
+    fnc put:: bool, key: const &, value: @           # 插入/替换（retain 新、替换 release 旧）
+    fnc remove:: bool, key: const &                  # 删除并 release value（未命中返回 false）
+    fnc clear::                                      # 清空并 release 全部 value
+    fnc each:: fn: bst_each_fn, ctx: &              # 中序（升序）遍历（回调返 false 即停）
+
+    # 游标双向遍历（游标 = 不透明节点 token；空集/越界返回 0）。中序升序，O(1) 取前驱后继。
+    # 游标在只读操作期间稳定；put/remove 可能回收节点使其失效，遍历期间勿增删。
+    fnc first:: i8                                  # 中序首节点游标（空集 0）
+    fnc last:: i8                                   # 中序末节点游标（空集 0）
+    fnc next:: i8, cur: i8                          # 后继游标（无则 0）
+    fnc prev:: i8, cur: i8                          # 前驱游标（无则 0）
+    fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
+    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+    fnc index_of:: i8, key: const &                 # key 的 0 基中序序号（未命中 -1）
+    fnc at:: i8, index: u8                          # 0 基中序序号处的游标（越界 0）
+    fnc most:: i8, key: const &                     # <= key 的最接近项游标（前驱或等于；无 0）
+    fnc least:: i8, key: const &                    # >= key 的最接近项游标（后继或等于；无 0）
 }
 
 

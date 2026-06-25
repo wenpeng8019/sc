@@ -1072,4 +1072,539 @@ sc_afat dict_value_at(dict *_this, int64_t cur) {
     return *dict_val(_this, (uint64_t)cur);
 }
 
+/* ================= bst：AVL/红黑 融合的有序映射 =================
+ * 设计：单棵树用 red_depth 区分 AVL(0) 与红黑(1)——二者本质是「容忍不平衡的深度」不同
+ *   （AVL 最多差 1 层，红黑多容忍 1 层）。节点 balance 字段在 AVL 下记 -1/0/1 倾斜，
+ *   在红黑下记 'B'/'R' 颜色。weight_l = 左子树权重（含自身 1），用于 index<->entry 双向换算。
+ * 对齐安全：节点采用「内部父指针」设计（每节点 parent 字段、自然对齐），不使用任何 pack(1)
+ *   外置检索栈——这正是原型在严格对齐核（如 TI）上崩溃、而本实现规避的根因；数值键比较一律
+ *   走 memcpy 装载，杜绝非对齐强转 UB。
+ * 值为裸自动指针 @（sc_afat），bst 拥有每节点一份 retain；key 三态同 dict。
+ * 中序双向链表（prev/next）维护 first/last/next/prev 与顺序遍历，O(1) 取前驱后继。 */
+
+typedef struct bst_node bst_node;
+struct bst_node {
+    sc_afat   value;     /* 裸 @ 值（32B，置首保 8 对齐） */
+    const void *key;     /* 字符串模式：char*（借用或拷贝）；数值模式：未用（内联键紧随节点尾） */
+    bst_node *parent;    /* 父节点（根节点为 NULL） */
+    bst_node *left;
+    bst_node *right;
+    bst_node *prev;      /* 中序前驱 */
+    bst_node *next;      /* 中序后继 */
+    uint32_t  weight_l;  /* 左子树权重（含自身 1） */
+    int8_t    balance;   /* AVL: -1/0/1；红黑: 'B'/'R' */
+};
+
+/* 数值键内联存于节点尾部（自然 8 对齐）；字符串键存 node->key 指针 */
+static inline const void *bst_logkey(bst *t, bst_node *n) {
+    return t->key_size > 0 ? (const void *)(n + 1) : n->key;
+}
+
+/* 比较：返回 sign(probe - node_key)。cmp 非空走自定义；否则内置数值（有符号，按宽度装载）/字符串。 */
+static int bst_cmp_key(bst *t, const void *probe, bst_node *n) {
+    const void *nk = bst_logkey(t, n);
+    if (t->cmp) return t->cmp(probe, nk, t->cmp_ctx);
+    if (t->key_size > 0) {
+        switch (t->key_size) {
+            case 1: { int8_t a = *(const int8_t *)probe, b = *(const int8_t *)nk;
+                      return a < b ? -1 : a > b ? 1 : 0; }
+            case 2: { int16_t a, b; memcpy(&a, probe, 2); memcpy(&b, nk, 2);
+                      return a < b ? -1 : a > b ? 1 : 0; }
+            case 4: { int32_t a, b; memcpy(&a, probe, 4); memcpy(&b, nk, 4);
+                      return a < b ? -1 : a > b ? 1 : 0; }
+            case 8: { int64_t a, b; memcpy(&a, probe, 8); memcpy(&b, nk, 8);
+                      return a < b ? -1 : a > b ? 1 : 0; }
+            default: return memcmp(probe, nk, (size_t)t->key_size);  /* 非 1/2/4/8 宽度退化为字节序 */
+        }
+    }
+    { const char *a = (const char *)probe, *b = (const char *)nk;
+      if (a == b) return 0; if (!a) return -1; if (!b) return 1; return strcmp(a, b); }
+}
+
+static bst_node *bst_node_new(bst *t) {
+    size_t extra = t->key_size > 0 ? (size_t)t->key_size : 0;
+    return (bst_node *)chunk(sizeof(bst_node) + extra);
+}
+static uint8_t bst_storekey(bst *t, bst_node *n, const void *key) {
+    if (t->key_size > 0) { memcpy((char *)(n + 1), key, (size_t)t->key_size); return 1; }
+    if (t->key_size == 0) { n->key = (const char *)key; return 1; }   /* 借用 */
+    { const char *s = (const char *)key; size_t len = s ? strlen(s) : 0;
+      char *cp = (char *)chunk(len + 1); if (!cp) return 0;
+      if (len) memcpy(cp, s, len); cp[len] = 0; n->key = cp; return 1; }
+}
+static inline void bst_freekey(bst *t, bst_node *n) {
+    if (t->key_size == -1) recycle((void *)n->key);
+}
+
+/* ---------------- 旋转（内部父指针版；同时维护 weight_l） ---------------- */
+static inline void bst_rr1(bst_node *root, bst_node *left) {       /* 单层右旋 */
+    bst_node *n;
+    if ((n = left->right)) n->parent = root;
+    root->left = n;
+    root->parent = left;
+    left->right = root;
+    root->weight_l -= left->weight_l;
+}
+static inline void bst_rr2(bst_node *root, bst_node *left, bst_node *lr) {  /* 双层右旋 */
+    bst_node *n;
+    if ((n = lr->left)) n->parent = left;
+    left->right = n;
+    left->parent = lr;
+    lr->left = left;
+    if ((n = lr->right)) n->parent = root;
+    root->left = n;
+    root->parent = lr;
+    lr->right = root;
+    lr->weight_l += left->weight_l;
+    root->weight_l -= lr->weight_l;
+}
+static inline void bst_lr1(bst_node *root, bst_node *right) {      /* 单层左旋 */
+    bst_node *n;
+    if ((n = right->left)) n->parent = root;
+    root->right = n;
+    root->parent = right;
+    right->left = root;
+    right->weight_l += root->weight_l;
+}
+static inline void bst_lr2(bst_node *root, bst_node *right, bst_node *rl) {  /* 双层左旋 */
+    bst_node *n;
+    if ((n = rl->right)) n->parent = right;
+    right->left = n;
+    right->parent = rl;
+    rl->right = right;
+    if ((n = rl->left)) n->parent = root;
+    root->right = n;
+    root->parent = rl;
+    rl->left = root;
+    right->weight_l -= rl->weight_l;
+    rl->weight_l += root->weight_l;
+}
+
+/* ---------------- AVL 插入维护 ---------------- */
+static void bst_avl_inserted(bst *t, bst_node *node, bst_node *parent, bst_node *mbs_parent) {
+    bst_node *mbs_root, *up, *newroot;
+    int8_t inc;
+
+    /* 根整体平衡：新节点令全树高度 +1，沿途记倾斜 + 维护 weight */
+    if (!mbs_parent) {
+        do {
+            if (parent->left == node) { ++parent->weight_l; parent->balance = -1; }
+            else parent->balance = 1;
+            node = parent;
+        } while ((parent = node->parent) != NULL);
+        return;
+    }
+    /* 维护最大平衡子树（MBS）路径上各节点的平衡因子 + weight */
+    while (parent != mbs_parent) {
+        if (parent->left == node) { ++parent->weight_l; parent->balance = -1; }
+        else parent->balance = 1;
+        node = parent; parent = node->parent;
+    }
+    mbs_root = node;
+    /* MBS 之上仅维护 weight（结构不变） */
+    do {
+        if (parent->left == node) ++parent->weight_l;
+        node = parent;
+    } while ((parent = node->parent) != NULL);
+
+    /* 重建 MBS 子树平衡 */
+    inc = mbs_parent->left == mbs_root ? -1 : 1;
+    if (inc != mbs_parent->balance) { mbs_parent->balance = 0; return; }
+    up = mbs_parent->parent;
+    if (inc == mbs_root->balance) {                /* 单旋 */
+        newroot = mbs_root;
+        if (inc == -1) bst_rr1(mbs_parent, mbs_root); else bst_lr1(mbs_parent, mbs_root);
+        mbs_parent->balance = mbs_root->balance = 0;
+    } else {                                       /* 双旋 */
+        if (inc == -1) bst_rr2(mbs_parent, mbs_root, newroot = mbs_root->right);
+        else           bst_lr2(mbs_parent, mbs_root, newroot = mbs_root->left);
+        if (newroot->balance == inc)       { mbs_parent->balance = (int8_t)-inc; mbs_root->balance = 0; }
+        else if (newroot->balance == -inc) { mbs_parent->balance = 0; mbs_root->balance = inc; }
+        else                                 mbs_parent->balance = mbs_root->balance = 0;
+        newroot->balance = 0;
+    }
+    if (!up) { newroot->parent = NULL; t->root = newroot; }
+    else {
+        newroot->parent = up;
+        if (up->left == mbs_parent) up->left = newroot; else up->right = newroot;
+    }
+}
+
+/* ---------------- 红黑 插入维护 ---------------- */
+static void bst_rb_inserted(bst *t, bst_node *node, bst_node *parent) {
+    bst_node *root = t->root, *sup, *uncle, *rotate_parent;
+    int8_t pinc, sinc;
+    for (;;) {
+        if (parent->balance == 'B') break;
+        if (parent->left == node) { pinc = -1; ++parent->weight_l; } else pinc = 1;
+        sup = parent->parent;
+        if (sup->left == parent) { uncle = sup->right; sinc = -1; ++sup->weight_l; }
+        else                     { uncle = sup->left;  sinc = 1; }
+
+        if (uncle && uncle->balance == 'R') {       /* 叔红：变色上浮 */
+            parent->balance = uncle->balance = 'B';
+            if (sup == root) return;
+            sup->balance = 'R';
+            node = sup; parent = sup->parent;
+            continue;
+        }
+        rotate_parent = sup->parent;
+        if (pinc == sinc) {                         /* 同侧：单旋 */
+            parent->balance = 'B'; sup->balance = 'R';
+            if (sinc < 0) bst_rr1(sup, parent); else bst_lr1(sup, parent);
+            node = parent;
+        } else {                                    /* 异侧：双旋 */
+            node->balance = 'B'; parent->balance = sup->balance = 'R';
+            if (sinc < 0) bst_rr2(sup, parent, node); else bst_lr2(sup, parent, node);
+        }
+        node->parent = rotate_parent;
+        if (!rotate_parent) { t->root = node; return; }
+        if (rotate_parent->left == sup) rotate_parent->left = node; else rotate_parent->right = node;
+        parent = rotate_parent;
+        break;
+    }
+    /* 维护剩余路径的 weight 直至根 */
+    for (;;) {
+        if (parent->left == node) ++parent->weight_l;
+        if (parent == t->root) break;
+        parent = (node = parent)->parent;
+    }
+}
+
+/* ---------------- AVL 删除维护 ---------------- */
+static void bst_avl_removed(bst *t, bst_node *parent, int8_t inc) {
+    bst_node *rparent, *rroot, *decline;
+    for (;;) {
+        if (parent->balance == 0) { parent->balance = (int8_t)-inc; return; }
+        if (parent->balance == inc) {               /* 恢复平衡，递归向上 */
+            parent->balance = 0;
+            decline = parent;
+            if (!(parent = decline->parent)) return;
+            inc = (decline == parent->left) ? -1 : 1;
+            continue;
+        }
+        decline = (inc == 1) ? parent->left : parent->right;
+        rparent = parent->parent;
+        if (decline->balance == 0) {                /* 旋转后高度不变 */
+            decline->parent = rparent;
+            if (inc == -1) bst_lr1(parent, decline); else bst_rr1(parent, decline);
+            decline->balance = inc;
+            if (!rparent) t->root = decline;
+            else if (rparent->left == parent) rparent->left = decline; else rparent->right = decline;
+            return;
+        }
+        if (decline->balance == parent->balance) {  /* 单旋 */
+            rroot = decline;
+            rroot->parent = rparent;
+            if (inc == -1) bst_lr1(parent, rroot); else bst_rr1(parent, rroot);
+            rroot->balance = parent->balance = 0;
+        } else {                                    /* 双旋 */
+            if (inc == -1) bst_lr2(parent, decline, rroot = decline->left);
+            else           bst_rr2(parent, decline, rroot = decline->right);
+            rroot->parent = rparent;
+            if (rroot->balance == inc)       { decline->balance = (int8_t)-inc; parent->balance = 0; }
+            else if (rroot->balance == -inc) { decline->balance = 0; parent->balance = inc; }
+            else                               decline->balance = parent->balance = 0;
+            rroot->balance = 0;
+        }
+        if (!rparent) { t->root = rroot; return; }
+        if (rparent->left == parent) { rparent->left = rroot; inc = -1; }
+        else                         { rparent->right = rroot; inc = 1; }
+        parent = rparent;
+    }
+}
+
+/* ---------------- 红黑 删除维护（仅删黑节点时调用） ---------------- */
+static void bst_rb_removed(bst *t, bst_node *parent, int8_t inc) {
+    bst_node *sup, *sibling, *sub;
+    for (;;) {
+        sibling = inc < 0 ? parent->right : parent->left;
+        if (sibling->balance == 'R') {              /* 兄红：先旋转转化 */
+            sup = parent->parent;
+            if (!sup) t->root = sibling;
+            else if (sup->left == parent) sup->left = sibling; else sup->right = sibling;
+            sibling->parent = sup;
+            sibling->balance = 'B'; parent->balance = 'R';
+            if (inc < 0) { bst_lr1(parent, sibling); sibling = parent->right; }
+            else         { bst_rr1(parent, sibling); sibling = parent->left; }
+        }
+        for (;;) {
+            sup = parent->parent;                   /* 旋转会改写 parent->parent，先存 */
+            if (inc < 0) {
+                if ((sub = sibling->right) && sub->balance == 'R') {
+                    sibling->balance = parent->balance; parent->balance = 'B'; sub->balance = 'B';
+                    bst_lr1(parent, sibling);
+                } else if ((sub = sibling->left) && sub->balance == 'R') {
+                    sub->balance = parent->balance; sibling->balance = 'B'; parent->balance = 'B';
+                    bst_lr2(parent, sibling, sub); sibling = sub;
+                } else break;
+            } else {
+                if ((sub = sibling->left) && sub->balance == 'R') {
+                    sibling->balance = parent->balance; sub->balance = 'B'; parent->balance = 'B';
+                    bst_rr1(parent, sibling);
+                } else if ((sub = sibling->right) && sub->balance == 'R') {
+                    sub->balance = parent->balance; sibling->balance = parent->balance = 'B';
+                    bst_rr2(parent, sibling, sub); sibling = sub;
+                } else break;
+            }
+            if (!sup) t->root = sibling;
+            else if (sup->left == parent) sup->left = sibling; else sup->right = sibling;
+            sibling->parent = sup;
+            return;
+        }
+        sibling->balance = 'R';                      /* 兄两子皆黑：同删，递归向上 */
+        if (parent->balance == 'R') { parent->balance = 'B'; return; }
+        if (!(sup = parent->parent)) return;
+        inc = sup->left == parent ? -1 : 1;
+        parent = sup;
+    }
+}
+
+/* ---------------- 公共接口 ---------------- */
+void bst_init(bst *_this, uint8_t red_depth, int32_t key_size, bst_cmp cmp, void *cmp_ctx) {
+    _this->root = _this->head = _this->rear = NULL;
+    _this->cmp = cmp;
+    _this->cmp_ctx = cmp_ctx;
+    _this->size = 0;
+    _this->key_size = key_size;
+    _this->red_depth = red_depth;
+}
+
+void bst_clear(bst *_this) {
+    bst_node *n = (bst_node *)_this->head, *nx;
+    while (n) {
+        nx = n->next;
+        sc_afat_unbind(&n->value);                  /* release value */
+        bst_freekey(_this, n);                       /* -1 模式回收 key 拷贝 */
+        recycle(n);
+        n = nx;
+    }
+    _this->root = _this->head = _this->rear = NULL;
+    _this->size = 0;
+}
+
+void bst_drop(bst *_this) { bst_clear(_this); }      /* 内部父指针设计无外置缓冲，drop 同 clear */
+
+uint64_t bst_len(bst *_this) { return _this->size; }
+
+uint8_t bst_has(bst *_this, const void *key) {
+    bst_node *n = (bst_node *)_this->root;
+    while (n) { int c = bst_cmp_key(_this, key, n); if (c == 0) return 1; n = c < 0 ? n->left : n->right; }
+    return 0;
+}
+
+sc_afat bst_get(bst *_this, const void *key) {
+    bst_node *n = (bst_node *)_this->root;
+    while (n) {
+        int c = bst_cmp_key(_this, key, n);
+        if (c == 0) return n->value;
+        n = c < 0 ? n->left : n->right;
+    }
+    { sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e; }
+}
+
+uint8_t bst_put(bst *_this, const void *key, sc_afat value) {
+    bst_node *nn, *parent, *child, *mbs_parent = NULL;
+    int c;
+
+    if (!_this->root) {                             /* 空树：建根 */
+        if (!(nn = bst_node_new(_this))) return 0;
+        if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+        nn->left = nn->right = nn->prev = nn->next = NULL;
+        nn->parent = NULL;
+        nn->weight_l = 1;
+        nn->balance = _this->red_depth ? 'B' : 0;
+        sc_afat_bind(&nn->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+        _this->root = _this->head = _this->rear = nn;
+        _this->size++;
+        return 1;
+    }
+
+    parent = (bst_node *)_this->root;
+    for (;;) {
+        c = bst_cmp_key(_this, key, parent);
+        if (c == 0) {                               /* 键已存在：替换值（先 retain 新、再 release 旧） */
+            sc_afat old = parent->value;
+            sc_afat_bind(&parent->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+            sc_afat_unbind(&old);
+            return 1;
+        }
+        if (!_this->red_depth && parent->balance) mbs_parent = parent;  /* AVL：记最后失衡子树父 */
+        if (c < 0) {
+            if (!(child = parent->left)) {
+                if (!(nn = bst_node_new(_this))) return 0;
+                if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+                parent->left = nn;
+                nn->next = parent;                  /* 中序链表插入 */
+                if ((child = parent->prev)) child->next = nn; else _this->head = nn;
+                nn->prev = child;
+                parent->prev = nn;
+                break;
+            }
+        } else {
+            if (!(child = parent->right)) {
+                if (!(nn = bst_node_new(_this))) return 0;
+                if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+                parent->right = nn;
+                nn->prev = parent;
+                if ((child = parent->next)) child->prev = nn; else _this->rear = nn;
+                nn->next = child;
+                parent->next = nn;
+                break;
+            }
+        }
+        parent = child;
+    }
+    nn->left = nn->right = NULL;
+    nn->weight_l = 1;
+    nn->parent = parent;
+    nn->balance = _this->red_depth ? 'R' : 0;        /* 红黑新节点默认红 */
+    sc_afat_bind(&nn->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+    if (_this->red_depth) bst_rb_inserted(_this, nn, parent);
+    else                  bst_avl_inserted(_this, nn, parent, mbs_parent);
+    _this->size++;
+    return 1;
+}
+
+uint8_t bst_remove(bst *_this, const void *key) {
+    bst_node *node, *child, *parent;
+    int8_t removed_balance, inc;
+
+    if (!(node = (bst_node *)_this->root)) return 0;
+
+    /* 二分查找；左降途中预减 weight_l（预期从左子树删除） */
+    for (;;) {
+        int c = bst_cmp_key(_this, key, node);
+        if (c == 0) break;
+        if (c > 0) child = node->right;
+        else if ((child = node->left)) --node->weight_l;
+        if (!child) {                               /* 未命中：回滚 weight */
+            parent = node->parent;
+            while (parent) { if (node == parent->left) ++parent->weight_l; parent = (node = parent)->parent; }
+            return 0;
+        }
+        node = child;
+    }
+
+    /* 命中 node：先处置其值/键（逻辑删除） */
+    sc_afat_unbind(&node->value);
+    bst_freekey(_this, node);
+
+    /* 双子：逻辑变换为删前驱（前驱 = 左子树最右节点，O(1) 经 prev 取） */
+    if (node->left && node->right) {
+        child = node->prev;
+        --node->weight_l;                            /* 前驱在 node 左子树，仅此一处需调 */
+        node->value = child->value;                  /* 裸搬移（所有权转移，不改计数） */
+        if (_this->key_size > 0) memcpy((char *)(node + 1), (const char *)(child + 1), (size_t)_this->key_size);
+        else node->key = child->key;                 /* 移交字符串指针（-1 模式所有权随之转移） */
+        node = child;                                /* 实际物理删除前驱 */
+    }
+
+    /* 中序链表摘除 */
+    child = node->prev; parent = node->next;
+    if (child) child->next = parent; else _this->head = parent;
+    if (parent) parent->prev = child; else _this->rear = child;
+
+    /* 树结构摘除 */
+    parent = node->parent;
+    if ((child = node->left) || (child = node->right)) child->parent = parent;
+    removed_balance = node->balance;
+    recycle(node);                                   /* 物理回收（值/键已处置或已移出） */
+    _this->size--;
+
+    if (!parent) {                                   /* 删的是根 */
+        _this->root = child;
+        if (child && child->balance == 'R') child->balance = 'B';
+        return 1;
+    }
+
+    if (node == parent->left) { parent->left = child; inc = -1; }
+    else                      { parent->right = child; inc = 1; }
+
+    if (!_this->red_depth) bst_avl_removed(_this, parent, inc);
+    else if (removed_balance == 'B') {               /* 红黑：仅删黑需重建 */
+        if (child && child->balance == 'R') child->balance = 'B';
+        else bst_rb_removed(_this, parent, inc);
+    }
+    return 1;
+}
+
+void bst_each(bst *_this, bst_each_fn fn, void *ctx) {
+    bst_node *n;
+    if (!fn) return;
+    for (n = (bst_node *)_this->head; n; n = n->next)
+        if (!fn(bst_logkey(_this, n), n->value, ctx)) return;
+}
+
+/* 游标 = 节点指针（不透明 token，0 = 无）；遍历期间勿增删（增删可能回收节点使其失效）。 */
+int64_t bst_first(bst *_this) { return (int64_t)(intptr_t)_this->head; }
+int64_t bst_last(bst *_this)  { return (int64_t)(intptr_t)_this->rear; }
+int64_t bst_next(bst *_this, int64_t cur) {
+    bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
+    return n ? (int64_t)(intptr_t)n->next : 0;
+}
+int64_t bst_prev(bst *_this, int64_t cur) {
+    bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
+    return n ? (int64_t)(intptr_t)n->prev : 0;
+}
+const void *bst_key_at(bst *_this, int64_t cur) {
+    bst_node *n = (bst_node *)(intptr_t)cur;
+    return n ? bst_logkey(_this, n) : NULL;
+}
+sc_afat bst_value_at(bst *_this, int64_t cur) {
+    bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
+    if (n) return n->value;
+    { sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e; }
+}
+
+/* key -> 0 基中序序号；未命中返回 -1 */
+int64_t bst_index_of(bst *_this, const void *key) {
+    bst_node *n = (bst_node *)_this->root;
+    int64_t i;
+    if (!n) return -1;
+    i = (int64_t)n->weight_l;
+    for (;;) {
+        int c = bst_cmp_key(_this, key, n);
+        if (c == 0) return i - 1;
+        if (c < 0) { if (!n->left) return -1; i = i - (int64_t)n->weight_l + (int64_t)n->left->weight_l; n = n->left; }
+        else       { if (!n->right) return -1; i += (int64_t)n->right->weight_l; n = n->right; }
+    }
+}
+
+/* 0 基中序序号 -> 游标；越界返回 0 */
+int64_t bst_at(bst *_this, uint64_t index) {
+    bst_node *n = (bst_node *)_this->root;
+    int64_t i;
+    if (!n) return 0;
+    i = (int64_t)index + 1;
+    for (;;) {
+        int64_t w = (int64_t)n->weight_l;
+        if (i == w) return (int64_t)(intptr_t)n;
+        if (i < w) n = n->left; else { i -= w; n = n->right; }
+        if (!n) return 0;
+    }
+}
+
+/* 最接近且 <= key 的项（前驱或等于）；无返回 0 */
+int64_t bst_most(bst *_this, const void *key) {
+    bst_node *n = (bst_node *)_this->root, *cand = NULL;
+    while (n) {
+        int c = bst_cmp_key(_this, key, n);
+        if (c == 0) { cand = n; break; }
+        if (c > 0) { cand = n; n = n->right; } else n = n->left;
+    }
+    return (int64_t)(intptr_t)cand;
+}
+
+/* 最接近且 >= key 的项（后继或等于）；无返回 0 */
+int64_t bst_least(bst *_this, const void *key) {
+    bst_node *n = (bst_node *)_this->root, *cand = NULL;
+    while (n) {
+        int c = bst_cmp_key(_this, key, n);
+        if (c == 0) { cand = n; break; }
+        if (c < 0) { cand = n; n = n->left; } else n = n->right;
+    }
+    return (int64_t)(intptr_t)cand;
+}
+
 

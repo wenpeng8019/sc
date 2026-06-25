@@ -78,6 +78,7 @@ POSITIVE=(
     tests/cases/list_at.sc
     tests/cases/dict_at.sc
     tests/cases/ring_at.sc
+    tests/cases/bst_at.sc
     tests/cases/array.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc
