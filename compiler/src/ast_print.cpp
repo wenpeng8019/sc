@@ -58,6 +58,7 @@ std::string rec(const Expr& e, bool top) {
             if (e.castVolatile) s += "volatile ";
             s += e.op;
             for (int i = 0; i < e.castPtr; i++) s += "&";
+            if (e.castFat) s += "@";   // 自动指针强转 T@ / 裸 @（op 为空 → 类型擦除）
             if (e.castRestrict) s += " restrict";
             return s + ")";
         }

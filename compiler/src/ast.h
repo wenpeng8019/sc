@@ -235,6 +235,7 @@ struct Expr {
     bool castConst = false;     // Cast: 目标类型 const 限定（前缀）
     bool castVolatile = false;  // Cast: 目标类型 volatile 限定（前缀）
     bool castRestrict = false;  // Cast: 目标指针 restrict 限定（尾置）
+    bool castFat = false;       // Cast: 目标为自动指针 T@/裸 @（op 为空 → 裸 @ 类型擦除）
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量

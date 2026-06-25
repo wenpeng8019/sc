@@ -218,10 +218,13 @@ struct CGen {
     std::unordered_map<std::string, VType> globalsT, localsT;
     // 自动指针 T@：被构造为胖目标（T()）的类型名集合（决定生成 T__new_ref 带头分配）
     std::set<std::string> fatTypeNames;
+    // 裸 @（类型擦除）根变量名集合：供 `e = T()` 重新赋值时按变量名回收构造类型到 fatTypeNames。
+    std::set<std::string> bareFatVarNames;
     // 胖根指针作用域栈：每层一组本块内声明的 T@ 根变量，退块/return 时逆序 unbind。
     //   dtorArg = 目标类型 T 有 drop 时的析构实参串 "(void (*)(void *))T_drop"（无则空），
     //   解绑（in→0）时按目标静态类型调析构清理子成员（见 auto_ptr.md §5）。
-    struct FatRoot { std::string name; std::string dtorArg; };
+    //   bare = 裸 @（类型擦除，sc_afat）：解绑走 sc_afat_unbind（dtor 随句柄）。
+    struct FatRoot { std::string name; std::string dtorArg; bool bare = false; };
     std::vector<std::vector<FatRoot>> fatScopes;
     // 与 fatScopes 平行：每层本块内声明的 T@ 数组根变量（元素各为一条根边），退块/return 时
     // 逐元素 unbind（覆盖整个引用图，避免泄漏）。局部 T@ 数组（一维/多维）。
@@ -323,9 +326,11 @@ struct CGen {
             return;
         }
         // 胖指针（自动指针 T@）：C 侧统一为 sc_fat（24 字节，首成员 p 即裸指针）。
+        // 裸 @（类型擦除，name 空）：sc_afat（前 24B 同构 + dtor 槽）。
         if (f.type.fat) {
             if (asConst) out << "const ";
-            out << "sc_fat " << (f.name == "this" ? "_this" : f.name);
+            out << (f.type.name.empty() ? "sc_afat " : "sc_fat ")
+                << (f.name == "this" ? "_this" : f.name);
             for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
         }
@@ -591,7 +596,22 @@ struct CGen {
             for (auto& f : t.structCommon.fields) noteFatType(f.type);
     }
     void collectFatTypesStmt(const Stmt& s) {
-        for (auto& f : s.decls) noteFatType(f.type);
+        for (auto& f : s.decls) {
+            noteFatType(f.type);
+            // 裸 @ 由 T() 构造时，目标类型名不出现在声明类型里（被擦除），
+            // 须从初值 T() 收集，以生成带头堆构造 T__new_ref（否则链接缺符号）。
+            if (f.type.fat && f.type.name.empty()) {
+                bareFatVarNames.insert(f.name);
+                if (f.init)
+                    if (const Decl* td = typeCallee(*f.init)) fatTypeNames.insert(td->name);
+            }
+        }
+        // 裸 @ 重新赋值 `e = T()`：左值类型被擦除，须据已登记的裸 @ 变量名收集构造类型。
+        if (s.kind == Stmt::ExprS && s.expr && s.expr->kind == Expr::Binary
+            && s.expr->op == "=" && s.expr->a && s.expr->a->kind == Expr::Ident
+            && bareFatVarNames.count(s.expr->a->text) && s.expr->b)
+            if (const Decl* td = typeCallee(*s.expr->b))
+                fatTypeNames.insert(td->name);
         if (s.decl) {
             for (auto& f : s.decl->structCommon.fields) noteFatType(f.type);
             if (s.decl->structCommon.type) noteFatType(*s.decl->structCommon.type);
@@ -1141,9 +1161,11 @@ struct CGen {
     }
 
     // 发一条胖指针解绑语句：有 dtorArg 走 sc_fat_unbind_d（带目标类型析构），否则 sc_fat_unbind。
-    void emitFatUnbind(const std::string& lvAddr, const std::string& dtorArg) {
+    //   bare = 裸 @（sc_afat）：走 sc_afat_unbind（析构器随句柄，类型擦除）。
+    void emitFatUnbind(const std::string& lvAddr, const std::string& dtorArg, bool bare = false) {
         indent();
-        if (dtorArg.empty()) out << "sc_fat_unbind(&" << lvAddr << ");\n";
+        if (bare) out << "sc_afat_unbind(&" << lvAddr << ");\n";
+        else if (dtorArg.empty()) out << "sc_fat_unbind(&" << lvAddr << ");\n";
         else out << "sc_fat_unbind_d(&" << lvAddr << ", " << dtorArg << ");\n";
     }
 
@@ -1300,6 +1322,7 @@ struct CGen {
             case Expr::StrLit:   vt = {"char", 1, 0}; return true;
             case Expr::Cast:
                 vt = {e.op, e.castPtr, 0};
+                vt.fat = e.castFat;   // (e: T@) / (e: @) 强转结果为自动指针（name 空 → 裸 @）
                 return true;
             case Expr::Binary:
                 // 赋值表达式的结果类型 = 左操作数类型（支持 (p = T())->m() 等）
@@ -2134,6 +2157,31 @@ struct CGen {
                 // 中被拆解）；出现在其他表达式位置则是误用。
                 if (e.castIsFmt)
                     throw CompileError{"格式说明符 (expr: \"%fmt\") 只能用于 print 实参", e.line};
+                // 自动指针类型擦除/恢复强转（单层求值，经语句表达式只算一次操作数）：
+                //   (e: T@)  恢复：裸 @（sc_afat）/T@ → sc_fat 视图（丢 dtor，前 24B 同构）
+                //   (e: @)   擦除：T@（sc_fat）→ 裸 @（sc_afat），dtor 取 e 静态类型 T 的析构
+                if (e.castFat) {
+                    std::string srcT;
+                    bool srcFat = isFatExpr(*e.a, &srcT);
+                    int n = fatTmpSeq++;
+                    if (e.op.empty()) {
+                        // 擦除为裸 @
+                        if (srcFat && srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }  // 已是裸 @：恒等
+                        std::string d = fatDtorArg(srcT);
+                        out << "({ sc_fat _ec" << n << " = ";
+                        emitExpr(*e.a, true);
+                        out << "; (sc_afat){_ec" << n << ".p, _ec" << n << ".tar, _ec" << n
+                            << ".own, " << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
+                    } else {
+                        // 恢复为 T@（sc_fat 视图）：源为裸 @（sc_afat）取前 24B；源为 T@ 直透
+                        if (srcFat && !srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
+                        out << "({ sc_afat _rc" << n << " = ";
+                        emitExpr(*e.a, true);
+                        out << "; (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, _rc" << n
+                            << ".own}; })";
+                    }
+                    break;
+                }
                 // (inst: object) → &inst._class（类实例 → 类型擦除分派器槽地址）
                 if (e.op == "object" && e.castPtr == 0) {
                     VType vt; bool ok = exprVType(*e.a, vt);
@@ -2274,13 +2322,15 @@ struct CGen {
     }
 
     // 自动指针 T@ 根变量声明：sc_fat 声明 + 按初值形态绑定，并登记进当前作用域。
+    //   裸 @：sc_afat 声明（dtor 随句柄），登记 bare 标记供退块 sc_afat_unbind。
     void emitFatVarInit(const Field& f, bool asConst, bool isStatic) {
         regVar(f);
-        if (!fatScopes.empty()) fatScopes.back().push_back({f.name, fatDtorArg(f.type.name)});
+        bool bare = f.type.fat && f.type.name.empty();
+        if (!fatScopes.empty()) fatScopes.back().push_back({f.name, fatDtorArg(f.type.name), bare});
         indent();
         if (isStatic) out << "static ";
         if (asConst) out << "const ";
-        out << "sc_fat " << f.name << " = {0};\n";
+        out << (bare ? "sc_afat " : "sc_fat ") << f.name << " = {0};\n";
         if (!f.init) return;
         emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true, f.type.name);
     }
@@ -2294,13 +2344,15 @@ struct CGen {
     //   targetType=左值的目标静态类型 T（拆旧边时按其析构 drop 清理子成员，见 §5）。
     void emitFatBind(const std::string& lv, const std::string& own,
                      const Expr& init, bool isInit, const std::string& targetType = "") {
+        // 胖左值类型名为空 ⇔ 裸 @（sc_afat，类型擦除）：解绑/绑定走 sc_afat_*，dtor 随句柄。
+        bool bare = targetType.empty();
         std::string dtorArg = fatDtorArg(targetType);
         // nil：仅解绑
         if (init.kind == Expr::Ident && init.text == "nil") {
-            if (!isInit) emitFatUnbind(lv, dtorArg);
+            if (!isInit) emitFatUnbind(lv, dtorArg, bare);
             return;
         }
-        if (!isInit) emitFatUnbind(lv, dtorArg);
+        if (!isInit) emitFatUnbind(lv, dtorArg, bare);
         // T() → 带头分配 + 绑定
         if (const Decl* td = typeCallee(init)) {
             if (!init.args.empty())
@@ -2310,6 +2362,14 @@ struct CGen {
             out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
                 << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             indent();
+            // 裸 @ 目标：擦除类型，p 取实体基址（同 T@），dtor 取构造类型 T 的析构（随句柄）。
+            if (bare) {
+                std::string d = fatDtorArg(td->name);
+                out << "sc_afat_bind(&" << lv << ", " << tmp
+                    << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own << ", "
+                    << (d.empty() ? "(void (*)(void *))0" : d) << ");\n";
+                return;
+            }
             // object@ 目标：p 须为擦除的 _class 槽指针（非 T 实体基址，供 dim 派发 / sc_obj_drop）。
             std::string pexpr = tmp;
             if (targetType == "object" && classNames.count(td->name))
@@ -2363,6 +2423,15 @@ struct CGen {
         std::string tt;
         if (isFatExpr(init, &tt)) {
             std::string rhs = captureExpr(init);
+            // 裸 @ 目标：擦除绑定。源为 T@ → dtor 取源静态类型；源已是裸 @ → dtor 随其句柄。
+            if (bare) {
+                std::string d = tt.empty() ? ("(" + rhs + ").dtor")
+                    : (fatDtorArg(tt).empty() ? "(void (*)(void *))0" : fatDtorArg(tt));
+                indent();
+                out << "sc_afat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
+                    << rhs << ").tar, " << own << ", " << d << ");\n";
+                return;
+            }
             std::string pexpr = "(" + rhs + ").p";
             // object@ 目标：p 须为擦除的 _class 槽指针（dim 派发 / sc_obj_drop 均以之为入口）。
             //   源为具体类 T@ → &((T*)(rhs).p)->_class；源已是 object@ → 直取 (rhs).p（已是槽）。
@@ -2470,7 +2539,7 @@ struct CGen {
     void emitFatScopeCleanup(const std::vector<FatRoot>& scope, const std::string& skip) {
         for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
             if (it->name == skip) continue;
-            emitFatUnbind(it->name, it->dtorArg);
+            emitFatUnbind(it->name, it->dtorArg, it->bare);
         }
     }
 

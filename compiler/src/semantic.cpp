@@ -785,9 +785,12 @@ struct Checker {
                 return l.valid ? l : r;
             }
             // -- 类型强转 (T)x：返回声明类型 -----------------------------------
-            case Expr::Cast:
+            case Expr::Cast: {
                 (void)inferExpr(*e.a, locals, line);
-                return Ty{e.op, e.castPtr, 0, true, false};
+                Ty ct{e.op, e.castPtr, 0, true, false};
+                ct.fat = e.castFat;   // (e: T@)/(e: @) 强转结果为自动指针（name 空 → 裸 @）
+                return ct;
+            }
             // -- 初始化列表 {a, b, c}：类型由赋值目标决定，此处返回 invalid -----
             case Expr::InitList:
                 for (auto& a : e.args) (void)inferExpr(*a, locals, line);
@@ -1110,6 +1113,7 @@ struct Checker {
                               const std::unordered_map<std::string, Ty>& locals) {
         const bool declared = f.type.hasInline || !f.type.name.empty() ||
                               f.type.ptr > 0 || !f.type.arrayDims.empty() ||
+                              f.type.fat ||
                               f.type.fnKind != TypeRef::FncKind::None;
         if (declared) return fromTypeRef(f.type);
         if (!f.init)

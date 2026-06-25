@@ -43,6 +43,17 @@ typedef struct sc_fat {
     int32_t *own;     /* 持有者 sc_ref.out 地址（哨兵见下；NULL=未初始化） */
 } sc_fat;
 
+/* 裸自动指针 @（类型擦除）：前 24B 与 sc_fat 同构（共同首序列，可 (sc_fat*) 复用 bind/unbind），
+ * 尾随 dtor。dtor 在擦除点（T@/T() → @）由静态类型 T 填入（T_drop / NULL）；归零时读 dtor
+ * 自析构，故通用容器无需知道具体类型即可正确释放。.p 存实体基址（同 T@，非 object@ 的 &_class），
+ * 头由 tar 直接定位、回转 (T*).p 零偏移；不派发方法，故无 base 偏移问题。 */
+typedef struct sc_afat {
+    void    *p;
+    int32_t *tar;
+    int32_t *own;
+    void   (*dtor)(void *);
+} sc_afat;
+
 #define SC_REF_HDR  16                  /* 堆对象头偏移（≥sizeof(sc_ref)，过 max_align 对齐） */
 #define SC_REF_ATOM 1                   /* sc_ref.flags 位：对象引用计数用原子 RMW（T<atom>() 构造） */
 #define SC_REF_CANARY 2                 /* sc_ref.flags 位：对象带越界 canary（--check=mem 注入头尾哨兵） */
@@ -153,6 +164,18 @@ static inline void sc_fat_unbind_d(sc_fat *f, void (*dtor)(void *)) {
     f->p = (void *)0; f->tar = (int32_t *)0;
 }
 static inline void sc_fat_unbind(sc_fat *f) { sc_fat_unbind_d(f, (void (*)(void *))0); }
+
+/* 裸自动指针 @ 绑定/解绑：复用 sc_fat 记账（前 24B 同构），dtor 单独随句柄存取。
+ *   bind：擦除点由静态类型 T 填 dtor（T_drop / NULL）；
+ *   unbind：归零时以句柄自带 dtor 析构（通用容器无需知道 T）。 */
+static inline void sc_afat_bind(sc_afat *f, void *tgt, sc_ref *tr, int32_t *ow,
+                                void (*dtor)(void *)) {
+    sc_fat_bind((sc_fat *)f, tgt, tr, ow);
+    f->dtor = dtor;
+}
+static inline void sc_afat_unbind(sc_afat *f) {
+    sc_fat_unbind_d((sc_fat *)f, f->dtor);
+}
 
 /* ---------------- chain：侵入式双向链表 ----------------
  * 元素为 sc 链表结构体（def T: ~ {}，首位有 void *_prev, *_next）

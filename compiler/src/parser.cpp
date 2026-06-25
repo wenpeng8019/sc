@@ -158,10 +158,10 @@ struct Parser {
         }
     }
 
-    // 判断冒号后是否开始一个类型：命名类型、内联 {}/()、或裸 &/&&（void* 指针）
+    // 判断冒号后是否开始一个类型：命名类型、内联 {}/()、或裸 &/&&（void* 指针）、裸 @（类型擦除）
     bool atTypeStart() const {
         return at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)
-            || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&"));
+            || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@"));
     }
 
     // 解析强转目标类型部分到 Cast 节点：[const|volatile]* name [&|&&]* [restrict]
@@ -175,9 +175,15 @@ struct Parser {
         }
         if (at(Tok::Ident)) c->op = advance().text;   // 命名类型存于 op（转换去向，非被操作主体）
         // 裸 & / &&（无名类型）即 void* / void**：op 留空，由 codegen 输出 void
-        else if (!(atOp("&") || atOp("&&"))) err("强转期望类型名");
+        else if (!(atOp("&") || atOp("&&") || atOp("@"))) err("强转期望类型名");
         while (atOp("&") || atOp("&&"))
             c->castPtr += advance().text == "&&" ? 2 : 1;
+        // 自动指针强转 (e: T@) / 裸 (e: @)：恒单层，与 & 互斥
+        if (atOp("@")) {
+            advance();
+            if (c->castPtr > 0) err("自动指针强转 @ 不能与 & 组合（T@ 恒为单层）");
+            c->castFat = true;
+        }
         if (at(Tok::Ident) && cur().text == "restrict") {
             if (c->castPtr == 0) err("restrict 限定符仅对指针强转有意义");
             c->castRestrict = true; advance();
@@ -204,8 +210,8 @@ struct Parser {
 
         // 获取类型名
         if (at(Tok::Ident)) ty.name = foldMacroSpelling(advance().text);  // 宏体内折叠 \ 粘贴（如 Vec_\N& 类型引用）
-        // 对于（无名）裸 & / &&，即 void* 指针
-        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&")))
+        // 对于（无名）裸 & / &&，即 void* 指针；裸 @ 为类型擦除自动指针
+        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@")))
             err("期望类型名");
 
         // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
@@ -220,11 +226,11 @@ struct Parser {
 
         // 胖指针 T@（自动指针，见 builtins/auto_ptr.md）：恒为单层，与 & 互斥。
         // C 侧展开为 sc_fat，参与引用图与释放点验证。
+        // 裸 @（无名）：类型擦除自动指针，C 侧 sc_afat（24B 同构 + dtor 槽），供通用容器。
         if (atOp("@")) {
             advance();
             if (ty.ptr > 0) err("胖指针 @ 不能与 & 组合（T@ 恒为单层）");
-            if (ty.name.empty()) err("胖指针 @ 须作用于命名类型（如 T@）");
-            ty.fat = true;
+            ty.fat = true;   // ty.name 为空 → 裸 @（类型擦除）
         }
 
         // 分身/切片句柄类型 T[...]（def T: <S> {} 机制）：类型侧方括号（数组维度在
@@ -1090,7 +1096,7 @@ struct Parser {
                     exprBracket--;
                     return e;
                 }
-                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&")) err("强转期望类型名");
+                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&") && !atOp("@")) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
                 parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]（类型名可省=void*）
