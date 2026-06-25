@@ -1325,6 +1325,14 @@ struct Parser {
             e->a = parseUnary();                // 操作数：rpc 调用
             return e;
         }
+        // sync E：同步驱动 rpc 流程——无目标即在当前线程直接执行该 rpc 调用
+        //   （替代裸 rpc() 调用），返回其结果。带队列目标的阻塞投递形态见后续阶段。
+        if (at(Tok::KwSync)) {
+            auto e = mk(Expr::Sync);
+            advance();
+            e->a = parseUnary();                // 操作数：rpc 调用
+            return e;
+        }
         // await E：挂起当前 rpc，等 E 产的 future 就绪后恢复（仅 rpc 体内）
         if (at(Tok::KwAwait)) {
             auto e = mk(Expr::Await);

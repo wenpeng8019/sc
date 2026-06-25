@@ -85,6 +85,7 @@ POSITIVE=(
     tests/cases/print_str_chn.sc
     tests/cases/forin_adt.sc
     tests/cases/chain_sort.sc
+    tests/cases/sync_rpc.sc
     tests/cases/array.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc
@@ -135,6 +136,7 @@ NEGATIVE=(
     tests/cases/cross_module_bad.sc
     tests/cases/int_range_bad.sc
     tests/cases/case_exhaustive_bad.sc
+    tests/cases/bare_rpc_bad.sc
 )
 
 # 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。

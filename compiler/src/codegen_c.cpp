@@ -278,6 +278,7 @@ struct CGen {
     // ---- rpc 支撑：实际函数体内，参数引用改写为 _p->name ----
     const Decl* curRpc = nullptr;               // 非空时正在输出 rpc 实际函数体
     std::unordered_set<std::string> rpcParams;  // 当前 rpc 的参数名集合
+    bool emitRpcCallOK = false;                  // 正在 sync/await 驱动下发出 rpc 调用（放行裸调用禁令）
     int asyncState = 0;                         // 异步 rpc 状态机：当前 await 段编号
     int comRpcIdx = 0;                           // 异步 com<<>>rpc 序列化：帧 _crpcN 计数
 
@@ -1689,6 +1690,13 @@ struct CGen {
                     out << ")";
                     break;
                 }
+                // rpc 只能经驱动调用（sync/async/run/<<），禁止裸 rpc() 直接调用：
+                // 流程语义须显式选定驱动形态。当前线程直接执行请用 `sync work(args)`。
+                if (!emitRpcCallOK && e.a && e.a->kind == Expr::Ident &&
+                    rpcs.count(e.a->text))
+                    throw CompileError{"rpc '" + e.a->text +
+                        "' 不能直接调用，须经驱动：当前线程执行用 sync work(args)，"
+                        "另有 async/run/队列 << 形态", e.line};
                 // base/prev/next 内置函数：链表结构体字段导航
                 if (e.a && e.a->kind == Expr::Ident && !localsT.count(e.a->text) &&
                     !globalsT.count(e.a->text) && !funcs.count(e.a->text)) {
@@ -2332,6 +2340,22 @@ struct CGen {
                     emitAsyncCallArgs(call);
                     out << ")";
                 }
+                break;
+            }
+            // sync E：同步驱动 rpc。无目标 ⇒ 当前线程直接执行（经 rpc 调用包装
+            // X(args)：装填参数结构体→worker X_rpc→取返回槽），替代已废止的裸 rpc() 调用。
+            case Expr::Sync: {
+                if (!e.a || e.a->kind != Expr::Call ||
+                    !e.a->a || e.a->a->kind != Expr::Ident ||
+                    !rpcs.count(e.a->a->text))
+                    throw CompileError{"sync 期望 rpc 调用形式 name(args)", e.line};
+                if (rpcs.at(e.a->a->text)->hasAwait)
+                    throw CompileError{"sync 不能驱动异步 rpc '" + e.a->a->text +
+                                       "'（含 await，请用 async）", e.line};
+                bool save = emitRpcCallOK;
+                emitRpcCallOK = true;
+                emitExpr(*e.a, true);
+                emitRpcCallOK = save;
                 break;
             }
             // await E：仅出现在异步 rpc 体内，由 emitAsyncStmts 在语句层处理；
@@ -5269,7 +5293,10 @@ struct CGen {
                 return;
             }
         }
+        bool save = emitRpcCallOK;   // await 上下文：放行（叶子原语 fnc 非 rpc 不受限，此为兜底）
+        emitRpcCallOK = true;
         emitExpr(e, true);
+        emitRpcCallOK = save;
     }
 
     // 发出 (T)future_get(_p->_fut)：指针类型直接强转；标量经 intptr_t 还原。

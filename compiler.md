@@ -256,11 +256,18 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
   （省略返回类型时无 `_`；无参且无返回时生成 `char _;` 占位）；
 - `void name_rpc(struct name *_p);` —— 实际函数（本模块未导出时 `static`；
   仅声明形态为 extern，由外部 C 侧实现）；
-- `static inline ret name(...)` —— 调用包装：装填结构体 → 执行 → 取返回槽。
+- `static inline ret name(...)` —— 调用包装：装填结构体 → 执行 → 取返回槽，
+  即 `sync work(args)` 当前线程驱动的落地。
 
 实现要点：结构体仅用 struct tag（不 typedef），C 中 tag 与函数名分属不同命名
-空间，故可同名——调用点无需任何改写。函数体内参数引用改写为 `_p->x`，
-`return e` 改写为 `_p->_ = e; return;`。`@rpc` 导出时头文件包含完整三件套。
+空间，故可同名。函数体内参数引用改写为 `_p->x`，`return e` 改写为
+`_p->_ = e; return;`。`@rpc` 导出时头文件包含完整三件套。
+
+rpc 是「流程」原语，**禁止裸 `rpc()` 直接调用**：codegen 在 emitExpr 的 Call
+分支拦截「目标名在 rpcs 表且非驱动上下文」并报错。须经驱动选定执行形态——
+`sync`（当前线程直接执行，经上面的调用包装，发出与旧裸调用字节一致的 C）、
+`async`（事件循环）、`run`（独立线程/池）、队列 `<<`（投递）。`sync E` 由
+`Expr::Sync` 承载，仅放行其内层 rpc 调用（`emitRpcCallOK` 标志）。
 
 ### 5.6 run 语句（多线程）
 

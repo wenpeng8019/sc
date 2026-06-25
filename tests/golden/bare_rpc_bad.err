@@ -1,0 +1,2 @@
+bare_rpc_bad.sc:7: [1;31m错误[0m: rpc 'add' 不能直接调用，须经驱动：当前线程执行用 sync work(args)，另有 async/run/队列 << 形态
+  |      return add(3, 4)

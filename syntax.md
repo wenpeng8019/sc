@@ -1456,14 +1456,19 @@ fnc demo
 `rpc` 是与 `fnc` 同级的语法糖：形式与 `fnc` 完全一致，但内核（转 C）会把
 参数和返回值展开为一个**同名结构体**，实际函数则是以该结构体为唯一参数的
 `void name_rpc(struct name*)`。这使得调用参数天然可打包、可转发——适合消息
-派发、跨进程/跨机 RPC 等场景，而调用侧写法与普通函数没有任何区别。
+派发、跨进程/跨机 RPC 等场景。
+
+`rpc` 是「流程」原语：**不能像普通函数那样裸调用**，必须经一个**驱动**选定
+执行形态。在当前线程同步执行并取结果用 `sync work(args)`（等价于过去的裸
+调用，返回 rpc 结果）；另有 `async`（登记进事件循环，返回 future）、`run`
+（独立线程/线程池）、队列 `<<`（投递）等形态。裸 `rpc()` 调用会编译报错。
 
 ```sc
 rpc add: i4, a: i4, b: i4
     return a + b
 
 fnc main: i4
-    var r: i4 = add(3, 4)    # 调用形式与 fnc 完全一致
+    var r: i4 = sync add(3, 4)    # 当前线程直接执行，取返回槽
     return 0
 ```
 
@@ -1476,7 +1481,7 @@ struct add {            /* 1. 同名参数结构体 */
     int32_t b;
 };
 void add_rpc(struct add *_p);            /* 2. 实际函数 */
-static inline int32_t add(int32_t a, int32_t b) {  /* 3. 调用包装 */
+static inline int32_t add(int32_t a, int32_t b) {  /* 3. 调用包装（sync 的落地） */
     struct add _p = {0};
     _p.a = a; _p.b = b;
     add_rpc(&_p);                        /* 装填 → 执行 → 取返回槽 */

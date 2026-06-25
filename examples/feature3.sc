@@ -5,7 +5,9 @@
 #   struct name { ret _; ...params }   同名参数结构体（返回槽 _ 为首成员）
 #   void name_rpc(struct name *_p)     实际函数（仅声明形态由 C 侧实现）
 #   static inline ret name(...)        调用包装（装填 → 执行 → 取返回槽）
-# 调用形式与普通函数完全一致；参数天然可打包、可转发（消息派发/RPC 场景）
+# rpc 是「流程」原语，须经驱动调用（禁止裸 rpc()）：当前线程直接执行用
+# `sync work(args)`（返回结果，等价旧的裸调用）；另有 async（事件循环）、
+# run（独立线程/池）、队列 <<（投递）等形态。参数天然可打包、可转发。
 
 # 定义形态：函数体内参数引用自动改写为 _p->x，return e 改写为 _p->_ = e
 rpc add: i4, a: i4, b: i4
@@ -37,11 +39,11 @@ rpc dot: i4, a[3]: i4, b[3]: i4
     return x * x
 
 fnc main: i4
-    printf("add(3,4) = %d\n", add(3, 4))
-    greet(2)
-    printf("strlen2 = %d\n", strlen2("abc"))
+    printf("add(3,4) = %d\n", sync add(3, 4))
+    sync greet(2)
+    printf("strlen2 = %d\n", sync strlen2("abc"))
     var u[3]: i4 = [1, 2, 3]
     var v[3]: i4 = [4, 5, 6]
-    printf("dot = %d\n", dot(u, v))
-    printf("square(9) = %d\n", square(9))
+    printf("dot = %d\n", sync dot(u, v))
+    printf("square(9) = %d\n", sync square(9))
     return 0

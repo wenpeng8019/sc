@@ -558,6 +558,11 @@ struct Checker {
                 if (e.a) (void)inferExpr(*e.a, locals, line);
                 return Ty{"future", 1, 0, true, false};
             }
+            // -- sync E：同步驱动 rpc，返回该 rpc 调用的结果类型 --
+            case Expr::Sync: {
+                if (e.a) return inferExpr(*e.a, locals, line);
+                return Ty{};
+            }
             // -- 标识符：查找 locals → globals，nil/true/false 特殊处理 ----------
             case Expr::Ident: {
                 if (e.cBridge) return Ty{};  // C 桥接 ::name：C 侧符号，类型不跟踪，跳过解析

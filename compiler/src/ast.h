@@ -206,6 +206,8 @@ struct Expr {
                     //             > a=被 await 的表达式（rpc 调用 或 返回 future& 的叶子原语调用）
         Async,      // async E  把 rpc 调用登记进事件循环，立即返回 future&（不阻塞）
                     //             > a=rpc 调用（Expr::Call）
+        Sync,       // sync E   同步驱动 rpc：无目标=当前线程直接执行（替代裸 rpc 调用），返回其结果
+                    //             > a=rpc 调用（Expr::Call）
     } kind;
 
     std::string text;           // 标识符名 / 字面量值 / 成员名 / Offsetof 的目标类型名

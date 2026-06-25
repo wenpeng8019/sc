@@ -93,6 +93,8 @@ std::string rec(const Expr& e, bool top) {
             return "await " + rec(*e.a, false);
         case Expr::Async:
             return "async " + rec(*e.a, false);
+        case Expr::Sync:
+            return "sync " + rec(*e.a, false);
     }
     return "";
 }
