@@ -1,4 +1,4 @@
-# mt —— sc 多线程语言支持标准（mutex/cond/barrier/pool；thread 与 run 线程创建已下沉至 op.sc 内核）
+# mt —— sc 多线程语言支持标准（mutex/cond/barrier/pool/queue；thread 与 run 线程创建已下沉至 op.sc 内核）
 #
 # 本文件是 mt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -77,3 +77,18 @@
 # 不提供 future/cancel，任务级同步用 cond + wait 方法。
 # 将来可按其它策略另起 *_pool(n) 构造（如 work-stealing / 优先级），均返回 pool&。
 @fnc default_pool:: pool&, n: u4     # 构造默认线程池（FIFO 队列 + n 个固定工作线程）
+
+# ---------------- queue：消息队列协议的「默认」实现 ----------------
+# queue 类型与 post/pull/drop 方法是 op 层「消息队列接口协议」（默认导入，vtable，
+# 见 op.sc）；本模块按「默认 FIFO」策略提供具名构造 default_queue，犹如 io 的 file()
+# 之于 com——填充协议指针并返回 queue&。
+#   var q: queue& = default_queue(main)  # 宿主=当前/主线程（自行跑 pull 循环消费）
+#   q << work(a, b)                      # 投递：rpc 整体打包入队（经 q->post(...)）
+#   for q->pull(0) > 0                   # 排空：取一条执行，队空返 0 退出
+#       skip
+#   q->drop()                            # 析构：解绑 → 排空残留 → 回收
+# 宿主三态（host: pool&）：nil 未绑/延迟、main 当前/主线程、&pool 线程池消费。
+# main 是 op 提供的 pool& 哨兵常量（值 -1）；P2 阶段池自动消费为下一步，三态功能上
+# 均为手动 pull。消息节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，
+# 投递点无需保活。将来可按其它策略另起 *_queue(host) 构造，均返回 queue&。
+@fnc default_queue:: queue&, host: pool&   # 构造默认 FIFO 消息队列，host 三态绑定宿主

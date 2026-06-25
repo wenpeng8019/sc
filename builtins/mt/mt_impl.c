@@ -242,3 +242,114 @@ struct pool *default_pool(uint32_t n) {
     }
     return &p->base;
 }
+
+/* ---------------- queue：消息队列协议的「默认 FIFO」实现 ---------------- */
+/* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「默认 FIFO」策略用
+ * default_queue(host) 具名构造——同 pool：que_state 首字段即 queue base，故 (queue*)
+ * 与 (que_state*) 同址，方法直接 (que_state*)_this 回取私有区。消息节点 [q_msg][params]
+ * 联合分配，参数拷贝入节点，投递点无需保活。
+ * 宿主三态（host）：NULL 未绑/延迟、(pool*)-1 当前/主线程（自跑 pull 循环）、&pool
+ * 线程池消费（自动消费接通见后续实现）。P2 阶段仅记录 host，三态功能上均为手动 pull。 */
+
+/* 消息节点：联合分配 [q_msg][rpc 参数 psize]（与 pool 任务节点同哲学） */
+typedef struct q_msg {
+    struct q_msg *next;
+    void        (*fn)(void *);   /* rpc 实际函数，参数紧随本节点 */
+} q_msg;
+
+/* 队列盒子：首字段 queue base（协议 vtable）+ 单链 FIFO + 条件变量（来活） */
+typedef struct {
+    queue        base;     /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
+    mtx_state    mu;
+    cnd_state    more;     /* 来活：post 唤醒阻塞的 pull */
+    q_msg       *head, *tail;
+    uint32_t     pending;  /* 队列中待处理消息数 */
+    uint8_t      closed;   /* drop 置位：拒收新消息、唤醒 pull 退出 */
+    struct pool *host;     /* 宿主绑定：NULL/(pool*)-1/&pool（P2 仅记录） */
+} que_state;
+
+static void que_lock(que_state *q)   { sc_mutex_lock(&q->mu); }
+static void que_unlock(que_state *q) { sc_mutex_unlock(&q->mu); }
+
+/* post 方法（协议指针，对称 pool.run）：rpc 调用整体打包成消息入队。
+ * 返回 1 成功 / 0 失败（队列已关闭 / 内存不足） */
+static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize) {
+    que_state *q = (que_state *)_this;
+    if (!q || !fn) return 0;
+    q_msg *m = (q_msg *)malloc(sizeof(q_msg) + psize);
+    if (!m) return 0;
+    m->next = NULL;
+    m->fn = fn;
+    if (params && psize) memcpy(m + 1, params, psize);
+    que_lock(q);
+    if (q->closed) { que_unlock(q); free(m); return 0; }
+    if (q->tail) q->tail->next = m; else q->head = m;
+    q->tail = m;
+    q->pending++;
+    sc_cond_one(&q->more);
+    que_unlock(q);
+    return 1;
+}
+
+/* pull 方法：取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
+ * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。 */
+static int32_t que_pull(queue *_this, int64_t timeout_ms) {
+    que_state *q = (que_state *)_this;
+    if (!q) return -1;
+    que_lock(q);
+    while (!q->head && !q->closed) {
+        if (timeout_ms == 0) { que_unlock(q); return 0; }       /* 立即返回 */
+        if (timeout_ms < 0) {
+            sc_cond_wait(&q->more, &q->mu, 0, 0);               /* 无限等待来活 */
+        } else {
+            uint64_t sec  = (uint64_t)timeout_ms / 1000ULL;
+            uint64_t nsec = ((uint64_t)timeout_ms % 1000ULL) * 1000000ULL;
+            int r = sc_cond_wait(&q->more, &q->mu, nsec, sec);
+            if (r == 1) { que_unlock(q); return 0; }            /* 超时 */
+        }
+    }
+    q_msg *m = q->head;
+    if (!m) { que_unlock(q); return -1; }                       /* 已关闭且排空 */
+    q->head = m->next;
+    if (!q->head) q->tail = NULL;
+    q->pending--;
+    que_unlock(q);
+
+    m->fn((void *)(m + 1));                                     /* 参数紧随消息节点 */
+    free(m);
+    return 1;
+}
+
+/* drop 方法：解绑宿主 → 排空残留消息（释放，不执行）→ 唤醒 pull 退出 → 回收整块。 */
+static void que_drop(queue *_this) {
+    que_state *q = (que_state *)_this;
+    if (!q) return;
+    que_lock(q);
+    q->closed = 1;
+    q_msg *m = q->head;                  /* 排空：丢弃未处理消息（投递为不带回复的 fire-and-forget） */
+    while (m) { q_msg *n = m->next; free(m); m = n; }
+    q->head = q->tail = NULL;
+    q->pending = 0;
+    sc_cond_all(&q->more);               /* 唤醒所有阻塞 pull，令其见 closed 退出 */
+    que_unlock(q);
+    sc_mutex_final(&q->mu);
+    sc_cond_final(&q->more);
+    free(q);                             /* 整块回收（queue 对象与盒子同生命周期） */
+}
+
+/* default_queue：「默认 FIFO」消息队列构造（填充协议 vtable，返回 queue&）。
+ *   - host：宿主三态（NULL / (pool*)-1 / &pool）；P2 仅记录，三态均手动 pull
+ *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收 */
+struct queue *default_queue(struct pool *host) {
+    que_state *q = (que_state *)malloc(sizeof(que_state));
+    if (!q) return NULL;
+    memset(q, 0, sizeof(*q));
+    q->base.h    = q;        /* 私有区即本盒子（方法实际经 (que_state*)_this 回取） */
+    q->base.post = que_post;
+    q->base.pull = que_pull;
+    q->base.drop = que_drop;
+    sc_mutex_init(&q->mu);
+    sc_cond_init(&q->more);
+    q->host = host;          /* 宿主自动消费（&pool）接通见后续实现 */
+    return &q->base;
+}

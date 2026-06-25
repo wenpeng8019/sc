@@ -2099,6 +2099,39 @@ run<prio:5> note(7)                            # 仅设优先级（detach 线程
   `thread_run(..., (uint32_t)stack, (uint8_t)prio)`，省略的键传 0
   （表示由 C 取平台默认）。
 
+#### 消息队列 `queue`（`<<` 投递 / `pull` 消费）
+
+`queue` 与 `com`/`pool` 同属 **op 层接口协议**（vtable 全为每对象方法指针，
+默认导入；C 结构体见 op.h），由 mt 模块按策略提供具名构造 `default_queue(host)`
+（返回 `queue&`）。`<<` 把一个 rpc 调用整体打包成消息投入队列，`pull` 在当前
+线程取一条消息执行：
+
+```sc
+inc mt.sc
+
+rpc add: a: acc&, v: i4               # rpc 即消息处理体，参数即消息载荷
+    a->sum = a->sum + v
+
+var q: queue& = default_queue(main)   # 宿主=main：当前线程自跑 pull 循环消费
+q << add(&a, 10)                      # 投递：rpc 整体打包入队（不触发本地调用）
+q << add(&a, 20) << add(&a, 30)       # 链式投递多条
+while q->pull(0) > 0                  # 排空：取一条执行，队空（pull 返 0）退出
+    skip
+q->drop()                            # 析构：解绑宿主 → 排空残留 → 回收
+```
+
+- **左操作数类型分派**：`<<` 链最左为 `com` → 逐字段序列化收发；最左为 `queue`
+  → 整体打包 `post`。`queue` 仅支持 `<<`（`>>` 报错）。
+- **宿主三态**（构造时绑定 `host: pool&`）：`nil` 未绑/延迟、`main` 当前/主线程
+  （自跑 `pull` 循环消费）、`&pool` 线程池消费。`main` 是 op 提供的 `pool&` 哨兵
+  常量（值 -1）。
+- `pull(timeout)`：`<0` 无限等 / `0` 立即返回 / `>0` 毫秒超时；返回 `1` 处理一条
+  / `0` 超时且队列空 / `-1` 已关闭。`queue&` 是协议指针，方法用箭头 `q->pull(...)`。
+- 转 C：`<<` 经协议指针派发 `q->post(q, work_rpc, &参数, sizeof)`，语言内核零 emit
+  mt 符号。消息节点 `[节点][rpc 参数]` 单块分配，参数拷贝入节点，投递点无需保活。
+- 阶段说明：当前为骨架——`nil`/`main` 手动 `pull` 完整可用；`host=&pool`（线程池
+  自动消费队列）的消费者接通为后续实现。完整示例见 `examples/feature38.sc`。
+
 ### 15.3 异步（async / await / done）
 
 与 `run`（抢占式、多线程）相对的**第二套并发模型**：单线程协作式异步——

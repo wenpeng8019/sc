@@ -247,6 +247,26 @@ typedef struct pool {
     void    (*drop)(struct pool *_this);
 } pool;
 
+/* ---------------- queue：消息队列接口协议（rpc 投递目标，op 层声明） ----------------
+ * queue 是 op 层定义的「消息队列接口协议」——仿 com/pool：成员均为「每对象方法指针」
+ * 构成的 vtable（无具体实现）。由实现模块（mt）按策略提供具名构造函数填充指针并返回
+ * queue&（如 default_queue(host)，犹如 com 的 file()）。如此语言内核（<< 投递）经协议
+ * 指针派发，零 emit mt 符号——彻底解耦 mt 模块与语言。
+ *   - post：把一个 rpc 任务整体打包投入队列（q << work(args) → q->post(q, fn, &参数, sizeof)）
+ *   - pull：从队列取一条消息在当前线程执行；timeout_ms <0 无限等 / 0 立即返回 / >0 毫秒超时；
+ *           返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）
+ *   - drop：析构，解绑宿主 → 排空残留消息 → 回收（含 queue 对象本身）
+ * 宿主三态（构造时绑定，host 为 pool&）：nil=未绑/延迟、(pool*)-1=当前/主线程（自行跑
+ *   pull 循环消费）、&pool=线程池消费（池工作线程持续 pull）。
+ * 消息节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，投递点无需保活。
+ * 默认实现见 mt_impl.c 的 default_queue(host)；投递帧与 thread_run/pool.run 同形。 */
+typedef struct queue {
+    void   *h;       /* 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有） */
+    uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
+    int32_t (*pull)(struct queue *_this, int64_t timeout_ms);
+    void    (*drop)(struct queue *_this);
+} queue;
+
 /* ---------------- future / async：单线程协作式异步机制 ----------------
  * 语言底层机制：future 类型 + async/await/done 关键字 + async_init/loop/final。
  * future 是异步结果句柄（类型擦除：result 为 void*）。含 await 的 rpc 被编译为

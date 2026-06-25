@@ -66,6 +66,7 @@ POSITIVE=(
     examples/feature35.sc
     examples/feature36.sc
     examples/feature37.sc
+    examples/feature38.sc
     examples/feature30/feature30.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc

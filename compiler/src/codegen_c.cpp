@@ -1626,6 +1626,8 @@ struct CGen {
                     out << "(_this->_self)";  // 分身/切片内上下文关键字：回指本体实体
                                               // （无同名局部时；MethodPtr 实现可用 self 作接收者参数名）
                 else if (e.text == "nil") out << "NULL";   // 空指针常量
+                else if (e.text == "main" && !localsT.count("main") && !globalsT.count("main"))
+                    out << "((struct pool *)-1)";          // queue 宿主哨兵：当前/主线程（pool& 值 -1）
                 else if (e.text == "ok" && !localsT.count("ok") && !globalsT.count("ok"))
                     out << "0";                            // ADT 接口成功返回码（类型 ret）
                 else if (e.text == "negative" && !localsT.count("negative") && !globalsT.count("negative"))
@@ -3505,6 +3507,69 @@ struct CGen {
         else { out << "&("; emitExpr(base, true); out << ")"; }
     }
 
+    // ---- queue 投递链（<< 投递，整体打包）----
+    // 若 e 是以 queue（消息队列端点）为最左操作数的 << 链，返回 queue 基址表达式，
+    // 并按从左到右顺序填充 targets（每个为一个 rpc 调用 work(args)）；否则返回 nullptr。
+    // 与 com 不同：queue 仅支持 << 投递（>> 报错），每个目标整体打包成一条消息 post。
+    const Expr* queueChain(const Expr& e, std::vector<const Expr*>& targets) const {
+        if (e.kind != Expr::Binary || (e.op != "<<" && e.op != ">>")) return nullptr;
+        std::vector<const Expr*> rev;
+        bool sawRecv = false;
+        const Expr* cur = &e;
+        while (cur->kind == Expr::Binary && (cur->op == "<<" || cur->op == ">>")) {
+            if (cur->op == ">>") sawRecv = true;
+            rev.push_back(cur->b.get());
+            cur = cur->a.get();
+        }
+        VType vt;
+        if (!exprVType(*cur, vt) || vt.name != "queue" || !aggrOf("queue")) return nullptr;
+        if (sawRecv)
+            throw CompileError{"queue 仅支持 << 投递，不支持 >> 读取", e.line};
+        targets.assign(rev.rbegin(), rev.rend());
+        return cur;
+    }
+
+    // 发出 queue 投递链：每个目标 rpc 调用 work(args) 整体打包成一条消息 post。
+    //   q << work(a, b)  →  { struct work _rp = {0}; _rp.x = a; ...;
+    //                         q->post(q, (void (*)(void *))work_rpc, &_rp, sizeof(_rp)); }
+    // 接收者按值/指针自动取址注入（emitComBasePtr，与协议指针调用约定一致）。
+    void emitQueueChain(const Expr& base, const std::vector<const Expr*>& targets) {
+        VType vt;
+        exprVType(base, vt);
+        const bool isPtr = vt.ptr >= 1;
+        for (const Expr* t : targets) {
+            if (t->kind != Expr::Call || !t->a || t->a->kind != Expr::Ident)
+                throw CompileError{"queue << 的目标必须是 rpc 调用：q << work(参数...)", t->line};
+            auto it = rpcs.find(t->a->text);
+            if (it == rpcs.end())
+                throw CompileError{"queue << 的目标必须是 rpc：" + t->a->text, t->line};
+            const Decl* r = it->second;
+            if (r->hasAwait)
+                throw CompileError{"queue << 暂不支持异步 rpc：" + r->name, t->line};
+            if (r->structCommon.variadic)
+                throw CompileError{"queue << 暂不支持可变参数 rpc：" + r->name, t->line};
+            if (t->args.size() > r->structCommon.fields.size())
+                throw CompileError{"rpc 实参数量超出：" + r->name, t->line};
+            indent(); out << "{\n"; depth++;
+            indent(); out << "struct " << r->name << " _rp = {0};\n";
+            for (size_t i = 0; i < t->args.size(); i++) {
+                const Field& f = r->structCommon.fields[i];
+                indent(); out << "_rp." << f.name << " = ";
+                emitExpr(*t->args[i], true); out << ";\n";
+                if (!f.type.arrayDims.empty()) {       // 数组实参：额外装填 size（字节数）
+                    indent(); out << "_rp." << rpcArraySizeName(f) << " = ";
+                    emitRpcArraySizeof(f); out << ";\n";
+                }
+            }
+            indent();
+            emitComBasePtr(base, isPtr);
+            out << "->post(";
+            emitComBasePtr(base, isPtr);
+            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
+            depth--; indent(); out << "}\n";
+        }
+    }
+
     // com << rpc(args)（发）：装填 rpc 参数结构体（跳过返回槽 _），逐参数字段序列化 write。
     //   普通标量/指针：write(&_rp.f, sizeof)；数组：write(_rp.f, f_size)；
     //   com[...] 参数：句柄无法序列化 → 报错。
@@ -3689,6 +3754,12 @@ struct CGen {
                     std::vector<ComOp> ops;
                     if (const Expr* base = comChain(*s.expr, ops)) {
                         emitComChain(*base, ops);
+                        break;
+                    }
+                    // queue 投递链：q << work(参数) → 整体打包 post（左操作数类型分派）
+                    std::vector<const Expr*> qtargets;
+                    if (const Expr* qbase = queueChain(*s.expr, qtargets)) {
+                        emitQueueChain(*qbase, qtargets);
                         break;
                     }
                 }
