@@ -249,7 +249,9 @@ struct pool *default_pool(uint32_t n) {
  * 与 (que_state*) 同址，方法直接 (que_state*)_this 回取私有区。消息节点 [q_msg][params]
  * 联合分配，参数拷贝入节点，投递点无需保活。
  * 宿主三态（host）：NULL 未绑/延迟、(pool*)-1 当前/主线程（自跑 pull 循环）、&pool
- * 线程池消费（自动消费接通见后续实现）。P2 阶段仅记录 host，三态功能上均为手动 pull。 */
+ * 线程池消费——host 为真实 pool 时，post 直接经 pool 协议指针转交池（pool->run），由
+ * 池的工作线程并发执行，无需手动 pull（用 pool->join() 作屏障）；NULL/(pool*)-1 入本
+ * 队列 FIFO，由当前/主线程手动 pull 消费。 */
 
 /* 消息节点：联合分配 [q_msg][rpc 参数 psize]（与 pool 任务节点同哲学） */
 typedef struct q_msg {
@@ -272,10 +274,19 @@ static void que_lock(que_state *q)   { sc_mutex_lock(&q->mu); }
 static void que_unlock(que_state *q) { sc_mutex_unlock(&q->mu); }
 
 /* post 方法（协议指针，对称 pool.run）：rpc 调用整体打包成消息入队。
+ * 宿主为真实线程池（host 非 NULL 且非 (pool*)-1）时，直接转交池消费（经 pool 协议
+ * 指针 host->run 派发，不入本队列 FIFO），由池工作线程并发执行。
  * 返回 1 成功 / 0 失败（队列已关闭 / 内存不足） */
 static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return 0;
+    /* 宿主=线程池：投递即提交给池（pool->run 自行 memcpy 参数），由池工作线程消费。
+     * host 只在构造时设定、之后不改，故此处免锁读取安全。 */
+    {
+        struct pool *host = q->host;
+        if (host && host != (struct pool *)-1)
+            return host->run(host, fn, params, psize);
+    }
     q_msg *m = (q_msg *)malloc(sizeof(q_msg) + psize);
     if (!m) return 0;
     m->next = NULL;
@@ -305,7 +316,8 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
             uint64_t sec  = (uint64_t)timeout_ms / 1000ULL;
             uint64_t nsec = ((uint64_t)timeout_ms % 1000ULL) * 1000000ULL;
             int r = sc_cond_wait(&q->more, &q->mu, nsec, sec);
-            if (r == 1) { que_unlock(q); return 0; }            /* 超时 */
+            /* 超时且仍空才返 0；若恰在超时边界来活，留待 while 复检后照常取出 */
+            if (r == 1 && !q->head && !q->closed) { que_unlock(q); return 0; }
         }
     }
     q_msg *m = q->head;
@@ -338,8 +350,9 @@ static void que_drop(queue *_this) {
 }
 
 /* default_queue：「默认 FIFO」消息队列构造（填充协议 vtable，返回 queue&）。
- *   - host：宿主三态（NULL / (pool*)-1 / &pool）；P2 仅记录，三态均手动 pull
- *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收 */
+ *   - host：宿主三态——NULL 未绑/延迟、(pool*)-1 当前/主线程（手动 pull）、&pool
+ *     线程池（post 自动转交池消费，用 pool->join() 作屏障，无需 pull）
+ *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收（池宿主须另行 drop 池）*/
 struct queue *default_queue(struct pool *host) {
     que_state *q = (que_state *)malloc(sizeof(que_state));
     if (!q) return NULL;
@@ -350,6 +363,6 @@ struct queue *default_queue(struct pool *host) {
     q->base.drop = que_drop;
     sc_mutex_init(&q->mu);
     sc_cond_init(&q->more);
-    q->host = host;          /* 宿主自动消费（&pool）接通见后续实现 */
+    q->host = host;          /* &pool：post 自动转交池消费；NULL/(pool*)-1：手动 pull */
     return &q->base;
 }

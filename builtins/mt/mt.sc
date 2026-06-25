@@ -87,8 +87,9 @@
 #   for q->pull(0) > 0                   # 排空：取一条执行，队空返 0 退出
 #       skip
 #   q->drop()                            # 析构：解绑 → 排空残留 → 回收
-# 宿主三态（host: pool&）：nil 未绑/延迟、main 当前/主线程、&pool 线程池消费。
-# main 是 op 提供的 pool& 哨兵常量（值 -1）；P2 阶段池自动消费为下一步，三态功能上
-# 均为手动 pull。消息节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，
-# 投递点无需保活。将来可按其它策略另起 *_queue(host) 构造，均返回 queue&。
+# 宿主三态（host: pool&）：nil 未绑/延迟、main 当前/主线程（手动 pull）、&pool 线程池消费。
+# main 是 op 提供的 pool& 哨兵常量（值 -1）。宿主为真实线程池时，<< 投递自动转交
+# 池并发消费（用 p->join() 等待排空，无需 pull；q、p 各自 drop）。消息节点延续联合
+# 分配哲学：[节点][rpc 参数]，参数拷贝入节点，投递点无需保活。将来可按其它策略
+# 另起 *_queue(host) 构造，均返回 queue&。
 @fnc default_queue:: queue&, host: pool&   # 构造默认 FIFO 消息队列，host 三态绑定宿主
