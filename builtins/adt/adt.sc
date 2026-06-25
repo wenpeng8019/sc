@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树）
+# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树/堆）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -249,6 +249,42 @@
     fnc at:: i8, index: u8                          # 0 基中序序号处的游标（越界 0）
     fnc most:: i8, key: const &                     # <= key 的最接近项游标（前驱或等于；无 0）
     fnc least:: i8, key: const &                    # >= key 的最接近项游标（后继或等于；无 0）
+}
+
+
+# ---------------- heap：数组背二叉堆 / 优先队列 ----------------
+# (key, value) 对：key 决定优先级，value 为裸自动指针 @（sc_afat），heap 拥有每元素一份 retain。
+# 数组背完全二叉树（隐式编码：父 (i-1)/2、左右子 2i+1/2i+2），槽连续 [@ value][key]，value 在前保 8 对齐。
+# push 末尾追加后上滤、pop 末尾补根后下滤，均 O(log n)；扩容几何增长。
+# min 决定堆向：min=1 小键在顶（最小堆，典型用于 Dijkstra/定时器）、min=0 大键在顶（最大堆）。
+# key 三态/比较器语义同 bst：key_size >0 定长数值（按宽度有符号）/ ==0 引用字符串 / ==-1 拷贝字符串；
+#   cmp 非空时一律走自定义比较（返回 sign(a-b)，a/b 为逻辑键指针）。
+# 取出语义同 dict「取用分离」：peek 借用堆顶（不改计数），pop 删除并 release（返回 bool）。
+# 不提供遍历游标——堆数组非优先序。优先级变更用「推新+pop 时跳过陈旧」惰性删除。
+# 因 init 带参数，不参与「声明即构造」——须显式 h.init(min, key_size, cmp, ctx)。
+
+@fnc heap_cmp_fn: i4, a: const &, b: const &, ctx: &     # 自定义比较器（返回 sign(a-b)；nil=内置）
+
+@def heap: {
+    slots: char&     # 连续槽数组（cap * stride，每槽 [@ value][key]；内部）
+    cmp: &           # 自定义比较器指针（nil = 内置）
+    cmp_ctx: &       # 比较器上下文
+    stride: u4       # 单槽字节 = align8(sizeof(@) + keylen)
+    size: u4         # 元素数
+    cap: u4          # 槽容量
+    key_size: i4     # >0 定长数值 / 0 引用字符串 / -1 拷贝字符串
+    min: u1          # 1 = 最小堆（小键在顶）/ 0 = 最大堆
+
+    fnc init:: min: u1, key_size: i4, cmp: heap_cmp_fn, ctx: &   # 构造（堆向 + key 模式 + 比较器）
+    fnc drop::                                       # 释放全部 retain + 回收槽数组
+    fnc len:: u8                                    # 元素个数
+    fnc is_empty:: bool                             # 是否空
+    fnc clear::                                      # 清空并 release 全部 value（保留容量）
+    fnc reserve:: bool, n: u8                       # 预留至少 n 槽
+    fnc push:: bool, key: const &, value: @          # 入堆（retain value；上滤）
+    fnc pop:: bool                                   # 弹出堆顶并 release（空返回 false；下滤）
+    fnc peek:: @                                     # 借用堆顶 value 句柄（空返回空句柄；不改计数）
+    fnc peek_key:: const &                           # 借用堆顶 key（空返回 nil）
 }
 
 

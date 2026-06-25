@@ -247,6 +247,41 @@ int64_t      bst_at(bst *_this, uint64_t index);      /* 0 基中序序号处的
 int64_t      bst_most(bst *_this, const void *key);   /* <= key 的最接近项游标（前驱或等于）；无 0 */
 int64_t      bst_least(bst *_this, const void *key);  /* >= key 的最接近项游标（后继或等于）；无 0 */
 
+/* ---------------- heap：数组背二叉堆 / 优先队列 ---------------- */
+/* (key, value) 对：key 决定优先级，value 为裸自动指针 @（sc_afat），heap 拥有每元素一份 retain。
+ * 数组背完全二叉树（隐式编码：父 (i-1)/2、左右子 2i+1/2i+2），槽连续 [sc_afat value][key]，
+ * value 在前保 8 对齐，stride = align8(sizeof(sc_afat) + (key_size>0 ? key_size : sizeof(char*)))。
+ * push 末尾追加后上滤、pop 末尾补根后下滤，均 O(log n)；扩容几何增长（refit 裸搬移句柄）。
+ * min 决定堆向：min=1 小键在顶（最小堆，典型用于 Dijkstra/定时器）、min=0 大键在顶（最大堆）。
+ * key 三态/比较器语义同 bst：key_size >0 定长数值（按宽度有符号）/ ==0 引用字符串 / ==-1 拷贝字符串；
+ *   cmp 非空时一律走自定义比较（签名 sign(a-b)，a/b 为逻辑键指针）。
+ * 取出语义同 dict「取用分离」：peek 借用堆顶（不改计数），pop 删除并 release（返回 bool）。
+ * 不提供遍历游标——堆数组非优先序。decrease-key 未内置，优先级变更用「推新+pop 时跳过陈旧」惰性删除。
+ * 因 init 带参数，不参与「声明即构造」——须显式 h.init(min, key_size, cmp, ctx)。 */
+
+typedef int32_t (*heap_cmp)(const void *a, const void *b, void *ctx);  /* 自定义比较器（NULL = 内置） */
+
+typedef struct heap {
+    char    *slots;     /* 连续槽数组（cap * stride，每槽 [sc_afat value][key]） */
+    heap_cmp cmp;       /* 自定义比较器（NULL = 内置数值/字符串比较） */
+    void    *cmp_ctx;   /* 比较器上下文 */
+    uint32_t stride;    /* 单槽字节 = align8(sizeof(sc_afat) + keylen) */
+    uint32_t size;      /* 元素数 */
+    uint32_t cap;       /* 槽容量 */
+    int32_t  key_size;  /* >0 定长数值 / 0 引用字符串 / -1 拷贝字符串 */
+    uint8_t  min;       /* 1 = 最小堆（小键在顶）/ 0 = 最大堆 */
+} heap;
+
+void     heap_init(heap *_this, uint8_t min, int32_t key_size, heap_cmp cmp, void *cmp_ctx);
+void     heap_drop(heap *_this);                      /* 释放全部 retain + 回收槽数组 */
+uint64_t heap_len(heap *_this);
+uint8_t  heap_is_empty(heap *_this);
+void     heap_clear(heap *_this);                     /* 清空并 release 全部 value（保留容量） */
+uint8_t  heap_reserve(heap *_this, uint64_t n);       /* 预留至少 n 槽 */
+uint8_t  heap_push(heap *_this, const void *key, sc_afat value);  /* 入堆：retain value，上滤；失败 0 */
+uint8_t  heap_pop(heap *_this);                       /* 弹出堆顶并 release，下滤；空返回 0 */
+sc_afat  heap_peek(heap *_this);                      /* 借用堆顶 value 句柄（不改计数）；空返回空句柄 */
+const void *heap_peek_key(heap *_this);               /* 借用堆顶 key（空返回 NULL） */
 
 
 #ifdef __cplusplus

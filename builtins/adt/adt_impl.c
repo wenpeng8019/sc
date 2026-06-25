@@ -1615,4 +1615,180 @@ int64_t bst_least(bst *_this, const void *key) {
     return (int64_t)(intptr_t)cand;
 }
 
+/* ==================================================================== */
+/* heap —— 数组背二叉堆 / 优先队列                                       */
+/* 槽数组连续存放（cap * stride，每槽 [sc_afat value][key]，value 在前保 8 对齐）。
+ * 完全二叉树隐式编码：节点 i 的父 = (i-1)/2，左右子 = 2i+1 / 2i+2。
+ * push 末尾追加后上滤（sift-up），pop 末尾补根后下滤（sift-down）；均 O(log n)。
+ * min 决定堆向：min=1 小键在顶（最小堆），min=0 大键在顶（最大堆）。
+ * key 三态/比较器同 bst：数值按宽度有符号、字符串 strcmp、cmp 非空走自定义。
+ * value 拥有（每元素一份 retain，SC_OWN_RAW）；取出语义「取用分离」：
+ *   peek 借用堆顶（不改计数），pop 删除并 release（返回 bool）。
+ * 不提供遍历游标——堆数组非优先序，迭代会误导（与 C++ priority_queue 一致）。 */
+
+#define HEAP_MIN_CAP 8u
+
+static inline char   *heap_slot(heap *h, uint32_t i) { return h->slots + (size_t)i * h->stride; }
+static inline sc_afat *heap_val(heap *h, uint32_t i)  { return (sc_afat *)heap_slot(h, i); }
+static inline char   *heap_keyslot(heap *h, uint32_t i) { return heap_slot(h, i) + sizeof(sc_afat); }
+/* 逻辑键：数值模式为键字节指针；字符串模式为存于槽内的 char* */
+static inline const void *heap_logkey(heap *h, uint32_t i) {
+    return h->key_size > 0 ? (const void *)heap_keyslot(h, i)
+                           : *(const char **)heap_keyslot(h, i);
+}
+
+/* 比较两逻辑键：返回 sign(a - b)。cmp 非空走自定义；否则数值按宽度有符号 / 字符串 strcmp。 */
+static int heap_cmp_key(heap *h, const void *a, const void *b) {
+    if (h->cmp) return h->cmp(a, b, h->cmp_ctx);
+    if (h->key_size > 0) {
+        switch (h->key_size) {
+            case 1: { int8_t x = *(const int8_t *)a, y = *(const int8_t *)b;
+                      return x < y ? -1 : x > y ? 1 : 0; }
+            case 2: { int16_t x, y; memcpy(&x, a, 2); memcpy(&y, b, 2);
+                      return x < y ? -1 : x > y ? 1 : 0; }
+            case 4: { int32_t x, y; memcpy(&x, a, 4); memcpy(&y, b, 4);
+                      return x < y ? -1 : x > y ? 1 : 0; }
+            case 8: { int64_t x, y; memcpy(&x, a, 8); memcpy(&y, b, 8);
+                      return x < y ? -1 : x > y ? 1 : 0; }
+            default: return memcmp(a, b, (size_t)h->key_size);
+        }
+    }
+    { const char *x = (const char *)a, *y = (const char *)b;
+      if (x == y) return 0; if (!x) return -1; if (!y) return 1; return strcmp(x, y); }
+}
+
+/* i 是否应在 j 之上（更靠近根）：最小堆 = i 键更小，最大堆 = i 键更大。 */
+static inline int heap_above(heap *h, uint32_t i, uint32_t j) {
+    int c = heap_cmp_key(h, heap_logkey(h, i), heap_logkey(h, j));
+    return h->min ? (c < 0) : (c > 0);
+}
+
+/* 交换两槽全部字节（裸搬移句柄+键，move 语义，不改计数）；分块经栈缓冲，支持任意 stride。 */
+static void heap_swap(heap *h, uint32_t i, uint32_t j) {
+    char *a = heap_slot(h, i), *b = heap_slot(h, j);
+    char tmp[64];
+    uint32_t n = h->stride, k;
+    if (i == j) return;
+    for (k = 0; k < n; k += (uint32_t)sizeof(tmp)) {
+        uint32_t m = n - k < (uint32_t)sizeof(tmp) ? n - k : (uint32_t)sizeof(tmp);
+        memcpy(tmp, a + k, m);
+        memcpy(a + k, b + k, m);
+        memcpy(b + k, tmp, m);
+    }
+}
+
+static void heap_sift_up(heap *h, uint32_t i) {
+    while (i > 0) {
+        uint32_t parent = (i - 1) / 2;
+        if (!heap_above(h, i, parent)) break;
+        heap_swap(h, i, parent);
+        i = parent;
+    }
+}
+
+static void heap_sift_down(heap *h, uint32_t i) {
+    uint32_t n = h->size;
+    for (;;) {
+        uint32_t l = 2 * i + 1, r = l + 1, best = i;
+        if (l < n && heap_above(h, l, best)) best = l;
+        if (r < n && heap_above(h, r, best)) best = r;
+        if (best == i) break;
+        heap_swap(h, i, best);
+        i = best;
+    }
+}
+
+static uint8_t heap_storekey(heap *h, uint32_t i, const void *key) {
+    if (h->key_size > 0) { memcpy(heap_keyslot(h, i), key, (size_t)h->key_size); return 1; }
+    if (h->key_size == 0) { *(const char **)heap_keyslot(h, i) = (const char *)key; return 1; }  /* 借用 */
+    { const char *s = (const char *)key; size_t n = s ? strlen(s) : 0;  /* -1：拷贝一份 */
+      char *cp = (char *)chunk(n + 1); if (!cp) return 0;
+      if (n) memcpy(cp, s, n); cp[n] = 0; *(const char **)heap_keyslot(h, i) = cp; return 1; }
+}
+static inline void heap_freekey(heap *h, uint32_t i) {
+    if (h->key_size == -1) recycle(*(char **)heap_keyslot(h, i));
+}
+
+/* 扩容到至少 want 槽（几何增长）；裸字节搬移句柄，不改计数。失败返回 0。 */
+static uint8_t heap_grow(heap *h, uint32_t want) {
+    uint32_t ncap = h->cap ? h->cap : HEAP_MIN_CAP;
+    char *ns;
+    while (ncap < want) ncap *= 2;
+    ns = (char *)refit(h->slots, (uint64_t)ncap * h->stride);
+    if (!ns) return 0;
+    h->slots = ns;
+    h->cap = ncap;
+    return 1;
+}
+
+void heap_init(heap *_this, uint8_t min, int32_t key_size, heap_cmp cmp, void *cmp_ctx) {
+    uint32_t keylen = key_size > 0 ? (uint32_t)key_size : (uint32_t)sizeof(char *);
+    uint32_t st = (uint32_t)sizeof(sc_afat) + keylen;
+    _this->slots = NULL;
+    _this->cmp = cmp;
+    _this->cmp_ctx = cmp_ctx;
+    _this->stride = (st + 7u) & ~7u;                /* align8 */
+    _this->size = 0;
+    _this->cap = 0;
+    _this->key_size = key_size;
+    _this->min = min ? 1 : 0;
+}
+
+void heap_clear(heap *_this) {
+    uint32_t i;
+    for (i = 0; i < _this->size; i++) {
+        sc_afat_unbind(heap_val(_this, i));         /* release value */
+        heap_freekey(_this, i);                     /* -1 模式回收 key 拷贝 */
+    }
+    _this->size = 0;
+}
+
+void heap_drop(heap *_this) {
+    heap_clear(_this);
+    recycle(_this->slots);
+    _this->slots = NULL;
+    _this->cap = 0;
+}
+
+uint64_t heap_len(heap *_this) { return _this->size; }
+uint8_t  heap_is_empty(heap *_this) { return _this->size == 0; }
+
+uint8_t heap_reserve(heap *_this, uint64_t n) {
+    if (n <= _this->cap) return 1;
+    if (n > 0xFFFFFFFFu) return 0;
+    return heap_grow(_this, (uint32_t)n);
+}
+
+uint8_t heap_push(heap *_this, const void *key, sc_afat value) {
+    uint32_t i = _this->size;
+    if (i == _this->cap && !heap_grow(_this, i + 1)) return 0;
+    if (!heap_storekey(_this, i, key)) return 0;
+    sc_afat_bind(heap_val(_this, i), value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);  /* retain */
+    _this->size = i + 1;
+    heap_sift_up(_this, i);
+    return 1;
+}
+
+uint8_t heap_pop(heap *_this) {
+    uint32_t last;
+    if (!_this->size) return 0;
+    sc_afat_unbind(heap_val(_this, 0));             /* release 堆顶 value */
+    heap_freekey(_this, 0);                         /* -1 模式回收堆顶 key */
+    last = --_this->size;
+    if (last) {                                     /* 末槽裸搬移到根后下滤（move，不改计数） */
+        memcpy(heap_slot(_this, 0), heap_slot(_this, last), _this->stride);
+        heap_sift_down(_this, 0);
+    }
+    return 1;
+}
+
+sc_afat heap_peek(heap *_this) {
+    if (_this->size) return *heap_val(_this, 0);    /* 借用，不改计数 */
+    { sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e; }
+}
+
+const void *heap_peek_key(heap *_this) {
+    return _this->size ? heap_logkey(_this, 0) : NULL;
+}
+
 
