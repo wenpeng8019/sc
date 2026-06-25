@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/列表）
+# adt —— sc 内置抽象数据类型（字符串/数组/列表）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -47,6 +47,54 @@
     fnc lower::                                    # 转小写（ASCII）
     fnc upper::                                    # 转大写（ASCII）
     fnc clone:: bool, out: string&                # 深拷贝到 out
+}
+
+# ---------------- array：动态值数组 ----------------
+# 元素为定长值块（逐字节复制、无唯一身份），以单元素字节数 elem_sz 参数化。
+# 本质上 array 与 string 同构：string 即 elem_sz=1 的 char array，故接口/能力对应一致：
+#   string.cstr → array.data ；string.at → array.at（返回元素指针，非值）；
+#   string.append_char → array.push ；string.append_n → array.append ；
+#   char 专属的 printf/strip/lower/upper 无泛型对应，省去；
+#   泛型比较类（find/rfind/equals/starts_with/ends_with/sort/bsearch）需传 array_cmp 回调。
+# 参考 uthash 的 utarray：内联连续存储、qsort 排序、bsearch 检索。
+# 因 init 带 elem_sz 参数，不参与“声明即构造”——须显式 a.init(sizeof(T))。
+# data/at/pop/front/back/bsearch 返回的是指向缓冲区内部的元素指针，下次扩容/写入后可能失效。
+
+@fnc array_cmp: i4, a: &, b: &                          # 比较回调类型（qsort/bsearch/find 契约）
+
+@def array: {
+    buf: char&      # 连续值块缓冲区（cap 个 elem_sz 字节槽位）
+    size: u4      # 元素个数
+    cap: u4       # 已分配槽位
+    elem_sz: u4   # 单元素字节数
+
+    fnc init:: elem_sz: u4                           # 构造（指定单元素字节数）
+    fnc drop::                                       # 释放缓冲区
+    fnc len:: u8                                    # 元素个数
+    fnc data:: &                                    # 缓冲区视图（≈ string.cstr；空可为 nil）
+    fnc clear::                                      # 清空（保留容量）
+    fnc reserve:: bool, n: u8                       # 预留槽位
+    fnc resize:: bool, n: u8                        # 调整元素数（新增槽位清零）
+    fnc assign:: bool, src: &, n: u8                 # 赋值为 n 个元素（≈ string.assign）
+    fnc append:: bool, src: &, n: u8                 # 追加 n 个元素（≈ string.append_n）
+    fnc push:: bool, value: &                        # 追加单元素（≈ string.append_char）
+    fnc pop:: &                                     # 弹出并返回尾元素指针（空返回 nil）
+    fnc insert:: bool, index: u8, value: &           # 指定位置插入单元素（≈ string.insert）
+    fnc erase:: bool, index: u8, n: u8               # 删除自 index 起 n 个元素（≈ string.erase）
+    fnc at:: &, index: u8                           # 取元素指针（≈ string.at；越界返回 nil）
+    fnc set:: bool, index: u8, value: &              # 改写元素（复制）
+    fnc front:: &                                   # 首元素指针（空返回 nil）
+    fnc back:: &                                    # 尾元素指针（空返回 nil）
+    fnc find:: i8, key: &, start: u8, cmp: array_cmp     # 线性查找（≈ string.find；未找到 -1）
+    fnc rfind:: i8, key: &, cmp: array_cmp               # 反向线性查找（≈ string.rfind；未找到 -1）
+    fnc equals:: bool, other: array&, cmp: array_cmp     # 逐元素比较相等（≈ string.equals）
+    fnc starts_with:: bool, other: array&, cmp: array_cmp  # 前缀判断（≈ string.starts_with）
+    fnc ends_with:: bool, other: array&, cmp: array_cmp    # 后缀判断（≈ string.ends_with）
+    fnc slice:: bool, start: i8, stop: i8, out: array&   # 切片（≈ string.slice；负索引从尾部计）
+    fnc reverse::                                    # 原地反转
+    fnc clone:: bool, out: array&                   # 深拷贝到 out
+    fnc sort:: cmp: array_cmp                        # qsort 排序
+    fnc bsearch:: &, key: &, cmp: array_cmp          # bsearch 检索（须已排序，未找到 nil）
 }
 
 # ---------------- list：动态指针数组 ----------------

@@ -249,6 +249,203 @@ uint8_t string_clone(string *_this, string *out) {
     return string_append_n(out, _this->data, _this->size);
 }
 
+/* ---------------- array ---------------- */
+
+/* 第 i 个元素槽位地址 */
+static char *arr_eltptr(array *a, uint64_t i) { return a->buf + i * a->elem_sz; }
+
+/* 确保容量至少 need 个槽位，按 2 倍扩容 */
+static uint8_t arr_grow(array *a, uint64_t need) {
+    if (a->cap >= need) return 1;
+    uint64_t cap = a->cap ? a->cap : 8;
+    while (cap < need) cap *= 2;
+    char *p = (char *)sc_realloc(a->buf, cap * a->elem_sz);
+    if (!p) return 0;
+    a->buf = p;
+    a->cap = cap;
+    return 1;
+}
+
+void array_init(array *_this, uint32_t elem_sz) {
+    _this->buf = NULL;
+    _this->size = 0;
+    _this->cap = 0;
+    _this->elem_sz = elem_sz ? elem_sz : 1;
+}
+
+void array_drop(array *_this) {
+    sc_free(_this->buf);
+    _this->buf = NULL;
+    _this->size = 0;
+    _this->cap = 0;
+}
+
+uint64_t array_len(array *_this) { return _this->size; }
+
+void *array_data(array *_this) { return _this->buf; }
+
+void array_clear(array *_this) { _this->size = 0; }
+
+uint8_t array_reserve(array *_this, uint64_t n) { return arr_grow(_this, n); }
+
+uint8_t array_resize(array *_this, uint64_t n) {
+    if (n > _this->size) {
+        if (!arr_grow(_this, n)) return 0;
+        memset(arr_eltptr(_this, _this->size), 0,
+               (n - _this->size) * _this->elem_sz);
+    }
+    _this->size = n;
+    return 1;
+}
+
+uint8_t array_assign(array *_this, void *src, uint64_t n) {
+    _this->size = 0;
+    return array_append(_this, src, n);
+}
+
+uint8_t array_append(array *_this, void *src, uint64_t n) {
+    if (!n) return 1;
+    if (!arr_grow(_this, _this->size + n)) return 0;
+    if (src) memcpy(arr_eltptr(_this, _this->size), src, n * _this->elem_sz);
+    _this->size += n;
+    return 1;
+}
+
+uint8_t array_push(array *_this, void *value) {
+    if (!arr_grow(_this, _this->size + 1)) return 0;
+    if (value) memcpy(arr_eltptr(_this, _this->size), value, _this->elem_sz);
+    _this->size++;
+    return 1;
+}
+
+void *array_pop(array *_this) {
+    return _this->size ? arr_eltptr(_this, --_this->size) : NULL;
+}
+
+uint8_t array_insert(array *_this, uint64_t index, void *value) {
+    if (index > _this->size) return 0;
+    if (!arr_grow(_this, _this->size + 1)) return 0;
+    memmove(arr_eltptr(_this, index + 1), arr_eltptr(_this, index),
+            (_this->size - index) * _this->elem_sz);
+    if (value) memcpy(arr_eltptr(_this, index), value, _this->elem_sz);
+    _this->size++;
+    return 1;
+}
+
+uint8_t array_erase(array *_this, uint64_t index, uint64_t n) {
+    if (index >= _this->size || !n) return index >= _this->size ? 0 : 1;
+    if (index + n > _this->size) n = _this->size - index;
+    memmove(arr_eltptr(_this, index), arr_eltptr(_this, index + n),
+            (_this->size - index - n) * _this->elem_sz);
+    _this->size -= n;
+    return 1;
+}
+
+void *array_at(array *_this, uint64_t index) {
+    return index < _this->size ? arr_eltptr(_this, index) : NULL;
+}
+
+uint8_t array_set(array *_this, uint64_t index, void *value) {
+    if (index >= _this->size) return 0;
+    if (value) memcpy(arr_eltptr(_this, index), value, _this->elem_sz);
+    return 1;
+}
+
+void *array_front(array *_this) {
+    return _this->size ? arr_eltptr(_this, 0) : NULL;
+}
+
+void *array_back(array *_this) {
+    return _this->size ? arr_eltptr(_this, _this->size - 1) : NULL;
+}
+
+/* 元素相等：cmp 非空用回调（==0 即相等），否则逐字节 memcmp */
+static int arr_eq(array *a, void *x, void *y, array_cmp cmp) {
+    return cmp ? cmp(x, y) == 0 : memcmp(x, y, a->elem_sz) == 0;
+}
+
+int64_t array_find(array *_this, void *key, uint64_t start, array_cmp cmp) {
+    for (uint64_t i = start; i < _this->size; i++)
+        if (arr_eq(_this, arr_eltptr(_this, i), key, cmp)) return (int64_t)i;
+    return -1;
+}
+
+int64_t array_rfind(array *_this, void *key, array_cmp cmp) {
+    for (uint64_t i = _this->size; i > 0; i--)
+        if (arr_eq(_this, arr_eltptr(_this, i - 1), key, cmp)) return (int64_t)(i - 1);
+    return -1;
+}
+
+uint8_t array_equals(array *_this, array *other, array_cmp cmp) {
+    if (_this->size != other->size || _this->elem_sz != other->elem_sz) return 0;
+    for (uint64_t i = 0; i < _this->size; i++)
+        if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
+    return 1;
+}
+
+uint8_t array_starts_with(array *_this, array *other, array_cmp cmp) {
+    if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
+    for (uint64_t i = 0; i < other->size; i++)
+        if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
+    return 1;
+}
+
+uint8_t array_ends_with(array *_this, array *other, array_cmp cmp) {
+    if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
+    uint64_t off = _this->size - other->size;
+    for (uint64_t i = 0; i < other->size; i++)
+        if (!arr_eq(_this, arr_eltptr(_this, off + i), arr_eltptr(other, i), cmp)) return 0;
+    return 1;
+}
+
+/* 负索引从尾部计；区间 [start, stop)，stop 超界截断。out 沿用本数组 elem_sz */
+uint8_t array_slice(array *_this, int64_t start, int64_t stop, array *out) {
+    int64_t len = (int64_t)_this->size;
+    if (start < 0) start += len;
+    if (stop < 0) stop += len;
+    if (start < 0) start = 0;
+    if (stop > len) stop = len;
+    out->elem_sz = _this->elem_sz;
+    out->size = 0;
+    if (start >= stop) return 1;
+    return array_append(out, arr_eltptr(_this, (uint64_t)start),
+                        (uint64_t)(stop - start));
+}
+
+void array_reverse(array *_this) {
+    if (_this->size < 2) return;
+    /* 借栈上小缓冲交换；元素较大时退化为逐字节 */
+    char tmp[64];
+    uint64_t sz = _this->elem_sz;
+    char *heap = sz > sizeof(tmp) ? (char *)sc_alloc(sz) : NULL;
+    char *t = heap ? heap : tmp;
+    for (uint64_t i = 0, j = _this->size; i + 1 < j; i++, j--) {
+        char *a = arr_eltptr(_this, i), *b = arr_eltptr(_this, j - 1);
+        memcpy(t, a, sz);
+        memcpy(a, b, sz);
+        memcpy(b, t, sz);
+    }
+    if (heap) sc_free(heap);
+}
+
+uint8_t array_clone(array *_this, array *out) {
+    out->elem_sz = _this->elem_sz;
+    out->size = 0;
+    return array_append(out, _this->buf, _this->size);
+}
+
+void array_sort(array *_this, array_cmp cmp) {
+    if (!cmp || _this->size < 2) return;
+    qsort(_this->buf, _this->size, _this->elem_sz,
+          (int (*)(const void *, const void *))cmp);
+}
+
+void *array_bsearch(array *_this, void *key, array_cmp cmp) {
+    if (!cmp || !_this->size) return NULL;
+    return bsearch(key, _this->buf, _this->size, _this->elem_sz,
+                   (int (*)(const void *, const void *))cmp);
+}
+
 /* ---------------- list ---------------- */
 
 static uint8_t list_grow(list *l, uint64_t need) {
