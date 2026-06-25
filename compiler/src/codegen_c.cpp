@@ -2174,6 +2174,16 @@ struct CGen {
                             << ".own, " << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
                     } else {
                         // 恢复为 T@（sc_fat 视图）：源为裸 @（sc_afat）取前 24B；源为 T@ 直透
+                        // object@ → 具体类 T@：源 .p 是擦除的 _class 槽指针，须 container_of
+                        // 回算实体基址（_class 偏移≠0 时，如 ~ 链表前缀/<C,I> 容器前缀）。
+                        if (srcFat && srcT == "object" && classNames.count(e.op)) {
+                            out << "({ sc_fat _oc" << n << " = ";
+                            emitExpr(*e.a, true);
+                            out << "; (sc_fat){(void *)((char *)_oc" << n << ".p - offsetof("
+                                << e.op << ", _class)), _oc" << n << ".tar, _oc" << n
+                                << ".own}; })";
+                            break;
+                        }
                         if (srcFat && !srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
                         out << "({ sc_afat _rc" << n << " = ";
                         emitExpr(*e.a, true);

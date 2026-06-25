@@ -33,4 +33,6 @@ fnc main: i4
     var nk: i4
     ok.LEGS(&nk)
     printf("node legs=%d\n", nk)
+    var back: Node@ = (ok: Node@)
+    printf("back age=%d\n", back->age)
     return 0

@@ -133,9 +133,15 @@ int32_t main(void) {
     (*(object)(ok).p)((object)(ok).p, SC_DIM_LEGS, &(nk));
     /* line 40 */
     printf("node legs=%d\n", nk);
-    /* line 41 */
+    /* line 44 */
+    sc_fat back = {0};
+    sc_fat_bind(&back, (({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).p, (sc_ref *)(({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).tar, SC_OWN_ROOT);
+    /* line 45 */
+    printf("back age=%d\n", ((Node *)(back).p)->age);
+    /* line 46 */
     {
         int32_t _ret = 0;
+        sc_fat_unbind_d(&back, (void (*)(void *))Node_drop);
         sc_fat_unbind_d(&ok, (void (*)(void *))sc_obj_drop);
         sc_fat_unbind_d(&k, (void (*)(void *))Node_drop);
         sc_fat_unbind_d(&od, (void (*)(void *))sc_obj_drop);

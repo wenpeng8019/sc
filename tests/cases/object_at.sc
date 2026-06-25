@@ -38,4 +38,9 @@ fnc main: i4
     var nk: i4
     ok.LEGS(&nk)
     printf("node legs=%d\n", nk)
+
+    # object@ → 具体类 T@ 还原（downcast）：源 .p 是擦除的 _class 槽，
+    # 须 container_of 回算实体基址（Node 为 ~ 链表类，_class 偏移≠0，覆盖偏移修复）。
+    var back: Node@ = (ok: Node@)
+    printf("back age=%d\n", back->age)
     return 0
