@@ -609,14 +609,130 @@ static inline const void *dict_logkey(dict *d, uint64_t i) {
                            : *(const void **)dict_keyslot(d, i);
 }
 
+/* ---------------- 可选哈希算法（编译期选择，默认 FNV-1a）----------------
+ * 用 -DDICT_HASH=dict_hash_xxx 切换（经 SCC_CFLAGS / cflags 传入），全进程统一。
+ * 7 种均为 (const unsigned char *p, size_t n) -> uint64_t，仅低位入桶（表为 2 幂掩码）。
+ * 候选：dict_hash_fnv / _ber / _sax / _oat / _jen / _sfh / _mur（见 REFERENCE.md 选型表）。
+ * 全部 static inline：未选中者不发出代码、不触发 -Wunused-function。 */
+
+static inline uint64_t dict_hash_fnv(const unsigned char *p, size_t n) {  /* FNV-1a 64 */
+    uint64_t h = 1469598103934665603ULL;
+    size_t i; for (i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+    return h;
+}
+static inline uint64_t dict_hash_ber(const unsigned char *p, size_t n) {  /* Bernstein djb2 */
+    uint64_t h = 0;
+    size_t i; for (i = 0; i < n; i++) h = h * 33 + p[i];
+    return h;
+}
+static inline uint64_t dict_hash_sax(const unsigned char *p, size_t n) {  /* Shift-Add-XOR */
+    uint64_t h = 0;
+    size_t i; for (i = 0; i < n; i++) h ^= (h << 5) + (h >> 2) + p[i];
+    return h;
+}
+static inline uint64_t dict_hash_oat(const unsigned char *p, size_t n) {  /* Jenkins one-at-a-time */
+    uint32_t h = 0;
+    size_t i;
+    for (i = 0; i < n; i++) { h += p[i]; h += (h << 10); h ^= (h >> 6); }
+    h += (h << 3); h ^= (h >> 11); h += (h << 15);
+    return h;
+}
+static inline uint64_t dict_hash_jen(const unsigned char *p, size_t n) {  /* Jenkins lookup2（uthash JEN） */
+    uint32_t a, b, c, k = (uint32_t)n;
+    a = b = 0x9e3779b9u; c = 0xfeedbeefu;
+#define DICT_JEN_MIX(a,b,c) do {                                       \
+        a -= b; a -= c; a ^= (c >> 13); b -= c; b -= a; b ^= (a << 8); \
+        c -= a; c -= b; c ^= (b >> 13); a -= b; a -= c; a ^= (c >> 12);\
+        b -= c; b -= a; b ^= (a << 16); c -= a; c -= b; c ^= (b >> 5); \
+        a -= b; a -= c; a ^= (c >> 3); b -= c; b -= a; b ^= (a << 10); \
+        c -= a; c -= b; c ^= (b >> 15);                               \
+    } while (0)
+    while (k >= 12u) {
+        a += p[0] + ((uint32_t)p[1] << 8) + ((uint32_t)p[2] << 16) + ((uint32_t)p[3] << 24);
+        b += p[4] + ((uint32_t)p[5] << 8) + ((uint32_t)p[6] << 16) + ((uint32_t)p[7] << 24);
+        c += p[8] + ((uint32_t)p[9] << 8) + ((uint32_t)p[10] << 16) + ((uint32_t)p[11] << 24);
+        DICT_JEN_MIX(a, b, c);
+        p += 12; k -= 12u;
+    }
+    c += (uint32_t)n;
+    switch (k) {
+        case 11: c += ((uint32_t)p[10] << 24); /* fallthrough */
+        case 10: c += ((uint32_t)p[9] << 16);  /* fallthrough */
+        case 9:  c += ((uint32_t)p[8] << 8);   /* fallthrough */
+        case 8:  b += ((uint32_t)p[7] << 24);  /* fallthrough */
+        case 7:  b += ((uint32_t)p[6] << 16);  /* fallthrough */
+        case 6:  b += ((uint32_t)p[5] << 8);   /* fallthrough */
+        case 5:  b += p[4];                    /* fallthrough */
+        case 4:  a += ((uint32_t)p[3] << 24);  /* fallthrough */
+        case 3:  a += ((uint32_t)p[2] << 16);  /* fallthrough */
+        case 2:  a += ((uint32_t)p[1] << 8);   /* fallthrough */
+        case 1:  a += p[0];                    /* fallthrough */
+        default: break;
+    }
+    DICT_JEN_MIX(a, b, c);
+#undef DICT_JEN_MIX
+    return c;
+}
+static inline uint64_t dict_hash_sfh(const unsigned char *p, size_t n) {  /* SuperFastHash（Paul Hsieh） */
+    uint32_t h = (uint32_t)n, tmp;
+    size_t rem = n & 3u;
+    n >>= 2;
+#define DICT_SFH_G16(d) ((uint32_t)((d)[0]) + ((uint32_t)((d)[1]) << 8))
+    for (; n > 0; n--) {
+        h += DICT_SFH_G16(p);
+        tmp = (DICT_SFH_G16(p + 2) << 11) ^ h;
+        h = (h << 16) ^ tmp;
+        p += 4;
+        h += (h >> 11);
+    }
+    switch (rem) {
+        case 3: h += DICT_SFH_G16(p); h ^= (h << 16);
+                h ^= ((uint32_t)p[2] << 18); h += (h >> 11); break;
+        case 2: h += DICT_SFH_G16(p); h ^= (h << 11); h += (h >> 17); break;
+        case 1: h += p[0]; h ^= (h << 10); h += (h >> 1); break;
+        default: break;
+    }
+#undef DICT_SFH_G16
+    h ^= (h << 3); h += (h >> 5); h ^= (h << 4);
+    h += (h >> 17); h ^= (h << 25); h += (h >> 6);
+    return h;
+}
+static inline uint64_t dict_hash_mur(const unsigned char *p, size_t n) {  /* MurmurHash3 x86_32 */
+    const uint32_t c1 = 0xcc9e2d51u, c2 = 0x1b873593u;
+    uint32_t h = 0, k;
+    size_t nb = n / 4, i;
+    for (i = 0; i < nb; i++) {
+        memcpy(&k, p + i * 4, 4);                  /* memcpy 避免非对齐读 UB */
+        k *= c1; k = (k << 15) | (k >> 17); k *= c2;
+        h ^= k; h = (h << 13) | (h >> 19); h = h * 5 + 0xe6546b64u;
+    }
+    k = 0;
+    {
+        const unsigned char *t = p + nb * 4;
+        switch (n & 3u) {
+            case 3: k ^= (uint32_t)t[2] << 16; /* fallthrough */
+            case 2: k ^= (uint32_t)t[1] << 8;  /* fallthrough */
+            case 1: k ^= (uint32_t)t[0];
+                    k *= c1; k = (k << 15) | (k >> 17); k *= c2; h ^= k; break;
+            default: break;
+        }
+    }
+    h ^= (uint32_t)n;
+    h ^= h >> 16; h *= 0x85ebca6bu; h ^= h >> 13; h *= 0xc2b2ae35u; h ^= h >> 16;
+    return h;
+}
+
+#ifndef DICT_HASH
+#define DICT_HASH dict_hash_fnv                    /* 默认 FNV-1a：小巧、短键分布稳 */
+#endif
+
 static uint64_t dict_hash(const dict *d, const void *key) {
     const unsigned char *p = (const unsigned char *)key;
     size_t n = d->key_size > 0 ? (size_t)d->key_size
                                : (key ? strlen((const char *)key) : 0);
-    uint64_t h = 1469598103934665603ULL;          /* FNV-1a 64 偏移基 */
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
-    return h;
+    return DICT_HASH(p, n);                         /* 编译期定死，直接内联，无间接调用 */
 }
+
 
 static int dict_keyeq(dict *d, uint64_t i, const void *key) {
     if (d->key_size > 0)

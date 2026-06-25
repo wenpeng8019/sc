@@ -8,7 +8,7 @@
 
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
-| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（动态指针数组） |
+| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射） |
 | m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
 | mem | `inc mem.sc` | 内存池：chunk/chunk0/chunk_array/chunk_aligned/refit/recycle（替代 malloc/calloc/realloc/free）、mem_usable、mem_trim（空闲页归还 OS）、mem_stat（统计快照含峰值）、mem_teardown、arena（竞技场批量分配）、shm（跨进程命名共享内存，支持只读/独占标志）；每线程 TLS 堆无锁、跨线程释放安全、线程退出堆自动回收复用 |
@@ -80,7 +80,7 @@
 
 ### 工作机制
 
-1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list` 类型及其方法。
+1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list`/`dict` 类型及其方法。
 2. 方法声明（`fnc T::m` 无函数体）转 C 时生成 extern 原型 `T_m(T *_this, ...)`，
    实现由配套 C 兑现。
 3. 单元图包含 `builtins/adt/adt.sc` 时，scc 把默认实现 `adt_impl.c` 经拼接机制并入
@@ -155,7 +155,65 @@ SCC_ADT=my_adt.o scc app.sc    # 环境变量等价；.sc 配置键 adt 亦可
 | clone | `bool, out&: list` | 浅拷贝到 out |
 | sort | `cmp&: list_cmp` | 稳定排序，`list_cmp: i4, a&:, b&:` |
 
+### dict —— 开放寻址哈希映射
+
+key→`@`（裸自动指针）映射，**拥有 value**（每条一份 retain，put 替换/remove/clear/drop 自动 release）。
+自写 SwissTable 风格开放寻址表：控制字节 + 桶数据两块内存，无 per-item 分配；线性探测 + 墓碑，
+负载因子 7/8 时整体 rehash 重建。因 `init` 带 `key_size` 参数，**不参与「声明即构造」**，须显式 `d.init(...)`。
+
+`key_size` 三态决定 key 语义（接口 key 均为 `const &` 裸指针，按 key_size 解读）：
+
+| key_size | 含义 | 存储 | 比较 |
+|----------|------|------|------|
+| `> 0` | 定长数值/POD（如 i4=4、指针=8） | 内联拷贝 key_size 字节 | memcmp（浮点键不安全，限整数/指针类） |
+| `== 0` | 引用字符串 | 仅存 `const char*` 借用指针，**dict 不拥有**，字符串本体须由 value 自持 | strcmp |
+| `== -1` | 拷贝字符串 | put 时复制一份，remove/clear/drop 回收 | strcmp |
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `key_size: i4` | 构造（指定 key 模式） |
+| drop | | 释放全部 retain + 回收桶/控制块 |
+| len | `u8` | 元素个数 |
+| has | `bool, key: const &` | 是否含 key |
+| get | `@, key: const &` | 借用 value 句柄（未命中返回空句柄，不改计数） |
+| put | `bool, key: const &, value: @` | 插入/替换（retain 新、替换 release 旧） |
+| remove | `bool, key: const &` | 删除并 release value（未命中返回 false） |
+| clear | | 清空并 release 全部 value（保留桶容量） |
+| each | `fn: dict_each_fn, ctx: &` | 无序遍历占用桶，回调返 false 即停 |
+| first / last | `i8` | 首/末个占用桶游标（空集 -1） |
+| next / prev | `i8, cur: i8` | cur 之后/之前的占用桶（无则 -1） |
+| key_at | `const &, cur: i8` | 游标处 key（无效返回 nil） |
+| value_at | `@, cur: i8` | 游标处 value 借用（无效返回空句柄） |
+
+回调类型 `dict_each_fn: bool, key: const &, value: @, ctx: &`（返回 false 提前终止）。
+游标与 `each` 走同一桶序；`get/has/each` 期间游标稳定，`put/remove` 可能 rehash 使其失效（遍历期间勿增删）。
+
+#### 哈希算法选择（编译期，对标 uthash）
+
+dict 内置 7 种哈希算法，默认 **FNV-1a**。算法全进程统一（哈希值不跨进程持久化），用编译宏切换、
+**零运行时开销**（编译期定死、直接内联，无函数指针间接调用）：
+
+```sh
+SCC_CFLAGS="-DDICT_HASH=dict_hash_mur" scc app.sc   # 切到 MurmurHash3
+# 或 .sc 配置：cflags = -DDICT_HASH=dict_hash_jen
+```
+
+| 宏值 | 算法 | 速度 | 分布质量 | 优势 / 适用场景 |
+|------|------|------|----------|-----------------|
+| `dict_hash_fnv`（默认） | FNV-1a 64 | 快 | 中上 | 实现极小、无表无依赖；短键（小整数、短字符串）分布稳——**通用首选** |
+| `dict_hash_ber` | Bernstein djb2 | 最快 | 中 | 一行核心、最省指令；键短且分布友好、追求极致简洁时用 |
+| `dict_hash_sax` | Shift-Add-XOR | 最快 | 中 | 同 djb2 量级，移位混合，对部分文本键比 djb2 略匀 |
+| `dict_hash_oat` | Jenkins one-at-a-time | 快 | 上 | 雪崩明显优于 djb2/SAX，仍单字节流式；中等长度字符串键的稳妥选择 |
+| `dict_hash_jen` | Jenkins lookup2 | 中 | 高 | 12 字节分块强混合；长字符串键、要求低碰撞时 |
+| `dict_hash_sfh` | SuperFastHash | 中快 | 高 | 16 位分块，吞吐高；中长键、批量查找的吞吐敏感场景 |
+| `dict_hash_mur` | MurmurHash3 x86_32 | 中快 | 最高 | 雪崩/抗碰撞最好；键分布刁钻、对碰撞最敏感时——**质量优先首选** |
+
+选型经验：**短键**（≤8 字节 int/短串）→ FNV-1a/djb2（混合开销占比大，简单即快）；
+**中长字符串键**→ OAT/SFH；**对碰撞最敏感或键分布刁钻**→ MurmurHash3。
+注意：本表非密码学哈希，**不抗 HashDoS**；如需抗恶意构造碰撞，应另接 SipHash（替换 `dict_hash` 单函数即可，接口/ABI 不变）。
+
 ### 使用示例
+
 
 完整示例见 `examples/feature6.sc`：
 
