@@ -1791,4 +1791,256 @@ const void *heap_peek_key(heap *_this) {
     return _this->size ? heap_logkey(_this, 0) : NULL;
 }
 
+/* ==================================================================== */
+/* trie —— 前缀树（字符串键 → 裸 @ 映射）                                */
+/* 节点用「首子/次兄」有序链 + 父指针表示：每节点存一个边字节，兄弟按字节升序排列——
+ *   故深度优先天然得字典序，子查找在兄弟链上线性扫描（可提前退出）。
+ * subkeys 记子树内键数（含自身终止），使 count_prefix 退化为 O(prefix) 而非扫子树。
+ * value 拥有（每键一份 retain，SC_OWN_RAW）；非终止节点 value 恒为零句柄（chunk0）。
+ * put/remove 迭代实现（深度 = 键长，避免对超长键深递归）；遍历/释放用「父指针回溯」
+ *   迭代（无显式栈、无递归），后序释放保子树先于父被回收。 */
+
+typedef struct trie_node trie_node;
+struct trie_node {
+    sc_afat    value;     /* 32B；仅 terminal 时有效 */
+    trie_node *child;     /* 首子（最小 byte） */
+    trie_node *sibling;   /* 次兄（byte 递增） */
+    trie_node *parent;    /* 上溯（remove 剪枝 / 遍历回溯） */
+    uint32_t   subkeys;   /* 子树内终止键数（含自身） */
+    uint8_t    byte;      /* 来自父的边标签 */
+    uint8_t    terminal;  /* 1 = 此处结束一个键 */
+};
+
+static inline sc_afat trie_empty_afat(void) {
+    sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e;
+}
+
+static trie_node *trie_node_new(trie_node *parent, uint8_t byte) {
+    trie_node *n = (trie_node *)chunk0(sizeof(trie_node));  /* 清零：value 空句柄、子/兄 NULL、subkeys 0、terminal 0 */
+    if (!n) return NULL;
+    n->parent = parent;
+    n->byte = byte;
+    return n;
+}
+
+/* 在有序兄弟链中查 byte=b 的子节点；无则 NULL */
+static trie_node *trie_find_child(trie_node *n, uint8_t b) {
+    trie_node *c = n->child;
+    while (c && c->byte < b) c = c->sibling;
+    return (c && c->byte == b) ? c : NULL;
+}
+
+/* find-or-create：返回子节点（*created 标记是否新建）；OOM 返回 NULL */
+static trie_node *trie_get_child(trie_node *n, uint8_t b, int *created) {
+    trie_node *prev = NULL, *c = n->child;
+    while (c && c->byte < b) { prev = c; c = c->sibling; }
+    if (c && c->byte == b) { *created = 0; return c; }
+    {
+        trie_node *nn = trie_node_new(n, b);
+        if (!nn) { *created = 0; return NULL; }          /* OOM */
+        nn->sibling = c;                                 /* 有序插入 */
+        if (prev) prev->sibling = nn; else n->child = nn;
+        *created = 1;
+        return nn;
+    }
+}
+
+/* 从 par 的子链中摘除节点 n（已知 n 是 par 的子） */
+static void trie_unlink(trie_node *par, trie_node *n) {
+    trie_node *prev = NULL, *q = par->child;
+    while (q && q != n) { prev = q; q = q->sibling; }
+    if (q) { if (prev) prev->sibling = q->sibling; else par->child = q->sibling; }
+}
+
+/* 沿键走到终端节点；任一字节缺失或空树返回 NULL（空前缀返回 root） */
+static trie_node *trie_walk(trie *t, const char *key) {
+    const unsigned char *p;
+    trie_node *n;
+    if (!key || !t->root) return NULL;
+    n = (trie_node *)t->root;
+    for (p = (const unsigned char *)key; *p; p++) {
+        n = trie_find_child(n, *p);
+        if (!n) return NULL;
+    }
+    return n;
+}
+
+/* 后序迭代释放整棵子树（父指针回溯、无递归、无显式栈）：
+ *   保证子节点全部回收后才回收父节点。release=1 时对终止节点 release value。 */
+static void trie_free_all(trie_node *root, int release) {
+    trie_node *n = root;
+    int descend = 1;
+    if (!n) return;
+    for (;;) {
+        if (descend && n->child) { n = n->child; continue; }  /* 一路下到无子 */
+        {
+            trie_node *sib = n->sibling, *par = n->parent;    /* 释放前捕获去向 */
+            if (release && n->terminal) sc_afat_unbind(&n->value);
+            recycle(n);
+            if (sib) { n = sib; descend = 1; }                /* 转兄弟，重新下探 */
+            else if (par) { n = par; descend = 0; }           /* 该层子链尽，回父：父子已尽即回收父 */
+            else break;                                       /* 已释放 root */
+        }
+    }
+}
+
+void trie_init(trie *_this) { _this->root = NULL; _this->size = 0; }
+
+void trie_clear(trie *_this) {
+    if (_this->root) { trie_free_all((trie_node *)_this->root, 1); _this->root = NULL; }
+    _this->size = 0;
+}
+
+void trie_drop(trie *_this) { trie_clear(_this); }
+
+uint64_t trie_len(trie *_this) { return _this->size; }
+
+uint8_t trie_has(trie *_this, const char *key) {
+    trie_node *n = trie_walk(_this, key);
+    return (uint8_t)(n && n->terminal);
+}
+
+sc_afat trie_get(trie *_this, const char *key) {
+    trie_node *n = trie_walk(_this, key);
+    if (n && n->terminal) return n->value;            /* 借用，不改计数 */
+    return trie_empty_afat();
+}
+
+uint8_t trie_put(trie *_this, const char *key, sc_afat value) {
+    const unsigned char *p;
+    trie_node *n, *graft_parent = NULL, *graft_first = NULL;
+    if (!key) return 0;
+    if (!_this->root) {
+        _this->root = trie_node_new(NULL, 0);
+        if (!_this->root) return 0;
+    }
+    n = (trie_node *)_this->root;
+    for (p = (const unsigned char *)key; *p; p++) {
+        int created = 0;
+        trie_node *c = trie_get_child(n, *p, &created);
+        if (!c) {                                     /* OOM：回滚新建链（单条下降链） */
+            if (graft_first) {
+                trie_unlink(graft_parent, graft_first);
+                while (graft_first) { trie_node *nx = graft_first->child; recycle(graft_first); graft_first = nx; }
+            }
+            return 0;
+        }
+        if (created && !graft_first) { graft_parent = n; graft_first = c; }
+        n = c;
+    }
+    if (n->terminal) {                                /* 替换：先 retain 新、再 release 旧（防自赋 UAF） */
+        sc_afat old = n->value;
+        sc_afat_bind(&n->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+        sc_afat_unbind(&old);
+        return 1;
+    }
+    n->terminal = 1;
+    sc_afat_bind(&n->value, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);  /* retain */
+    _this->size++;
+    { trie_node *u; for (u = n; u; u = u->parent) u->subkeys++; }   /* 路径全程 subkeys++ */
+    return 1;
+}
+
+uint8_t trie_remove(trie *_this, const char *key) {
+    trie_node *n, *u;
+    n = trie_walk(_this, key);
+    if (!n || !n->terminal) return 0;
+    sc_afat_unbind(&n->value);                        /* release value */
+    n->terminal = 0;
+    _this->size--;
+    for (u = n; u; u = u->parent) u->subkeys--;       /* 路径全程 subkeys-- */
+    while (n->parent && !n->terminal && n->child == NULL) {   /* 自下而上剪除悬挂空节点 */
+        trie_node *par = n->parent;
+        trie_unlink(par, n);
+        recycle(n);
+        n = par;
+    }
+    return 1;
+}
+
+uint8_t trie_has_prefix(trie *_this, const char *prefix) {
+    return (uint8_t)(trie_count_prefix(_this, prefix) > 0);
+}
+
+uint64_t trie_count_prefix(trie *_this, const char *prefix) {
+    trie_node *n = trie_walk(_this, prefix);
+    return n ? n->subkeys : 0;
+}
+
+int64_t trie_longest_prefix(trie *_this, const char *text) {
+    const unsigned char *p;
+    trie_node *n;
+    int64_t best = -1, depth = 0;
+    if (!text || !_this->root) return -1;
+    n = (trie_node *)_this->root;
+    if (n->terminal) best = 0;                        /* 空串键是任意串前缀 */
+    for (p = (const unsigned char *)text; *p; p++) {
+        n = trie_find_child(n, *p);
+        if (!n) break;
+        depth++;
+        if (n->terminal) best = depth;
+    }
+    return best;
+}
+
+/* 键缓冲：DFS 增量拼键，chunk/refit 背 */
+typedef struct { char *p; uint32_t len, cap; } trie_keybuf;
+
+static int tkb_init(trie_keybuf *b, const char *prefix) {
+    size_t n = prefix ? strlen(prefix) : 0;
+    b->cap = (uint32_t)(n + 16);
+    b->p = (char *)chunk(b->cap);
+    if (!b->p) return 0;
+    if (n) memcpy(b->p, prefix, n);
+    b->len = (uint32_t)n;
+    b->p[b->len] = 0;
+    return 1;
+}
+static int tkb_push(trie_keybuf *b, uint8_t c) {
+    if (b->len + 1 >= b->cap) {
+        uint32_t nc = b->cap * 2;
+        char *np = (char *)refit(b->p, nc);
+        if (!np) return 0;
+        b->p = np; b->cap = nc;
+    }
+    b->p[b->len++] = (char)c;
+    b->p[b->len] = 0;
+    return 1;
+}
+static void tkb_pop(trie_keybuf *b) { if (b->len) { b->p[--b->len] = 0; } }
+static void tkb_drop(trie_keybuf *b) { recycle(b->p); b->p = NULL; }
+
+void trie_each_prefix(trie *_this, const char *prefix, trie_each_fn fn, void *ctx) {
+    trie_node *start, *cur;
+    trie_keybuf buf;
+    if (!fn) return;
+    start = trie_walk(_this, prefix);                 /* prefix 终端节点；不存在则 NULL */
+    if (!start) return;
+    if (!tkb_init(&buf, prefix)) return;              /* buf 起始 = prefix（= 到 start 的路径） */
+    cur = start;
+    for (;;) {
+        if (cur->terminal) {
+            if (!fn(buf.p, cur->value, ctx)) break;
+        }
+        if (cur->child) {                             /* 下探：追加子边字节 */
+            cur = cur->child;
+            if (!tkb_push(&buf, cur->byte)) break;
+        } else {
+            while (cur != start && cur->sibling == NULL) {  /* 无子无兄：回溯到有兄处（不越过 start） */
+                cur = cur->parent;
+                tkb_pop(&buf);
+            }
+            if (cur == start) break;                  /* 回到子树根，遍历完毕 */
+            tkb_pop(&buf);                             /* 转兄弟：替换末字节 */
+            cur = cur->sibling;
+            if (!tkb_push(&buf, cur->byte)) break;
+        }
+    }
+    tkb_drop(&buf);
+}
+
+void trie_each(trie *_this, trie_each_fn fn, void *ctx) {
+    trie_each_prefix(_this, "", fn, ctx);
+}
+
 

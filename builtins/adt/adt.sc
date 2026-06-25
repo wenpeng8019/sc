@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树/堆）
+# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典/二叉搜索树/堆/前缀树）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -285,6 +285,38 @@
     fnc pop:: bool                                   # 弹出堆顶并 release（空返回 false；下滤）
     fnc peek:: @                                     # 借用堆顶 value 句柄（空返回空句柄；不改计数）
     fnc peek_key:: const &                           # 借用堆顶 key（空返回 nil）
+}
+
+
+# ---------------- trie：前缀树（字符串键 → 裸 @ 映射） ----------------
+# 键恒为 NUL 结尾字符串，逐字节分解进树路径（路径即键，不另存键串）；value 为裸自动指针 @，
+#   trie 拥有每键一份 retain（put retain、替换/remove/clear/drop release）。
+# 节点采「首子/次兄」有序链 + 父指针：每节点存一个边字节，兄弟按字节升序——故遍历天然字典序；
+#   节点 subkeys 记子树内键数，使 count_prefix O(prefix)。
+# 取出语义同 dict「取用分离」：get 借用（不改计数），remove 删除并 release（返回 bool）。
+# 前缀能力：has_prefix/count_prefix/each_prefix（自动补全）/longest_prefix（路由/最长匹配）。
+# 不提供整数游标——键串须沿路径重建，each/each_prefix 用回调在 DFS 中增量拼键，O(总字符数)。
+# init 无参——参与「声明即构造」：var t: trie 自动 trie_init(&t)。
+
+@fnc trie_each_fn: bool, key: const char&, value: @, ctx: &   # 遍历回调（key 为完整键串；返回 false 提前终止）
+
+@def trie: {
+    root: &          # 根节点（不透明 trie_node*；空树为 nil）
+    size: u8         # 键数
+
+    fnc init::                                       # 构造（空树；无参→声明即构造）
+    fnc drop::                                       # 释放全部 retain + 回收全部节点
+    fnc len:: u8                                    # 键个数
+    fnc has:: bool, key: const char&                 # 是否含精确键
+    fnc get:: @, key: const char&                    # 借用键对应 value（未命中空句柄；不改计数）
+    fnc put:: bool, key: const char&, value: @       # 插入/替换（retain 新、替换 release 旧）
+    fnc remove:: bool, key: const char&              # 删除并 release（未命中 false；剪枝空节点）
+    fnc clear::                                      # 清空并 release 全部 value
+    fnc has_prefix:: bool, prefix: const char&       # 是否存在以 prefix 开头的键
+    fnc count_prefix:: u8, prefix: const char&       # 以 prefix 开头的键数（O(prefix)）
+    fnc each:: fn: trie_each_fn, ctx: &             # 按字典序遍历全部键（回调返 false 即停）
+    fnc each_prefix:: prefix: const char&, fn: trie_each_fn, ctx: &  # 按字典序遍历 prefix 开头的键（自动补全）
+    fnc longest_prefix:: i8, text: const char&       # text 的最长「键前缀」长度（无则 -1；空串键返 0）
 }
 
 

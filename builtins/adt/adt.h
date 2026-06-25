@@ -283,6 +283,37 @@ uint8_t  heap_pop(heap *_this);                       /* 弹出堆顶并 release
 sc_afat  heap_peek(heap *_this);                      /* 借用堆顶 value 句柄（不改计数）；空返回空句柄 */
 const void *heap_peek_key(heap *_this);               /* 借用堆顶 key（空返回 NULL） */
 
+/* ---------------- trie：前缀树（字符串键 → 裸 @ 映射） ---------------- */
+/* 键恒为 NUL 结尾字符串，逐字节分解进树路径（路径即键，不另存键串）；value 为裸自动指针 @，
+ * trie 拥有每键一份 retain（put retain、替换/remove/clear/drop release）。
+ * 节点采「首子/次兄」有序链 + 父指针：每节点存一个边字节，兄弟按字节升序——故遍历天然字典序，
+ *   子查找在兄弟链上线性（分支因子通常小）。节点 subkeys 记子树内键数，使 count_prefix O(prefix)。
+ * 取出语义同 dict「取用分离」：get 借用（不改计数），remove 删除并 release（返回 bool）。
+ * 前缀能力：has_prefix/count_prefix/each_prefix（自动补全）/longest_prefix（路由/最长匹配）。
+ * 不提供整数游标——键串须沿路径重建，each/each_prefix 用回调在 DFS 中增量拼键，O(总字符数)。
+ * init 无参——参与「声明即构造」：var t: trie 自动 trie_init(&t)。 */
+
+typedef uint8_t (*trie_each_fn)(const char *key, sc_afat value, void *ctx);  /* 遍历回调：完整键串；返回 0 提前终止 */
+
+typedef struct trie {
+    void    *root;   /* trie_node*（首次插入前为 NULL；代表空串路径） */
+    uint64_t size;   /* 键数 */
+} trie;
+
+void     trie_init(trie *_this);                       /* 构造（空树） */
+void     trie_drop(trie *_this);                       /* 释放全部 retain + 回收全部节点 */
+uint64_t trie_len(trie *_this);
+uint8_t  trie_has(trie *_this, const char *key);       /* 是否含精确键 */
+sc_afat  trie_get(trie *_this, const char *key);       /* 借用键对应 value（未命中空句柄；不改计数） */
+uint8_t  trie_put(trie *_this, const char *key, sc_afat value);  /* 插入/替换：retain 新、替换 release 旧 */
+uint8_t  trie_remove(trie *_this, const char *key);    /* 删除并 release；未命中 0；剪枝空节点 */
+void     trie_clear(trie *_this);                      /* 清空并 release 全部 value */
+uint8_t  trie_has_prefix(trie *_this, const char *prefix);   /* 是否存在以 prefix 开头的键 */
+uint64_t trie_count_prefix(trie *_this, const char *prefix); /* 以 prefix 开头的键数（O(prefix)） */
+void     trie_each(trie *_this, trie_each_fn fn, void *ctx);  /* 按字典序遍历全部键；回调返 0 即停 */
+void     trie_each_prefix(trie *_this, const char *prefix, trie_each_fn fn, void *ctx);  /* 字典序遍历 prefix 开头的键 */
+int64_t  trie_longest_prefix(trie *_this, const char *text); /* text 的最长「键前缀」长度；无 -1；空串键 0 */
+
 
 #ifdef __cplusplus
 }
