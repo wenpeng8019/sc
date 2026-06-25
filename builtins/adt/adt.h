@@ -96,6 +96,33 @@ uint8_t  array_clone(array *_this, array *out);       /* 深拷贝 */
 void     array_sort(array *_this, array_cmp cmp);     /* qsort */
 void    *array_bsearch(array *_this, void *key, array_cmp cmp);  /* bsearch（须已排序），未找到 NULL */
 
+/* ---------------- ring：SPSC 无锁循环队列（kfifo 风格） ---------------- */
+/* 单生产者单消费者无锁有界队列：元素为定长值块（elem_sz 字节），容量为 2 的幂。
+ * head（消费者独写）/ tail（生产者独写）为自由递增计数器，槽位下标 = idx & mask，
+ * 元素数 = tail - head（无符号回绕）。生产者以 release 发布 tail、消费者以 acquire
+ * 观测 → 数据写入先于索引可见；空 = (tail==head)，满 = (tail-head > mask)。
+ * 约束：仅 SPSC 安全；多生产者/多消费者须外部加锁。init/drop/clear 仅在无并发时调用。
+ * 原子读写经 platform.h 的 sc_* 宏（C11 stdatomic / 平台特化）。 */
+
+typedef struct ring {
+    char    *buf;      /* 连续值块缓冲区（cap = mask+1 个 elem_sz 字节槽，2 的幂） */
+    uint32_t head;     /* 消费者索引（自由递增；& mask 取槽） */
+    uint32_t tail;     /* 生产者索引（自由递增） */
+    uint32_t mask;     /* cap - 1（cap 为 2 的幂） */
+    uint32_t elem_sz;  /* 单元素字节数 */
+} ring;
+
+uint8_t  ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity);  /* capacity 向上取 2 幂；分配失败返回 0 */
+void     ring_drop(ring *_this);                      /* 释放缓冲区 */
+uint64_t ring_cap(ring *_this);                       /* 容量（2 的幂；未初始化 0） */
+uint64_t ring_len(ring *_this);                       /* 当前元素数快照（tail - head） */
+uint8_t  ring_is_empty(ring *_this);
+uint8_t  ring_is_full(ring *_this);
+void     ring_clear(ring *_this);                     /* 复位 head/tail（仅无并发时安全） */
+uint8_t  ring_push(ring *_this, void *value);         /* 生产者入队一个元素（拷贝 elem_sz 字节）；满返回 0 */
+uint8_t  ring_pop(ring *_this, void *out);            /* 消费者出队到 out（拷贝 elem_sz 字节）；空返回 0 */
+void    *ring_peek(ring *_this);                      /* 消费者借用队首元素指针；空返回 NULL */
+
 /* ---------------- list：段式裸 @ 自动指针容器 ---------------- */
 /* 元素为裸自动指针 @（sc_afat，32B）；list 拥有元素（每元素一份 retain）。
  * 段式存储：元素 i 住 segs[i / LIST_SEG][i % LIST_SEG]，段索引表与各段内存均来自

@@ -447,6 +447,96 @@ void *array_bsearch(array *_this, void *key, array_cmp cmp) {
                    (int (*)(const void *, const void *))cmp);
 }
 
+/* ================= ring：SPSC 无锁循环队列（kfifo 风格） ================= */
+/* 单生产者单消费者无锁：head（消费者独写）/ tail（生产者独写）自由递增，容量 2 的幂，
+ * 槽位下标 = idx & mask，元素数 = tail - head（无符号回绕）。生产者 release 发布 tail、
+ * 消费者 acquire 观测 tail → 数据先于索引可见；反向 head 同理释放槽位。
+ * 原子读写用 platform.h 的 sc_* 宏（C11 stdatomic / 平台特化）。
+ * 仅 SPSC 安全；多生产者/多消费者须外部加锁。init/drop/clear 仅在无并发时调用。 */
+
+static uint32_t ring_pow2(uint32_t n) {
+    uint32_t p = 2;                          /* 最小容量 2 */
+    while (p < n) {
+        if (p & 0x80000000u) return 0x80000000u;  /* 溢出兜底：封顶 2^31 */
+        p <<= 1;
+    }
+    return p;
+}
+
+static inline char *ring_slot(ring *r, uint32_t idx) {
+    return r->buf + (size_t)(idx & r->mask) * r->elem_sz;
+}
+
+uint8_t ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity) {
+    uint32_t es = elem_sz ? elem_sz : 1;
+    uint32_t cap = ring_pow2(capacity ? capacity : 2);
+    _this->head = 0;
+    _this->tail = 0;
+    _this->elem_sz = es;
+    _this->buf = (char *)sc_alloc((uint64_t)cap * es);
+    if (!_this->buf) { _this->mask = 0; return 0; }
+    _this->mask = cap - 1;
+    return 1;
+}
+
+void ring_drop(ring *_this) {
+    sc_free(_this->buf);
+    _this->buf = NULL;
+    _this->head = 0;
+    _this->tail = 0;
+    _this->mask = 0;
+}
+
+uint64_t ring_cap(ring *_this) {
+    return _this->buf ? (uint64_t)_this->mask + 1 : 0;
+}
+
+uint64_t ring_len(ring *_this) {
+    uint32_t tail = sc_get_acq(&_this->tail);
+    uint32_t head = sc_get_acq(&_this->head);
+    return (uint64_t)(tail - head);
+}
+
+uint8_t ring_is_empty(ring *_this) {
+    return sc_get_acq(&_this->tail) == sc_get_acq(&_this->head);
+}
+
+uint8_t ring_is_full(ring *_this) {
+    uint32_t tail = sc_get_acq(&_this->tail);
+    uint32_t head = sc_get_acq(&_this->head);
+    return (tail - head) > _this->mask;      /* count == mask+1 == cap → 满 */
+}
+
+void ring_clear(ring *_this) {
+    sc_set(&_this->head, 0);
+    sc_set(&_this->tail, 0);
+}
+
+uint8_t ring_push(ring *_this, void *value) {
+    uint32_t tail = sc_get(&_this->tail);        /* 生产者独占 tail：relaxed 读自身 */
+    uint32_t head = sc_get_acq(&_this->head);    /* acquire 观测消费者已释放的槽 */
+    if ((tail - head) > _this->mask) return 0;   /* 满 */
+    if (value) memcpy(ring_slot(_this, tail), value, _this->elem_sz);
+    sc_set_rel(&_this->tail, tail + 1);          /* release：数据写入先于 tail 可见 */
+    return 1;
+}
+
+uint8_t ring_pop(ring *_this, void *out) {
+    uint32_t head = sc_get(&_this->head);        /* 消费者独占 head：relaxed 读自身 */
+    uint32_t tail = sc_get_acq(&_this->tail);    /* acquire 观测生产者写入的数据 */
+    if (tail == head) return 0;                  /* 空 */
+    if (out) memcpy(out, ring_slot(_this, head), _this->elem_sz);
+    sc_set_rel(&_this->head, head + 1);          /* release：释放该槽供生产者复用 */
+    return 1;
+}
+
+void *ring_peek(ring *_this) {
+    uint32_t head = sc_get(&_this->head);
+    uint32_t tail = sc_get_acq(&_this->tail);
+    if (tail == head) return NULL;
+    return ring_slot(_this, head);
+}
+
 /* ---------------- list：段式裸 @ 自动指针容器 ----------------
  * 元素为 sc_afat（裸自动指针 @），list 拥有每元素一份 retain（own=SC_OWN_RAW，
  * 仅经目标 in++/in-- 记账，不挂 out 边）。段式存储：元素 i 住 segs[i/LIST_SEG][i%LIST_SEG]，

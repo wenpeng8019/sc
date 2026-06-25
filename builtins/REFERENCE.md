@@ -8,7 +8,7 @@
 
 | 模块 | 引入方式 | 说明 |
 |------|----------|------|
-| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射） |
+| adt | `inc adt.sc` | 抽象数据类型：string（动态字符串）、list（段式裸 @ 容器）、dict（开放寻址哈希映射）、ring（SPSC 无锁循环队列） |
 | m | `inc m.sc` | 多线程语言支持标准：run 语句、thread、mutex、cond（含 wait 方法）、pool（线程池） |
 | env | `inc env.sc` | 运行环境 / 系统路径：work_dir、home_dir、download_dir、exe_file、tmp_file（跨平台，C 侧实现） |
 | mem | `inc mem.sc` | 内存池：chunk/chunk0/chunk_array/chunk_aligned/refit/recycle（替代 malloc/calloc/realloc/free）、mem_usable、mem_trim（空闲页归还 OS）、mem_stat（统计快照含峰值）、mem_teardown、arena（竞技场批量分配）、shm（跨进程命名共享内存，支持只读/独占标志）；每线程 TLS 堆无锁、跨线程释放安全、线程退出堆自动回收复用 |
@@ -80,7 +80,7 @@
 
 ### 工作机制
 
-1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list`/`dict` 类型及其方法。
+1. sc 源码 `inc adt.sc` 后即可使用 `string`/`list`/`dict`/`ring` 类型及其方法。
 2. 方法声明（`fnc T::m` 无函数体）转 C 时生成 extern 原型 `T_m(T *_this, ...)`，
    实现由配套 C 兑现。
 3. 单元图包含 `builtins/adt/adt.sc` 时，scc 把默认实现 `adt_impl.c` 经拼接机制并入
@@ -215,6 +215,11 @@ chaining）**根本不同——更接近 Google SwissTable / Rust `hashbrown`。
 | 类型模型 | 编译期宏 + 侵入式 handle | 运行时类型擦除（key_size 三态） |
 
 > 仅「哈希算法」这一层对标了 uthash（下文 7 选 1）；桶与碰撞这套底层结构是独立的开放寻址设计。
+>
+> **设计渊源**：本 dict 属 Google **SwissTable**（Abseil `flat_hash_map`）/ Rust **`hashbrown`**（标准库
+> `HashMap` 后端）一派——开放寻址 + 独立控制字节（h2 元数据）+ 连续内联存储。本实现是其精简版：保留控制
+> 字节快速过滤与连续布局两大核心收益，但用**标量逐桶线性探测**替代 SwissTable 的 SIMD 16 桶组（实现更小、
+> 无平台 intrinsic 依赖），代价是大表高负载时探测略慢于 SIMD 版。
 
 #### 哈希算法选择（编译期，对标 uthash）
 
@@ -239,6 +244,68 @@ SCC_CFLAGS="-DDICT_HASH=dict_hash_mur" scc app.sc   # 切到 MurmurHash3
 选型经验：**短键**（≤8 字节 int/短串）→ FNV-1a/djb2（混合开销占比大，简单即快）；
 **中长字符串键**→ OAT/SFH；**对碰撞最敏感或键分布刁钻**→ MurmurHash3。
 注意：本表非密码学哈希，**不抗 HashDoS**；如需抗恶意构造碰撞，应另接 SipHash（替换 `dict_hash` 单函数即可，接口/ABI 不变）。
+
+### ring —— SPSC 无锁循环队列（kfifo 风格）
+
+单生产者单消费者（SPSC）**无锁有界队列**，仿 Linux 内核 `kfifo`。元素为定长值块（`elem_sz` 字节、
+逐字节复制），容量向上取 2 的幂。`head`（消费者独写）/ `tail`（生产者独写）为自由递增计数器，
+槽位下标 = `idx & mask`，元素数 = `tail - head`（无符号回绕）：**空** = `tail==head`，**满** = `tail-head > mask`。
+因 `init` 带参数，**不参与「声明即构造」**，须显式 `r.init(sizeof(T), capacity)`。
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| init | `bool, elem_sz: u4, capacity: u4` | 构造（capacity 向上取 2 幂；分配失败返回 false） |
+| drop | | 释放缓冲区 |
+| cap | `u8` | 容量（2 的幂；未初始化 0） |
+| len | `u8` | 当前元素数快照（tail − head） |
+| is_empty | `bool` | 是否空 |
+| is_full | `bool` | 是否满 |
+| clear | | 复位 head/tail（**仅无并发时安全**） |
+| push | `bool, value: &` | 生产者入队一个元素（拷贝 elem_sz 字节）；满返回 false |
+| pop | `bool, out: &` | 消费者出队到 out（拷贝 elem_sz 字节）；空返回 false |
+| peek | `&` | 消费者借用队首元素指针；空返回 nil |
+
+#### 无锁内存序
+
+生产者 `push` 以 **release** 发布 `tail`、消费者 `pop`/`len`/`is_empty` 以 **acquire** 观测 `tail`，
+保证数据写入先于索引可见；反向 `head` 同理释放槽位供生产者复用。原子读写经 `platform.h` 的 `sc_*` 宏
+（C11 `stdatomic` / 平台特化），无任何锁与系统调用。
+
+**使用约束**：
+- 仅 **SPSC** 安全——**单一**生产者线程只调 `push`，**单一**消费者线程只调 `pop`/`peek`；
+  多生产者或多消费者并发须**外部加锁**（或改用带锁队列）。
+- `init`/`drop`/`clear` 仅在**无并发访问**时调用（建立/拆除阶段）。
+- `peek` 返回指向缓冲区内部的指针，仅供消费者线程在下一次 `pop` 前读取。
+- `head`/`tail` 同 cache 行存在**伪共享**，极端吞吐场景可自行加 padding 分离到不同 cache 行。
+
+```sc
+inc adt.sc
+inc m.sc
+
+@def shared: { q: ring ; ... }
+
+@rpc producer: s: shared&, n: i4          # 单生产者线程
+    var i: i4 = 1
+    for i = 1; i <= n; i++
+        while !s->q.push(&i)              # 满则自旋让出
+            P_usleep(0)
+
+@rpc consumer: s: shared&, n: i4          # 单消费者线程
+    var v: i4 = 0
+    ...
+        if s->q.pop(&v)                    # 空则自旋
+            ...
+
+fnc main: i4
+    var s: shared
+    s.q.init(sizeof(v), 1024)              # 容量取 2 的幂
+    run producer(&s, n), &tp
+    run consumer(&s, n), &tc
+    tp->join(); tc->join()
+    s.q.drop()
+```
+
+完整用例见 `tests/cases/ring_at.sc`（单线程 FIFO/满空语义 + 并发 SPSC 校验和压力）。
 
 ### 使用示例
 

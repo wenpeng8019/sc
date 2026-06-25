@@ -1,4 +1,4 @@
-# adt —— sc 内置抽象数据类型（字符串/数组/列表）
+# adt —— sc 内置抽象数据类型（字符串/数组/环形队列/列表/字典）
 #
 # 本文件是 adt 的唯一事实源：
 #   @def 定义纯数据结构布局（C ABI 契约的一部分）
@@ -96,6 +96,36 @@
     fnc sort:: cmp: array_cmp                        # qsort 排序
     fnc bsearch:: &, key: &, cmp: array_cmp          # bsearch 检索（须已排序，未找到 nil）
 }
+
+# ---------------- ring：SPSC 无锁循环队列（kfifo 风格） ----------------
+# 单生产者单消费者无锁有界队列。元素为定长值块（elem_sz 字节，逐字节复制），容量为 2 的幂。
+# head（消费者独写）/ tail（生产者独写）为自由递增计数器，槽位下标 = idx & mask，
+#   元素数 = tail - head（无符号回绕）。生产者 release 发布 tail、消费者 acquire 观测，
+#   保证数据写入先于索引可见；空 = (tail==head)，满 = (tail-head > mask)。
+# 约束：仅 SPSC 安全——单生产者线程只调 push、单消费者线程只调 pop/peek；
+#   多生产者/多消费者须外部加锁。init/drop/clear 仅在无并发访问时调用。
+#   head/tail 同 cache 行存在伪共享，极端吞吐场景可自行加 padding。
+# 因 init 带参数，不参与「声明即构造」——须显式 r.init(sizeof(T), capacity)。
+
+@def ring: {
+    buf: char&      # 连续值块缓冲区（cap = mask+1 个 elem_sz 字节槽）
+    head: u4        # 消费者索引（自由递增；& mask 取槽）
+    tail: u4        # 生产者索引（自由递增）
+    mask: u4        # cap - 1（cap 为 2 的幂）
+    elem_sz: u4     # 单元素字节数
+
+    fnc init:: bool, elem_sz: u4, capacity: u4       # 构造（capacity 向上取 2 幂；分配失败返回 false）
+    fnc drop::                                       # 释放缓冲区
+    fnc cap:: u8                                    # 容量（2 的幂；未初始化 0）
+    fnc len:: u8                                    # 当前元素数快照（tail - head）
+    fnc is_empty:: bool                             # 是否空
+    fnc is_full:: bool                              # 是否满
+    fnc clear::                                      # 复位 head/tail（仅无并发时安全）
+    fnc push:: bool, value: &                        # 生产者入队一个元素（满返回 false）
+    fnc pop:: bool, out: &                           # 消费者出队到 out（空返回 false）
+    fnc peek:: &                                    # 消费者借用队首元素指针（空返回 nil）
+}
+
 
 # ---------------- list：段式裸 @ 自动指针容器 ----------------
 # 元素为裸自动指针 @（sc_afat），list 拥有元素（每元素一份 retain）。
