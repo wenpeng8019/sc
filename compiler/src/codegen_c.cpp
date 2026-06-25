@@ -2344,20 +2344,53 @@ struct CGen {
                 }
                 break;
             }
-            // sync E：同步驱动 rpc。无目标 ⇒ 当前线程直接执行（经 rpc 调用包装
-            // X(args)：装填参数结构体→worker X_rpc→取返回槽），替代已废止的裸 rpc() 调用。
+            // sync E[, q]：同步驱动 rpc。
+            //   无目标 ⇒ 当前线程直接执行（X(args) 包装：装填→worker X_rpc→取返回槽），替代裸 rpc()。
+            //   带队列 q ⇒ 阻塞带回复：投递给 q，阻塞至消费者执行完，取回返回槽。语句表达式求值：
+            //     ({ struct W _rp = {0}; 填实参; q->sync(q,(void(*)(void*))W_rpc,&_rp); _rp._; })
             case Expr::Sync: {
                 if (!e.a || e.a->kind != Expr::Call ||
                     !e.a->a || e.a->a->kind != Expr::Ident ||
                     !rpcs.count(e.a->a->text))
                     throw CompileError{"sync 期望 rpc 调用形式 name(args)", e.line};
-                if (rpcs.at(e.a->a->text)->hasAwait)
+                const Decl* r = rpcs.at(e.a->a->text);
+                if (r->hasAwait)
                     throw CompileError{"sync 不能驱动异步 rpc '" + e.a->a->text +
                                        "'（含 await，请用 async）", e.line};
-                bool save = emitRpcCallOK;
-                emitRpcCallOK = true;
-                emitExpr(*e.a, true);
-                emitRpcCallOK = save;
+                if (!e.b) {                          // 无目标：当前线程直接执行
+                    bool save = emitRpcCallOK;
+                    emitRpcCallOK = true;
+                    emitExpr(*e.a, true);
+                    emitRpcCallOK = save;
+                    break;
+                }
+                // 带队列目标：阻塞带回复
+                if (r->structCommon.variadic)
+                    throw CompileError{"sync ..., q 暂不支持可变参数 rpc：" + r->name, e.line};
+                const Expr& call = *e.a;
+                if (call.args.size() > r->structCommon.fields.size())
+                    throw CompileError{"rpc 实参数量超出：" + r->name, e.line};
+                VType qvt;
+                if (!exprVType(*e.b, qvt) || qvt.name != "queue" || !aggrOf("queue"))
+                    throw CompileError{"sync ..., q 的目标须为 queue 端点", e.line};
+                const bool isPtr = qvt.ptr >= 1;
+                out << "({ struct " << r->name << " _rp = {0}; ";
+                for (size_t i = 0; i < call.args.size(); i++) {
+                    const Field& f = r->structCommon.fields[i];
+                    out << "_rp." << f.name << " = ";
+                    emitExpr(*call.args[i], true); out << "; ";
+                    if (!f.type.arrayDims.empty()) {   // 数组实参：额外装填 size（字节数）
+                        out << "_rp." << rpcArraySizeName(f) << " = ";
+                        emitRpcArraySizeof(f); out << "; ";
+                    }
+                }
+                emitComBasePtr(*e.b, isPtr);
+                out << "->sync(";
+                emitComBasePtr(*e.b, isPtr);
+                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp); ";
+                if (rpcHasRet(*r)) out << "_rp._; ";    // 返回槽（消费者已回填）
+                else out << "(void)0; ";
+                out << "})";
                 break;
             }
             // await E：仅出现在异步 rpc 体内，由 emitAsyncStmts 在语句层处理；

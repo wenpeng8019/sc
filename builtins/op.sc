@@ -341,6 +341,8 @@ def operand: {
 # 故语言内核（<< 投递）经协议指针派发、零 emit mt 符号，彻底解耦 mt 与语言。
 #   q << work(a, b)       # 投递：把 rpc 调用整体打包成消息入队（不触发本地调用）
 #                         # → q->post(q, work_rpc, &参数, sizeof(参数))
+#   var r = sync work(a, b), q  # 阻塞带回复：投递给 q，阻塞至消费者执行完，返 rpc 结果
+#                         # → q->sync(q, work_rpc, &参数)；由另一线程 pull 或池工作线程消费
 #   q->pull(0)            # 取一条消息在当前线程执行：<0 无限等 / 0 立即 / >0 毫秒超时
 #                         # 返回 1 处理一条 / 0 超时且队列空 / -1 已关闭（且排空）
 # 宿主三态（构造时绑定 host: pool&）：nil=未绑/延迟、main=当前/主线程（自行跑 pull
@@ -352,6 +354,7 @@ def operand: {
     h: &                 # 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有）
 
     fnc post:            # << 投递一个 rpc 消息（编译器经 << 派发；签名见 op.h）
+    fnc sync:            # sync work(args), q 阻塞带回复（编译器经 sync 派发；签名见 op.h）
     fnc pull: i4, timeout_ms: i8   # 取一条消息执行：<0 无限 / 0 立即 / >0 毫秒；返回 1/0/-1
     fnc drop:            # 析构：解绑宿主 → 排空残留 → 回收（含 queue 对象本身）
 }

@@ -253,6 +253,10 @@ typedef struct pool {
  * queue&（如 default_queue(host)，犹如 com 的 file()）。如此语言内核（<< 投递）经协议
  * 指针派发，零 emit mt 符号——彻底解耦 mt 模块与语言。
  *   - post：把一个 rpc 任务整体打包投入队列（q << work(args) → q->post(q, fn, &参数, sizeof)）
+ *   - sync：阻塞带回复——把 rpc 调用投递给队列，阻塞至某消费者（另一线程 pull / 池
+ *           工作线程）执行完成，结果回填 params 首字段（返回槽 _）；sync work(args), q
+ *           → q->sync(q, work_rpc, &参数)。返回 0 成功 / -1 队列已关闭或投递失败。
+ *           同线程 sync 到自身会死锁（需别的消费者）；超时/优先级/死锁替代待后续。
  *   - pull：从队列取一条消息在当前线程执行；timeout_ms <0 无限等 / 0 立即返回 / >0 毫秒超时；
  *           返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）
  *   - drop：析构，解绑宿主 → 排空残留消息 → 回收（含 queue 对象本身）
@@ -263,6 +267,7 @@ typedef struct pool {
 typedef struct queue {
     void   *h;       /* 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有） */
     uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
+    int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params);
     int32_t (*pull)(struct queue *_this, int64_t timeout_ms);
     void    (*drop)(struct queue *_this);
 } queue;

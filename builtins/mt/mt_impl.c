@@ -302,6 +302,60 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
     return 1;
 }
 
+/* sync 方法（协议指针）：阻塞带回复——把 rpc 调用投递给某消费者（另一线程 pull 或池
+ * 工作线程）执行，阻塞至执行完成，结果回填 caller 的 params 首字段（返回槽 _）。
+ * 复用 post 路径：把 caller 的 (fn, params 指针, &reply) 打成 trampoline 投递，消费者
+ * 执行 q_sync_run——在 caller 的 params 缓冲上实跑 fn 后置位 reply、唤醒 caller。
+ *   - params 是 caller 栈上的 rpc 参数结构体；caller 阻塞期间保证其与 reply 存活。
+ *   - post 会拷贝 trampoline，故 trampoline 自身栈生命周期无关。
+ *   - 返回 0 成功 / -1 投递失败（队列已关闭等）。
+ *   - 同线程对自己消费的队列 sync 会死锁（须由别的消费者执行）；超时/优先级/死锁替代待后续。 */
+typedef struct q_sync {
+    mtx_state mu;
+    cnd_state done_cv;
+    uint8_t   done;
+} q_sync;
+
+typedef struct q_sync_tramp {
+    void   (*fn)(void *);   /* 真正的 rpc worker */
+    void    *params;        /* caller 的 rpc 参数缓冲（执行结果回填其首字段） */
+    q_sync  *reply;         /* caller 栈上的应答描述符 */
+} q_sync_tramp;
+
+/* 消费者侧蹦床：在 caller 缓冲上实跑 rpc，再置位并唤醒 caller。 */
+static void q_sync_run(void *arg) {
+    q_sync_tramp *t = (q_sync_tramp *)arg;
+    t->fn(t->params);                       /* 在 caller 的 params 上执行（写入返回槽 _） */
+    sc_mutex_lock(&t->reply->mu);
+    t->reply->done = 1;
+    sc_cond_one(&t->reply->done_cv);
+    sc_mutex_unlock(&t->reply->mu);
+}
+
+static int32_t que_sync(queue *_this, void (*fn)(void *), void *params) {
+    que_state *q = (que_state *)_this;
+    if (!q || !fn) return -1;
+    q_sync rep;
+    sc_mutex_init(&rep.mu);
+    sc_cond_init(&rep.done_cv);
+    rep.done = 0;
+    q_sync_tramp tr = { fn, params, &rep };
+    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷贝 tr（含指向 caller 缓冲/应答的指针） */
+    uint8_t ok = q->base.post(&q->base, q_sync_run, &tr, sizeof(tr));
+    if (!ok) {
+        sc_mutex_final(&rep.mu);
+        sc_cond_final(&rep.done_cv);
+        return -1;
+    }
+    sc_mutex_lock(&rep.mu);
+    while (!rep.done)
+        sc_cond_wait(&rep.done_cv, &rep.mu, 0, 0);   /* 无限阻塞等回复（超时待后续） */
+    sc_mutex_unlock(&rep.mu);
+    sc_mutex_final(&rep.mu);
+    sc_cond_final(&rep.done_cv);
+    return 0;
+}
+
 /* pull 方法：取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
  * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。 */
 static int32_t que_pull(queue *_this, int64_t timeout_ms) {
@@ -359,6 +413,7 @@ struct queue *default_queue(struct pool *host) {
     memset(q, 0, sizeof(*q));
     q->base.h    = q;        /* 私有区即本盒子（方法实际经 (que_state*)_this 回取） */
     q->base.post = que_post;
+    q->base.sync = que_sync;
     q->base.pull = que_pull;
     q->base.drop = que_drop;
     sc_mutex_init(&q->mu);
