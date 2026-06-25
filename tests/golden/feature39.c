@@ -65,7 +65,7 @@ int32_t main(void) {
             struct add _rp = {0};
             _rp.a = &(a);
             _rp.v = i;
-            q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+            q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
         }
     }
     /* line 43 */

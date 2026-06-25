@@ -252,15 +252,18 @@ typedef struct pool {
  * 构成的 vtable（无具体实现）。由实现模块（mt）按策略提供具名构造函数填充指针并返回
  * queue&（如 default_queue(host)，犹如 com 的 file()）。如此语言内核（<< 投递）经协议
  * 指针派发，零 emit mt 符号——彻底解耦 mt 模块与语言。
- *   - post：把一个 rpc 任务整体打包投入队列（q << work(args) → q->post(q, fn, &参数, sizeof)）
+ *   - post：把一个 rpc 任务整体打包投入队列（q << work(args) → q->post(q, fn, &参数, sizeof, 0, 0)）
  *   - sync：阻塞带回复——把 rpc 调用投递给队列，阻塞至某消费者（另一线程 pull / 池
  *           工作线程）执行完成，结果回填 params 首字段（返回槽 _）；sync work(args), q
- *           → q->sync(q, work_rpc, &参数)。返回 0 成功 / -1 队列已关闭或投递失败。
- *           同线程 sync 到自身会死锁（需别的消费者）；超时/优先级/死锁替代待后续。
+ *           → q->sync(q, work_rpc, &参数, prio, delay_ms)。返回 0 成功 / -1 队列已关闭或投递失败。
+ *           同线程 sync 到自身会死锁（需别的消费者）；超时/死锁替代待后续。
  *   - async：非阻塞带回复——把 rpc 调用投递给队列，立即返回 promise&（mt-future 句柄）；
  *           消费者执行完成后兑现 promise，调用方经 p->wait() 阻塞取结果（或 p->ready() 轮询）。
- *           async work(args), q → q->async(q, work_rpc, &参数, sizeof(参数))。参数缓冲堆
+ *           async work(args), q → q->async(q, work_rpc, &参数, sizeof(参数), prio, delay_ms)。参数缓冲堆
  *           分配并由 promise 拥有（drop 回收）；返回 NULL=投递失败。
+ *   - prio/delay_ms（post/sync/async 共有）：prio=优先级（高者先被消费，0=默认）；
+ *           delay_ms=延迟毫秒（>0 则到期后才可被 pull，0=立即）。二者仅作用于 FIFO-pull 消费
+ *           路径（host=nil/自 pull）；池宿主路径忽略（池自调度）。
  *   - pull：从队列取一条消息在当前线程执行；timeout_ms <0 无限等 / 0 立即返回 / >0 毫秒超时；
  *           返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）
  *   - drop：析构，解绑宿主 → 排空残留消息 → 回收（含 queue 对象本身）
@@ -270,10 +273,10 @@ typedef struct pool {
  * 默认实现见 mt_impl.c 的 default_queue(host)；投递帧与 thread_run/pool.run 同形。 */
 struct promise;  /* 前置声明：queue.async 返回 promise&（mt-future，定义见下） */
 typedef struct queue {
-    void   *h;       /* 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有） */
-    uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
-    int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params);
-    struct promise *(*async)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize);
+    void   *h;       /* 实现私有区指针（FIFO 消息队列 + 延迟链 + 同步原语 + 宿主绑定，实现私有） */
+    uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize, int32_t prio, int64_t delay_ms);
+    int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params, int32_t prio, int64_t delay_ms);
+    struct promise *(*async)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize, int32_t prio, int64_t delay_ms);
     int32_t (*pull)(struct queue *_this, int64_t timeout_ms);
     void    (*drop)(struct queue *_this);
 } queue;

@@ -59,9 +59,9 @@ int32_t main(void) {
     /* line 27 */
     queue *q = default_queue(p);
     /* line 29 */
-    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; q->sync(q, (void (*)(void *))compute_rpc, &_rp); _rp._; });
+    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; q->sync(q, (void (*)(void *))compute_rpc, &_rp, 0, 0); _rp._; });
     /* line 30 */
-    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 100; _rp.b = 23; q->sync(q, (void (*)(void *))compute_rpc, &_rp); _rp._; });
+    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 100; _rp.b = 23; q->sync(q, (void (*)(void *))compute_rpc, &_rp, 0, 0); _rp._; });
     /* line 31 */
     printf("pool sync: r1=%d r2=%d\n", r1, r2);
     /* line 33 */
@@ -80,9 +80,9 @@ int32_t main(void) {
         thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0u, (uint8_t)0u);
     }
     /* line 41 */
-    int32_t s1 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp); _rp._; });
+    int32_t s1 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp, 0, 0); _rp._; });
     /* line 42 */
-    int32_t s2 = ({ struct compute _rp = {0}; _rp.a = 5; _rp.b = 6; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp); _rp._; });
+    int32_t s2 = ({ struct compute _rp = {0}; _rp.a = 5; _rp.b = 6; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp, 0, 0); _rp._; });
     /* line 43 */
     printf("thread sync: s1=%d s2=%d\n", s1, s2);
     /* line 45 */

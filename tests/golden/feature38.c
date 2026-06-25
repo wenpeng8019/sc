@@ -75,20 +75,20 @@ int32_t main(void) {
         struct add _rp = {0};
         _rp.a = &(a);
         _rp.v = 10;
-        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     /* line 42 */
     {
         struct add _rp = {0};
         _rp.a = &(a);
         _rp.v = 20;
-        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     {
         struct add _rp = {0};
         _rp.a = &(a);
         _rp.v = 30;
-        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+        q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     /* line 43 */
     {
@@ -96,7 +96,7 @@ int32_t main(void) {
         _rp.a = &(a);
         _rp.label = "boost";
         _rp.v = 40;
-        q->post(q, (void (*)(void *))tag_rpc, &_rp, sizeof(_rp));
+        q->post(q, (void (*)(void *))tag_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     /* line 46 */
     int32_t n = 0;
@@ -116,14 +116,14 @@ int32_t main(void) {
         struct add _rp = {0};
         _rp.a = &(a);
         _rp.v = 5;
-        q2->post(q2, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+        q2->post(q2, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     /* line 57 */
     {
         struct add _rp = {0};
         _rp.a = &(a);
         _rp.v = 7;
-        q2->post(q2, (void (*)(void *))add_rpc, &_rp, sizeof(_rp));
+        q2->post(q2, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
     }
     /* line 58 */
     int32_t m = 0;

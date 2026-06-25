@@ -2371,7 +2371,9 @@ struct CGen {
                     emitComBasePtr(*e.b, isPtr);
                     out << "->async(";
                     emitComBasePtr(*e.b, isPtr);
-                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap)); })";
+                    auto pv = rpcOptVals(e);   // <prio:N, delay:ms>
+                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap), "
+                        << pv.first << ", " << pv.second << "); })";
                     break;
                 }
                 if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
@@ -2396,6 +2398,8 @@ struct CGen {
                     throw CompileError{"sync 不能驱动异步 rpc '" + e.a->a->text +
                                        "'（含 await，请用 async）", e.line};
                 if (!e.b) {                          // 无目标：当前线程直接执行
+                    if (!e.syncOpts.empty())
+                        throw CompileError{"无目标 sync（当前线程直接执行）不接受 <prio/delay> 选项", e.line};
                     bool save = emitRpcCallOK;
                     emitRpcCallOK = true;
                     emitExpr(*e.a, true);
@@ -2425,7 +2429,9 @@ struct CGen {
                 emitComBasePtr(*e.b, isPtr);
                 out << "->sync(";
                 emitComBasePtr(*e.b, isPtr);
-                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp); ";
+                auto pv = rpcOptVals(e);   // <prio:N, delay:ms>
+                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, "
+                    << pv.first << ", " << pv.second << "); ";
                 if (rpcHasRet(*r)) out << "_rp._; ";    // 返回槽（消费者已回填）
                 else out << "(void)0; ";
                 out << "})";
@@ -3602,7 +3608,7 @@ struct CGen {
 
     // 发出 queue 投递链：每个目标 rpc 调用 work(args) 整体打包成一条消息 post。
     //   q << work(a, b)  →  { struct work _rp = {0}; _rp.x = a; ...;
-    //                         q->post(q, (void (*)(void *))work_rpc, &_rp, sizeof(_rp)); }
+    //                         q->post(q, (void (*)(void *))work_rpc, &_rp, sizeof(_rp), 0, 0); }
     // 接收者按值/指针自动取址注入（emitComBasePtr，与协议指针调用约定一致）。
     void emitQueueChain(const Expr& base, const std::vector<const Expr*>& targets) {
         VType vt;
@@ -3636,7 +3642,7 @@ struct CGen {
             emitComBasePtr(base, isPtr);
             out << "->post(";
             emitComBasePtr(base, isPtr);
-            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
+            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), 0, 0);\n";
             depth--; indent(); out << "}\n";
         }
     }
@@ -5186,6 +5192,18 @@ struct CGen {
     static bool rpcHasRet(const Decl& d) {
         const auto& rt = d.structCommon.type;
         return rt && (!rt->name.empty() || rt->ptr > 0);
+    }
+
+    // sync/async 的 <prio:N, delay:ms> 选项 → (prio, delay_ms) 整数对，透传给 queue 协议。
+    // 键限 prio/delay，值限非负整数字面量（parser 已保证非负）；缺省 0。
+    std::pair<long long, long long> rpcOptVals(const Expr& e) {
+        long long prio = 0, delay = 0;
+        for (auto& kv : e.syncOpts) {
+            if (kv.first == "prio")       prio = kv.second;
+            else if (kv.first == "delay") delay = kv.second;
+            else throw CompileError{"sync/async 选项仅支持 prio/delay，未知键：" + kv.first, e.line};
+        }
+        return {prio, delay};
     }
 
     // rpc 数组形参 → 结构体两字段：指针（数组退化）+ size（字节数）。

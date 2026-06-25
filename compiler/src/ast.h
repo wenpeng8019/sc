@@ -243,6 +243,11 @@ struct Expr {
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
     std::vector<std::pair<std::string, long long>> sofOpts;
 
+    // sync<prio:N, delay:ms> / async<prio:N, delay:ms> 选项块（仅 Sync/Async 且带队列目标时有意义）；
+    // + 值限非负整数字面量；codegen 据此把 prio/delay 透传给 queue 协议 post/sync/async。
+    //   delay/priority 仅作用于 FIFO-pull 消费路径，池宿主路径忽略（池自调度）。
+    std::vector<std::pair<std::string, long long>> syncOpts;
+
     // future<ID>() 构造标记（仅 Call 且 callee 为 future 伪构造时有效）；
     // + ID 为 future_id 枚举常量名，编译期聚合成 future_id 枚举（type.h），
     //   codegen 生成 future__new_tagged(ID) 为该 future 设 id，供 async_loop 按 id 派发。

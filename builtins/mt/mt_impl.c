@@ -253,34 +253,79 @@ struct pool *default_pool(uint32_t n) {
  * 池的工作线程并发执行，无需手动 pull（用 pool->join() 作屏障）；NULL/(pool*)-1 入本
  * 队列 FIFO，由当前/主线程手动 pull 消费。 */
 
-/* 消息节点：联合分配 [q_msg][rpc 参数 psize]（与 pool 任务节点同哲学） */
+/* 消息节点：联合分配 [q_msg][rpc 参数 psize]（与 pool 任务节点同哲学）。
+ * P5：prio=优先级（高者先消费，ready 链按其有序插入）；delayed/deadline=延迟项
+ * （投递时带 delay_ms>0 则计算绝对到期时刻入 delaying 有序链，pull 到期后提升进 ready）。*/
 typedef struct q_msg {
-    struct q_msg *next;
-    void        (*fn)(void *);   /* rpc 实际函数，参数紧随本节点 */
+    struct q_msg   *next;
+    void          (*fn)(void *);   /* rpc 实际函数，参数紧随本节点 */
+    int32_t         prio;          /* 优先级（高者先被消费，0=默认） */
+    uint8_t         delayed;       /* 是否延迟项（在 delaying 链上） */
+    struct timespec deadline;      /* 延迟到期绝对时刻（单调钟；delayed=1 时有效） */
 } q_msg;
 
-/* 队列盒子：首字段 queue base（协议 vtable）+ 单链 FIFO + 条件变量（来活） */
+/* 队列盒子：首字段 queue base（协议 vtable）+ 单链 ready FIFO（按 prio 有序）+ 延迟有序链
+ * delaying（按 deadline 升序）+ 条件变量（来活/延迟头变化）。 */
 typedef struct {
     queue        base;     /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
     mtx_state    mu;
-    cnd_state    more;     /* 来活：post 唤醒阻塞的 pull */
-    q_msg       *head, *tail;
-    uint32_t     pending;  /* 队列中待处理消息数 */
+    cnd_state    more;     /* 来活：post 唤醒阻塞的 pull（含延迟头变早需重算等待） */
+    q_msg       *head, *tail;  /* ready 链：head=最高优先级，pull 从队头取 */
+    q_msg       *delaying;     /* 延迟链：按 deadline 升序，pull 到期提升进 ready */
+    uint32_t     pending;  /* 队列中待处理消息数（ready + delaying 合计） */
     uint8_t      closed;   /* drop 置位：拒收新消息、唤醒 pull 退出 */
-    struct pool *host;     /* 宿主绑定：NULL/(pool*)-1/&pool（P2 仅记录） */
+    struct pool *host;     /* 宿主绑定：NULL/(pool*)-1/&pool */
 } que_state;
 
 static void que_lock(que_state *q)   { sc_mutex_lock(&q->mu); }
 static void que_unlock(que_state *q) { sc_mutex_unlock(&q->mu); }
 
+/* ready 链按优先级有序插入：head=最高优先级；同优先级稳定（FIFO，插在同级之后）。
+ * 仅插入，不改 pending（pending 由 post 统一 +1）。 */
+static void que_ready_insert(que_state *q, q_msg *m) {
+    q_msg *prev = NULL, *cur = q->head;
+    while (cur && cur->prio >= m->prio) { prev = cur; cur = cur->next; }
+    m->next = cur;
+    if (prev) prev->next = m; else q->head = m;
+    if (!cur) q->tail = m;          /* 插到尾部 */
+}
+
+/* delaying 链按 deadline 升序插入；同时刻稳定（插在相等之后）。仅插入，不改 pending。 */
+static void que_delay_insert(que_state *q, q_msg *m) {
+    q_msg *prev = NULL, *cur = q->delaying;
+    while (cur && !clock_gt(cur->deadline, m->deadline)) { prev = cur; cur = cur->next; }
+    m->next = cur;
+    if (prev) prev->next = m; else q->delaying = m;
+}
+
+/* 把 delaying 链中所有已到期（deadline <= now）的项提升进 ready（按 prio 重新有序）。
+ * 不改 pending（仅在两链间搬移）。 */
+static void que_promote_matured(que_state *q) {
+    if (!q->delaying) return;
+    struct timespec now;
+    P_clock_now(&now);
+    while (q->delaying) {
+        q_msg *d = q->delaying;
+        if (clock_gt(d->deadline, now)) break;   /* deadline > now：未到期，后续更晚，停 */
+        q->delaying = d->next;
+        d->delayed = 0;
+        que_ready_insert(q, d);
+    }
+}
+
+
 /* post 方法（协议指针，对称 pool.run）：rpc 调用整体打包成消息入队。
+ * prio：优先级（高者先被消费，0=默认）；delay_ms：延迟毫秒（>0 则到期才可被 pull）。
  * 宿主为真实线程池（host 非 NULL 且非 (pool*)-1）时，直接转交池消费（经 pool 协议
- * 指针 host->run 派发，不入本队列 FIFO），由池工作线程并发执行。
+ * 指针 host->run 派发，不入本队列），由池工作线程并发执行——此路径忽略 prio/delay
+ * （池自调度）。NULL/(pool*)-1 入本队列：delay_ms>0 入 delaying 有序链，否则按 prio
+ * 入 ready 有序链。
  * 返回 1 成功 / 0 失败（队列已关闭 / 内存不足） */
-static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize) {
+static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize,
+                        int32_t prio, int64_t delay_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return 0;
-    /* 宿主=线程池：投递即提交给池（pool->run 自行 memcpy 参数），由池工作线程消费。
+    /* 宿主=线程池：投递即提交给池（pool->run 自行 memcpy 参数），忽略 prio/delay。
      * host 只在构造时设定、之后不改，故此处免锁读取安全。 */
     {
         struct pool *host = q->host;
@@ -291,13 +336,24 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
     if (!m) return 0;
     m->next = NULL;
     m->fn = fn;
+    m->prio = prio;
+    m->delayed = 0;
     if (params && psize) memcpy(m + 1, params, psize);
     que_lock(q);
     if (q->closed) { que_unlock(q); free(m); return 0; }
-    if (q->tail) q->tail->next = m; else q->head = m;
-    q->tail = m;
+    if (delay_ms > 0) {
+        struct timespec now, rel;
+        P_clock_now(&now);
+        rel.tv_sec  = (time_t)(delay_ms / 1000);
+        rel.tv_nsec = (long)((delay_ms % 1000) * 1000000L);
+        clock_inc(now, rel, m->deadline);     /* 绝对到期时刻（单调钟） */
+        m->delayed = 1;
+        que_delay_insert(q, m);
+    } else {
+        que_ready_insert(q, m);
+    }
     q->pending++;
-    sc_cond_one(&q->more);
+    sc_cond_one(&q->more);    /* 唤醒 pull 重算等待（来活，或延迟头变早需重算时限） */
     que_unlock(q);
     return 1;
 }
@@ -306,10 +362,10 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
  * 工作线程）执行，阻塞至执行完成，结果回填 caller 的 params 首字段（返回槽 _）。
  * 复用 post 路径：把 caller 的 (fn, params 指针, &reply) 打成 trampoline 投递，消费者
  * 执行 q_sync_run——在 caller 的 params 缓冲上实跑 fn 后置位 reply、唤醒 caller。
- *   - params 是 caller 栈上的 rpc 参数结构体；caller 阻塞期间保证其与 reply 存活。
- *   - post 会拷贝 trampoline，故 trampoline 自身栈生命周期无关。
+ *   - prio/delay_ms 透传给 post（优先级排序 / 延迟投递）；caller 阻塞期间 params 与 reply 保活。
+ *   - post 会拷趝 trampoline，故 trampoline 自身栈生命周期无关。
  *   - 返回 0 成功 / -1 投递失败（队列已关闭等）。
- *   - 同线程对自己消费的队列 sync 会死锁（须由别的消费者执行）；超时/优先级/死锁替代待后续。 */
+ *   - 同线程对自己消费的队列 sync 会死锁（须别的消费者执行）；超时/死锁替代待后续。 */
 typedef struct q_sync {
     mtx_state mu;
     cnd_state done_cv;
@@ -332,7 +388,7 @@ static void q_sync_run(void *arg) {
     sc_mutex_unlock(&t->reply->mu);
 }
 
-static int32_t que_sync(queue *_this, void (*fn)(void *), void *params) {
+static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, int32_t prio, int64_t delay_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return -1;
     q_sync rep;
@@ -340,8 +396,8 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params) {
     sc_cond_init(&rep.done_cv);
     rep.done = 0;
     q_sync_tramp tr = { fn, params, &rep };
-    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷贝 tr（含指向 caller 缓冲/应答的指针） */
-    uint8_t ok = q->base.post(&q->base, q_sync_run, &tr, sizeof(tr));
+    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷趝 tr（含指向 caller 缓冲/应答的指针） */
+    uint8_t ok = q->base.post(&q->base, q_sync_run, &tr, sizeof(tr), prio, delay_ms);
     if (!ok) {
         sc_mutex_final(&rep.mu);
         sc_cond_final(&rep.done_cv);
@@ -415,7 +471,8 @@ static void q_async_run(void *arg) {
     sc_mutex_unlock(&b->mu);
 }
 
-static struct promise *que_async(queue *_this, void (*fn)(void *), const void *params, size_t psize) {
+static struct promise *que_async(queue *_this, void (*fn)(void *), const void *params, size_t psize,
+                                 int32_t prio, int64_t delay_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return NULL;
     /* 缓冲至少 sizeof(void*)：q_async_run 擦除结果时读首 8 字节，避免越界。 */
@@ -433,8 +490,9 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
     b->result = NULL;
     b->fn     = fn;
     if (params && psize) memcpy(b + 1, params, psize);
-    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷贝 box 指针（参数已在 box 堆缓冲里） */
-    uint8_t ok = q->base.post(&q->base, q_async_run, &b, sizeof(b));
+    /* 经 post 投递蹦床（FIFO 入队或转交池）——post 拷贝 box 指针（参数已在 box 堆缓冲里），
+     * prio/delay 透传给 post（优先级排序 / 延迟投递）。 */
+    uint8_t ok = q->base.post(&q->base, q_async_run, &b, sizeof(b), prio, delay_ms);
     if (!ok) {
         sc_mutex_final(&b->mu);
         sc_cond_final(&b->done_cv);
@@ -445,25 +503,60 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
 }
 
 /* pull 方法：取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
- * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。 */
+ * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。
+ * P5：先把 delaying 中已到期项提升进 ready（按 prio），再取 ready 队头（最高优先级）；
+ * ready 空时按 min(pull 截止, delaying 头到期时刻) 定时等，醒来重算（鲁棒于虚假唤醒）。 */
 static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q) return -1;
     que_lock(q);
-    while (!q->head && !q->closed) {
-        if (timeout_ms == 0) { que_unlock(q); return 0; }       /* 立即返回 */
-        if (timeout_ms < 0) {
-            sc_cond_wait(&q->more, &q->mu, 0, 0);               /* 无限等待来活 */
-        } else {
-            uint64_t sec  = (uint64_t)timeout_ms / 1000ULL;
-            uint64_t nsec = ((uint64_t)timeout_ms % 1000ULL) * 1000000ULL;
-            int r = sc_cond_wait(&q->more, &q->mu, nsec, sec);
-            /* 超时且仍空才返 0；若恰在超时边界来活，留待 while 复检后照常取出 */
-            if (r == 1 && !q->head && !q->closed) { que_unlock(q); return 0; }
+
+    /* pull 自身的绝对截止（仅 timeout_ms>0 时有意义） */
+    struct timespec pull_deadline;
+    uint8_t have_pull_deadline = 0;
+    if (timeout_ms > 0) {
+        struct timespec now, rel;
+        P_clock_now(&now);
+        rel.tv_sec  = (time_t)(timeout_ms / 1000);
+        rel.tv_nsec = (long)((timeout_ms % 1000) * 1000000L);
+        clock_inc(now, rel, pull_deadline);
+        have_pull_deadline = 1;
+    }
+
+    for (;;) {
+        que_promote_matured(q);                 /* 已到期延迟项提升进 ready */
+        if (q->head) break;                     /* ready 有货 → 取队头 */
+        if (q->closed) { que_unlock(q); return -1; }   /* 已关闭且排空 */
+        if (timeout_ms == 0) { que_unlock(q); return 0; }  /* 立即模式 */
+
+        /* 本轮等待时限 = min(pull 截止, delaying 头到期时刻)，取较早者 */
+        struct timespec now, wake;
+        uint8_t have_wake = 0;
+        P_clock_now(&now);
+        if (q->delaying) { wake = q->delaying->deadline; have_wake = 1; }
+        if (have_pull_deadline && (!have_wake || clock_gt(wake, pull_deadline))) {
+            wake = pull_deadline; have_wake = 1;
+        }
+
+        if (!have_wake) {
+            sc_cond_wait(&q->more, &q->mu, 0, 0);          /* 无限等来活 */
+        } else if (clock_gt(wake, now)) {
+            struct timespec rel;
+            clock_dec(wake, now, rel);                      /* 相对时限 = wake - now（>0） */
+            sc_cond_wait(&q->more, &q->mu, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
+        }
+        /* 醒来：若是 pull 自身超时且仍无可取货，返 0；否则回到循环顶重算（虚假唤醒亦安全） */
+        if (have_pull_deadline) {
+            struct timespec now2;
+            P_clock_now(&now2);
+            if (clock_ge(now2, pull_deadline)) {
+                que_promote_matured(q);
+                if (!q->head && !q->closed) { que_unlock(q); return 0; }
+            }
         }
     }
+
     q_msg *m = q->head;
-    if (!m) { que_unlock(q); return -1; }                       /* 已关闭且排空 */
     q->head = m->next;
     if (!q->head) q->tail = NULL;
     q->pending--;
@@ -474,15 +567,18 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     return 1;
 }
 
-/* drop 方法：解绑宿主 → 排空残留消息（释放，不执行）→ 唤醒 pull 退出 → 回收整块。 */
+/* drop 方法：解绑宿主 → 排空残留消息（ready + delaying 均释放，不执行）→ 唤醒 pull 退出 → 回收整块。 */
 static void que_drop(queue *_this) {
     que_state *q = (que_state *)_this;
     if (!q) return;
     que_lock(q);
     q->closed = 1;
-    q_msg *m = q->head;                  /* 排空：丢弃未处理消息（投递为不带回复的 fire-and-forget） */
+    q_msg *m = q->head;                  /* 排空 ready：丢弃未处理消息（fire-and-forget） */
     while (m) { q_msg *n = m->next; free(m); m = n; }
     q->head = q->tail = NULL;
+    m = q->delaying;                     /* 排空 delaying：丢弃未到期延迟消息 */
+    while (m) { q_msg *n = m->next; free(m); m = n; }
+    q->delaying = NULL;
     q->pending = 0;
     sc_cond_all(&q->more);               /* 唤醒所有阻塞 pull，令其见 closed 退出 */
     que_unlock(q);

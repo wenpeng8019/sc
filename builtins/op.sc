@@ -353,9 +353,9 @@ def operand: {
 @def queue: {
     h: &                 # 实现私有区指针（FIFO 消息队列 + 同步原语 + 宿主绑定，实现私有）
 
-    fnc post:            # << 投递一个 rpc 消息（编译器经 << 派发；签名见 op.h）
-    fnc sync:            # sync work(args), q 阻塞带回复（编译器经 sync 派发；签名见 op.h）
-    fnc async:           # async work(args), q 非阻塞带回复，返 promise&（编译器经 async 派发；签名见 op.h）
+    fnc post:            # << 投递一个 rpc 消息（编译器经 << 派发；签名见 op.h，带 prio/delay_ms）
+    fnc sync:            # sync<prio,delay> work(args), q 阻塞带回复（编译器经 sync 派发；签名见 op.h）
+    fnc async:           # async<prio,delay> work(args), q 非阻塞带回复，返 promise&（经 async 派发；签名见 op.h）
     fnc pull: i4, timeout_ms: i8   # 取一条消息执行：<0 无限 / 0 立即 / >0 毫秒；返回 1/0/-1
     fnc drop:            # 析构：解绑宿主 → 排空残留 → 回收（含 queue 对象本身）
 }
