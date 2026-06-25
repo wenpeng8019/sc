@@ -130,3 +130,47 @@
     fnc sort:: cmp: list_cmp                         # 按比较回调排序
 }
 
+# ---------------- dict：开放寻址裸 @ 自动指针映射 ----------------
+# value 为裸自动指针 @（sc_afat），dict 拥有 value（每条一份 retain）。
+# key 由 init 的 key_size 三态决定，接口的 key 均为 const & 裸指针，按 key_size 解读：
+#   key_size  > 0：定长数值/POD，内联拷贝 key_size 字节，memcmp 比较（浮点键不安全，限整数/指针类）；
+#   key_size == 0：引用字符串，仅存 const char& 借用指针——dict 不拥有，字符串本体由 value 对象自持；
+#   key_size == -1：拷贝字符串，put 时 chunk 复制、remove/clear/drop 时 recycle。
+# 开放寻址：全部 item 内联住一整块桶数组，无 per-item 分配；整张表仅 ctrl + slots 两块（mem chunk），
+#   resize 整体 rehash 重建。每桶 [@ value][key]，value 在前保 8 对齐。
+# 取出语义同 list「取用分离」：get 借用（返回句柄不改计数）；remove 删除并 release（返回 bool）。
+# 因 init 带 key_size 参数，不参与「声明即构造」——须显式 d.init(key_size)。
+
+@fnc dict_each_fn: bool, key: const &, value: @, ctx: &  # 遍历回调（返回 false 提前终止）
+
+@def dict: {
+    ctrl: u1&       # 控制字节数组（空/墓碑/占用）
+    slots: char&    # 桶数据（nbuckets * stride，每桶 [@ value][key]）
+    key_size: i4    # >0 定长 / 0 引用字符串 / -1 拷贝字符串
+    stride: u4      # 单桶字节 = align8(sizeof(@) + keylen)
+    size: u4        # 元素数
+    used: u4        # 占用 + 墓碑（rehash 阈值用）
+    nbuckets: u4    # 桶数（2 的幂；0 = 未分配）
+
+    fnc init:: key_size: i4                          # 构造（指定 key 模式）
+    fnc drop::                                       # 释放全部 retain + 回收桶/控制块
+    fnc len:: u8                                    # 元素个数
+    fnc has:: bool, key: const &                     # 是否含 key
+    fnc get:: @, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
+    fnc put:: bool, key: const &, value: @           # 插入/替换（retain 新、替换 release 旧）
+    fnc remove:: bool, key: const &                  # 删除并 release value（未命中返回 false）
+    fnc clear::                                      # 清空并 release 全部 value（保留桶容量）
+    fnc each:: fn: dict_each_fn, ctx: &              # 无序遍历占用桶（回调返 false 即停）
+
+    # 整数游标双向遍历（游标 = 桶下标；空集/越界返回 -1）。each 与 next 走同一桶序。
+    # 游标在 get/has/each 期间稳定；put/remove 可能 rehash 使其失效，遍历期间勿增删。
+    fnc first:: i8                                  # 首个占用桶游标（空集 -1）
+    fnc last:: i8                                   # 末个占用桶游标（空集 -1）
+    fnc next:: i8, cur: i8                          # cur 之后的占用桶（无则 -1）
+    fnc prev:: i8, cur: i8                          # cur 之前的占用桶（无则 -1）
+    fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
+    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+}
+
+
+

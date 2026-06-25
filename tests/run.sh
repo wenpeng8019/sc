@@ -76,6 +76,7 @@ POSITIVE=(
     tests/cases/object_at.sc
     tests/cases/bare_at.sc
     tests/cases/list_at.sc
+    tests/cases/dict_at.sc
     tests/cases/array.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc

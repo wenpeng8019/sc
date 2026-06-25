@@ -590,3 +590,280 @@ void list_sort(list *_this, list_cmp cmp) {
     }
 }
 
+/* ================= dict：开放寻址裸 @ 自动指针映射 ================= */
+/* 控制字节：空 0xFF / 墓碑 0xFE（高位 1）；占用 = hash 低 7 位 0x00..0x7F（高位 0）。 */
+#define DICT_EMPTY 0xFFu
+#define DICT_TOMB  0xFEu
+#define DICT_OCCUPIED(c) (((c) & 0x80u) == 0u)
+#define DICT_MIN_BUCKETS 8u
+
+static inline sc_afat *dict_val(dict *d, uint64_t i) {
+    return (sc_afat *)(d->slots + i * (uint64_t)d->stride);
+}
+static inline void *dict_keyslot(dict *d, uint64_t i) {
+    return d->slots + i * (uint64_t)d->stride + sizeof(sc_afat);
+}
+/* 桶 i 处的「逻辑键」指针：定长内联取槽地址；字符串模式取槽内存的 char* 借用 */
+static inline const void *dict_logkey(dict *d, uint64_t i) {
+    return d->key_size > 0 ? (const void *)dict_keyslot(d, i)
+                           : *(const void **)dict_keyslot(d, i);
+}
+
+static uint64_t dict_hash(const dict *d, const void *key) {
+    const unsigned char *p = (const unsigned char *)key;
+    size_t n = d->key_size > 0 ? (size_t)d->key_size
+                               : (key ? strlen((const char *)key) : 0);
+    uint64_t h = 1469598103934665603ULL;          /* FNV-1a 64 偏移基 */
+    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+    return h;
+}
+
+static int dict_keyeq(dict *d, uint64_t i, const void *key) {
+    if (d->key_size > 0)
+        return memcmp(dict_keyslot(d, i), key, (size_t)d->key_size) == 0;
+    {
+        const char *stored = *(const char **)dict_keyslot(d, i);
+        const char *probe = (const char *)key;
+        if (stored == probe) return 1;
+        if (!stored || !probe) return 0;
+        return strcmp(stored, probe) == 0;
+    }
+}
+
+/* 查找已存在键，返回桶下标；未命中 -1 */
+static int64_t dict_find(dict *d, const void *key) {
+    uint64_t h, mask, i;
+    uint8_t h7;
+    uint32_t probes;
+    if (!d->nbuckets) return -1;
+    h = dict_hash(d, key);
+    h7 = (uint8_t)(h & 0x7Fu);
+    mask = d->nbuckets - 1;
+    i = h & mask;
+    for (probes = 0; probes < d->nbuckets; probes++) {
+        uint8_t c = d->ctrl[i];
+        if (c == DICT_EMPTY) return -1;            /* 探测链遇空即止 */
+        if (c == h7 && dict_keyeq(d, i, key)) return (int64_t)i;
+        i = (i + 1) & mask;                        /* 墓碑跳过继续 */
+    }
+    return -1;
+}
+
+/* 为插入定位：命中已存在键则 *found=1 返其桶；否则 *found=0 返首个可用（墓碑优先于空尾）。表满 -1。 */
+static int64_t dict_find_slot(dict *d, const void *key, int *found) {
+    uint64_t h = dict_hash(d, key), mask = d->nbuckets - 1, i = h & mask;
+    uint8_t h7 = (uint8_t)(h & 0x7Fu);
+    int64_t tomb = -1;
+    uint32_t probes;
+    for (probes = 0; probes < d->nbuckets; probes++) {
+        uint8_t c = d->ctrl[i];
+        if (c == DICT_EMPTY) { *found = 0; return tomb >= 0 ? tomb : (int64_t)i; }
+        if (c == DICT_TOMB) { if (tomb < 0) tomb = (int64_t)i; }
+        else if (c == h7 && dict_keyeq(d, i, key)) { *found = 1; return (int64_t)i; }
+        i = (i + 1) & mask;
+    }
+    *found = 0;
+    return tomb;                                    /* 无空桶；有墓碑可复用，否则 -1 */
+}
+
+/* 重建为 newcap 桶（2 的幂）：占用项整体搬移（裸字节移动句柄，不改 retain），清除墓碑 */
+static uint8_t dict_rehash(dict *d, uint32_t newcap) {
+    uint8_t *nctrl = (uint8_t *)chunk(newcap);
+    char *nslots;
+    uint8_t *octrl = d->ctrl;
+    char *oslots = d->slots;
+    uint32_t ocap = d->nbuckets, k;
+    uint64_t mask = newcap - 1;
+    if (!nctrl) return 0;
+    nslots = (char *)chunk((uint64_t)newcap * d->stride);
+    if (!nslots) { recycle(nctrl); return 0; }
+    memset(nctrl, DICT_EMPTY, newcap);
+    for (k = 0; k < ocap; k++) {
+        uint64_t h, i;
+        const void *lk;
+        if (!DICT_OCCUPIED(octrl[k])) continue;
+        lk = d->key_size > 0
+                 ? (const void *)(oslots + (uint64_t)k * d->stride + sizeof(sc_afat))
+                 : *(const void **)(oslots + (uint64_t)k * d->stride + sizeof(sc_afat));
+        h = dict_hash(d, lk);
+        i = h & mask;
+        while (nctrl[i] != DICT_EMPTY) i = (i + 1) & mask;
+        nctrl[i] = (uint8_t)(h & 0x7Fu);
+        memcpy(nslots + i * (uint64_t)d->stride,
+               oslots + (uint64_t)k * d->stride, d->stride);
+    }
+    recycle(octrl);
+    recycle(oslots);
+    d->ctrl = nctrl;
+    d->slots = nslots;
+    d->nbuckets = newcap;
+    d->used = d->size;                              /* 墓碑已清 */
+    return 1;
+}
+
+/* 负载因子 7/8（按 used 含墓碑判定）；超阈值则按 size 决定扩容或同尺寸清墓碑 */
+static uint8_t dict_ensure(dict *d) {
+    if (d->nbuckets == 0) return dict_rehash(d, DICT_MIN_BUCKETS);
+    if ((uint64_t)(d->used + 1) * 8 >= (uint64_t)d->nbuckets * 7) {
+        uint32_t newcap = d->nbuckets;
+        if ((uint64_t)(d->size + 1) * 8 >= (uint64_t)d->nbuckets * 7) newcap *= 2;
+        return dict_rehash(d, newcap);
+    }
+    return 1;
+}
+
+static uint8_t dict_storekey(dict *d, uint64_t i, const void *key) {
+    if (d->key_size > 0) {
+        memcpy(dict_keyslot(d, i), key, (size_t)d->key_size);
+        return 1;
+    }
+    if (d->key_size == 0) {
+        *(const char **)dict_keyslot(d, i) = (const char *)key;   /* 借用，不拥有 */
+        return 1;
+    }
+    {                                               /* key_size == -1：拷贝一份 */
+        const char *s = (const char *)key;
+        size_t n = s ? strlen(s) : 0;
+        char *cp = (char *)chunk(n + 1);
+        if (!cp) return 0;
+        if (n) memcpy(cp, s, n);
+        cp[n] = 0;
+        *(char **)dict_keyslot(d, i) = cp;
+        return 1;
+    }
+}
+static inline void dict_freekey(dict *d, uint64_t i) {
+    if (d->key_size == -1) recycle(*(char **)dict_keyslot(d, i));
+}
+
+void dict_init(dict *_this, int32_t key_size) {
+    uint32_t keylen = key_size > 0 ? (uint32_t)key_size : (uint32_t)sizeof(char *);
+    uint32_t st = (uint32_t)sizeof(sc_afat) + keylen;
+    _this->ctrl = NULL;
+    _this->slots = NULL;
+    _this->key_size = key_size;
+    _this->stride = (st + 7u) & ~7u;                /* align8 */
+    _this->size = 0;
+    _this->used = 0;
+    _this->nbuckets = 0;
+}
+
+void dict_clear(dict *_this) {
+    uint32_t i;
+    if (!_this->nbuckets) return;
+    for (i = 0; i < _this->nbuckets; i++) {
+        if (DICT_OCCUPIED(_this->ctrl[i])) {
+            sc_afat_unbind(dict_val(_this, i));      /* release value */
+            dict_freekey(_this, i);                  /* -1 模式回收 key 拷贝 */
+        }
+        _this->ctrl[i] = DICT_EMPTY;
+    }
+    _this->size = 0;
+    _this->used = 0;
+}
+
+void dict_drop(dict *_this) {
+    dict_clear(_this);
+    recycle(_this->ctrl);
+    recycle(_this->slots);
+    _this->ctrl = NULL;
+    _this->slots = NULL;
+    _this->nbuckets = 0;                             /* 保留 key_size/stride 以便复用 */
+}
+
+uint64_t dict_len(dict *_this) { return _this->size; }
+
+uint8_t dict_has(dict *_this, const void *key) { return dict_find(_this, key) >= 0; }
+
+sc_afat dict_get(dict *_this, const void *key) {
+    int64_t i = dict_find(_this, key);
+    if (i >= 0) return *dict_val(_this, (uint64_t)i);
+    { sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e; }
+}
+
+uint8_t dict_put(dict *_this, const void *key, sc_afat value) {
+    int found;
+    int64_t i;
+    sc_afat *slot;
+    uint8_t wastomb;
+    uint64_t h;
+    if (!dict_ensure(_this)) return 0;
+    i = dict_find_slot(_this, key, &found);
+    if (i < 0) {                                     /* 全满（理论不达，扩容兜底） */
+        if (!dict_rehash(_this, _this->nbuckets * 2)) return 0;
+        i = dict_find_slot(_this, key, &found);
+        if (i < 0) return 0;
+    }
+    slot = dict_val(_this, (uint64_t)i);
+    if (found) {                                     /* 替换：先 retain 新、再 release 旧（防自赋 UAF） */
+        sc_afat old = *slot;
+        sc_afat_bind(slot, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+        sc_afat_unbind(&old);
+        return 1;
+    }
+    wastomb = (_this->ctrl[i] == DICT_TOMB);
+    if (!dict_storekey(_this, (uint64_t)i, key)) return 0;
+    sc_afat_bind(slot, value.p, (sc_ref *)value.tar, SC_OWN_RAW, value.dtor);
+    h = dict_hash(_this, key);
+    _this->ctrl[i] = (uint8_t)(h & 0x7Fu);
+    _this->size++;
+    if (!wastomb) _this->used++;                     /* 复用墓碑不增 used */
+    return 1;
+}
+
+uint8_t dict_remove(dict *_this, const void *key) {
+    int64_t i = dict_find(_this, key);
+    if (i < 0) return 0;
+    sc_afat_unbind(dict_val(_this, (uint64_t)i));    /* release value */
+    dict_freekey(_this, (uint64_t)i);
+    _this->ctrl[i] = DICT_TOMB;                      /* 留墓碑保探测链；rehash 时清理 */
+    _this->size--;
+    return 1;
+}
+
+void dict_each(dict *_this, dict_each_fn fn, void *ctx) {
+    uint32_t i;
+    if (!fn || !_this->nbuckets) return;
+    for (i = 0; i < _this->nbuckets; i++) {
+        if (!DICT_OCCUPIED(_this->ctrl[i])) continue;
+        if (!fn(dict_logkey(_this, i), *dict_val(_this, i), ctx)) return;
+    }
+}
+
+int64_t dict_first(dict *_this) {
+    uint32_t i;
+    for (i = 0; i < _this->nbuckets; i++)
+        if (DICT_OCCUPIED(_this->ctrl[i])) return (int64_t)i;
+    return -1;
+}
+int64_t dict_last(dict *_this) {
+    uint32_t i;
+    for (i = _this->nbuckets; i-- > 0; )
+        if (DICT_OCCUPIED(_this->ctrl[i])) return (int64_t)i;
+    return -1;
+}
+int64_t dict_next(dict *_this, int64_t cur) {
+    int64_t i;
+    for (i = cur + 1; i < (int64_t)_this->nbuckets; i++)
+        if (DICT_OCCUPIED(_this->ctrl[i])) return i;
+    return -1;
+}
+int64_t dict_prev(dict *_this, int64_t cur) {
+    int64_t i, top = cur < (int64_t)_this->nbuckets ? cur : (int64_t)_this->nbuckets;
+    for (i = top - 1; i >= 0; i--)
+        if (DICT_OCCUPIED(_this->ctrl[i])) return i;
+    return -1;
+}
+const void *dict_key_at(dict *_this, int64_t cur) {
+    if (cur < 0 || (uint64_t)cur >= _this->nbuckets || !DICT_OCCUPIED(_this->ctrl[cur]))
+        return NULL;
+    return dict_logkey(_this, (uint64_t)cur);
+}
+sc_afat dict_value_at(dict *_this, int64_t cur) {
+    if (cur < 0 || (uint64_t)cur >= _this->nbuckets || !DICT_OCCUPIED(_this->ctrl[cur])) {
+        sc_afat e; e.p = NULL; e.tar = NULL; e.own = NULL; e.dtor = NULL; return e;
+    }
+    return *dict_val(_this, (uint64_t)cur);
+}
+
+
