@@ -17,8 +17,9 @@ typedef int8_t tril;
 typedef tril (*sc_hyper)(void *, uint32_t, ...);
 typedef sc_hyper *object;
 enum { SC_CLS_NONE = 0, SC_CLS_Cat = 1, SC_CLS_Dog = 2, SC_CLS_Fish = 3, SC_CLS_Item = 4 };
-enum { SC_DIM_CLS_ID = 0, SC_DIM_OBJ_KEY = 1, SC_DIM_OBJ_NAME = 2, SC_DIM_RLT_KEY = 3, SC_DIM_RLT_NAME = 4, SC_DIM_SPEAK = 5, SC_DIM_LEGS = 6 };
+enum { SC_DIM_CLS_ID = 0, SC_DIM_REF = 1, SC_DIM_DROP = 2, SC_DIM_OBJ_KEY = 3, SC_DIM_OBJ_NAME = 4, SC_DIM_RLT_KEY = 5, SC_DIM_RLT_NAME = 6, SC_DIM_SPEAK = 7, SC_DIM_LEGS = 8 };
 
+static void sc_obj_drop(void *);
 tril Cat_hyper_impl(void *, uint32_t, ...);
 tril Dog_hyper_impl(void *, uint32_t, ...);
 tril Fish_hyper_impl(void *, uint32_t, ...);
@@ -193,12 +194,19 @@ int32_t main(void) {
     return 0;
 }
 
+static void sc_obj_drop(void *_p) {
+    if (!_p) return;
+    sc_hyper _h = *(sc_hyper *)_p;
+    if (_h) _h(_p, SC_DIM_DROP);
+}
+
 tril Cat_hyper_impl(void *_slot, uint32_t _dim, ...) {
     Cat *_this = (Cat *)((char *)_slot - offsetof(Cat, _class));
     (void)_this;
     va_list _va; va_start(_va, _dim);
     switch (_dim) {
     case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); va_end(_va); *_id = SC_CLS_Cat; return SC_TRIL_POS; }
+    case SC_DIM_REF: { sc_ref **_h = va_arg(_va, sc_ref **); va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }
     case SC_DIM_OBJ_KEY: { void **_k = va_arg(_va, void **); va_end(_va); *_k = (void *)_this; return SC_TRIL_POS; }
     case SC_DIM_OBJ_NAME: { char *_b = va_arg(_va, char *); int32_t _cap = va_arg(_va, int); va_end(_va); snprintf(_b, (size_t)_cap, "Cat@%p", (void *)_this); return SC_TRIL_POS; }
     case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); void *_ka = (void *)0, *_kb = (void *)0; Cat_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; return SC_TRIL_UNK; }
@@ -232,6 +240,7 @@ tril Dog_hyper_impl(void *_slot, uint32_t _dim, ...) {
     va_list _va; va_start(_va, _dim);
     switch (_dim) {
     case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); va_end(_va); *_id = SC_CLS_Dog; return SC_TRIL_POS; }
+    case SC_DIM_REF: { sc_ref **_h = va_arg(_va, sc_ref **); va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }
     case SC_DIM_OBJ_KEY: { void **_k = va_arg(_va, void **); va_end(_va); *_k = (void *)_this; return SC_TRIL_POS; }
     case SC_DIM_OBJ_NAME: { char *_b = va_arg(_va, char *); int32_t _cap = va_arg(_va, int); va_end(_va); snprintf(_b, (size_t)_cap, "Dog@%p", (void *)_this); return SC_TRIL_POS; }
     case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); void *_ka = (void *)0, *_kb = (void *)0; Dog_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; return SC_TRIL_UNK; }
@@ -265,6 +274,7 @@ tril Fish_hyper_impl(void *_slot, uint32_t _dim, ...) {
     va_list _va; va_start(_va, _dim);
     switch (_dim) {
     case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); va_end(_va); *_id = SC_CLS_Fish; return SC_TRIL_POS; }
+    case SC_DIM_REF: { sc_ref **_h = va_arg(_va, sc_ref **); va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }
     case SC_DIM_OBJ_KEY: { void **_k = va_arg(_va, void **); va_end(_va); *_k = (void *)_this; return SC_TRIL_POS; }
     case SC_DIM_OBJ_NAME: { char *_b = va_arg(_va, char *); int32_t _cap = va_arg(_va, int); va_end(_va); snprintf(_b, (size_t)_cap, "Fish@%p", (void *)_this); return SC_TRIL_POS; }
     case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); void *_ka = (void *)0, *_kb = (void *)0; Fish_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; return SC_TRIL_UNK; }
@@ -288,6 +298,7 @@ tril Item_hyper_impl(void *_slot, uint32_t _dim, ...) {
     va_list _va; va_start(_va, _dim);
     switch (_dim) {
     case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); va_end(_va); *_id = SC_CLS_Item; return SC_TRIL_POS; }
+    case SC_DIM_REF: { sc_ref **_h = va_arg(_va, sc_ref **); va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }
     case SC_DIM_OBJ_KEY: { void **_k = va_arg(_va, void **); va_end(_va); *_k = (void *)(uintptr_t)_this->obj_key; return SC_TRIL_POS; }
     case SC_DIM_OBJ_NAME: { char *_b = va_arg(_va, char *); int32_t _cap = va_arg(_va, int); va_end(_va); snprintf(_b, (size_t)_cap, "%s", _this->obj_name); return SC_TRIL_POS; }
     case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); void *_ka = (void *)0, *_kb = (void *)0; Item_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; return SC_TRIL_UNK; }

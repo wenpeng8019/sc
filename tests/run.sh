@@ -73,6 +73,7 @@ POSITIVE=(
     tests/cases/cast.sc
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc
+    tests/cases/object_at.sc
     tests/cases/fat_array.sc
     tests/cases/fat_global.sc
     tests/cases/final.sc

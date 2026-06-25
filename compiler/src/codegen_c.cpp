@@ -147,17 +147,19 @@ struct CGen {
     std::set<std::string> externalClassNames;                  // 外部（其它单元定义）cls 类名：本单元仅引用其分派器（extern 原型）
     std::map<std::string, std::vector<const Decl*>> classDims; // 类名 → 用户 dim 声明（源序）
     std::map<std::string, int> dimSelectors;                   // 全局维度名 → 选择子 id（用户 dim 从 5 起）
-    int nextDimSel = 5;                                        // 下一个用户维度选择子（0..4 保留）
+    int nextDimSel = 7;                                        // 下一个用户维度选择子（0..6 保留）
     bool usesClassRt = false;                                  // 本单元需输出类机制运行时序言（tril/object/cls）
 
-    // 维度名 → 全局选择子 id（保留：CLS_ID=0 / OBJ_KEY=1 / OBJ_NAME=2 / RLT_KEY=3 / RLT_NAME=4；
-    // 其余按首现顺序从 5 起）
+    // 维度名 → 全局选择子 id（保留：CLS_ID=0 / REF=1 / DROP=2 / OBJ_KEY=3 / OBJ_NAME=4 /
+    //   RLT_KEY=5 / RLT_NAME=6；REF/DROP 为 object@ 根本机制故紧跟 CLS_ID；其余按首现顺序从 7 起）
     int dimId(const std::string& name) {
         if (name == "CLS_ID")   return 0;
-        if (name == "OBJ_KEY")  return 1;
-        if (name == "OBJ_NAME") return 2;
-        if (name == "RLT_KEY")  return 3;
-        if (name == "RLT_NAME") return 4;
+        if (name == "REF")      return 1;
+        if (name == "DROP")     return 2;
+        if (name == "OBJ_KEY")  return 3;
+        if (name == "OBJ_NAME") return 4;
+        if (name == "RLT_KEY")  return 5;
+        if (name == "RLT_NAME") return 6;
         auto it = dimSelectors.find(name);
         if (it != dimSelectors.end()) return it->second;
         int id = nextDimSel++;
@@ -1131,6 +1133,8 @@ struct CGen {
     // 子成员，见 auto_ptr.md §5）；无 drop 则空串（解绑点退化为普通 sc_fat_unbind，无析构步）。
     std::string fatDtorArg(const std::string& typeName) const {
         if (typeName.empty()) return "";
+        // object@：类型擦除，静态查不到具体析构 → 走通用蹦床 sc_obj_drop（运行时经 SC_DIM_DROP 派发）。
+        if (typeName == "object") return "(void (*)(void *))sc_obj_drop";
         const Decl* dm = findMethod(typeName, "drop");
         if (!dm) return "";
         return "(void (*)(void *))" + dm->name;
@@ -1840,8 +1844,14 @@ struct CGen {
                         }
                         // 维度调用糖：object 动态接收者 ob.Dim(args) → (*ob)(ob, SC_DIM_Dim, args)
                         if (base.name == "object" && isDimCallName(e.a->text)) {
-                            out << "(*("; emitExpr(*e.a->a); out << "))(";
-                            emitExpr(*e.a->a); out << ", SC_DIM_" << e.a->text;
+                            if (base.fat) {
+                                // object@ 胖接收者：分派槽为擦除的 _class 槽指针 (object)(recv).p
+                                out << "(*(object)("; emitExpr(*e.a->a); out << ").p)((object)(";
+                                emitExpr(*e.a->a); out << ").p, SC_DIM_" << e.a->text;
+                            } else {
+                                out << "(*("; emitExpr(*e.a->a); out << "))(";
+                                emitExpr(*e.a->a); out << ", SC_DIM_" << e.a->text;
+                            }
                             for (auto& a : e.args) { out << ", "; emitExpr(*a, true); }
                             out << ")";
                             break;
@@ -2300,7 +2310,11 @@ struct CGen {
             out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
                 << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             indent();
-            out << "sc_fat_bind(&" << lv << ", " << tmp
+            // object@ 目标：p 须为擦除的 _class 槽指针（非 T 实体基址，供 dim 派发 / sc_obj_drop）。
+            std::string pexpr = tmp;
+            if (targetType == "object" && classNames.count(td->name))
+                pexpr = "(void *)&" + tmp + "->_class";
+            out << "sc_fat_bind(&" << lv << ", " << pexpr
                 << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), " << own << ");\n";
             return;
         }
@@ -2349,8 +2363,13 @@ struct CGen {
         std::string tt;
         if (isFatExpr(init, &tt)) {
             std::string rhs = captureExpr(init);
+            std::string pexpr = "(" + rhs + ").p";
+            // object@ 目标：p 须为擦除的 _class 槽指针（dim 派发 / sc_obj_drop 均以之为入口）。
+            //   源为具体类 T@ → &((T*)(rhs).p)->_class；源已是 object@ → 直取 (rhs).p（已是槽）。
+            if (targetType == "object" && tt != "object" && classNames.count(tt))
+                pexpr = "(void *)&((" + tt + " *)(" + rhs + ").p)->_class";
             indent();
-            out << "sc_fat_bind(&" << lv << ", (" << rhs << ").p, (sc_ref *)("
+            out << "sc_fat_bind(&" << lv << ", " << pexpr << ", (sc_ref *)("
                 << rhs << ").tar, " << own << ");\n";
             return;
         }
@@ -4505,8 +4524,8 @@ struct CGen {
             for (auto& n : classNames) out << ", SC_CLS_" << n << " = " << i++;
             out << " };\n";
         }
-        out << "enum { SC_DIM_CLS_ID = 0, SC_DIM_OBJ_KEY = 1, SC_DIM_OBJ_NAME = 2"
-               ", SC_DIM_RLT_KEY = 3, SC_DIM_RLT_NAME = 4";
+        out << "enum { SC_DIM_CLS_ID = 0, SC_DIM_REF = 1, SC_DIM_DROP = 2"
+               ", SC_DIM_OBJ_KEY = 3, SC_DIM_OBJ_NAME = 4, SC_DIM_RLT_KEY = 5, SC_DIM_RLT_NAME = 6";
         std::vector<std::pair<int, std::string>> ds;
         for (auto& kv : dimSelectors) ds.push_back({kv.second, kv.first});
         std::sort(ds.begin(), ds.end());
@@ -4568,6 +4587,14 @@ struct CGen {
         out << "    switch (_dim) {\n";
         out << "    case SC_DIM_CLS_ID: { int32_t *_id = va_arg(_va, int32_t *); "
             << "va_end(_va); *_id = SC_CLS_" << T << "; return SC_TRIL_POS; }\n";
+        // REF（保留）：object@ 取目标 sc_ref 头——派发器知 offsetof(T,_class)，由 container_of
+        //   回算的 _this 减 SC_REF_HDR 即头（堆对象头紧贴实体）。类型擦除后唯一能定位头的途径。
+        out << "    case SC_DIM_REF: { sc_ref **_h = va_arg(_va, sc_ref **); "
+            << "va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }\n";
+        // DROP（保留）：object@ 入边归零时经派发器调本类析构（类型擦除后静态查不到 T_drop）。
+        if (const Decl* dm = findMethod(T, "drop"))
+            out << "    case SC_DIM_DROP: { va_end(_va); " << dm->name
+                << "(_this); return SC_TRIL_POS; }\n";
         bool hasKey = false, hasName = false, hasRltKey = false, hasRltName = false;
         auto it = classDims.find(T);
         if (it != classDims.end())
@@ -5683,6 +5710,8 @@ struct CGen {
 
         // 类机制运行时序言（tril/object/sc_hyper 类型 + 全局类 id / 维度选择子枚举）
         emitClassRuntimePrelude();
+        // object@ 通用析构蹦床前置声明（fatDtorArg("object") 在函数体内引用，定义在文件末）
+        if (usesClassRt) out << "static void sc_obj_drop(void *);\n";
         // 每个 cls 的分派器原型（构造点安装 _class 指针、object 强转、dim 调用均引用之）
         for (auto* c : classDecls)
             out << "tril " << c->name << "_hyper_impl(void *, uint32_t, ...);\n";
@@ -5809,6 +5838,15 @@ struct CGen {
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
         // 类机制分派器定义（每个 cls 一个 T_hyper_impl，折叠其全部 dim + 保留维度）
+        if (usesClassRt) {
+            // object@ 通用析构蹦床：入边归零时 sc_fat_on_zero_d 静态拿不到擦除类型的析构，
+            //   故转交派发器 SC_DIM_DROP（其内 container_of 回算 _this 调本类 T_drop）。_p=_class 槽。
+            out << "static void sc_obj_drop(void *_p) {\n"
+                << "    if (!_p) return;\n"
+                << "    sc_hyper _h = *(sc_hyper *)_p;\n"
+                << "    if (_h) _h(_p, SC_DIM_DROP);\n"
+                << "}\n\n";
+        }
         for (auto* c : classDecls) emitDispatcher(*c);
         // 库模块（无 main）：sc_mod_<token>_init/drop 定义（在方法/全局声明之后）。
         emitLifecycleDefs();
@@ -6010,14 +6048,14 @@ std::string emitClassHeader(const std::vector<std::string>& clsNames,
     int ci = 1;
     for (auto& n : clsNames) s += ", SC_CLS_" + n + " = " + std::to_string(ci++);
     s += " };\n";
-    // 全局维度选择子枚举（保留 0..4，用户维度从 5 起，首见序；跳过保留名）
-    s += "enum { SC_DIM_CLS_ID = 0, SC_DIM_OBJ_KEY = 1, SC_DIM_OBJ_NAME = 2, "
-         "SC_DIM_RLT_KEY = 3, SC_DIM_RLT_NAME = 4";
-    int di = 5;
+    // 全局维度选择子枚举（保留 0..6，用户维度从 7 起，首见序；跳过保留名）
+    s += "enum { SC_DIM_CLS_ID = 0, SC_DIM_REF = 1, SC_DIM_DROP = 2, "
+         "SC_DIM_OBJ_KEY = 3, SC_DIM_OBJ_NAME = 4, SC_DIM_RLT_KEY = 5, SC_DIM_RLT_NAME = 6";
+    int di = 7;
     for (auto& n : dimNames) {
         if (n == "CLS_ID" || n == "OBJ_KEY" || n == "OBJ_NAME" ||
-            n == "RLT_KEY" || n == "RLT_NAME")
-            continue;  // 保留维度已占 0..4
+            n == "RLT_KEY" || n == "RLT_NAME" || n == "REF" || n == "DROP")
+            continue;  // 保留维度已占 0..6
         s += ", SC_DIM_" + n + " = " + std::to_string(di++);
     }
     s += " };\n\n#endif\n";

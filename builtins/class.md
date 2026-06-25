@@ -50,19 +50,28 @@ cls TypeName: {
 - 体内 `this` 经 `container_of(_this)` 还原；返回恒 `tril`，真正输出经**指针出参**回填。
 - 对象未实现某 dim → `default` 返回 `unknown`（不应答）。任意 `object` 可被任意 dim 探测。
 
-**保留维度**（选择子 0..4，先于用户 dim）：
+**保留维度**（选择子 0..6，先于用户 dim）：
 
 | 选择子 | 名 | 出参 / 入参 | 默认实现 |
 |--------|----|------|------|
 | 0 | `SC_DIM_CLS_ID`   | `int32_t* id` | 写 `SC_CLS_<T>`，返回 `positive`（不可覆盖）|
-| 1 | `SC_DIM_OBJ_KEY`  | `void** key`  | 有 `obj_key` 字段 → 写字段值；否则写对象基址。返回 `positive`（可覆盖）|
-| 2 | `SC_DIM_OBJ_NAME` | `char* buf, int32_t cap` | 有 `obj_name` 字段 → `%s` 写字段值；否则 `snprintf "<T>@%p"`。返回 `positive`（可覆盖）|
-| 3 | `SC_DIM_RLT_KEY`  | `object other` | 取自身与 `other` 的 key（经 `OBJ_KEY`），按地址比大小，返回三态 `负/0/正`（可覆盖）|
-| 4 | `SC_DIM_RLT_NAME` | `object other` | 取自身与 `other` 的 name（经 `OBJ_NAME`），`strcmp` 比大小，返回三态（可覆盖）|
+| 1 | `SC_DIM_REF`      | `sc_ref** hdr` | 写目标 `sc_ref` 头地址（`(char*)_this - SC_REF_HDR`），返回 `positive`（不可覆盖）。供 `object@` 从类型擦除的 `_class` 槽取回引用计数头——派发器知 `offsetof(T,_class)`，是擦除后定位头的唯一途径 |
+| 2 | `SC_DIM_DROP`     | （无） | 类有 `drop` 方法时调本类析构 `T_drop(_this)`，返回 `positive`（不可覆盖）；无 `drop` 则落 `default` 返回 `unknown`。供 `object@` 入边归零经通用蹦床 `sc_obj_drop` 动态派发到正确析构 |
+| 3 | `SC_DIM_OBJ_KEY`  | `void** key`  | 有 `obj_key` 字段 → 写字段值；否则写对象基址。返回 `positive`（可覆盖）|
+| 4 | `SC_DIM_OBJ_NAME` | `char* buf, int32_t cap` | 有 `obj_name` 字段 → `%s` 写字段值；否则 `snprintf "<T>@%p"`。返回 `positive`（可覆盖）|
+| 5 | `SC_DIM_RLT_KEY`  | `object other` | 取自身与 `other` 的 key（经 `OBJ_KEY`），按地址比大小，返回三态 `负/0/正`（可覆盖）|
+| 6 | `SC_DIM_RLT_NAME` | `object other` | 取自身与 `other` 的 name（经 `OBJ_NAME`），`strcmp` 比大小，返回三态（可覆盖）|
 
 OBJ_KEY 默认对象地址、OBJ_NAME 默认「类名@地址」，二者默认即唯一；若类含 `obj_key`/`obj_name`
 字段则默认实现自动采用字段值。RLT_KEY/RLT_NAME 用于与另一**同类**对象比对 key/name，默认「直接比大小」
-（自身经 `OBJ_KEY`/`OBJ_NAME` 取值，因此尊重用户对这两者的覆盖）。用户 dim 选择子从 **5** 起。
+（自身经 `OBJ_KEY`/`OBJ_NAME` 取值，因此尊重用户对这两者的覆盖）。REF/DROP 为 `object@`（类型擦除自动指针）
+的根本机制，故紧跟 `CLS_ID`。用户 dim 选择子从 **7** 起。
+
+**`object@`（类型擦除自动指针）**：`sc_fat` 的 `.p` 存擦除的 `_class` 槽指针（非 `T` 实体基址，因 `_class`
+未必在偏移 0——与 `~` 链表前缀或 `<C,I>` 容器前缀共存时在其后），`.tar` 为引用计数头（绑定时由源 `T@`/`object@`
+直接携带）。dim 调用 `o.Dim()` → `(*(object)o.p)(o.p, SC_DIM_Dim, ...)`；入边归零经 `sc_obj_drop` →
+`SC_DIM_DROP` 动态派发析构。仅支持从堆 `T@`/`T()` 或另一 `object@` 绑定（头紧贴实体）；栈/全局类对象的头为
+旁挂伴生头、无法经 `_this - SC_REF_HDR` 反推，故不支持擦除为 `object@`（用裸 `object` 引用即可）。
 
 **维度调用语法**：
 - 静态接收者 `o.DimName(args)`（`T`/`T&`/`T@`）→ `T_hyper_impl(&o._class, SC_DIM_DimName, args)`。
