@@ -188,6 +188,34 @@ key→`@`（裸自动指针）映射，**拥有 value**（每条一份 retain，
 回调类型 `dict_each_fn: bool, key: const &, value: @, ctx: &`（返回 false 提前终止）。
 游标与 `each` 走同一桶序；`get/has/each` 期间游标稳定，`put/remove` 可能 rehash 使其失效（遍历期间勿增删）。
 
+#### 桶结构与碰撞策略（自写，非 uthash 路线）
+
+dict 的底层结构完全自写，走**开放寻址（open addressing）**路线，与 uthash 的**链地址法（separate
+chaining）**根本不同——更接近 Google SwissTable / Rust `hashbrown`。当初拒绝 uthash 正是为避开它的两个
+硬伤：**per-item malloc**（每元素一次堆分配，cache 不友好）与**编译期类型绑定**（侵入式 handle 宏，与裸
+`@` 类型擦除不兼容）。
+
+- **连续桶数组 + 线性探测**：所有 item 内联住一整块 `slots`，碰撞时顺序往后探（`i = (i+1) & mask`，
+  nbuckets 为 2 的幂）。整张表仅 `ctrl + slots` 两块内存，**零 per-item 分配**，探测/遍历皆顺序访问。
+- **SwissTable 控制字节**：独立 1 字节/桶的 `ctrl` 数组存 hash 低 7 位（h2）。探测先比这 1 字节快速过滤，
+  绝大多数不匹配桶连 key 都不碰（空=`0xFF`、墓碑=`0xFE`、占用=`0x00..0x7F`）。
+- **墓碑删除**：删除标 `0xFE` 而非真空，保住探测链；rehash 时统一清墓碑。
+- **负载因子 7/8 整体 rehash**：`(used+1)*8 >= nbuckets*7` 触发，重建整表（开放寻址扩容时 item 位置必变，
+  本就须全搬，故不做增量迁移）。
+
+| 维度 | uthash | 本 dict |
+|------|--------|---------|
+| 桶结构 | 桶=链表头，元素散在堆 | 桶=连续数组槽，元素内联 |
+| 碰撞解决 | 链地址（挂链表） | 开放寻址 + 线性探测 |
+| 元素分配 | 每 item 一次 malloc | 零 per-item，整表两块内存 |
+| 快速过滤 | 可选 bloom filter | SwissTable 控制字节（h2） |
+| 删除 | 摘链表节点 | 墓碑标记 |
+| 扩容 | 桶翻倍重挂链（item 不动） | 负载 7/8 整体 rehash 重建 |
+| 内存局部性 | 差（指针跳转） | 好（顺序访问） |
+| 类型模型 | 编译期宏 + 侵入式 handle | 运行时类型擦除（key_size 三态） |
+
+> 仅「哈希算法」这一层对标了 uthash（下文 7 选 1）；桶与碰撞这套底层结构是独立的开放寻址设计。
+
 #### 哈希算法选择（编译期，对标 uthash）
 
 dict 内置 7 种哈希算法，默认 **FNV-1a**。算法全进程统一（哈希值不跨进程持久化），用编译宏切换、
