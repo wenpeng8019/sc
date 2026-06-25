@@ -6,9 +6,6 @@ typedef struct ctx ctx;
 typedef struct sig sig;
 typedef struct bctx bctx;
 
-typedef struct pool pool;
-extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
-
 typedef struct ctx {
     mutex mu;
     int32_t n;
@@ -295,85 +292,83 @@ int32_t main(void) {
     /* line 152 */
     mutex_init(&c2.mu);
     /* line 153 */
-    pool p = {0};
+    pool *p = default_pool(4);
     /* line 154 */
-    pool_init(&p, 4);
-    /* line 155 */
     int32_t k = 0;
-    /* line 156 */
+    /* line 155 */
     for (k = 0; k < 8; k++) {
-        /* line 157 */
+        /* line 156 */
         {
             struct work _rp = {0};
             _rp.c = &(c2);
             _rp.rounds = 1000;
-            pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
+            p->run(p, (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
         }
     }
+    /* line 157 */
+    p->join(p);
     /* line 158 */
-    pool_join(&p);
-    /* line 159 */
     printf("pool done: n=%d\n", c2.n);
-    /* line 160 */
+    /* line 159 */
     {
         struct work _rp = {0};
         _rp.c = &(c2);
         _rp.rounds = 1000;
-        pool_run(&(p), (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
+        p->run(p, (void (*)(void *))work_rpc, &_rp, sizeof(_rp));
     }
+    /* line 160 */
+    p->drop(p);
     /* line 161 */
-    pool_drop(&p);
-    /* line 162 */
     printf("pool drop: n=%d\n", c2.n);
-    /* line 163 */
+    /* line 162 */
     mutex_drop(&c2.mu);
-    /* line 166 */
+    /* line 165 */
     bctx bc = {0};
-    /* line 167 */
+    /* line 166 */
     bc.arrived = 0;
-    /* line 168 */
+    /* line 167 */
     bc.serial = 0;
-    /* line 169 */
+    /* line 168 */
     mutex_init(&bc.mu);
-    /* line 170 */
+    /* line 169 */
     barrier_init(&bc.bar, 3);
-    /* line 171 */
+    /* line 170 */
     thread *bt1 = NULL;
-    /* line 172 */
+    /* line 171 */
     thread *bt2 = NULL;
-    /* line 173 */
+    /* line 172 */
     thread *bt3 = NULL;
-    /* line 174 */
+    /* line 173 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt1)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 175 */
+    /* line 174 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt2)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 176 */
+    /* line 175 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
         thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt3)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 177 */
+    /* line 176 */
     thread_join(bt1);
-    /* line 178 */
+    /* line 177 */
     thread_join(bt2);
-    /* line 179 */
+    /* line 178 */
     thread_join(bt3);
-    /* line 180 */
+    /* line 179 */
     printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial);
-    /* line 181 */
+    /* line 180 */
     barrier_drop(&bc.bar);
-    /* line 182 */
+    /* line 181 */
     mutex_drop(&bc.mu);
-    /* line 183 */
+    /* line 182 */
     {
         int32_t _ret = 0;
         sc_mod_mt_drop();

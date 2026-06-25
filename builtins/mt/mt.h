@@ -4,7 +4,7 @@
  *   - thread 与 run 线程创建（thread_run/thread_join）已下沉至语言内核（op.h/op_impl.c）
  *   - mutex：init/drop 配对；lock/unlock 配对
  *   - cond：init/drop 配对；wait 为 cond 方法（编译器生成 cond_wait 调用）
- *   - pool：init/drop 配对；run 语句第二参为 pool 时编译器生成 pool_run 调用
+ *   - pool：op 层接口协议（vtable，见 op.h），本模块经 default_pool(n) 具名构造填充
  *   - 返回 uint8_t（sc 的 bool 类型）的函数：1 成功 / 0 失败
  */
 #ifndef SC_M_H
@@ -18,23 +18,21 @@ extern "C" {
 #endif
 
 /* thread 类型与 run 线程创建（thread_run/thread_join）已下沉至语言内核：
- * 见 builtins/op.h（默认带入）与 op_impl.c（始终链接）。pool 仍为本模块执行目标，
- * 其 pool_run 接收与 thread_run 同形的参数帧。 */
+ * 见 builtins/op.h（默认带入）与 op_impl.c（始终链接）。pool 亦为语言内核
+ * 声明的接口协议（vtable，见 op.h）；本模块按「默认 pool」策略提供具名构造
+ * default_pool(n)，填充 run/join/drop 指针并返回 pool&（犹如 io 的 file() 之于
+ * com）。其入池帧（fn/params/psize）与 thread_run 同形。 */
 
-/* ---------------- pool：线程池（run 语句的另一种执行目标） ---------------- */
+/* ---------------- pool：线程池协议的「默认」实现（构造入口） ---------------- */
 
-typedef struct pool {
-    void *h;       /* 实现私有区指针（队列 + 同步原语 + 工作线程） */
-} pool;
+struct pool;   /* op.h 定义完整 vtable；此处仅作返回类型的不完全声明 */
 
-/* run 语句原语（pool 形态，对称 thread_run）：fn 为 rpc 实际函数，
- * params/psize 为装填好的参数结构体（拷贝入任务节点，调用点无需保活）。
- * 返回 1 成功 / 0 失败（池未初始化/已停/内存不足） */
-uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psize);
-
-void    pool_init(pool *_this, uint32_t n);  /* n 个工作线程；0 → CPU 逻辑核数 */
-void    pool_join(pool *_this);              /* 屏障：等待全部已提交任务完成（后续仍可提交） */
-void    pool_drop(pool *_this);              /* 析构：等任务完成 → 停工作线程 → 回收 */
+/* default_pool：构造一个「默认策略」线程池（FIFO 任务队列 + n 个固定工作线程），
+ * 填充 op 层 pool 协议的 run/join/drop 指针并返回 pool&。
+ *   - n：工作线程数；0 → CPU 逻辑核数
+ *   - 返回 struct pool*（失败 NULL）；用完调 p->drop() 停池回收（含 pool 对象本身）
+ * 将来可按其它策略（如 work-stealing / 优先级）另起 *_pool(n) 构造，均返回 pool&。 */
+struct pool *default_pool(uint32_t n);
 
 /* ---------------- mutex：互斥锁 ---------------- */
 

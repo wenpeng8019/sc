@@ -300,14 +300,15 @@ def operand: {
 # 语法（第二参数决定执行形态，按类型静态分派）：
 #   run work(a, b)        # detach：独立线程，结束后自释放
 #   run work(a, b), &t    # joinable：t: thread&，须 t->join() 等待并回收
-#   run work(a, b), p     # 入池：p 为 pool（需 inc mt.sc），任务排队执行
+#   run work(a, b), p     # 入池：p 为 pool&（op 层接口协议，构造需 inc mt.sc），
+#                         # 任务排队执行——经 p->run(...) 协议指针派发，零 mt 符号
 # 机制：run 单次分配 sizeof(thread) + sizeof(rpc参数) + 实现私有区，
 #   rpc 参数紧随 thread 对象之后（p + sizeof(thread) 即参数），线程实体与参数
 #   同生命周期；语法层面能拿到的 thread 必为 joinable。
 # 分工：thread 类型是语言内核机制，声明在此（默认导入）；C 结构体/原型见 op.h
 #   （默认带入每个 C 单元），运行时（thread_run/thread_join，跨平台 pthread↔Win32）
-#   见 builtins/op_impl.c（始终随工程编译链接）。pool 执行目标属多线程模块
-#   （inc mt.sc）。
+#   见 builtins/op_impl.c（始终随工程编译链接）。pool 协议亦声明于此（默认导入），
+#   但其构造与执行目标实现属多线程模块（inc mt.sc）。
 
 # ---------------- thread：线程（run 创建，不可手工构造） ----------------
 @def thread: {
@@ -315,6 +316,23 @@ def operand: {
     h: &           # 实现私有区指针（同块分配，调用方不直接访问）
 
     fnc join::          # 等待结束并回收（含 thread 对象本身，之后指针失效）
+}
+
+# ---------------- pool：线程池接口协议（run 语句入池目标） ----------------
+# pool 是 op 层「线程池接口协议」，仿 com：成员均为「每对象方法指针」（单冒号
+# fnc name: 即方法指针槽，无 C 实现），由实现模块按策略提供具名构造函数填充。
+# 故语言内核（run 语句）经协议指针派发、零 emit mt 符号，彻底解耦 mt 与语言。
+#   run work(a, b), p     # 入池：p 为 pool&（经构造取得），任务排队执行
+#                         # → p->run(p, work_rpc, &参数, sizeof(参数))
+# 构造：实现模块（mt，inc mt.sc）按策略命名 *_pool(n)，均返回 pool&，犹如 com 的
+#   file()。当前默认实现 default_pool(n)（mt）。C 结构体（vtable）见 op.h，
+#   默认带入每个 C 单元；填充与工作线程实现见 mt_impl.c。
+@def pool: {
+    h: &                 # 实现私有区指针（队列 + 同步原语 + 工作线程，实现私有）
+
+    fnc run:             # 入池执行一个 rpc 任务（编译器经 run 语句派发；签名见 op.h）
+    fnc join:            # 屏障：等全部已提交任务完成（后续仍可提交）
+    fnc drop:            # 析构：等任务完成 → 停工作线程 → 回收（含 pool 对象本身）
 }
 
 

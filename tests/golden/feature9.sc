@@ -109,15 +109,14 @@ fnc main: i4
     var c2: ctx
     c2.n = 0
     c2.mu.init()
-    var p: pool
-    p.init(4)
+    var p: pool& = default_pool(4)
     var k: i4 = 0
     for k = 0; k < 8; k++
         run work(&c2, 1000), p
-    p.join()
+    p->join()
     printf("pool done: n=%d\n", c2.n)
     run work(&c2, 1000), p
-    p.drop()
+    p->drop()
     printf("pool drop: n=%d\n", c2.n)
     c2.mu.drop()
     var bc: bctx

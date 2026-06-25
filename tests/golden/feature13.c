@@ -3,9 +3,6 @@
 #include "builtins/mt/mt.h"
 #include "builtins/async/async.h"
 
-typedef struct pool pool;
-extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
-
 struct greet {
     char * _;
     future *_ret;

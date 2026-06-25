@@ -3988,11 +3988,11 @@ struct CGen {
     //   run worker(a, b), &t →
     //   { struct worker _rp = {0}; _rp.x = a; ...;
     //     thread_run((void (*)(void *))worker_rpc, &_rp, sizeof(_rp), (thread **)(&t)); }
-    //   run worker(a, b), p（p 为 pool 对象或指针，对象自动取地址）→
-    //     pool_run(&p, (void (*)(void *))worker_rpc, &_rp, sizeof(_rp));
+    //   run worker(a, b), p（p 为 pool& 接口协议，值则自动取址）→
+    //     p->run(p, (void (*)(void *))worker_rpc, &_rp, sizeof(_rp));
     // thread_run 在 op_impl 中实现：单次 alloc(sizeof(thread)+sizeof(参数)+实现私有区)，
     // 参数 memcpy 到 thread 对象紧随位置；出参为空时 detach 自释放。
-    // pool_run 同哲学：参数拷贝入任务节点，调用点无需保活。
+    // pool 经协议指针派发（零 emit mt 符号）：参数拷贝入任务节点，调用点无需保活。
     void emitRunStmt(const Stmt& s) {
         const Expr& call = *s.expr;
         auto it = rpcs.find(call.a->text);
@@ -4021,13 +4021,14 @@ struct CGen {
                                    "'（当前仅支持 stack、prio）", s.line};
             }
         }
-        // 第二参类型分派：pool（对象/指针）→ 入池；其余 → thread 出参
+        // 第二参类型分派：pool（接口协议，对象/指针）→ 入池；其余 → thread 出参
         bool toPool = false;
+        bool poolPtr = false;
         if (s.forInit) {
             VType vt;
             if (exprVType(*s.forInit, vt) && vt.arr == 0 && vt.ptr <= 1) {
                 const Decl* sd = aggrOf(vt.name);
-                if (sd && sd->name == "pool") toPool = true;
+                if (sd && sd->name == "pool") { toPool = true; poolPtr = (vt.ptr == 1); }
             }
         }
         // pool 工作线程为预创建，逐任务的 stack/prio 不适用 → 显式报错
@@ -4051,8 +4052,11 @@ struct CGen {
         }
         indent();
         if (toPool) {
-            out << "pool_run(";
-            emitAutoAddr(*s.forInit);
+            // 经 pool 协议指针派发：PTR->run(PTR, fn, &_rp, sizeof(_rp))
+            //   PTR：pool& 直传，pool 值取址（仿 com 的 c->close(c)），零 emit mt 符号
+            emitComBasePtr(*s.forInit, poolPtr);
+            out << "->run(";
+            emitComBasePtr(*s.forInit, poolPtr);
             out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
         } else {
             out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
@@ -5992,11 +5996,8 @@ struct CGen {
         }
 
         // run 语句线程原语：thread 类型与 thread_run 已属语言内核（op.h 默认带入，
-        // op_impl.c 始终链接），无需在此声明。pool 目标仍属 mt 模块（mt.h，inc mt.sc）。
-        if (usesRun && aggrOf("pool")) {
-            out << "typedef struct pool pool;\n"
-                << "extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);\n\n";
-        }
+        // op_impl.c 始终链接），无需在此声明。pool 亦为 op 层接口协议（vtable 见 op.h
+        // 默认带入），入池经协议指针派发——语言内核零 emit mt 符号，无需在此声明。
 
         // ADT 容器（def T: <C, I> {}）接口完备性校验：
         // 容器 C 与元素节点 I 必须已定义，且 C 具备必备成员函数 insert/remove/find/first/next

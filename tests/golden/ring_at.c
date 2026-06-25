@@ -5,9 +5,6 @@
 
 typedef struct shared shared;
 
-typedef struct pool pool;
-extern uint8_t pool_run(pool *, void (*)(void *), const void *, size_t);
-
 typedef struct shared {
     ring q;
     int64_t sum;

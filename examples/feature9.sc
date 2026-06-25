@@ -150,15 +150,14 @@ fnc main: i4
     var c2: ctx
     c2.n = 0
     c2.mu.init()
-    var p: pool
-    p.init(4)                  # 0 → CPU 核数
+    var p: pool& = default_pool(4)  # 接口协议：mt 按默认策略构造（0 → CPU 核数）
     var k: i4 = 0
     for k = 0; k < 8; k++
         run work(&c2, 1000), p # 入池：与 run 独立线程同一语句
-    p.join()                   # 屏障：等全部任务完成（pool 仍可用）
+    p->join()                  # 屏障：等全部任务完成（pool 仍可用）
     printf("pool done: n=%d\n", c2.n)      # 期望 8000
     run work(&c2, 1000), p     # join 后继续提交
-    p.drop()                   # 析构：等任务完成后停池回收
+    p->drop()                  # 析构：等任务完成后停池回收
     printf("pool drop: n=%d\n", c2.n)      # 期望 9000
     c2.mu.drop()
 

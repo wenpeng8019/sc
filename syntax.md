@@ -2049,28 +2049,30 @@ fnc main: i4
     run work(&c, 10000)        # detach：线程结束后自释放
     t->join()                  # 等待并回收（含 thread 对象），之后 t 失效
 
-    var p: pool                # 线程池：同一个 run 动词
-    p.init(4)                  # 4 个工作线程；0 → CPU 逻辑核数
+    var p: pool& = default_pool(4) # 线程池：接口协议，mt 按默认策略构造（0 → CPU 核数）
     run work(&c, 10000), p     # 入池：任务排队，由工作线程执行
-    p.join()                   # 屏障：等全部已提交任务完成
-    p.drop()                   # 析构：等任务完成后停池回收
+    p->join()                  # 屏障：等全部已提交任务完成
+    p->drop()                  # 析构：等任务完成后停池回收
     return 0
 ```
 
 - 第二参数（可选）按类型分派：`&t`（t 为 `thread&`）→ joinable
-  独立线程，必须 `join()` 等待并回收；pool 对象或指针 → 任务入池
-  （对象自动取地址，与方法调用糖一致）；省略 → 线程内部 detach，
-  结束后自释放。
+  独立线程，必须 `join()` 等待并回收；`p`（`pool&` 接口协议，值则自动
+  取址）→ 任务入池；省略 → 线程内部 detach，结束后自释放。
+- pool 是 op 层「线程池接口协议」（仿 com：vtable 全为每对象方法指针，
+  默认导入；C 结构体见 op.h）。实现模块 mt 按策略提供具名构造
+  `default_pool(n)`（返回 `pool&`，犹如 io 的 `file()` 之于 com），故入池
+  经协议指针派发（`p->run(p, ...)`），语言内核零 emit mt 符号。
 - thread 对象由 run 内部联合分配：单次
   `alloc(sizeof(thread) + sizeof(rpc参数) + 实现私有区)`，rpc 参数紧随
   thread 之后（`p + sizeof(thread)` 即参数），线程实体与参数同生命周期。
 - 语法层面能拿到的 thread 必为 joinable，所以 thread 成员很简洁：
   `id`（跨平台统一线程 id）与 `join` 方法。不可手工构造。
-- 转 C：装填 rpc 参数结构体后按第二参类型改发线程原语——独立线程
-  `thread_run(入口, &参数, sizeof(参数), 出参|NULL, stack, prio)`，入池
-  `pool_run(&池, 入口, &参数, sizeof(参数))`（thread_run 由 op_impl、
-  pool_run 由 mt_impl 提供，
-  POSIX pthread / Windows 线程；C 侧是两个普通函数，无运行时多态）。
+- 转 C：装填 rpc 参数结构体后按第二参类型改发——独立线程
+  `thread_run(入口, &参数, sizeof(参数), 出参|NULL, stack, prio)`（由
+  op_impl 提供，始终链接）；入池经协议指针
+  `p->run(p, 入口, &参数, sizeof(参数))`（vtable 由 `default_pool` 在 mt_impl
+  中填充，inc mt.sc）。底层 POSIX pthread / Windows 线程，无运行时多态。
 
 #### 线程属性选项 `run<...>`
 

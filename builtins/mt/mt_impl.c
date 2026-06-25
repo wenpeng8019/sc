@@ -104,7 +104,11 @@ uint8_t barrier_wait(barrier *_this) {
     return (uint8_t)(sc_barrier_wait(b) ? 1 : 0);
 }
 
-/* ---------------- pool ---------------- */
+/* ---------------- pool：线程池协议的「默认」实现 ---------------- */
+/* pool 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「默认策略」用
+ * default_pool(n) 具名构造——犹如 io 的 file() 之于 com：pol_state 首字段即
+ * pool base，故 (pool*) 与 (pol_state*) 同址，方法直接 (pol_state*)_this 回取私有
+ * 区。整块（含 pool 对象、同步原语、柔性 worker 句柄数组）一次分配，drop 整块回收。 */
 
 /* 任务节点：联合分配 [pool_task][rpc 参数 psize]（与 run 的联合实体同哲学） */
 typedef struct pool_task {
@@ -112,8 +116,9 @@ typedef struct pool_task {
     void            (*fn)(void *);   /* rpc 实际函数，参数紧随本节点 */
 } pool_task;
 
-/* 实现私有区：单链 FIFO 队列 + 双条件变量（来活 / 全部完成） */
+/* 池盒子：首字段 pool base（协议 vtable）+ 单链 FIFO 队列 + 双条件变量（来活 / 全部完成） */
 typedef struct {
+    pool       base;       /* op 层 pool 协议（首字段：与 pol_state 同址，可互转） */
     mtx_state  mu;
     cnd_state  more;       /* 来活：post 唤醒空闲 worker */
     cnd_state  idle;       /* 全部完成：pending 归零唤醒 join 等待者 */
@@ -159,31 +164,10 @@ static void *pol_worker(void *arg) {
     return 0;
 }
 
-void pool_init(pool *_this, uint32_t n) {
-    _this->h = NULL;
-    if (n == 0) n = P_ncpu();
-    pol_state *p = (pol_state *)malloc(sizeof(pol_state) + (n - 1) * sizeof(p->thr[0]));
-    if (!p) return;
-    memset(p, 0, sizeof(*p));
-    sc_mutex_init(&p->mu);
-    sc_cond_init(&p->more);
-    sc_cond_init(&p->idle);
-    for (uint32_t i = 0; i < n; i++) {
-#if P_WIN
-        p->thr[i] = CreateThread(NULL, 0, pol_worker, p, 0, NULL);
-        if (!p->thr[i]) break;
-#else
-        if (pthread_create(&p->thr[i], NULL, pol_worker, p) != 0) break;
-#endif
-        p->nthr++;
-    }
-    _this->h = p;
-}
-
-/* run 语句原语（pool 形态，对称 thread_run）：装填好的 rpc 参数入队。
- * 返回 1 成功 / 0 失败（池未初始化/已停/内存不足） */
-uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
-    pol_state *p = _this ? (pol_state *)_this->h : NULL;
+/* run 方法（协议指针，对称 thread_run）：装填好的 rpc 参数入队。
+ * 返回 1 成功 / 0 失败（池已停 / 无 worker / 内存不足） */
+static uint8_t pol_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+    pol_state *p = (pol_state *)_this;
     if (!p || !fn) return 0;
     pool_task *t = (pool_task *)malloc(sizeof(pool_task) + psize);
     if (!t) return 0;
@@ -200,9 +184,9 @@ uint8_t pool_run(pool *_this, void (*fn)(void *), const void *params, size_t psi
     return 1;
 }
 
-/* 屏障：等待全部已提交任务完成（之后 pool 仍可继续提交） */
-void pool_join(pool *_this) {
-    pol_state *p = _this ? (pol_state *)_this->h : NULL;
+/* join 方法：屏障，等待全部已提交任务完成（之后 pool 仍可继续提交） */
+static void pol_join(pool *_this) {
+    pol_state *p = (pol_state *)_this;
     if (!p) return;
     pol_lock(p);
     while (p->pending > 0)
@@ -210,9 +194,9 @@ void pool_join(pool *_this) {
     pol_unlock(p);
 }
 
-/* 析构：等已提交任务全部完成 → 停 worker → 回收（不丢任务，语义可预期） */
-void pool_drop(pool *_this) {
-    pol_state *p = _this ? (pol_state *)_this->h : NULL;
+/* drop 方法：等已提交任务全部完成 → 停 worker → 回收整块（含 pool 对象本身） */
+static void pol_drop(pool *_this) {
+    pol_state *p = (pol_state *)_this;
     if (!p) return;
     pol_lock(p);
     p->shutdown = 1;
@@ -229,6 +213,32 @@ void pool_drop(pool *_this) {
     sc_mutex_final(&p->mu);
     sc_cond_final(&p->more);
     sc_cond_final(&p->idle);
-    free(p);
-    _this->h = NULL;
+    free(p);                /* 整块回收（pool 对象与盒子同生命周期） */
+}
+
+/* default_pool：「默认策略」线程池构造（填充协议 vtable，返回 pool&）。
+ *   - n：工作线程数；0 → CPU 逻辑核数
+ *   - 返回 &box->base（失败 NULL）；用完调 p->drop() 停池回收 */
+struct pool *default_pool(uint32_t n) {
+    if (n == 0) n = P_ncpu();
+    pol_state *p = (pol_state *)malloc(sizeof(pol_state) + (n - 1) * sizeof(p->thr[0]));
+    if (!p) return NULL;
+    memset(p, 0, sizeof(*p));
+    p->base.h    = p;        /* 私有区即本盒子（方法实际经 (pol_state*)_this 回取） */
+    p->base.run  = pol_run;
+    p->base.join = pol_join;
+    p->base.drop = pol_drop;
+    sc_mutex_init(&p->mu);
+    sc_cond_init(&p->more);
+    sc_cond_init(&p->idle);
+    for (uint32_t i = 0; i < n; i++) {
+#if P_WIN
+        p->thr[i] = CreateThread(NULL, 0, pol_worker, p, 0, NULL);
+        if (!p->thr[i]) break;
+#else
+        if (pthread_create(&p->thr[i], NULL, pol_worker, p) != 0) break;
+#endif
+        p->nthr++;
+    }
+    return &p->base;
 }

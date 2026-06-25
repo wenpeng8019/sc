@@ -12,9 +12,10 @@
 # 第二参数决定执行形态（按类型静态分派）：
 #   run work(a, b)        # detach：独立线程，结束后自释放
 #   run work(a, b), &t    # joinable：t: thread&，须 t->join() 等待并回收
-#   run work(a, b), p     # 入池：p 为 pool（对象或指针），任务排队执行
+#   run work(a, b), p     # 入池：p 为 pool&（op 层接口协议，本模块经 default_pool 构造）
 # 其中 thread 类型与 detach/joinable 线程创建属语言内核（op.sc，默认导入，无需 inc）；
-# 本模块仅提供入池形态 run work(...), p 的 pool 执行目标。
+# pool 亦为 op 层接口协议（默认导入），本模块按「默认策略」提供其具名构造 default_pool
+# 与工作线程实现，作为入池形态 run work(...), p 的执行目标。
 #
 # 条件等待由 cond 的 wait 方法完成（普通方法调用，映射到 C 侧 cond_wait）：
 #   c.wait(&mu)            # 无限等待（调用前须已持有 mu）
@@ -64,16 +65,15 @@
     fnc wait:: bool       # 汇合点：阻塞至全部到达；最后到达者返回 1，其余返回 0
 }
 
-# ---------------- pool：线程池（run 语句的另一种执行目标） ----------------
-
-@def pool: {
-    h: &           # 实现私有区指针（队列 + 同步原语 + 工作线程）
-
-    fnc init:: n: u4     # n 个工作线程；0 → CPU 逻辑核数
-    fnc join::            # 屏障：等待全部已提交任务完成（后续仍可提交）
-    fnc drop::            # 析构：等任务完成 → 停工作线程 → 回收
-}
-
-# 任务提交复用 run 语句（无新增方法）：run work(a, b), p
-# 任务节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，
-# 调用点无需保活；不提供 future/cancel，任务级同步用 cond + wait 方法
+# ---------------- pool：线程池协议的「默认」实现 ----------------
+# pool 类型与 run/join/drop 方法是 op 层「线程池接口协议」（默认导入，vtable，
+# 见 op.sc）；本模块按「默认策略」提供具名构造 default_pool，犹如 io 的 file()
+# 之于 com——填充协议指针并返回 pool&。
+#   var p: pool& = default_pool(4)   # 4 个工作线程（0 → CPU 逻辑核数）
+#   run work(a, b), p                # 入池（经 p->run(...) 协议指针派发）
+#   p.join()                         # 屏障：等全部已提交任务完成（pool 仍可用）
+#   p.drop()                         # 析构：等任务完成 → 停池 → 回收
+# 任务节点延续联合分配哲学：[节点][rpc 参数]，参数拷贝入节点，调用点无需保活；
+# 不提供 future/cancel，任务级同步用 cond + wait 方法。
+# 将来可按其它策略另起 *_pool(n) 构造（如 work-stealing / 优先级），均返回 pool&。
+@fnc default_pool:: pool&, n: u4     # 构造默认线程池（FIFO 队列 + n 个固定工作线程）
