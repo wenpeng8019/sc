@@ -38,50 +38,50 @@ typedef struct com__project {
 void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
 static void compute_rpc(struct compute *_p) {
-    /* line 20 */
+    /* line 24 */
     _p->_ = _p->a + _p->b; return;
 }
 
 static void consume_n_rpc(struct consume_n *_p) {
-    /* line 24 */
+    /* line 28 */
     int32_t i = 0;
-    /* line 25 */
+    /* line 29 */
     for (i = 0; i < _p->n; i++) {
-        /* line 26 */
+        /* line 30 */
         _p->qq->pull(_p->qq, -(1));
     }
 }
 
 int32_t main(void) {
     sc_mod_mt_init();
-    /* line 30 */
+    /* line 34 */
     queue *q = default_queue(NULL);
-    /* line 31 */
+    /* line 35 */
     thread *ct = NULL;
-    /* line 32 */
+    /* line 36 */
     {
         struct consume_n _rp = {0};
         _rp.qq = q;
         _rp.n = 1;
         thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 34 */
+    /* line 38 */
     int32_t st1 = -(9);
-    /* line 35 */
+    /* line 39 */
     int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 2000); _rp._; });
-    /* line 36 */
-    printf("ok path: r=%d st=%d\n", r1, st1);
-    /* line 37 */
-    thread_join(ct);
     /* line 40 */
-    int32_t st2 = -(9);
+    printf("ok path: r=%d st=%d\n", r1, st1);
     /* line 41 */
-    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 50); _rp._; });
-    /* line 42 */
-    printf("timeout path: r=%d st=%d\n", r2, st2);
+    thread_join(ct);
     /* line 44 */
-    q->drop(q);
+    int32_t st2 = -(9);
     /* line 45 */
+    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 50); _rp._; });
+    /* line 46 */
+    printf("timeout path: r=%d st=%d\n", r2, st2);
+    /* line 48 */
+    q->drop(q);
+    /* line 49 */
     {
         int32_t _ret = 0;
         sc_mod_mt_drop();
