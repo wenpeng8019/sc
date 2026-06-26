@@ -169,9 +169,12 @@ std::string stmtNode(const Stmt& s) {
         }
         case Stmt::RunS: {
             std::string opts;
+            bool first = true;
+            if (s.runTarget) { opts += exprToStr(*s.runTarget); first = false; }
             for (size_t i = 0; i < s.runOpts.size(); i++) {
-                if (i) opts += ", ";
-                opts += s.runOpts[i].first + ":" + std::to_string(s.runOpts[i].second);
+                if (!first) opts += ", ";
+                opts += s.runOpts[i].first + ":" + exprToStr(*s.runOpts[i].second);
+                first = false;
             }
             return node("run", opts.empty() ? "" : "<" + opts + ">",
                         exprToStr(*s.expr) +

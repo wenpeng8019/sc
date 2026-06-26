@@ -1,14 +1,14 @@
 # 特性 43：sync<timeout:ms> —— 有限超时的阻塞同步调用（R2 铁律）
 #
-#   - 在 sync 关键字后加 `<timeout:ms>` 选项，把「阻塞带回复」从无限等升级为有限超时：
-#       sync<timeout:100> work(args), q          # 至多等 100ms（但见下「铁律」）
+#   - 在 sync 选项块内加 `timeout:ms`（首项为队列目标），把「阻塞带回复」从无限等升级为有限超时：
+#       sync<q, timeout:100> work(args)          # 至多等 100ms（但见下「铁律」）
 #   - 铁律（执行一旦开始，超时只挂起、不放弃）：
 #       · 超时在「消息被消费者 pull 之前」触发 → 干净摘除消息、零执行浪费，返回超时；
 #       · 超时在「消息已被 pull、执行进行中」触发 → 不放弃，死等至执行完成，返回成功。
 #     即 timeout 只约束「排队等待被消费」的时段；一旦某消费者开工，结果必被取回（不丢动作）。
 #   - 可选状态出参（仿 run ..., &t）区分超时 vs 成功：
 #       var st: i4
-#       var r: i4 = sync<timeout:100> compute(3, 4), q, &st   # &st 接收状态码
+#       var r: i4 = sync<q, timeout:100> compute(3, 4), &st   # &st 接收状态码
 #     状态码：0=成功 / 1=超时（仅 pull 前）/ -1=队列关闭被中断。表达式仍求值为结果（超时时为 0）。
 #   - 实现要点（无堆 shadow）：调用方会话留在自己栈上、消息仅持其指针、rpc 参数不复制；
 #     状态机 SS_QUEUED→PULLING→DONE 由全局锁保护，pull 与超时摘除串行 → 原子无竞态。
@@ -36,13 +36,13 @@ fnc main: i4
     run consume_n(q, 1), &ct                          # 起消费线程：处理 1 条后退出
 
     var st1: i4 = -9
-    var r1: i4 = sync<timeout:2000> compute(3, 4), q, &st1   # 至多等 2s；消费线程会及时算 7
+    var r1: i4 = sync<q, timeout:2000> compute(3, 4), &st1   # 至多等 2s；消费线程会及时算 7
     printf("ok path: r=%d st=%d\n", r1, st1)          # r=7 st=0
     ct->join()
 
     # ② 超时路径：无任何消费者，timeout 到期后放弃等待
     var st2: i4 = -9
-    var r2: i4 = sync<timeout:50> compute(10, 20), q, &st2   # 50ms 无人消费 → 超时
+    var r2: i4 = sync<q, timeout:50> compute(10, 20), &st2   # 50ms 无人消费 → 超时
     printf("timeout path: r=%d st=%d\n", r2, st2)     # r=0 st=1（结果未回填，状态=超时）
 
     q->drop()

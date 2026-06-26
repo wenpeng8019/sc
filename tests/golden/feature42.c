@@ -37,11 +37,11 @@ int32_t main(void) {
     /* line 29 */
     queue *q = default_queue(NULL);
     /* line 30 */
-    promise *a1 = ({ struct serve _ap = {0}; _ap.tag = 1; _ap.info = 1; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 1, 0); });
+    promise *a1 = ({ struct serve _ap = {0}; _ap.tag = 1; _ap.info = 1; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)(1), (int64_t)0); });
     /* line 31 */
-    promise *a2 = ({ struct serve _ap = {0}; _ap.tag = 2; _ap.info = 5; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 5, 0); });
+    promise *a2 = ({ struct serve _ap = {0}; _ap.tag = 2; _ap.info = 5; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)(5), (int64_t)0); });
     /* line 32 */
-    promise *a3 = ({ struct serve _ap = {0}; _ap.tag = 3; _ap.info = 3; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 3, 0); });
+    promise *a3 = ({ struct serve _ap = {0}; _ap.tag = 3; _ap.info = 3; q->async(q, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)(3), (int64_t)0); });
     /* line 33 */
     printf("priority order (expect tag 2,3,1):\n");
     /* line 34 */
@@ -67,11 +67,11 @@ int32_t main(void) {
     /* line 46 */
     queue *q2 = default_queue(NULL);
     /* line 47 */
-    promise *d1 = ({ struct serve _ap = {0}; _ap.tag = 100; _ap.info = 60; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 0, 60); });
+    promise *d1 = ({ struct serve _ap = {0}; _ap.tag = 100; _ap.info = 60; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)(60)); });
     /* line 48 */
-    promise *d2 = ({ struct serve _ap = {0}; _ap.tag = 200; _ap.info = 20; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 0, 20); });
+    promise *d2 = ({ struct serve _ap = {0}; _ap.tag = 200; _ap.info = 20; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)(20)); });
     /* line 49 */
-    promise *d3 = ({ struct serve _ap = {0}; _ap.tag = 300; _ap.info = 40; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), 0, 40); });
+    promise *d3 = ({ struct serve _ap = {0}; _ap.tag = 300; _ap.info = 40; q2->async(q2, (void (*)(void *))serve_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)(40)); });
     /* line 50 */
     printf("delay order (expect tag 200,300,100):\n");
     /* line 51 */

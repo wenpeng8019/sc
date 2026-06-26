@@ -14,17 +14,17 @@ rpc add: i4, a: i4, b: i4
 
 # 在 A 上执行：向 B 消费的队列 qb 投递 innerB —— A 阻塞等回复（A.waiting=qb）
 rpc kickA: i4, qb: queue&, qa: queue&
-    var v: i4 = sync innerB(qa), qb
+    var v: i4 = sync<qb> innerB(qa)
     return v
 
 # 在 B 上执行：向 A 消费的队列 qa 投递 add —— 沿 qa→A→qb→B 成环 → 替代，本地算出 30
 rpc innerB: i4, qa: queue&
-    var v: i4 = sync add(10, 20), qa
+    var v: i4 = sync<qa> add(10, 20)
     return v
 
 # 在某消费线程上执行：向「自己正消费的队列」qs 投递 add —— 自替代，本地算出 15
 rpc selfish: i4, qs: queue&
-    var v: i4 = sync add(7, 8), qs
+    var v: i4 = sync<qs> add(7, 8)
     return v
 
 # 专用消费线程体：pull 一条消息执行后退出（pull(-1) 无限等来活）
@@ -40,7 +40,7 @@ fnc main: i4
     run consume1(qa), &ta            # 线程 A：pull qa（成为 qa 消费者），处理 kickA
     run consume1(qb), &tb            # 线程 B：pull qb（成为 qb 消费者），处理 innerB
 
-    var rc: i4 = sync kickA(qb, qa), qa   # main 投 kickA 给 A → A sync qb → B sync 回 qa → 替代
+    var rc: i4 = sync<qa> kickA(qb, qa)   # main 投 kickA 给 A → A sync qb → B sync 回 qa → 替代
     printf("circular substitution: rc=%d\n", rc)   # 期望 30
 
     ta->join()
@@ -53,7 +53,7 @@ fnc main: i4
     var ts: thread& = nil
     run consume1(qs), &ts            # 线程 S：pull qs（成为 qs 消费者），处理 selfish
 
-    var rs: i4 = sync selfish(qs), qs     # S 处理 selfish 时 sync add 回 qs → 自替代
+    var rs: i4 = sync<qs> selfish(qs)     # S 处理 selfish 时 sync add 回 qs → 自替代
     printf("self substitution: rs=%d\n", rs)       # 期望 15
 
     ts->join()

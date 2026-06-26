@@ -15,11 +15,11 @@ fnc main: i4
     var ct: thread& = nil
     run consume_n(q, 1), &ct
     var st1: i4 = -9
-    var r1: i4 = sync compute(3, 4)
+    var r1: i4 = sync<q, timeout:2000> compute(3, 4), &st1
     printf("ok path: r=%d st=%d\n", r1, st1)
     ct->join()
     var st2: i4 = -9
-    var r2: i4 = sync compute(10, 20)
+    var r2: i4 = sync<q, timeout:50> compute(10, 20), &st2
     printf("timeout path: r=%d st=%d\n", r2, st2)
     q->drop()
     return 0

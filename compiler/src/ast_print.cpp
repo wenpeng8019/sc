@@ -10,6 +10,23 @@ namespace {
 
 // 表达式递归序列化
 // top=true: 顶层，不加括号；top=false: 子表达式，加括号防优先级歧义
+std::string rec(const Expr& e, bool top);
+
+// sync/async/run 的 <target, key:val, ...> 选项块回写（target 为空且无选项时返回空串）。
+std::string targetOptsBlock(const Expr* target,
+                            const std::vector<std::pair<std::string, ExprPtr>>& opts) {
+    if (!target && opts.empty()) return "";
+    std::string s = "<";
+    bool first = true;
+    if (target) { s += rec(*target, true); first = false; }
+    for (auto& kv : opts) {
+        if (!first) s += ", ";
+        s += kv.first + ":" + rec(*kv.second, true);
+        first = false;
+    }
+    return s + ">";
+}
+
 std::string rec(const Expr& e, bool top) {
     switch (e.kind) {
         case Expr::IntLit: case Expr::FloatLit:
@@ -92,9 +109,11 @@ std::string rec(const Expr& e, bool top) {
         case Expr::Await:
             return "await " + rec(*e.a, false);
         case Expr::Async:
-            return e.a ? "async " + rec(*e.a, false) : "async";   // 裸 async（取会话）：无操作数
+            if (!e.a) return "async";   // 裸 async（取会话）：无操作数
+            return "async" + targetOptsBlock(e.b.get(), e.syncOpts) + " " + rec(*e.a, false);
         case Expr::Sync:
-            return "sync " + rec(*e.a, false);
+            return "sync" + targetOptsBlock(e.b.get(), e.syncOpts) + " " + rec(*e.a, false) +
+                   (e.c ? ", " + rec(*e.c, true) : "");
     }
     return "";
 }

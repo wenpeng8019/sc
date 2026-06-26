@@ -59,9 +59,9 @@ int32_t main(void) {
     /* line 30 */
     queue *q = default_queue(p);
     /* line 33 */
-    promise *f1 = ({ struct compute _ap = {0}; _ap.a = 3; _ap.b = 4; q->async(q, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), 0, 0); });
+    promise *f1 = ({ struct compute _ap = {0}; _ap.a = 3; _ap.b = 4; q->async(q, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)0); });
     /* line 34 */
-    promise *f2 = ({ struct compute _ap = {0}; _ap.a = 100; _ap.b = 23; q->async(q, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), 0, 0); });
+    promise *f2 = ({ struct compute _ap = {0}; _ap.a = 100; _ap.b = 23; q->async(q, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)0); });
     /* line 35 */
     int32_t r1 = ((int32_t)(f1->wait(f1)));
     /* line 36 */
@@ -85,12 +85,12 @@ int32_t main(void) {
         struct consume_n _rp = {0};
         _rp.qq = q2;
         _rp.n = 2;
-        thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0, (uint8_t)0);
     }
     /* line 49 */
-    promise *g1 = ({ struct compute _ap = {0}; _ap.a = 10; _ap.b = 20; q2->async(q2, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), 0, 0); });
+    promise *g1 = ({ struct compute _ap = {0}; _ap.a = 10; _ap.b = 20; q2->async(q2, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)0); });
     /* line 50 */
-    promise *g2 = ({ struct compute _ap = {0}; _ap.a = 5; _ap.b = 6; q2->async(q2, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), 0, 0); });
+    promise *g2 = ({ struct compute _ap = {0}; _ap.a = 5; _ap.b = 6; q2->async(q2, (void (*)(void *))compute_rpc, &_ap, sizeof(_ap), (int32_t)0, (int64_t)0); });
     /* line 51 */
     int32_t s1 = ((int32_t)(g1->wait(g1)));
     /* line 52 */

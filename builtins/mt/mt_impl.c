@@ -154,7 +154,7 @@ static void *pol_worker(void *arg) {
         pol_unlock(p);
 
         t->fn((void *)(t + 1));                /* 参数紧随任务节点 */
-        free(t);
+        sc_recycle(t);
 
         pol_lock(p);
         if (--p->pending == 0)
@@ -169,13 +169,13 @@ static void *pol_worker(void *arg) {
 static uint8_t pol_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
     pol_state *p = (pol_state *)_this;
     if (!p || !fn) return 0;
-    pool_task *t = (pool_task *)malloc(sizeof(pool_task) + psize);
+    pool_task *t = (pool_task *)sc_chunk(sizeof(pool_task) + psize);   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
     if (!t) return 0;
     t->next = NULL;
     t->fn = fn;
     if (params && psize) memcpy(t + 1, params, psize);
     pol_lock(p);
-    if (p->shutdown || p->nthr == 0) { pol_unlock(p); free(t); return 0; }
+    if (p->shutdown || p->nthr == 0) { pol_unlock(p); sc_recycle(t); return 0; }
     if (p->tail) p->tail->next = t; else p->head = t;
     p->tail = t;
     p->pending++;
@@ -244,9 +244,9 @@ struct pool *default_pool(uint32_t n) {
 }
 
 /* ---------------- queue + port：消息队列协议的「PORT 单收件箱」实现 ---------------- */
-/* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按 thread_queue.c 的
- * 「每线程 PORT」模型实现——port 是每线程的单一收件箱中枢，多个 queue 归并进同一 port，
- * 消息在 port 邮箱里按到达顺序（同优先级 FIFO）排成单链，从而获得跨 queue 的全局时序。
+/* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「每线程 PORT」模型实现
+ * （完整机制规格见 builtins/mt.md）——port 是每线程的单一收件箱中枢，多个 queue 归并进同一
+ * port，消息在 port 邮箱里按到达顺序（同优先级 FIFO）排成单链，从而获得跨 queue 的全局时序。
  *   - port（sc_port）：每线程一个（TLS g_port 惰性堆分配）。其地址即该线程的稳定唯一身份。
  *     字段：单收件箱 box（ready 按 prio 有序 + delaying 按 deadline 有序）、recv 条件变量
  *     （消费者等来活）、send 条件变量（R2 替代死等）、waiting（本线程当前阻塞 sync 的队列，
@@ -452,7 +452,7 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
         if (host && host != (struct pool *)-1)
             return host->run(host, fn, params, psize);
     }
-    pmsg *m = (pmsg *)malloc(sizeof(pmsg) + psize);
+    pmsg *m = (pmsg *)sc_chunk(sizeof(pmsg) + psize);   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
     if (!m) return 0;
     m->next = NULL;
     m->receiver = q;
@@ -464,7 +464,7 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
 
     mt_ensure();
     sc_mutex_lock(&g_mutex);
-    if (q->closed) { sc_mutex_unlock(&g_mutex); free(m); return 0; }
+    if (q->closed) { sc_mutex_unlock(&g_mutex); sc_recycle(m); return 0; }
 
     if (delay_ms > 0) {
         struct timespec now, rel;
@@ -622,7 +622,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     }
 
     /* ---- 端口宿主：构造会话消息，入 consumer 收件箱或 staging 暂存 ---- */
-    pmsg *m = (pmsg *)malloc(sizeof(pmsg));      /* 同步消息不内联参数（在 sess->params） */
+    pmsg *m = (pmsg *)sc_chunk(sizeof(pmsg));    /* 同步消息不内联参数（在 sess->params）；节点确定性池化 */
     if (!m) { sc_mutex_unlock(&g_mutex); return -1; }
     m->next = NULL;
     m->receiver = q;
@@ -630,7 +630,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     m->sess = &sess;
     m->prio = prio;
     m->delayed = 0;
-    if (q->closed) { sc_mutex_unlock(&g_mutex); free(m); return -1; }
+    if (q->closed) { sc_mutex_unlock(&g_mutex); sc_recycle(m); return -1; }
     if (delay_ms > 0) {
         struct timespec now, rel;
         P_clock_now(&now);
@@ -668,7 +668,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
                 if (sess.state == SS_QUEUED) {       /* 未被 pull → 干净摘除、零执行 */
                     inbox_remove(box, m);
                     q->count--;
-                    free(m);
+                    sc_recycle(m);
                     m = NULL;
                     ret = 1;
                     break;
@@ -736,7 +736,7 @@ static void promise_drop(promise *_this) {
     if (!b) return;
     sc_mutex_final(&b->mu);
     sc_cond_final(&b->done_cv);
-    free(b);                /* 整块回收（promise 对象 + 堆参数缓冲同生命周期） */
+    sc_recycle(b);          /* 整块回收（promise 对象 + 堆参数缓冲同生命周期；确定性池化） */
 }
 
 /* 消费者侧蹦床：在 box 的堆缓冲上实跑 rpc，擦除结果后置位并唤醒 wait。 */
@@ -757,7 +757,7 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
     if (!q || !fn) return NULL;
     /* 缓冲至少 sizeof(void*)：q_async_run 擦除结果时读首 8 字节，避免越界。 */
     size_t bufsz = psize < sizeof(void *) ? sizeof(void *) : psize;
-    promise_box *b = (promise_box *)malloc(sizeof(promise_box) + bufsz);
+    promise_box *b = (promise_box *)sc_chunk(sizeof(promise_box) + bufsz);   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
     if (!b) return NULL;
     memset(b, 0, sizeof(promise_box) + bufsz);
     b->base.h     = b;       /* 私有区即本盒子（方法经 (promise_box*)_this 回取） */
@@ -776,7 +776,7 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
     if (!ok) {
         sc_mutex_final(&b->mu);
         sc_cond_final(&b->done_cv);
-        free(b);
+        sc_recycle(b);
         return NULL;
     }
     return &b->base;
@@ -883,13 +883,13 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
             if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
         }                                                      /* 已领取 → 延迟应答，调用方继续死等 */
         sc_mutex_unlock(&g_mutex);
-        free(m);
+        sc_recycle(m);
         return 1;
     }
 
     sc_mutex_unlock(&g_mutex);
     m->fn((void *)(m + 1));                                     /* 参数紧随消息节点 */
-    free(m);
+    sc_recycle(m);
     return 1;
 }
 
@@ -901,7 +901,7 @@ static void pmsg_discard(pmsg *m) {
         sync_sess *s = m->sess;
         if (s->state != SS_DONE) { s->state = SS_CLOSED; sc_cond_one(s->cond); }
     }
-    free(m);
+    sc_recycle(m);
 }
 
 /* 释放 inbox 中归属指定队列（receiver==q）的所有消息（须持 g_mutex），其余保留。

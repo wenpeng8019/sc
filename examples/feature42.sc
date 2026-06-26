@@ -1,9 +1,9 @@
 # 特性 42：sync/async 的 <prio:N, delay:ms> 选项 —— 队列消费的优先级与延迟
 #
-#   - 在 sync/async 驱动 rpc 入队时，可在关键字后加尖括号选项块（仿 run<...>）：
-#       async<prio:5> work(args), q        # 高优先级：先于低优先级被消费
-#       async<delay:50> work(args), q      # 延迟 50ms：到期后才可被 pull
-#       sync<prio:3, delay:10> work(), q   # 两者可同时给（逗号分隔，值限非负整数）
+#   - 在 sync/async 驱动 rpc 入队时，可在尖括号选项块内（首项为队列目标，其余为 key:val）：
+#       async<q, prio:5> work(args)        # 高优先级：先于低优先级被消费
+#       async<q, delay:50> work(args)      # 延迟 50ms：到期后才可被 pull
+#       sync<q, prio:3, delay:10> work()   # 两者可同时给（逗号分隔，值为任意表达式）
 #   - 语义（仅作用于「FIFO-pull 消费路径」，即 nil/main 宿主队列被 pull 时）：
 #       · prio  —— 就绪链按优先级排序，pull 总取最高优先级；同优先级稳定 FIFO。
 #       · delay —— 入「延迟链」按到期时刻升序；pull 阻塞至最早到期项成熟再消费。
@@ -27,9 +27,9 @@ fnc main: i4
     # ===== ① 优先级：高者先被消费 =====
     # nil 宿主：先把 3 条非阻塞入队（此刻无消费者），就绪链即按优先级排好：5 > 3 > 1
     var q: queue& = default_queue(nil)
-    var a1: promise& = async<prio:1> serve(1, 1), q     # 最低优先级
-    var a2: promise& = async<prio:5> serve(2, 5), q     # 最高优先级
-    var a3: promise& = async<prio:3> serve(3, 3), q
+    var a1: promise& = async<q, prio:1> serve(1, 1)     # 最低优先级
+    var a2: promise& = async<q, prio:5> serve(2, 5)     # 最高优先级
+    var a3: promise& = async<q, prio:3> serve(3, 3)
     printf("priority order (expect tag 2,3,1):\n")
     q->pull(-1)                                          # 取 prio5 → tag2
     q->pull(-1)                                          # 取 prio3 → tag3
@@ -44,9 +44,9 @@ fnc main: i4
 
     # ===== ② 延迟：按到期先后出队（与入队顺序无关）=====
     var q2: queue& = default_queue(nil)
-    var d1: promise& = async<delay:60> serve(100, 60), q2   # 60ms 后成熟
-    var d2: promise& = async<delay:20> serve(200, 20), q2   # 20ms（最早）
-    var d3: promise& = async<delay:40> serve(300, 40), q2   # 40ms
+    var d1: promise& = async<q2, delay:60> serve(100, 60)   # 60ms 后成熟
+    var d2: promise& = async<q2, delay:20> serve(200, 20)   # 20ms（最早）
+    var d3: promise& = async<q2, delay:40> serve(300, 40)   # 40ms
     printf("delay order (expect tag 200,300,100):\n")
     q2->pull(-1)                                        # 阻塞至 20ms 成熟 → tag200
     q2->pull(-1)                                        # 阻塞至 40ms 成熟 → tag300

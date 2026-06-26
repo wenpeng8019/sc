@@ -38,11 +38,17 @@ void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *)) {
     sc_free(r);                            /* 堆对象 in==0 && out==0 → 释放整块（含头；经分配间接层） */
 }
 
-/* ---------------- 分配间接层（SC_POOL）—— 转发到 mem 池 ----------------
- * 默认（未定义 SC_POOL）：sc_alloc/sc_realloc/sc_free 为 op.h 里直通 libc 的宏，
- * 本文件无需出现定义。开启 -DSC_POOL 时才编译下述函数，转发给 mem 三件套。 */
-#ifdef SC_POOL
+/* ---------------- 分配转发实现 —— 转发到 mem 池 ----------------
+ * sc_chunk/sc_recycle：确定性池化分配（恒走 mem chunk/recycle，不受 SC_POOL 影响）。
+ *   用于「短命高频、必池化」的分配——典型为 rpc 传参的联合节点（thread/pool/queue/
+ *   promise 各自 [节点][rpc 参数]）。op 单元恒隐式依赖 mem（编译器自动纳入单元图），
+ *   故本文件始终 #include "mem/mem.h" 并定义之。
+ * sc_alloc/sc_realloc/sc_free：随 SC_POOL 切换的间接层。默认（未定义 SC_POOL）为 op.h
+ *   里直通 libc 的宏，本文件无需定义；开启 -DSC_POOL 时编译下述函数，亦转发 mem 三件套。 */
 #include "mem/mem.h"
+void *sc_chunk(size_t n)  { return chunk((uint64_t)n); }
+void  sc_recycle(void *p) { recycle(p); }
+#ifdef SC_POOL
 void *sc_alloc(size_t n)            { return chunk((uint64_t)n); }
 void *sc_realloc(void *p, size_t n) { return refit(p, (uint64_t)n); }
 void  sc_free(void *p)              { recycle(p); }
@@ -425,7 +431,7 @@ static void *thd_entry(void *p) {
     thd_impl *im = (thd_impl *)t->h;
     t->id = thd_current_id();
     im->fn((void *)(t + 1));            /* 执行 rpc 实际函数（参数紧随 thread） */
-    if (!im->joinable) free(t);         /* detach：自释放整块 */
+    if (!im->joinable) sc_recycle(t);   /* detach：自释放整块 */
     return 0;
 }
 
@@ -433,7 +439,7 @@ uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread 
                    uint32_t stack, uint8_t prio) {
     if (out) *out = NULL;
     if (!fn) return 0;
-    thread *t = (thread *)malloc(sizeof(thread) + psize + sizeof(thd_impl));
+    thread *t = (thread *)sc_chunk(sizeof(thread) + psize + sizeof(thd_impl));   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
     if (!t) return 0;
     t->id = 0;
     t->h = (char *)(t + 1) + psize;     /* 私有区位于参数之后（同块） */
@@ -444,7 +450,7 @@ uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread 
 #if P_WIN
     /* stack=0 → 默认栈；非 0 作为初始提交栈字节数 */
     HANDLE h = CreateThread(NULL, (SIZE_T)stack, thd_entry, t, 0, NULL);
-    if (!h) { free(t); return 0; }
+    if (!h) { sc_recycle(t); return 0; }
     /* prio：最佳努力映射到 Windows 线程优先级（0=默认不调整） */
     if (prio) {
         int wp = prio < 64 ? THREAD_PRIORITY_BELOW_NORMAL
@@ -472,7 +478,7 @@ uint8_t thread_run(void (*fn)(void *), const void *params, size_t psize, thread 
     }
     int err = pthread_create(&h, &attr, thd_entry, t);
     pthread_attr_destroy(&attr);
-    if (err) { free(t); return 0; }
+    if (err) { sc_recycle(t); return 0; }
     /* prio：最佳努力（多数平台 SCHED_OTHER 不支持线程优先级，失败即忽略） */
     if (prio) {
         struct sched_param sp;
@@ -495,7 +501,7 @@ void thread_join(thread *_this) {
 #else
     pthread_join(im->t, NULL);
 #endif
-    free(_this);                        /* 回收联合实体（thread + 参数 + 私有区） */
+    sc_recycle(_this);                  /* 回收联合实体（thread + 参数 + 私有区；确定性池化） */
 }
 
 /* ---------------- print：日志输出（语言关键字） ----------------

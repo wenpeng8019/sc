@@ -6,15 +6,15 @@ rpc add: i4, a: i4, b: i4
     return a + b
 
 rpc kickA: i4, qb: queue&, qa: queue&
-    var v: i4 = sync innerB(qa)
+    var v: i4 = sync<qb> innerB(qa)
     return v
 
 rpc innerB: i4, qa: queue&
-    var v: i4 = sync add(10, 20)
+    var v: i4 = sync<qa> add(10, 20)
     return v
 
 rpc selfish: i4, qs: queue&
-    var v: i4 = sync add(7, 8)
+    var v: i4 = sync<qs> add(7, 8)
     return v
 
 rpc consume1: qq: queue&
@@ -27,7 +27,7 @@ fnc main: i4
     var tb: thread& = nil
     run consume1(qa), &ta
     run consume1(qb), &tb
-    var rc: i4 = sync kickA(qb, qa)
+    var rc: i4 = sync<qa> kickA(qb, qa)
     printf("circular substitution: rc=%d\n", rc)
     ta->join()
     tb->join()
@@ -36,7 +36,7 @@ fnc main: i4
     var qs: queue& = default_queue(nil)
     var ts: thread& = nil
     run consume1(qs), &ts
-    var rs: i4 = sync selfish(qs)
+    var rs: i4 = sync<qs> selfish(qs)
     printf("self substitution: rs=%d\n", rs)
     ts->join()
     qs->drop()

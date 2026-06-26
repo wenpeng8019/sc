@@ -2351,19 +2351,20 @@ struct CGen {
                     if (!e.a || e.a->kind != Expr::Call ||
                         !e.a->a || e.a->a->kind != Expr::Ident ||
                         !rpcs.count(e.a->a->text))
-                        throw CompileError{"async ..., q 期望 rpc 调用形式 name(args)", e.line};
+                        throw CompileError{"async<q> 期望 rpc 调用形式 name(args)", e.line};
                     const Decl* r = rpcs.at(e.a->a->text);
                     if (r->hasAwait)
-                        throw CompileError{"async ..., q 不能驱动协程 rpc '" + e.a->a->text +
+                        throw CompileError{"async<q> 不能驱动协程 rpc '" + e.a->a->text +
                                            "'（含 await，请用无目标 async）", e.line};
                     if (r->structCommon.variadic)
-                        throw CompileError{"async ..., q 暂不支持可变参数 rpc：" + r->name, e.line};
+                        throw CompileError{"async<q> 暂不支持可变参数 rpc：" + r->name, e.line};
                     const Expr& call = *e.a;
                     if (call.args.size() > r->structCommon.fields.size())
                         throw CompileError{"rpc 实参数量超出：" + r->name, e.line};
                     VType qvt;
                     if (!exprVType(*e.b, qvt) || qvt.name != "queue" || !aggrOf("queue"))
-                        throw CompileError{"async ..., q 的目标须为 queue 端点", e.line};
+                        throw CompileError{"async<q> 的目标须为 queue 端点", e.line};
+                    checkRpcOptKeys(e, false);   // <prio:N, delay:ms>（async 不支持 timeout）
                     const bool isPtr = qvt.ptr >= 1;
                     out << "({ struct " << r->name << " _ap = {0}; ";
                     for (size_t i = 0; i < call.args.size(); i++) {
@@ -2378,11 +2379,14 @@ struct CGen {
                     emitComBasePtr(*e.b, isPtr);
                     out << "->async(";
                     emitComBasePtr(*e.b, isPtr);
-                    auto pv = rpcOptVals(e, false);   // <prio:N, delay:ms>（async 不支持 timeout）
-                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap), "
-                        << pv.prio << ", " << pv.delay << "); })";
+                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap), ";
+                    emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
+                    emitOptOr0(e.syncOpts, "delay", "int64_t");
+                    out << "); })";
                     break;
                 }
+                if (!e.syncOpts.empty())
+                    throw CompileError{"无队列目标 async（事件循环 future&）不接受 <prio/delay> 选项", e.line};
                 if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
                     const Expr& call = *e.a;
                     out << call.a->text << "__async(";
@@ -2415,13 +2419,14 @@ struct CGen {
                 }
                 // 带队列目标：阻塞带回复
                 if (r->structCommon.variadic)
-                    throw CompileError{"sync ..., q 暂不支持可变参数 rpc：" + r->name, e.line};
+                    throw CompileError{"sync<q> 暂不支持可变参数 rpc：" + r->name, e.line};
                 const Expr& call = *e.a;
                 if (call.args.size() > r->structCommon.fields.size())
                     throw CompileError{"rpc 实参数量超出：" + r->name, e.line};
                 VType qvt;
                 if (!exprVType(*e.b, qvt) || qvt.name != "queue" || !aggrOf("queue"))
-                    throw CompileError{"sync ..., q 的目标须为 queue 端点", e.line};
+                    throw CompileError{"sync<q> 的目标须为 queue 端点", e.line};
+                checkRpcOptKeys(e, true);   // <prio:N, delay:ms, timeout:ms>
                 const bool isPtr = qvt.ptr >= 1;
                 out << "({ struct " << r->name << " _rp = {0}; ";
                 for (size_t i = 0; i < call.args.size(); i++) {
@@ -2433,20 +2438,22 @@ struct CGen {
                         emitRpcArraySizeof(f); out << "; ";
                     }
                 }
-                auto pv = rpcOptVals(e, true);   // <prio:N, delay:ms, timeout:ms>
                 // 可选状态出参 &st（i4 左值地址）：仅在带 timeout 时有意义，接收 sync 返回码
                 if (e.c) {
                     if (e.c->kind != Expr::Unary || e.c->op != "&" || !e.c->a)
                         throw CompileError{"sync 状态出参须为变量地址形式 &var（i4）", e.line};
-                    if (!pv.hasTimeout)
+                    if (!hasOpt(e.syncOpts, "timeout"))
                         throw CompileError{"sync 状态出参仅在带 <timeout:ms> 时有效", e.line};
                     emitExpr(*e.c->a, true); out << " = ";   // st = q->sync(...)
                 }
                 emitComBasePtr(*e.b, isPtr);
                 out << "->sync(";
                 emitComBasePtr(*e.b, isPtr);
-                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), "
-                    << pv.prio << ", " << pv.delay << ", " << pv.timeout << "); ";
+                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
+                emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
+                emitOptOr0(e.syncOpts, "delay", "int64_t"); out << ", ";
+                emitOptOr0(e.syncOpts, "timeout", "int64_t");
+                out << "); ";
                 if (rpcHasRet(*r)) out << "_rp._; ";    // 返回槽（消费者已回填；超时为 0）
                 else out << "(void)0; ";
                 out << "})";
@@ -4166,33 +4173,28 @@ struct CGen {
             throw CompileError{"rpc 实参数量超出: " + r->name + " 期望至多 " +
                                std::to_string(r->structCommon.fields.size()) + " 个", s.line};
         // thread 类型属语言内核（op.sc 默认导入），detach/joinable 形态无需 inc mt.sc。
-        // run<stack:N, prio:M> 选项：透传给 C（stack=u4 栈字节数，prio=u1 优先级；
-        //   0 表示由 C 取默认）。键在此校验，值越界（u4/u1）报错。
-        long long optStack = 0, optPrio = 0;
+        // run<target, stack:N, prio:M> 选项：透传给 C（stack=u4 栈字节数，prio=u1 优先级）。
+        //   键在此校验；值为任意表达式，运行时求值并强转（u4/u1），不做编译期范围校验。
         bool hasOpts = !s.runOpts.empty();
         for (auto& o : s.runOpts) {
-            if (o.first == "stack") {
-                if (o.second < 0 || o.second > 0xFFFFFFFFLL)
-                    throw CompileError{"run 选项 stack 超出 u4 范围", s.line};
-                optStack = o.second;
-            } else if (o.first == "prio") {
-                if (o.second < 0 || o.second > 0xFF)
-                    throw CompileError{"run 选项 prio 超出 u1 范围", s.line};
-                optPrio = o.second;
-            } else {
+            if (o.first != "stack" && o.first != "prio")
                 throw CompileError{"run 选项未知键：'" + o.first +
                                    "'（当前仅支持 stack、prio）", s.line};
-            }
         }
-        // 第二参类型分派：pool（接口协议，对象/指针）→ 入池；其余 → thread 出参
+        // <target> 类型分派：pool（接口协议，对象/指针）→ 入池；queue → 留待下一轮；其余报错
         bool toPool = false;
         bool poolPtr = false;
-        if (s.forInit) {
+        if (s.runTarget) {
             VType vt;
-            if (exprVType(*s.forInit, vt) && vt.arr == 0 && vt.ptr <= 1) {
+            if (exprVType(*s.runTarget, vt) && vt.arr == 0 && vt.ptr <= 1) {
                 const Decl* sd = aggrOf(vt.name);
                 if (sd && sd->name == "pool") { toPool = true; poolPtr = (vt.ptr == 1); }
+                else if (sd && sd->name == "queue")
+                    throw CompileError{"run<queue>（线程绑定消息队列为消费者）暂未实现，留待下一轮；"
+                                       "如需向队列投递任务请用 sync<q>/async<q>", s.line};
             }
+            if (!toPool)
+                throw CompileError{"run<target> 的目标须为 pool（入池）", s.line};
         }
         // pool 工作线程为预创建，逐任务的 stack/prio 不适用 → 显式报错
         if (toPool && hasOpts)
@@ -4217,9 +4219,9 @@ struct CGen {
         if (toPool) {
             // 经 pool 协议指针派发：PTR->run(PTR, fn, &_rp, sizeof(_rp))
             //   PTR：pool& 直传，pool 值取址（仿 com 的 c->close(c)），零 emit mt 符号
-            emitComBasePtr(*s.forInit, poolPtr);
+            emitComBasePtr(*s.runTarget, poolPtr);
             out << "->run(";
-            emitComBasePtr(*s.forInit, poolPtr);
+            emitComBasePtr(*s.runTarget, poolPtr);
             out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
         } else {
             out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
@@ -4228,7 +4230,10 @@ struct CGen {
                 emitExpr(*s.forInit, true);
                 out << ")";
             } else out << "NULL";
-            out << ", (uint32_t)" << optStack << "u, (uint8_t)" << optPrio << "u);\n";
+            out << ", ";
+            emitOptOr0(s.runOpts, "stack", "uint32_t"); out << ", ";
+            emitOptOr0(s.runOpts, "prio", "uint8_t");
+            out << ");\n";
         }
         depth--;
         indent(); out << "}\n";
@@ -5235,24 +5240,36 @@ struct CGen {
         return rt && (!rt->name.empty() || rt->ptr > 0);
     }
 
-    // sync/async 的 <prio:N, delay:ms[, timeout:ms]> 选项 → 整数透传给 queue 协议。
-    // 键限 prio/delay（与 timeout，仅 sync），值限非负整数字面量（parser 已保证非负）；缺省 0。
-    struct RpcOpts { long long prio = 0, delay = 0, timeout = 0; bool hasTimeout = false; };
-    RpcOpts rpcOptVals(const Expr& e, bool allowTimeout) {
-        RpcOpts o;
-        for (auto& kv : e.syncOpts) {
-            if (kv.first == "prio")       o.prio = kv.second;
-            else if (kv.first == "delay") o.delay = kv.second;
-            else if (kv.first == "timeout") {
-                if (!allowTimeout)
-                    throw CompileError{"async ..., q 暂不支持 timeout 选项（仅 sync 有限超时，见 P5c）", e.line};
-                o.timeout = kv.second; o.hasTimeout = true;
+    // sync/async/run 选项块：按 key 在 opts 中查表达式并 emit（带强转）；缺省 emit "(cast)0"。
+    //   值为任意表达式（运行时求值），故不做编译期范围校验，直接括号包裹后 emit。
+    void emitOptOr0(const std::vector<std::pair<std::string, ExprPtr>>& opts,
+                    const char* key, const char* cast) {
+        for (auto& kv : opts) {
+            if (kv.first == key) {
+                out << "(" << cast << ")("; emitExpr(*kv.second, true); out << ")";
+                return;
             }
-            else throw CompileError{"sync/async 选项仅支持 prio/delay" +
-                                    std::string(allowTimeout ? "/timeout" : "") +
-                                    "，未知键：" + kv.first, e.line};
         }
-        return o;
+        out << "(" << cast << ")0";
+    }
+    // opts 中是否含某键。
+    static bool hasOpt(const std::vector<std::pair<std::string, ExprPtr>>& opts, const char* key) {
+        for (auto& kv : opts) if (kv.first == key) return true;
+        return false;
+    }
+    // 校验 sync/async 选项键：仅允许 prio/delay（与 timeout，仅 sync）。
+    void checkRpcOptKeys(const Expr& e, bool allowTimeout) {
+        for (auto& kv : e.syncOpts) {
+            if (kv.first == "prio" || kv.first == "delay") continue;
+            if (kv.first == "timeout") {
+                if (!allowTimeout)
+                    throw CompileError{"async<q, ...> 暂不支持 timeout 选项（仅 sync 有限超时，见 P5c）", e.line};
+                continue;
+            }
+            throw CompileError{"sync/async 选项仅支持 prio/delay" +
+                               std::string(allowTimeout ? "/timeout" : "") +
+                               "，未知键：" + kv.first, e.line};
+        }
     }
 
     // rpc 数组形参 → 结构体两字段：指针（数组退化）+ size（字节数）。

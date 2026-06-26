@@ -152,11 +152,14 @@ struct SGen {
             case Stmt::RunS:
                 ind();
                 out << "run";
-                if (!s.runOpts.empty()) {
+                if (s.runTarget || !s.runOpts.empty()) {
                     out << "<";
+                    bool first = true;
+                    if (s.runTarget) { out << exprToStr(*s.runTarget); first = false; }
                     for (size_t i = 0; i < s.runOpts.size(); i++) {
-                        if (i) out << ", ";
-                        out << s.runOpts[i].first << ":" << s.runOpts[i].second;
+                        if (!first) out << ", ";
+                        out << s.runOpts[i].first << ":" << exprToStr(*s.runOpts[i].second);
+                        first = false;
                     }
                     out << ">";
                 }

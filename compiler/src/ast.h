@@ -243,10 +243,11 @@ struct Expr {
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
     std::vector<std::pair<std::string, long long>> sofOpts;
 
-    // sync<prio:N, delay:ms, timeout:ms> / async<prio:N, delay:ms> 选项块（仅 Sync/Async 且带队列目标时有意义）；
-    // + 值限非负整数字面；codegen 据此把 prio/delay/timeout 透传给 queue 协议 post/sync/async。
+    // sync<q, prio:N, delay:ms, timeout:ms> / async<q, prio:N, delay:ms> 选项块（仅 Sync/Async）；
+    // + 队列目标 q 解析进 b；这里仅存 opt:val 选项，值为任意表达式（运行时求值，不做编译期范围校验）。
+    //   codegen 据此把 prio/delay/timeout 透传给 queue 协议 post/sync/async。
     //   delay/priority 仅作用于 FIFO-pull 消费路径，池宿主路径忽略（池自调度）。timeout 仅 sync 有限超时（P5c）。
-    std::vector<std::pair<std::string, long long>> syncOpts;
+    std::vector<std::pair<std::string, ExprPtr>> syncOpts;
 
     // future<ID>() 构造标记（仅 Call 且 callee 为 future 伪构造时有效）；
     // + ID 为 future_id 枚举常量名，编译期聚合成 future_id 枚举（type.h），
@@ -352,7 +353,10 @@ struct Stmt {
     bool forRevert = false;             // revert 选项：逆序遍历
     ExprPtr forStepE, forOffsetE, forNumE;  // step/offset/num 选项表达式（空=默认 1/0/无上限）
 
-    std::vector<std::pair<std::string, long long>> runOpts;  // RunS: run<stack:N, prio:M> 线程属性（键:整数值），透传给 C
+    // RunS: run<target, stack:N, prio:M> —— target（池/队列）解析进 runTarget，opt:val 选项存 runOpts。
+    //   选项值为任意表达式（运行时求值，不做编译期范围校验），stack/prio 透传给 C 线程属性。
+    ExprPtr runTarget;                                       // RunS: run<target> 目标（池入池；队列留待下轮），无则普通线程
+    std::vector<std::pair<std::string, ExprPtr>> runOpts;    // RunS: run<...stack:N, prio:M> 线程属性选项
 
     std::string printChn;               // PrintS: <chn> 通道的 C 表达式文本（默认 "0"）
     std::vector<ExprPtr> printArgs;     // PrintS: 拼接实参列表（顺序）

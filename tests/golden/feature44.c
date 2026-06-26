@@ -80,21 +80,21 @@ static void add_rpc(struct add *_p) {
 
 static void kickA_rpc(struct kickA *_p) {
     /* line 17 */
-    int32_t v = ({ struct innerB _rp = {0}; _rp.qa = _p->qa; _p->qb->sync(_p->qb, (void (*)(void *))innerB_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t v = ({ struct innerB _rp = {0}; _rp.qa = _p->qa; _p->qb->sync(_p->qb, (void (*)(void *))innerB_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 18 */
     _p->_ = v; return;
 }
 
 static void innerB_rpc(struct innerB *_p) {
     /* line 22 */
-    int32_t v = ({ struct add _rp = {0}; _rp.a = 10; _rp.b = 20; _p->qa->sync(_p->qa, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t v = ({ struct add _rp = {0}; _rp.a = 10; _rp.b = 20; _p->qa->sync(_p->qa, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 23 */
     _p->_ = v; return;
 }
 
 static void selfish_rpc(struct selfish *_p) {
     /* line 27 */
-    int32_t v = ({ struct add _rp = {0}; _rp.a = 7; _rp.b = 8; _p->qs->sync(_p->qs, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t v = ({ struct add _rp = {0}; _rp.a = 7; _rp.b = 8; _p->qs->sync(_p->qs, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 28 */
     _p->_ = v; return;
 }
@@ -118,16 +118,16 @@ int32_t main(void) {
     {
         struct consume1 _rp = {0};
         _rp.qq = qa;
-        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(ta)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(ta)), (uint32_t)0, (uint8_t)0);
     }
     /* line 41 */
     {
         struct consume1 _rp = {0};
         _rp.qq = qb;
-        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(tb)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(tb)), (uint32_t)0, (uint8_t)0);
     }
     /* line 43 */
-    int32_t rc = ({ struct kickA _rp = {0}; _rp.qb = qb; _rp.qa = qa; qa->sync(qa, (void (*)(void *))kickA_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t rc = ({ struct kickA _rp = {0}; _rp.qb = qb; _rp.qa = qa; qa->sync(qa, (void (*)(void *))kickA_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 44 */
     printf("circular substitution: rc=%d\n", rc);
     /* line 46 */
@@ -146,10 +146,10 @@ int32_t main(void) {
     {
         struct consume1 _rp = {0};
         _rp.qq = qs;
-        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(ts)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consume1_rpc, &_rp, sizeof(_rp), (thread **)(&(ts)), (uint32_t)0, (uint8_t)0);
     }
     /* line 56 */
-    int32_t rs = ({ struct selfish _rp = {0}; _rp.qs = qs; qs->sync(qs, (void (*)(void *))selfish_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t rs = ({ struct selfish _rp = {0}; _rp.qs = qs; qs->sync(qs, (void (*)(void *))selfish_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 57 */
     printf("self substitution: rs=%d\n", rs);
     /* line 59 */

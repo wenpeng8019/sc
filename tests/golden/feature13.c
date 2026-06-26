@@ -139,7 +139,7 @@ static future * bg_square(int32_t n) {
         struct square_worker _rp = {0};
         _rp.f = f;
         _rp.n = n;
-        thread_run((void (*)(void *))square_worker_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))square_worker_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0, (uint8_t)0);
     }
     /* line 172 */
     return f;

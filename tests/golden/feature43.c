@@ -63,12 +63,12 @@ int32_t main(void) {
         struct consume_n _rp = {0};
         _rp.qq = q;
         _rp.n = 1;
-        thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0, (uint8_t)0);
     }
     /* line 38 */
     int32_t st1 = -(9);
     /* line 39 */
-    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 2000); _rp._; });
+    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(2000)); _rp._; });
     /* line 40 */
     printf("ok path: r=%d st=%d\n", r1, st1);
     /* line 41 */
@@ -76,7 +76,7 @@ int32_t main(void) {
     /* line 44 */
     int32_t st2 = -(9);
     /* line 45 */
-    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 50); _rp._; });
+    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(50)); _rp._; });
     /* line 46 */
     printf("timeout path: r=%d st=%d\n", r2, st2);
     /* line 48 */

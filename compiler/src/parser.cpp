@@ -1314,28 +1314,38 @@ struct Parser {
         return e;
     }
 
-    // sync/async 的可选 <key:val, ...> 选项块（紧跟关键字后的 '<' 触发）。
-    //   键校验延后到 codegen；值限非负整数字面量。无 '<' 即原样返回（无选项）。
-    void parseRpcOpts(std::vector<std::pair<std::string, long long>>& opts, const char* who) {
+    // run/sync/async 统一的 <target, opt:val, ...> 选项块（紧跟关键字后的 '<' 触发）。
+    //   首项无 `Ident :` 形态 → target（目标表达式，定位，仅首项）；其余 `key : val` → 选项。
+    //   选项值为任意表达式（运行时求值，不做编译期范围校验）；parseUnary 不解析二元 '>'，
+    //   故值自然停在 '>'（含 '>' 的值须加括号）。无 '<' 即原样返回（无 target、无选项）。
+    void parseTargetOptsBlock(ExprPtr& target,
+                              std::vector<std::pair<std::string, ExprPtr>>& opts,
+                              const char* who) {
         if (!atOp("<")) return;
-        advance();  // 消费 '<'
+        int saveBracket = exprBracket;
+        exprBracket++;        // '<...>' 内允许换行折行
+        advance();            // 消费 '<'
         skipNlInBracket();
         if (!atOp(">")) {
+            bool first = true;
             for (;;) {
                 skipNlInBracket();
-                if (!at(Tok::Ident)) err(std::string(who) + " 选项期望键名");
-                std::string key = advance().text;
-                expect(Tok::Colon, "':'");
-                skipNlInBracket();
-                acceptOp("+");
-                if (!at(Tok::Int))
-                    err(std::string(who) + " 选项 '" + key + "' 的值需为非负整数字面量");
-                long long v = std::strtoll(advance().text.c_str(), nullptr, 0);
-                opts.push_back({key, v});
+                if (at(Tok::Ident) && peek().kind == Tok::Colon) {   // key : val 选项
+                    std::string key = advance().text;
+                    advance();                                       // 消费 ':'
+                    skipNlInBracket();
+                    opts.push_back({key, parseUnary()});             // 值：任意表达式（遇 '>' 止）
+                } else {                                             // 目标（仅首项）
+                    if (!first)
+                        err(std::string(who) + " 选项块：目标只能作为首项（其后均为 key:val）");
+                    target = parseUnary();
+                }
+                first = false;
                 skipNlInBracket();
                 if (!accept(Tok::Comma)) break;
             }
         }
+        exprBracket = saveBracket;
         if (!acceptOp(">")) err(std::string(who) + " 选项块期望 '>'");
     }
 
@@ -1343,13 +1353,12 @@ struct Parser {
     ExprPtr parseUnary() {
 
         skipNlInBracket();
-        // async E[, q]：异步驱动 rpc。
+        // async[<q, opt:val...>] E：异步驱动 rpc。
         //   无目标 `async work(args)`     → 登记进当前线程事件循环，返回 future&（libuv 协作式）。
-        //   带队列 `async work(args), q`  → 非阻塞投递给 q，立即返回 promise&（mt-future），消费者
+        //   带队列 `async<q> work(args)`  → 非阻塞投递给 q，立即返回 promise&（mt-future），消费者
         //                                  执行完后兑现，p->wait() 阻塞取结果。
-        //   可选 <prio:N, delay:ms> 选项块（仅带队列时有意义；值限非负整数字面量）：
+        //   可选 <q, prio:N, delay:ms> 选项块（队列目标定位 + 选项；仅带队列时有意义；值为任意表达式）：
         //     prio=优先级（高者先被消费）、delay=延迟毫秒（到期才可被 pull）。仅作用于 FIFO-pull 路径。
-        //   逗号紧绑 async（同 sync）；故实参列表内用 async 须加括号。
         if (at(Tok::KwAsync)) {
             auto e = mk(Expr::Async);
             advance();
@@ -1357,26 +1366,22 @@ struct Parser {
             //   （rpc 延迟应答，a 留空区分于带操作数的 future/promise 发起形态，见 op.sc @def session）。
             if (at(Tok::Newline))
                 return e;                       // a==nullptr：裸 async → session&
-            parseRpcOpts(e->syncOpts, "async");     // 可选 <prio:N, delay:ms>
+            parseTargetOptsBlock(e->b, e->syncOpts, "async");   // 可选 <q, prio:N, delay:ms>
             e->a = parseUnary();                // 操作数：rpc 调用
-            if (accept(Tok::Comma))
-                e->b = parseUnary();            // 可选队列目标 q（非阻塞带回复，返 promise&）
             return e;
         }
-        // sync E[, q]：同步驱动 rpc 流程。
+        // sync[<q, opt:val...>] E[, &st]：同步驱动 rpc 流程。
         //   无目标 `sync work(args)`        → 当前线程直接执行（替代裸 rpc()），返回结果。
-        //   带队列 `sync work(args), q`     → 阻塞投递给 q，等消费者执行完取回结果（带回复）。
-        //   可选 <prio:N, delay:ms, timeout:ms> 选项块（仅带队列时有意义；值限非负整数字面量）：
+        //   带队列 `sync<q> work(args)`     → 阻塞投递给 q，等消费者执行完取回结果（带回复）。
+        //   可选 <q, prio:N, delay:ms, timeout:ms> 选项块（队列目标定位 + 选项；值为任意表达式）：
         //     prio=优先级（高者先被消费）、delay=延迟毫秒、timeout=有限超时毫秒（P5c）。仅作用于 FIFO-pull 路径。
-        //   可选状态出参 `sync<timeout:ms> work(args), q, &st`：&st(i4&) 接收状态码 0 成功/1 超时/-1 关闭。
-        //   逗号紧绑 sync（在此吃掉 , 目标）；故实参列表内用 sync 须加括号：f((sync w(), q), x)。
+        //   可选状态出参 `sync<q, timeout:ms> work(args), &st`：&st(i4&) 接收状态码 0 成功/1 超时/-1 关闭。
+        //   逗号紧绑 sync（在此吃掉 , &st）；故实参列表内用 sync 须加括号：f((sync w()), x)。
         if (at(Tok::KwSync)) {
             auto e = mk(Expr::Sync);
             advance();
-            parseRpcOpts(e->syncOpts, "sync");      // 可选 <prio:N, delay:ms, timeout:ms>
+            parseTargetOptsBlock(e->b, e->syncOpts, "sync");    // 可选 <q, prio:N, delay:ms, timeout:ms>
             e->a = parseUnary();                // 操作数：rpc 调用
-            if (accept(Tok::Comma))
-                e->b = parseUnary();            // 可选队列目标 q（阻塞带回复）
             if (accept(Tok::Comma))
                 e->c = parseUnary();            // 可选状态出参 &st（仅 timeout 有意义）
             return e;
@@ -1983,35 +1988,16 @@ struct Parser {
             case Tok::KwThrough:
                 err("through 只能出现在 case 分支末尾");
 
-            // run 线程语句：run[<opt:v, ...>] rpc调用 [, &thread指针]
-            //   有出参 → joinable（join 等待并回收）；无 → detach 自释放
-            //   可选 <stack:N, prio:M> 选项块：线程属性透传给 C（值限非负整数字面量）
+            // run 线程语句：run[<target, opt:v, ...>] rpc调用 [, &thread指针]
+            //   <target>：可选目标（pool 入池；queue 留待下一轮）；无目标 → 普通线程。
+            //   有 &t 出参 → joinable（join 等待并回收）；无 → detach 自释放
+            //   选项 <stack:N, prio:M>：线程属性透传给 C（值为任意表达式）
             case Tok::KwRun: {
                 auto s = mkStmt(Stmt::RunS);
                 advance();
-                // run<key:val, ...> 选项块：紧跟 run 后的 '<' 触发（run 目标为
+                // run<target, key:val, ...> 选项块：紧跟 run 后的 '<' 触发（run 目标为
                 // + 标识符调用，'<' 不会是其合法起始，故无歧义）。键校验延后到 codegen。
-                if (atOp("<")) {
-                    advance();  // 消费 '<'
-                    skipNlInBracket();
-                    if (!atOp(">")) {
-                        for (;;) {
-                            skipNlInBracket();
-                            if (!at(Tok::Ident)) err("run 选项期望键名");
-                            std::string key = advance().text;
-                            expect(Tok::Colon, "':'");
-                            skipNlInBracket();
-                            acceptOp("+");
-                            if (!at(Tok::Int))
-                                err("run 选项 '" + key + "' 的值需为非负整数字面量");
-                            long long v = std::strtoll(advance().text.c_str(), nullptr, 0);
-                            s->runOpts.push_back({key, v});
-                            skipNlInBracket();
-                            if (!accept(Tok::Comma)) break;
-                        }
-                    }
-                    if (!acceptOp(">")) err("run 选项块期望 '>'");
-                }
+                parseTargetOptsBlock(s->runTarget, s->runOpts, "run");
                 s->expr = parseExpr();
                 if (!s->expr || s->expr->kind != Expr::Call ||
                     !s->expr->a || s->expr->a->kind != Expr::Ident)

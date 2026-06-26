@@ -182,14 +182,14 @@ int32_t main(void) {
         struct work _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
-        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t1)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t1)), (uint32_t)0, (uint8_t)0);
     }
     /* line 96 */
     {
         struct work _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
-        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t2)), (uint32_t)262144u, (uint8_t)5u);
+        thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&(t2)), (uint32_t)(262144), (uint8_t)(5));
     }
     /* line 97 */
     printf("t1 id set: %d\n", t1 != NULL);
@@ -203,7 +203,7 @@ int32_t main(void) {
     {
         struct note _rp = {0};
         _rp.tag = 7;
-        thread_run((void (*)(void *))note_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))note_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0, (uint8_t)0);
     }
     /* line 104 */
     P_usleep(50000);
@@ -231,14 +231,14 @@ int32_t main(void) {
         struct bump _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 10000;
-        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b1)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b1)), (uint32_t)0, (uint8_t)0);
     }
     /* line 121 */
     {
         struct bump _rp = {0};
         _rp.c = &(c);
         _rp.rounds = 20000;
-        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))bump_rpc, &_rp, sizeof(_rp), (thread **)(&(b2)), (uint32_t)0, (uint8_t)0);
     }
     /* line 122 */
     thread_join(b1);
@@ -260,7 +260,7 @@ int32_t main(void) {
     {
         struct ping _rp = {0};
         _rp.s = &(s);
-        thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))ping_rpc, &_rp, sizeof(_rp), NULL, (uint32_t)0, (uint8_t)0);
     }
     /* line 134 */
     mutex_lock(&s.mu);
@@ -342,19 +342,19 @@ int32_t main(void) {
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
-        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt1)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt1)), (uint32_t)0, (uint8_t)0);
     }
     /* line 174 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
-        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt2)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt2)), (uint32_t)0, (uint8_t)0);
     }
     /* line 175 */
     {
         struct bwork _rp = {0};
         _rp.b = &(bc);
-        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt3)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))bwork_rpc, &_rp, sizeof(_rp), (thread **)(&(bt3)), (uint32_t)0, (uint8_t)0);
     }
     /* line 176 */
     thread_join(bt1);

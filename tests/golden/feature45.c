@@ -63,10 +63,10 @@ int32_t main(void) {
     {
         struct server _rp = {0};
         _rp.qq = sq;
-        thread_run((void (*)(void *))server_rpc, &_rp, sizeof(_rp), (thread **)(&(st)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))server_rpc, &_rp, sizeof(_rp), (thread **)(&(st)), (uint32_t)0, (uint8_t)0);
     }
     /* line 30 */
-    int32_t r = ({ struct serve _rp = {0}; _rp.x = 7; sq->sync(sq, (void (*)(void *))serve_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    int32_t r = ({ struct serve _rp = {0}; _rp.x = 7; sq->sync(sq, (void (*)(void *))serve_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
     /* line 31 */
     printf("delayed response: r=%d\n", r);
     /* line 33 */

@@ -96,6 +96,16 @@ void *sc_realloc(void *p, size_t n);
 void  sc_free(void *p);
 #endif
 
+/* ---------------- 确定性池化分配 sc_chunk / sc_recycle ----------------
+ * 与 sc_alloc/sc_free（随 SC_POOL 在 libc↔mem 间切换）不同，sc_chunk/sc_recycle 恒走
+ * mem 池（chunk/recycle）——不受 SC_POOL 开关影响，始终池化。用于「短命高频、必池化」
+ * 的分配：典型为 rpc 传参的联合节点（run 线程 / pool 任务 / queue 消息 / promise 各自
+ * [节点][rpc 参数]，每次调用一份、随即回收）。这类对象池化收益最大，故不留作可选。
+ * 实现见 op_impl.c（转发 mem chunk/recycle）；op 单元恒隐式依赖 mem（编译器自动纳入
+ * 单元图，无需 inc mem.sc）。与 adt 的 list 段式存储直接走 mem 同哲学。 */
+void *sc_chunk(size_t n);
+void  sc_recycle(void *p);
+
 /* ---------------- --check=mem 越界 canary（头尾哨兵 + 地址派生魔数） ----------------
  * 仅在 --check=mem 构建下，T__new_ref 把 ref 头堆对象扩成：
  *   [ 头哨兵 SC_CANARY | sc_ref 头 SC_REF_HDR | T 实体 | 尾哨兵 SC_CANARY ]

@@ -151,14 +151,14 @@ int32_t main(void) {
         struct producer _rp = {0};
         _rp.s = &(s);
         _rp.n = n;
-        thread_run((void (*)(void *))producer_rpc, &_rp, sizeof(_rp), (thread **)(&(tp)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))producer_rpc, &_rp, sizeof(_rp), (thread **)(&(tp)), (uint32_t)0, (uint8_t)0);
     }
     /* line 74 */
     {
         struct consumer _rp = {0};
         _rp.s = &(s);
         _rp.n = n;
-        thread_run((void (*)(void *))consumer_rpc, &_rp, sizeof(_rp), (thread **)(&(tc)), (uint32_t)0u, (uint8_t)0u);
+        thread_run((void (*)(void *))consumer_rpc, &_rp, sizeof(_rp), (thread **)(&(tc)), (uint32_t)0, (uint8_t)0);
     }
     /* line 75 */
     thread_join(tp);

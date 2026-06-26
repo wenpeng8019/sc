@@ -112,10 +112,10 @@ fnc main: i4
     var p: pool& = default_pool(4)
     var k: i4 = 0
     for k = 0; k < 8; k++
-        run work(&c2, 1000), p
+        run<p> work(&c2, 1000)
     p->join()
     printf("pool done: n=%d\n", c2.n)
-    run work(&c2, 1000), p
+    run<p> work(&c2, 1000)
     p->drop()
     printf("pool drop: n=%d\n", c2.n)
     c2.mu.drop()

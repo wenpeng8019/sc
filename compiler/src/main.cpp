@@ -770,16 +770,24 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
             d->external = false;
         }
     }
-    // adt → mem 隐式硬依赖：adt 的 list 段式存储直接走 mem 三件套（chunk/recycle），
-    // 不受全局 -DSC_POOL 开关影响。故编译 adt.sc 时自动把 builtins/mem/mem.sc 纳入单元图
-    // （等同隐式 inc mem.sc）：递归加载使 mem 单元生成并拼接链接 mem_impl.c，导出声明
-    // （chunk/refit/recycle…）一并合并为 external，供 adt_impl.c 调用。
-    if (srcPath.stem().string() == "adt") {
-        const auto memPath = std::filesystem::weakly_canonical(
-            baseDir.parent_path() / "mem" / "mem.sc");
-        if (std::filesystem::exists(memPath)
-            && std::find(deps.begin(), deps.end(), memPath) == deps.end())
-            deps.push_back(memPath);
+    // adt / op → mem 隐式硬依赖：均直接走 mem 三件套（chunk/recycle…），不受全局
+    //   -DSC_POOL 开关影响。
+    //     · adt：list 段式存储用 chunk/recycle；
+    //     · op ：sc_chunk/sc_recycle（确定性池化，rpc 传参的联合节点等短命高频分配）恒转发 mem。
+    //   故编译这两个单元时自动把 builtins/mem/mem.sc 纳入单元图（等同隐式 inc mem.sc）：
+    //   递归加载使 mem 单元生成并拼接链接 mem_impl.c，导出声明（chunk/refit/recycle…）一并
+    //   合并为 external，供 adt_impl.c / op_impl.c 调用。op 恒被默认导入，故 mem 恒随工程链接。
+    {
+        const std::string stem = srcPath.stem().string();
+        std::filesystem::path memPath;
+        if (stem == "adt")     memPath = baseDir.parent_path() / "mem" / "mem.sc";  // builtins/adt → builtins/mem
+        else if (stem == "op") memPath = baseDir / "mem" / "mem.sc";                // builtins/op  → builtins/mem
+        if (!memPath.empty()) {
+            memPath = std::filesystem::weakly_canonical(memPath);
+            if (std::filesystem::exists(memPath)
+                && std::find(deps.begin(), deps.end(), memPath) == deps.end())
+                deps.push_back(memPath);
+        }
     }
     // 合并直接依赖的 @导出声明（external 标记）：供跨模块语法糖
     //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成。

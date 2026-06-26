@@ -10,8 +10,8 @@
 #   - 线程休眠用 platform.h 的 P_usleep(us)（默认 -I，直接 inc）
 #   - cond.wait 方法：条件变量等待 c.wait(&mu[, nsec, sec])
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
-#   - pool 线程池：run 语句第二参为 pool 时任务入池排队执行
-#     run work(...), p —— 与独立线程同一个动词，按类型静态分派
+#   - pool 线程池：run<p> 目标为 pool 时任务入池排队执行
+#     run<p> work(...) —— 与独立线程同一个动词，按目标类型静态分派
 #   - tls：线程局部变量（static 存储期，每线程独立实例，可顶层/函数内）
 #   - run<stack:N, prio:M> 选项块：设置线程属性（栈字节数 u4 / 优先级 u1），
 #     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
@@ -153,10 +153,10 @@ fnc main: i4
     var p: pool& = default_pool(4)  # 接口协议：mt 按默认策略构造（0 → CPU 核数）
     var k: i4 = 0
     for k = 0; k < 8; k++
-        run work(&c2, 1000), p # 入池：与 run 独立线程同一语句
+        run<p> work(&c2, 1000) # 入池：与 run 独立线程同一语句
     p->join()                  # 屏障：等全部任务完成（pool 仍可用）
     printf("pool done: n=%d\n", c2.n)      # 期望 8000
-    run work(&c2, 1000), p     # join 后继续提交
+    run<p> work(&c2, 1000)     # join 后继续提交
     p->drop()                  # 析构：等任务完成后停池回收
     printf("pool drop: n=%d\n", c2.n)      # 期望 9000
     c2.mu.drop()

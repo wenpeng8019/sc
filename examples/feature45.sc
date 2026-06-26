@@ -27,7 +27,7 @@ fnc main: i4
     var st: thread& = nil
     run server(sq), &st               # 服务线程：成为 sq 消费者，处理 serve
 
-    var r: i4 = sync serve(7), sq     # 阻塞至延迟应答兑现：期望 70
+    var r: i4 = sync<sq> serve(7)     # 阻塞至延迟应答兑现：期望 70
     printf("delayed response: r=%d\n", r)
 
     st->join()

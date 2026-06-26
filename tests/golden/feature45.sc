@@ -20,7 +20,7 @@ fnc main: i4
     var sq: queue& = default_queue(nil)
     var st: thread& = nil
     run server(sq), &st
-    var r: i4 = sync serve(7)
+    var r: i4 = sync<sq> serve(7)
     printf("delayed response: r=%d\n", r)
     st->join()
     sq->drop()

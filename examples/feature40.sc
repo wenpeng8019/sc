@@ -1,11 +1,11 @@
-# 特性 40：sync ..., q —— 阻塞带回复的队列投递（rpc 作流原语的第四种驱动）
+# 特性 40：sync<q> ... —— 阻塞带回复的队列投递（rpc 作流原语的第四种驱动）
 #
 #   - 无目标 `sync work(args)`：当前线程直接执行该 rpc，返回结果（替代裸 rpc()，见特性 3）。
-#   - 带队列 `sync work(args), q`：把 rpc 调用阻塞投递给队列 q，阻塞至某消费者
+#   - 带队列 `sync<q> work(args)`：把 rpc 调用阻塞投递给队列 q，阻塞至某消费者
 #     （另一线程 pull / 线程池工作线程）执行完成，取回 rpc 的返回值。
 #   - 编译器经队列协议指针派发 `q->sync(q, work_rpc, &参数)`——语言内核零 emit mt 符号。
 #     结果回填参数结构体首字段（返回槽 _），语句表达式求值为该返回值。
-#   - 逗号紧绑 sync：`var r = sync work(a, b), q`。实参列表内用须加括号。
+#   - 目标在 `<>` 内（与 print<chn> 对齐）：`var r = sync<q> work(a, b)`。
 #   - 消费者须是别的线程/池（同线程 sync 到自己消费的队列会死锁，由调用者负责）。
 #     超时 / 优先级 / 循环死锁替代为后续阶段。
 #
@@ -26,8 +26,8 @@ fnc main: i4
     var p: pool& = default_pool(2)
     var q: queue& = default_queue(p)
 
-    var r1: i4 = sync compute(3, 4), q       # 阻塞 → 池工作线程算 7 → 取回
-    var r2: i4 = sync compute(100, 23), q    # 123
+    var r1: i4 = sync<q> compute(3, 4)       # 阻塞 → 池工作线程算 7 → 取回
+    var r2: i4 = sync<q> compute(100, 23)    # 123
     printf("pool sync: r1=%d r2=%d\n", r1, r2)
 
     q->drop()
@@ -38,8 +38,8 @@ fnc main: i4
     var ct: thread& = nil
     run consume_n(q2, 2), &ct                # 起消费线程：处理 2 条后退出
 
-    var s1: i4 = sync compute(10, 20), q2    # 阻塞 → 消费线程算 30 → 取回
-    var s2: i4 = sync compute(5, 6), q2      # 11
+    var s1: i4 = sync<q2> compute(10, 20)    # 阻塞 → 消费线程算 30 → 取回
+    var s2: i4 = sync<q2> compute(5, 6)      # 11
     printf("thread sync: s1=%d s2=%d\n", s1, s2)
 
     ct->join()                               # 消费线程已处理完 2 条，回收
