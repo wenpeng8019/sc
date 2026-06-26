@@ -360,12 +360,14 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
 
 /* sync 方法（协议指针）：阻塞带回复——把 rpc 调用投递给某消费者（另一线程 pull 或池
  * 工作线程）执行，阻塞至执行完成，结果回填 caller 的 params 首字段（返回槽 _）。
- * 复用 post 路径：把 caller 的 (fn, params 指针, &reply) 打成 trampoline 投递，消费者
- * 执行 q_sync_run——在 caller 的 params 缓冲上实跑 fn 后置位 reply、唤醒 caller。
- *   - prio/delay_ms 透传给 post（优先级排序 / 延迟投递）；caller 阻塞期间 params 与 reply 保活。
- *   - post 会拷趝 trampoline，故 trampoline 自身栈生命周期无关。
- *   - 返回 0 成功 / -1 投递失败（队列已关闭等）。
- *   - 同线程对自己消费的队列 sync 会死锁（须别的消费者执行）；超时/死锁替代待后续。 */
+ *   - timeout_ms<=0（无限等）：复用 post 路径，把 caller 的 (fn, params 指针, &reply) 打成
+ *     trampoline 投递，消费者执行 q_sync_run——在 caller 的 params 缓冲上实跑 fn 后置位、唤醒。
+ *     零分配；caller 阻塞期间 params 与 reply 栈保活。
+ *   - timeout_ms>0（有限超时，P5c）：走 q_sync_box 堆盒子 + 引用计数路径（见下），执行方只碰
+ *     盒子堆缓冲，caller 超时 abort 不致 UAF。返回 1=超时。
+ *   - prio/delay_ms 透传给 post（优先级排序 / 延迟投递）。
+ *   - 返回 0 成功 / 1 超时 / -1 投递失败（队列已关闭等）。
+ *   - 同线程对自己消费的队列 sync 会死锁（须别的消费者执行）；循环死锁替代待后续。 */
 typedef struct q_sync {
     mtx_state mu;
     cnd_state done_cv;
@@ -388,9 +390,90 @@ static void q_sync_run(void *arg) {
     sc_mutex_unlock(&t->reply->mu);
 }
 
-static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, int32_t prio, int64_t delay_ms) {
+/* ---- P5c 有限超时 sync：堆盒子 + 引用计数 ----
+ * 无限等路径（timeout_ms<=0）下，sync 描述符与结果缓冲在 caller 栈上、靠 caller 阻塞期间
+ * 保活；但有限超时下 caller 会 abort 解栈，执行方再碰其栈即 UAF。故超时路径改为堆分配
+ * q_sync_box：盒子自带结果缓冲（堆），执行方只在盒子堆内存上跑 rpc，绝不碰 caller 栈。
+ * 引用计数（初 2 = caller + 在途消息）协同释放：whoever 最后撒手（refs→0）回收。
+ *   state: 0=pending / 1=done(执行方已完成) / 2=abandoned(caller 超时弃用)。 */
+typedef struct q_sync_box {
+    mtx_state   mu;
+    cnd_state   done_cv;
+    int32_t     state;      /* 0 pending / 1 done / 2 abandoned */
+    int32_t     refs;       /* 引用计数：初 2（caller + 在途消息）；归 0 回收 */
+    void      (*fn)(void *);/* 真正的 rpc worker */
+    /* rpc 参数/结果缓冲紧随本结构体之后：[q_sync_box][params psize] */
+} q_sync_box;
+
+/* refs 归 0 后的真正回收（须在 mu 解锁之后调用，因为要 final 掉 mu/cv）。 */
+static void q_sync_box_free(q_sync_box *b) {
+    sc_mutex_final(&b->mu);
+    sc_cond_final(&b->done_cv);
+    free(b);
+}
+
+/* 消费者侧蹦床：在盒子堆缓冲上实跑 rpc，再据 caller 是否已弃用决定唤醒/回收。 */
+static void q_sync_box_run(void *arg) {
+    q_sync_box *b = *(q_sync_box **)arg;     /* post 拷贝的是 box 指针 */
+    b->fn((void *)(b + 1));                  /* 在盒子堆缓冲上执行（写返回槽 _）——永不碰 caller 栈 */
+    sc_mutex_lock(&b->mu);
+    if (b->state != 2) {                     /* caller 未弃用：置完成并唤醒 */
+        b->state = 1;
+        sc_cond_one(&b->done_cv);
+    }
+    int32_t r = --b->refs;                   /* 撤销在途消息持有的引用 */
+    sc_mutex_unlock(&b->mu);
+    if (r == 0) q_sync_box_free(b);          /* caller 已先弃用撒手 → 末位回收 */
+}
+
+static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t psize,
+                        int32_t prio, int64_t delay_ms, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return -1;
+
+    /* ---- 有限超时路径（P5c）：堆盒子 + 引用计数 ---- */
+    if (timeout_ms > 0) {
+        q_sync_box *b = (q_sync_box *)malloc(sizeof(q_sync_box) + psize);
+        if (!b) return -1;
+        sc_mutex_init(&b->mu);
+        sc_cond_init(&b->done_cv);
+        b->state = 0;
+        b->refs  = 2;                        /* caller + 在途消息 */
+        b->fn    = fn;
+        if (params && psize) memcpy(b + 1, params, psize);
+        /* 投递盒子指针（post 拷贝指针；参数已在盒子堆缓冲里）；prio/delay 透传 */
+        uint8_t ok = q->base.post(&q->base, q_sync_box_run, &b, sizeof(b), prio, delay_ms);
+        if (!ok) { q_sync_box_free(b); return -1; }
+
+        /* 限时等待完成：用绝对截止重算剩余，鲁棒于虚假唤醒 */
+        struct timespec deadline, now, rel;
+        P_clock_now(&now);
+        rel.tv_sec  = (time_t)(timeout_ms / 1000);
+        rel.tv_nsec = (long)((timeout_ms % 1000) * 1000000L);
+        clock_inc(now, rel, deadline);
+        int32_t ret;
+        sc_mutex_lock(&b->mu);
+        for (;;) {
+            if (b->state == 1) { ret = 0; break; }       /* 已完成 */
+            P_clock_now(&now);
+            if (clock_ge(now, deadline)) {               /* 超时 */
+                if (b->state == 1) { ret = 0; break; }   /* 末刻 race 重查 */
+                b->state = 2;                            /* 弃用：执行方将自行回收 */
+                ret = 1;
+                break;
+            }
+            clock_dec(deadline, now, rel);
+            sc_cond_wait(&b->done_cv, &b->mu, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
+        }
+        if (ret == 0 && params && psize)
+            memcpy(params, b + 1, psize);                /* 成功：盒子结果缓冲拷回 caller（含返回槽 _） */
+        int32_t r = --b->refs;                           /* 撤销 caller 持有的引用 */
+        sc_mutex_unlock(&b->mu);
+        if (r == 0) q_sync_box_free(b);                  /* 执行方已先撒手 → 末位回收 */
+        return ret;
+    }
+
+    /* ---- 无限等路径（timeout_ms<=0）：caller-stack 描述符，零分配（不变） ---- */
     q_sync rep;
     sc_mutex_init(&rep.mu);
     sc_cond_init(&rep.done_cv);
@@ -405,7 +488,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, int32_t 
     }
     sc_mutex_lock(&rep.mu);
     while (!rep.done)
-        sc_cond_wait(&rep.done_cv, &rep.mu, 0, 0);   /* 无限阻塞等回复（超时待后续） */
+        sc_cond_wait(&rep.done_cv, &rep.mu, 0, 0);   /* 无限阻塞等回复 */
     sc_mutex_unlock(&rep.mu);
     sc_mutex_final(&rep.mu);
     sc_cond_final(&rep.done_cv);

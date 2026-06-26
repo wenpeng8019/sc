@@ -207,7 +207,7 @@ struct Expr {
         Async,      // async E  把 rpc 调用登记进事件循环，立即返回 future&（不阻塞）
                     //             > a=rpc 调用（Expr::Call）
         Sync,       // sync E   同步驱动 rpc：无目标=当前线程直接执行（替代裸 rpc 调用），返回其结果
-                    //             > a=rpc 调用（Expr::Call）
+                    //             > a=rpc 调用（Expr::Call），b=可选队列目标，c=可选状态出参 &st（i4，仅 <timeout> 有意义）
     } kind;
 
     std::string text;           // 标识符名 / 字面量值 / 成员名 / Offsetof 的目标类型名
@@ -243,9 +243,9 @@ struct Expr {
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量
     std::vector<std::pair<std::string, long long>> sofOpts;
 
-    // sync<prio:N, delay:ms> / async<prio:N, delay:ms> 选项块（仅 Sync/Async 且带队列目标时有意义）；
-    // + 值限非负整数字面量；codegen 据此把 prio/delay 透传给 queue 协议 post/sync/async。
-    //   delay/priority 仅作用于 FIFO-pull 消费路径，池宿主路径忽略（池自调度）。
+    // sync<prio:N, delay:ms, timeout:ms> / async<prio:N, delay:ms> 选项块（仅 Sync/Async 且带队列目标时有意义）；
+    // + 值限非负整数字面；codegen 据此把 prio/delay/timeout 透传给 queue 协议 post/sync/async。
+    //   delay/priority 仅作用于 FIFO-pull 消费路径，池宿主路径忽略（池自调度）。timeout 仅 sync 有限超时（P5c）。
     std::vector<std::pair<std::string, long long>> syncOpts;
 
     // future<ID>() 构造标记（仅 Call 且 callee 为 future 伪构造时有效）；

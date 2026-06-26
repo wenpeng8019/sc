@@ -2154,13 +2154,24 @@ q->drop(); p->drop()
   故在实参列表内用 sync 须加括号：`f((sync w(), q), x)`。
 - **消费者前提**：`q` 必须由**别的**线程/池消费（`default_queue(pool)` 或另起一
   线程跑 `q->pull`）。同线程 `sync` 到自己消费的队列会死锁（循环死锁替代为后续）。
-- **超时 / 优先级 / 死锁替代**：`<prio:N, delay:ms>` 选项见下文「队列消费的优先级
-  与延迟」小节；finite timeout / 循环死锁替代为后续架构升级阶段。
-- 转 C：语句表达式求值 `({ struct W _rp = {0}; 填实参; q->sync(q,(void(*)(void*))W_rpc,&_rp,prio,delay); _rp._; })`
-  ——结果由消费者回填返回槽 `_rp._`，语言内核零 emit mt 符号。实现上 `q->sync`
+- **有限超时 + 状态出参**：`<prio:N, delay:ms>` 选项见下文「队列消费的优先级
+  与延迟」小节；另有 `<timeout:ms>` 把「无限等」升级为「有限超时」（P5c）：
+  `sync<timeout:100> work(args), q` 至多等 100ms，超时则放弃等待。可附加状态
+  出参 `, &st`（仿 `run ..., &t`，`st: i4` 左值）区分超时 vs 成功：
+  ```sc
+  var st: i4
+  var r: i4 = sync<timeout:100> compute(3, 4), q, &st   # 状态码 0=成功 / 1=超时 / -1=队列关闭
+  ```
+  表达式仍求值为返回槽（超时时为 0，未被回填）。状态出参**须** `&var` 形式且**须**
+  同时带 `<timeout:ms>`（否则编译错：无限等下状态恒为成功，无意义）。
+  实现：无限等路径在调用方栈上放描述符（零分配）；有限超时路径改用堆盒子 +
+  引用计数——执行方只在盒子堆缓冲上跑 rpc，绝不碰调用方栈，故调用方超时 abort 不致 UAF。
+  循环死锁替代为后续架构升级阶段。
+- 转 C：语句表达式求值 `({ struct W _rp = {0}; 填实参; q->sync(q,(void(*)(void*))W_rpc,&_rp,sizeof(_rp),prio,delay,timeout); _rp._; })`
+  （带状态出参时首部作 `st = q->sync(...)`）——结果由消费者回填返回槽 `_rp._`，语言内核零 emit mt 符号。实现上 `q->sync`
   把 (fn, 参数缓冲指针, 应答描述符) 打成 trampoline 经 `post` 投递，消费者在调用方的
-  参数缓冲上实跑 rpc 后置位并唤醒调用方（参数/应答靠调用方阻塞期间存活保证）。
-- 示例：线程池宿主 + 专用消费线程两种消费路径见 `examples/feature40.sc`。
+  参数缓冲（或超时路径的堆盒子）上实跑 rpc 后置位并唤醒调用方。
+- 示例：线程池宿主 + 专用消费线程两种消费路径见 `examples/feature40.sc`；有限超时（成功/超时两路）见 `examples/feature43.sc`。
 
 #### 队列非阻塞调用 `async work(args), q`（返 promise&）
 
@@ -2212,13 +2223,16 @@ sync<prio:3, delay:10> work(), q     # 两者可同时给
 
 - `prio`——就绪链按优先级排序，`pull` 总取最高优先级；同优先级稳定 FIFO。缺省 0。
 - `delay`——入「延迟链」按到期时刻升序；`pull` 阻塞至最早到期项成熟再消费。缺省 0。
+- `timeout`（仅 `sync`）——把阻塞等回复从「无限等」限为「最多等 N 毫秒」（P5c）；
+  超时则放弃等待。可配状态出参 `, &st` 区分超时/成功（见上「队列阻塞调用」小节）。
+  `async` 暂不支持 `timeout`（给了报编译错）。
 - **仅作用于 FIFO-pull 消费路径**：即 `nil`/`main` 宿主队列被 `pull` 时生效。
   池宿主队列（`default_queue(&pool)`）**忽略** prio/delay：投递即转交池并发自调度。
 - **无目标时禁用**：`sync work(args)`（当前线程直接执行）带 `<...>` 选项为编译错。
 - **`<<` 不带选项**（语法上与移位/比较冲突）：要「延迟/带优先级的即发即忘」，
   用 `async<...>` 驱动并丢弃返回的 `promise` 即可。
-- 转 C：选项经协议指针透传 `q->post/sync/async` 的 `prio`/`delay_ms` 形参，语言内核零 emit mt 符号。
-- 示例：优先级与延迟排序的确定性观测见 `examples/feature42.sc`。
+- 转 C：选项经协议指针透传 `q->post/sync/async` 的 `prio`/`delay_ms`（`sync` 额外 `timeout_ms`）形参，语言内核零 emit mt 符号。
+- 示例：优先级与延迟排序的确定性观测见 `examples/feature42.sc`；`sync<timeout:ms>` 有限超时见 `examples/feature43.sc`。
 
 ### 15.3 异步（async / await / done）
 

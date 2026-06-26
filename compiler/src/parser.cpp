@@ -1362,16 +1362,19 @@ struct Parser {
         // sync E[, q]：同步驱动 rpc 流程。
         //   无目标 `sync work(args)`        → 当前线程直接执行（替代裸 rpc()），返回结果。
         //   带队列 `sync work(args), q`     → 阻塞投递给 q，等消费者执行完取回结果（带回复）。
-        //   可选 <prio:N, delay:ms> 选项块（仅带队列时有意义；值限非负整数字面量）：
-        //     prio=优先级（高者先被消费）、delay=延迟毫秒。仅作用于 FIFO-pull 路径（timeout 待后续）。
+        //   可选 <prio:N, delay:ms, timeout:ms> 选项块（仅带队列时有意义；值限非负整数字面量）：
+        //     prio=优先级（高者先被消费）、delay=延迟毫秒、timeout=有限超时毫秒（P5c）。仅作用于 FIFO-pull 路径。
+        //   可选状态出参 `sync<timeout:ms> work(args), q, &st`：&st(i4&) 接收状态码 0 成功/1 超时/-1 关闭。
         //   逗号紧绑 sync（在此吃掉 , 目标）；故实参列表内用 sync 须加括号：f((sync w(), q), x)。
         if (at(Tok::KwSync)) {
             auto e = mk(Expr::Sync);
             advance();
-            parseRpcOpts(e->syncOpts, "sync");      // 可选 <prio:N, delay:ms>
+            parseRpcOpts(e->syncOpts, "sync");      // 可选 <prio:N, delay:ms, timeout:ms>
             e->a = parseUnary();                // 操作数：rpc 调用
             if (accept(Tok::Comma))
                 e->b = parseUnary();            // 可选队列目标 q（阻塞带回复）
+            if (accept(Tok::Comma))
+                e->c = parseUnary();            // 可选状态出参 &st（仅 timeout 有意义）
             return e;
         }
         // await E：挂起当前 rpc，等 E 产的 future 就绪后恢复（仅 rpc 体内）

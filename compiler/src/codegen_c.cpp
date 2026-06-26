@@ -2371,9 +2371,9 @@ struct CGen {
                     emitComBasePtr(*e.b, isPtr);
                     out << "->async(";
                     emitComBasePtr(*e.b, isPtr);
-                    auto pv = rpcOptVals(e);   // <prio:N, delay:ms>
+                    auto pv = rpcOptVals(e, false);   // <prio:N, delay:ms>（async 不支持 timeout）
                     out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap), "
-                        << pv.first << ", " << pv.second << "); })";
+                        << pv.prio << ", " << pv.delay << "); })";
                     break;
                 }
                 if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
@@ -2398,8 +2398,8 @@ struct CGen {
                     throw CompileError{"sync 不能驱动异步 rpc '" + e.a->a->text +
                                        "'（含 await，请用 async）", e.line};
                 if (!e.b) {                          // 无目标：当前线程直接执行
-                    if (!e.syncOpts.empty())
-                        throw CompileError{"无目标 sync（当前线程直接执行）不接受 <prio/delay> 选项", e.line};
+                    if (!e.syncOpts.empty() || e.c)
+                        throw CompileError{"无目标 sync（当前线程直接执行）不接受 <prio/delay/timeout> 选项与状态出参", e.line};
                     bool save = emitRpcCallOK;
                     emitRpcCallOK = true;
                     emitExpr(*e.a, true);
@@ -2426,13 +2426,21 @@ struct CGen {
                         emitRpcArraySizeof(f); out << "; ";
                     }
                 }
+                auto pv = rpcOptVals(e, true);   // <prio:N, delay:ms, timeout:ms>
+                // 可选状态出参 &st（i4 左值地址）：仅在带 timeout 时有意义，接收 sync 返回码
+                if (e.c) {
+                    if (e.c->kind != Expr::Unary || e.c->op != "&" || !e.c->a)
+                        throw CompileError{"sync 状态出参须为变量地址形式 &var（i4）", e.line};
+                    if (!pv.hasTimeout)
+                        throw CompileError{"sync 状态出参仅在带 <timeout:ms> 时有效", e.line};
+                    emitExpr(*e.c->a, true); out << " = ";   // st = q->sync(...)
+                }
                 emitComBasePtr(*e.b, isPtr);
                 out << "->sync(";
                 emitComBasePtr(*e.b, isPtr);
-                auto pv = rpcOptVals(e);   // <prio:N, delay:ms>
-                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, "
-                    << pv.first << ", " << pv.second << "); ";
-                if (rpcHasRet(*r)) out << "_rp._; ";    // 返回槽（消费者已回填）
+                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), "
+                    << pv.prio << ", " << pv.delay << ", " << pv.timeout << "); ";
+                if (rpcHasRet(*r)) out << "_rp._; ";    // 返回槽（消费者已回填；超时为 0）
                 else out << "(void)0; ";
                 out << "})";
                 break;
@@ -5194,16 +5202,24 @@ struct CGen {
         return rt && (!rt->name.empty() || rt->ptr > 0);
     }
 
-    // sync/async 的 <prio:N, delay:ms> 选项 → (prio, delay_ms) 整数对，透传给 queue 协议。
-    // 键限 prio/delay，值限非负整数字面量（parser 已保证非负）；缺省 0。
-    std::pair<long long, long long> rpcOptVals(const Expr& e) {
-        long long prio = 0, delay = 0;
+    // sync/async 的 <prio:N, delay:ms[, timeout:ms]> 选项 → 整数透传给 queue 协议。
+    // 键限 prio/delay（与 timeout，仅 sync），值限非负整数字面量（parser 已保证非负）；缺省 0。
+    struct RpcOpts { long long prio = 0, delay = 0, timeout = 0; bool hasTimeout = false; };
+    RpcOpts rpcOptVals(const Expr& e, bool allowTimeout) {
+        RpcOpts o;
         for (auto& kv : e.syncOpts) {
-            if (kv.first == "prio")       prio = kv.second;
-            else if (kv.first == "delay") delay = kv.second;
-            else throw CompileError{"sync/async 选项仅支持 prio/delay，未知键：" + kv.first, e.line};
+            if (kv.first == "prio")       o.prio = kv.second;
+            else if (kv.first == "delay") o.delay = kv.second;
+            else if (kv.first == "timeout") {
+                if (!allowTimeout)
+                    throw CompileError{"async ..., q 暂不支持 timeout 选项（仅 sync 有限超时，见 P5c）", e.line};
+                o.timeout = kv.second; o.hasTimeout = true;
+            }
+            else throw CompileError{"sync/async 选项仅支持 prio/delay" +
+                                    std::string(allowTimeout ? "/timeout" : "") +
+                                    "，未知键：" + kv.first, e.line};
         }
-        return {prio, delay};
+        return o;
     }
 
     // rpc 数组形参 → 结构体两字段：指针（数组退化）+ size（字节数）。

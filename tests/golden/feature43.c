@@ -38,58 +38,50 @@ typedef struct com__project {
 void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
 static void compute_rpc(struct compute *_p) {
-    /* line 16 */
+    /* line 20 */
     _p->_ = _p->a + _p->b; return;
 }
 
 static void consume_n_rpc(struct consume_n *_p) {
-    /* line 20 */
+    /* line 24 */
     int32_t i = 0;
-    /* line 21 */
+    /* line 25 */
     for (i = 0; i < _p->n; i++) {
-        /* line 22 */
+        /* line 26 */
         _p->qq->pull(_p->qq, -(1));
     }
 }
 
 int32_t main(void) {
     sc_mod_mt_init();
-    /* line 26 */
-    pool *p = default_pool(2);
-    /* line 27 */
-    queue *q = default_queue(p);
-    /* line 29 */
-    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
     /* line 30 */
-    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 100; _rp.b = 23; q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
+    queue *q = default_queue(NULL);
     /* line 31 */
-    printf("pool sync: r1=%d r2=%d\n", r1, r2);
-    /* line 33 */
-    q->drop(q);
-    /* line 34 */
-    p->drop(p);
-    /* line 37 */
-    queue *q2 = default_queue(NULL);
-    /* line 38 */
     thread *ct = NULL;
-    /* line 39 */
+    /* line 32 */
     {
         struct consume_n _rp = {0};
-        _rp.qq = q2;
-        _rp.n = 2;
+        _rp.qq = q;
+        _rp.n = 1;
         thread_run((void (*)(void *))consume_n_rpc, &_rp, sizeof(_rp), (thread **)(&(ct)), (uint32_t)0u, (uint8_t)0u);
     }
-    /* line 41 */
-    int32_t s1 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
-    /* line 42 */
-    int32_t s2 = ({ struct compute _rp = {0}; _rp.a = 5; _rp.b = 6; q2->sync(q2, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 0); _rp._; });
-    /* line 43 */
-    printf("thread sync: s1=%d s2=%d\n", s1, s2);
-    /* line 45 */
+    /* line 34 */
+    int32_t st1 = -(9);
+    /* line 35 */
+    int32_t r1 = ({ struct compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 2000); _rp._; });
+    /* line 36 */
+    printf("ok path: r=%d st=%d\n", r1, st1);
+    /* line 37 */
     thread_join(ct);
-    /* line 46 */
-    q2->drop(q2);
-    /* line 48 */
+    /* line 40 */
+    int32_t st2 = -(9);
+    /* line 41 */
+    int32_t r2 = ({ struct compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))compute_rpc, &_rp, sizeof(_rp), 0, 0, 50); _rp._; });
+    /* line 42 */
+    printf("timeout path: r=%d st=%d\n", r2, st2);
+    /* line 44 */
+    q->drop(q);
+    /* line 45 */
     {
         int32_t _ret = 0;
         sc_mod_mt_drop();

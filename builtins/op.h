@@ -255,8 +255,11 @@ typedef struct pool {
  *   - post：把一个 rpc 任务整体打包投入队列（q << work(args) → q->post(q, fn, &参数, sizeof, 0, 0)）
  *   - sync：阻塞带回复——把 rpc 调用投递给队列，阻塞至某消费者（另一线程 pull / 池
  *           工作线程）执行完成，结果回填 params 首字段（返回槽 _）；sync work(args), q
- *           → q->sync(q, work_rpc, &参数, prio, delay_ms)。返回 0 成功 / -1 队列已关闭或投递失败。
- *           同线程 sync 到自身会死锁（需别的消费者）；超时/死锁替代待后续。
+ *           → q->sync(q, work_rpc, &参数, sizeof(参数), prio, delay_ms, timeout_ms)。
+ *           timeout_ms<=0 无限阻塞等回复；>0 有限超时（P5c）：超时未果则放弃并返回。
+ *           返回 0 成功 / 1 超时 / -1 队列已关闭或投递失败。可选状态出参由调用点接收返回码。
+ *           有限超时走堆盒子+引用计数路径（执行方只碰盒子堆内存，调用方超时 abort 不 UAF）。
+ *           同线程 sync 到自身会死锁（需别的消费者）；循环死锁替代待后续。
  *   - async：非阻塞带回复——把 rpc 调用投递给队列，立即返回 promise&（mt-future 句柄）；
  *           消费者执行完成后兑现 promise，调用方经 p->wait() 阻塞取结果（或 p->ready() 轮询）。
  *           async work(args), q → q->async(q, work_rpc, &参数, sizeof(参数), prio, delay_ms)。参数缓冲堆
@@ -275,7 +278,7 @@ struct promise;  /* 前置声明：queue.async 返回 promise&（mt-future，定
 typedef struct queue {
     void   *h;       /* 实现私有区指针（FIFO 消息队列 + 延迟链 + 同步原语 + 宿主绑定，实现私有） */
     uint8_t (*post)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize, int32_t prio, int64_t delay_ms);
-    int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params, int32_t prio, int64_t delay_ms);
+    int32_t (*sync)(struct queue *_this, void (*fn)(void *), void *params, size_t psize, int32_t prio, int64_t delay_ms, int64_t timeout_ms);
     struct promise *(*async)(struct queue *_this, void (*fn)(void *), const void *params, size_t psize, int32_t prio, int64_t delay_ms);
     int32_t (*pull)(struct queue *_this, int64_t timeout_ms);
     void    (*drop)(struct queue *_this);
