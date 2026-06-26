@@ -264,9 +264,34 @@ typedef struct q_msg {
     struct timespec deadline;      /* 延迟到期绝对时刻（单调钟；delayed=1 时有效） */
 } q_msg;
 
+/* ---- P5d 循环死锁替代：每线程上下文 + 关系图全局锁 ----
+ * 每线程一份 g_self（thread_local），其地址 &g_self 即该线程的稳定唯一身份。
+ * waiting：本线程当前阻塞 sync 所等待的目标队列（NULL=未在 sync 阻塞中）。
+ * 队列的「消费者」即谁 pull 它（que_pull 惰性绑 q->consumer=&g_self）。
+ * 当 A 向「自己消费的队列」或「沿 consumer→waiting 链回到自己」的队列 sync 时，
+ * 直接投递会死锁——改为在当前线程直接执行该 rpc（替代），打破循环。
+ * consumer/waiting 关系图由 g_link_mu 全局保护（仿参考 thread_queue.c 的 g_mutex）。 */
+typedef struct sc_thr_ctx {
+    struct que_state *waiting;     /* 本线程当前阻塞 sync 的队列（NULL=未阻塞） */
+} sc_thr_ctx;
+
+static TLS sc_thr_ctx g_self;      /* 每线程上下文（&g_self=线程身份；waiting 零初始化） */
+static sc_mutex_t     g_link_mu;   /* 保护 consumer/waiting 关系图 */
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((constructor)) static void mt_link_init(void) { sc_mutex_init(&g_link_mu); }
+static inline void mt_link_ensure(void) {}
+#else
+/* MSVC 回退：启动期单线程惰性 init（首个 queue 在主线程创建于派生消费线程之前）。 */
+static int g_link_inited = 0;
+static inline void mt_link_ensure(void) {
+    if (!g_link_inited) { sc_mutex_init(&g_link_mu); g_link_inited = 1; }
+}
+#endif
+
 /* 队列盒子：首字段 queue base（协议 vtable）+ 单链 ready FIFO（按 prio 有序）+ 延迟有序链
  * delaying（按 deadline 升序）+ 条件变量（来活/延迟头变化）。 */
-typedef struct {
+typedef struct que_state {
     queue        base;     /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
     mtx_state    mu;
     cnd_state    more;     /* 来活：post 唤醒阻塞的 pull（含延迟头变早需重算等待） */
@@ -275,10 +300,29 @@ typedef struct {
     uint32_t     pending;  /* 队列中待处理消息数（ready + delaying 合计） */
     uint8_t      closed;   /* drop 置位：拒收新消息、唤醒 pull 退出 */
     struct pool *host;     /* 宿主绑定：NULL/(pool*)-1/&pool */
+    sc_thr_ctx  *consumer; /* P5d：消费此队列的线程身份（pull 惰性绑；循环死锁替代检测用） */
 } que_state;
 
 static void que_lock(que_state *q)   { sc_mutex_lock(&q->mu); }
 static void que_unlock(que_state *q) { sc_mutex_unlock(&q->mu); }
+
+/* 循环死锁替代判定（须持 g_link_mu）：from 线程拟向 tq 队列 sync，是否应改为本地替代执行？
+ *   - tq->consumer == from：向自己消费的队列 sync（自替代）。
+ *   - 否则沿 consumer→waiting→consumer 链行走：若某环节回到 from → 存在循环互锁。
+ * 走的是「每节点至多一条出边（waiting）」的函数图；不变量（替代使图保持无环）下必终止；
+ * 仍加防御步数上限，意外成环时保守返回 0（退化为正常投递，至多死锁而非检测器卡死）。 */
+static int sub_should_substitute(que_state *tq, sc_thr_ctx *from) {
+    if (tq->consumer == from) return 1;            /* 自替代 */
+    sc_thr_ctx *c = tq->consumer;
+    int guard = 4096;                              /* 防御：远超任何合理线程数 */
+    while (c && guard-- > 0) {
+        que_state *w = c->waiting;                 /* c 线程当前阻塞 sync 的队列 */
+        if (!w) return 0;                          /* c 未阻塞 → 无循环 */
+        if (w->consumer == from) return 1;         /* 循环回到自己 → 替代 */
+        c = w->consumer;
+    }
+    return 0;
+}
 
 /* ready 链按优先级有序插入：head=最高优先级；同优先级稳定（FIFO，插在同级之后）。
  * 仅插入，不改 pending（pending 由 post 统一 +1）。 */
@@ -367,7 +411,7 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
  *     盒子堆缓冲，caller 超时 abort 不致 UAF。返回 1=超时。
  *   - prio/delay_ms 透传给 post（优先级排序 / 延迟投递）。
  *   - 返回 0 成功 / 1 超时 / -1 投递失败（队列已关闭等）。
- *   - 同线程对自己消费的队列 sync 会死锁（须别的消费者执行）；循环死锁替代待后续。 */
+ *   - 循环死锁替代（向自己消费的队列、或循环互锁）由外层 que_sync 包装拦截、改本地执行（P5d）。 */
 typedef struct q_sync {
     mtx_state mu;
     cnd_state done_cv;
@@ -426,8 +470,8 @@ static void q_sync_box_run(void *arg) {
     if (r == 0) q_sync_box_free(b);          /* caller 已先弃用撒手 → 末位回收 */
 }
 
-static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t psize,
-                        int32_t prio, int64_t delay_ms, int64_t timeout_ms) {
+static int32_t que_sync_core(queue *_this, void (*fn)(void *), void *params, size_t psize,
+                             int32_t prio, int64_t delay_ms, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return -1;
 
@@ -493,6 +537,40 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     sc_mutex_final(&rep.mu);
     sc_cond_final(&rep.done_cv);
     return 0;
+}
+
+/* sync 方法（协议指针）—— 薄包装：先做循环死锁替代检测（P5d），否则转 que_sync_core。
+ *   - 替代命中（向自己消费的队列、或沿 consumer→waiting 链回到自己）：在当前线程直接
+ *     执行 fn(params)（写回返回槽 _），立即返回 0——打破循环，无需投递/阻塞。无限等与
+ *     有限超时两路同此（命中替代即同步成功）。
+ *   - 未命中：发布「本线程正阻塞 sync 于 q」（from->waiting=q，置于 g_link_mu 保护下，
+ *     使后续可能形成循环的他方能检测到），再走 core 投递+阻塞；返回后清 waiting。
+ *   - 锁序：走链/发布仅持 g_link_mu，core 投递（取 q->mu）前已释 g_link_mu；que_pull 绑
+ *     consumer 时单独 g_link_mu 临界区（不嵌 q->mu）→ 全局无锁序环。
+ *   - 池宿主队列：consumer 恒 NULL（池 worker 不 que_pull）→ 走链无命中 → 照常 core 投递
+ *     转交池（替代对池天然禁用）。 */
+static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t psize,
+                        int32_t prio, int64_t delay_ms, int64_t timeout_ms) {
+    que_state *q = (que_state *)_this;
+    if (!q || !fn) return -1;
+
+    sc_thr_ctx *from = &g_self;
+    mt_link_ensure();
+    sc_mutex_lock(&g_link_mu);
+    if (sub_should_substitute(q, from)) {
+        sc_mutex_unlock(&g_link_mu);
+        fn(params);                          /* 本线程直接执行（写回返回槽 _），打破循环 */
+        return 0;
+    }
+    from->waiting = q;                        /* 发布：本线程正阻塞 sync 于 q（供他方循环检测） */
+    sc_mutex_unlock(&g_link_mu);
+
+    int32_t ret = que_sync_core(_this, fn, params, psize, prio, delay_ms, timeout_ms);
+
+    sc_mutex_lock(&g_link_mu);
+    from->waiting = NULL;                     /* 清除：已返回（成功/超时/失败均清） */
+    sc_mutex_unlock(&g_link_mu);
+    return ret;
 }
 
 /* async 方法（协议指针）：非阻塞带回复——把 rpc 调用投递给某消费者（另一线程 pull 或池
@@ -592,6 +670,17 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
 static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q) return -1;
+
+    /* P5d：惰性绑定「消费者即谁 pull」。仅首次（或更换消费线程）时进 g_link_mu 临界区更新；
+     * 无锁比较读至多触发一次冗余加锁（consumer 仅 NULL→&g_self 单向转变，竞态无害）。
+     * 独立于 q->mu 之外（不嵌套）→ 与 que_sync 走链的锁序互不成环。 */
+    if (q->consumer != &g_self) {
+        mt_link_ensure();
+        sc_mutex_lock(&g_link_mu);
+        q->consumer = &g_self;
+        sc_mutex_unlock(&g_link_mu);
+    }
+
     que_lock(q);
 
     /* pull 自身的绝对截止（仅 timeout_ms>0 时有意义） */
