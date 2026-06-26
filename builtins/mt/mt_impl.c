@@ -243,77 +243,162 @@ struct pool *default_pool(uint32_t n) {
     return &p->base;
 }
 
-/* ---------------- queue：消息队列协议的「默认 FIFO」实现 ---------------- */
-/* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「默认 FIFO」策略用
- * default_queue(host) 具名构造——同 pool：que_state 首字段即 queue base，故 (queue*)
- * 与 (que_state*) 同址，方法直接 (que_state*)_this 回取私有区。消息节点 [q_msg][params]
- * 联合分配，参数拷贝入节点，投递点无需保活。
- * 宿主三态（host）：NULL 未绑/延迟、(pool*)-1 当前/主线程（自跑 pull 循环）、&pool
- * 线程池消费——host 为真实 pool 时，post 直接经 pool 协议指针转交池（pool->run），由
- * 池的工作线程并发执行，无需手动 pull（用 pool->join() 作屏障）；NULL/(pool*)-1 入本
- * 队列 FIFO，由当前/主线程手动 pull 消费。 */
+/* ---------------- queue + port：消息队列协议的「PORT 单收件箱」实现 ---------------- */
+/* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按 thread_queue.c 的
+ * 「每线程 PORT」模型实现——port 是每线程的单一收件箱中枢，多个 queue 归并进同一 port，
+ * 消息在 port 邮箱里按到达顺序（同优先级 FIFO）排成单链，从而获得跨 queue 的全局时序。
+ *   - port（sc_port）：每线程一个（TLS g_port 惰性堆分配）。其地址即该线程的稳定唯一身份。
+ *     字段：单收件箱 box（ready 按 prio 有序 + delaying 按 deadline 有序）、recv 条件变量
+ *     （消费者等来活）、send 条件变量（R2 替代死等）、waiting（本线程当前阻塞 sync 的队列，
+ *     环检测用）、substituting（R2 铁律）、attached（绑定到本 port 的队列链，线程退出自动 detach）。
+ *   - queue（que_state）：首字段 queue base（vtable）+ consumer（谁 pull 我，首次 pull 惰性 attach）
+ *     + staging（attach 前的暂存收件箱，首次 attach 时整块插入 port 收件箱首部，优先处理历史）
+ *     + count（归属本队列的在途消息数，detach 清理用）+ host（宿主三态）。
+ *   - 宿主三态（host）：NULL 未绑/延迟、(pool*)-1 当前/主线程（自跑 pull 循环）、&pool
+ *     线程池消费——host 为真实 pool 时，post 直接经 pool 协议指针转交池（pool->run），由
+ *     池的工作线程并发执行（不入 port，无 attach）。
+ *   - 全局唯一互斥 g_mutex（仿参考 g_mutex）保护所有 port 收件箱 + queue 暂存 + consumer/waiting
+ *     关系图，彻底消除锁序环；各 port 的 recv/send 条件变量均在 g_mutex 上等待。
+ *     调用方阻塞/唤醒用每调用私有的应答描述符（叶子锁，不与 g_mutex 嵌套）。 */
 
-/* 消息节点：联合分配 [q_msg][rpc 参数 psize]（与 pool 任务节点同哲学）。
- * P5：prio=优先级（高者先消费，ready 链按其有序插入）；delayed/deadline=延迟项
- * （投递时带 delay_ms>0 则计算绝对到期时刻入 delaying 有序链，pull 到期后提升进 ready）。*/
-typedef struct q_msg {
-    struct q_msg   *next;
-    void          (*fn)(void *);   /* rpc 实际函数，参数紧随本节点 */
-    int32_t         prio;          /* 优先级（高者先被消费，0=默认） */
-    uint8_t         delayed;       /* 是否延迟项（在 delaying 链上） */
-    struct timespec deadline;      /* 延迟到期绝对时刻（单调钟；delayed=1 时有效） */
-} q_msg;
+/* 消息节点：联合分配 [pmsg][rpc 参数 psize]（与 pool 任务节点同哲学）。
+ * receiver=目标队列（detach 清理 + 归属判定）；prio=优先级（ready 按其有序）；
+ * delayed/deadline=延迟项（投递带 delay_ms>0 则计算绝对到期时刻入 delaying 有序链）。*/
+typedef struct pmsg {
+    struct pmsg      *next;
+    struct que_state *receiver;    /* 目标队列（归属/清理） */
+    void            (*fn)(void *); /* rpc 实际函数，参数紧随本节点 */
+    int32_t           prio;        /* 优先级（高者先被消费，0=默认） */
+    uint8_t           delayed;     /* 是否延迟项（在 delaying 链上） */
+    struct timespec   deadline;    /* 延迟到期绝对时刻（单调钟；delayed=1 时有效） */
+} pmsg;
 
-/* ---- P5d 循环死锁替代：每线程上下文 + 关系图全局锁 ----
- * 每线程一份 g_self（thread_local），其地址 &g_self 即该线程的稳定唯一身份。
- * waiting：本线程当前阻塞 sync 所等待的目标队列（NULL=未在 sync 阻塞中）。
- * 队列的「消费者」即谁 pull 它（que_pull 惰性绑 q->consumer=&g_self）。
- * 当 A 向「自己消费的队列」或「沿 consumer→waiting 链回到自己」的队列 sync 时，
- * 直接投递会死锁——改为在当前线程直接执行该 rpc（替代），打破循环。
- * consumer/waiting 关系图由 g_link_mu 全局保护（仿参考 thread_queue.c 的 g_mutex）。 */
-typedef struct sc_thr_ctx {
-    struct que_state *waiting;     /* 本线程当前阻塞 sync 的队列（NULL=未阻塞） */
-} sc_thr_ctx;
+/* 收件箱：ready 单链（按 prio 有序，head=最高优先级）+ delaying 单链（按 deadline 升序）。
+ * port 与 queue（暂存）各内嵌一个，复用同一组插入/提升助手。 */
+typedef struct inbox {
+    pmsg *head, *tail;             /* ready 链：head=队头（最高优先级，先消费） */
+    pmsg *delaying;                /* 延迟链：按 deadline 升序，pull 到期提升进 ready */
+} inbox;
 
-static TLS sc_thr_ctx g_self;      /* 每线程上下文（&g_self=线程身份；waiting 零初始化） */
-static sc_mutex_t     g_link_mu;   /* 保护 consumer/waiting 关系图 */
+/* 端口：每线程一个收件箱中枢（TLS g_port 惰性堆分配，地址即线程身份）。 */
+typedef struct sc_port {
+    inbox             box;         /* 单收件箱（聚合所有 attached queue 的消息） */
+    cnd_state         recv;        /* 消费者等来活（在 g_mutex 上等待） */
+    cnd_state         send;        /* R2：替代死等（本轮先建字段，R2 启用） */
+    struct que_state *waiting;     /* 本线程当前阻塞 sync 的队列（NULL=未阻塞；环检测用） */
+    uint8_t           substituting;/* R2：铁律（本轮先建字段，R2 启用） */
+    struct que_state *attached;    /* attached 队列链（线程退出自动 detach；经 anext 串） */
+} sc_port;
+
+/* 队列盒子：首字段 queue base（协议 vtable）+ consumer（谁 pull）+ staging（attach 前暂存）。 */
+typedef struct que_state {
+    queue            base;         /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
+    inbox            staging;      /* attach 前暂存收件箱（首次 attach 整块插 port 首部） */
+    uint32_t         count;        /* 归属本队列的在途消息数（detach 清理用） */
+    uint8_t          closed;       /* drop 置位：拒收新消息 */
+    struct pool     *host;         /* 宿主绑定：NULL/(pool*)-1/&pool */
+    struct sc_port  *consumer;     /* 消费此队列的 port（首次 pull 惰性 attach；NULL=未绑） */
+    struct que_state *anext;       /* attached 链 next（挂在 consumer->attached 上） */
+} que_state;
+
+static sc_mutex_t  g_mutex;        /* 全局唯一锁：保护所有 port 收件箱 + queue 暂存 + 关系图 */
+static TLS sc_port *g_port;        /* 每线程 port 指针（惰性堆分配；地址=线程身份） */
+
+/* ---- 线程退出 TLS 析构：消费线程退出时自动 detach 全部 attached queue + 释放 port ----
+ * sc 寿命模型：queue 是 main 拥有的耐久堆对象，port 是消费线程的临时中枢。消费线程
+ * （run 语句起的）pull 完即退出，须在退出那刻把它 attach 的队列解绑（consumer 置空，
+ * 之后 main 的 q->drop() 见 consumer==NULL → 只释 queue 自身，无 UAF）并回收 port。
+ * 经 pthread_key 析构器（POSIX）/ FlsAlloc 回调（Windows）在线程退出时触发。 */
+static void port_release(sc_port *p);
+
+#if P_WIN
+static DWORD g_port_fls = FLS_OUT_OF_INDEXES;
+static void WINAPI mt_port_dtor(void *p) { if (p) port_release((sc_port *)p); }
+#else
+static pthread_key_t g_port_key;
+static void mt_port_dtor(void *p) { if (p) port_release((sc_port *)p); }
+#endif
 
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__((constructor)) static void mt_link_init(void) { sc_mutex_init(&g_link_mu); }
-static inline void mt_link_ensure(void) {}
+__attribute__((constructor)) static void mt_init(void) {
+    sc_mutex_init(&g_mutex);
+#if P_WIN
+    g_port_fls = FlsAlloc(mt_port_dtor);
+#else
+    pthread_key_create(&g_port_key, mt_port_dtor);
+#endif
+}
+static inline void mt_ensure(void) {}
 #else
 /* MSVC 回退：启动期单线程惰性 init（首个 queue 在主线程创建于派生消费线程之前）。 */
-static int g_link_inited = 0;
-static inline void mt_link_ensure(void) {
-    if (!g_link_inited) { sc_mutex_init(&g_link_mu); g_link_inited = 1; }
+static int g_mt_inited = 0;
+static inline void mt_ensure(void) {
+    if (!g_mt_inited) {
+        sc_mutex_init(&g_mutex);
+        g_port_fls = FlsAlloc(mt_port_dtor);
+        g_mt_inited = 1;
+    }
 }
 #endif
 
-/* 队列盒子：首字段 queue base（协议 vtable）+ 单链 ready FIFO（按 prio 有序）+ 延迟有序链
- * delaying（按 deadline 升序）+ 条件变量（来活/延迟头变化）。 */
-typedef struct que_state {
-    queue        base;     /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
-    mtx_state    mu;
-    cnd_state    more;     /* 来活：post 唤醒阻塞的 pull（含延迟头变早需重算等待） */
-    q_msg       *head, *tail;  /* ready 链：head=最高优先级，pull 从队头取 */
-    q_msg       *delaying;     /* 延迟链：按 deadline 升序，pull 到期提升进 ready */
-    uint32_t     pending;  /* 队列中待处理消息数（ready + delaying 合计） */
-    uint8_t      closed;   /* drop 置位：拒收新消息、唤醒 pull 退出 */
-    struct pool *host;     /* 宿主绑定：NULL/(pool*)-1/&pool */
-    sc_thr_ctx  *consumer; /* P5d：消费此队列的线程身份（pull 惰性绑；循环死锁替代检测用） */
-} que_state;
+/* 取本线程 port（惰性堆分配并登记 TLS 析构器）。无需持 g_mutex（仅本线程 TLS）。 */
+static sc_port *port_self(void) {
+    sc_port *p = g_port;
+    if (!p) {
+        mt_ensure();
+        p = (sc_port *)calloc(1, sizeof(sc_port));
+        if (!p) return NULL;
+        sc_cond_init(&p->recv);
+        sc_cond_init(&p->send);
+        g_port = p;
+#if P_WIN
+        FlsSetValue(g_port_fls, p);    /* 线程退出触发 mt_port_dtor */
+#else
+        pthread_setspecific(g_port_key, p);
+#endif
+    }
+    return p;
+}
 
-static void que_lock(que_state *q)   { sc_mutex_lock(&q->mu); }
-static void que_unlock(que_state *q) { sc_mutex_unlock(&q->mu); }
+/* ready 链按优先级有序插入：head=最高优先级；同优先级稳定（FIFO，插在同级之后）。 */
+static void inbox_ready_insert(inbox *b, pmsg *m) {
+    pmsg *prev = NULL, *cur = b->head;
+    while (cur && cur->prio >= m->prio) { prev = cur; cur = cur->next; }
+    m->next = cur;
+    if (prev) prev->next = m; else b->head = m;
+    if (!cur) b->tail = m;          /* 插到尾部 */
+}
 
-/* 循环死锁替代判定（须持 g_link_mu）：from 线程拟向 tq 队列 sync，是否应改为本地替代执行？
+/* delaying 链按 deadline 升序插入；同时刻稳定（插在相等之后）。 */
+static void inbox_delay_insert(inbox *b, pmsg *m) {
+    pmsg *prev = NULL, *cur = b->delaying;
+    while (cur && !clock_gt(cur->deadline, m->deadline)) { prev = cur; cur = cur->next; }
+    m->next = cur;
+    if (prev) prev->next = m; else b->delaying = m;
+}
+
+/* 把 delaying 链中所有已到期（deadline <= now）的项提升进 ready（按 prio 重新有序）。 */
+static void inbox_promote(inbox *b) {
+    if (!b->delaying) return;
+    struct timespec now;
+    P_clock_now(&now);
+    while (b->delaying) {
+        pmsg *d = b->delaying;
+        if (clock_gt(d->deadline, now)) break;   /* 未到期，后续更晚，停 */
+        b->delaying = d->next;
+        d->delayed = 0;
+        inbox_ready_insert(b, d);
+    }
+}
+
+/* 循环死锁替代判定（须持 g_mutex）：from 端口拟向 tq 队列 sync，是否应改为本地替代执行？
  *   - tq->consumer == from：向自己消费的队列 sync（自替代）。
  *   - 否则沿 consumer→waiting→consumer 链行走：若某环节回到 from → 存在循环互锁。
  * 走的是「每节点至多一条出边（waiting）」的函数图；不变量（替代使图保持无环）下必终止；
  * 仍加防御步数上限，意外成环时保守返回 0（退化为正常投递，至多死锁而非检测器卡死）。 */
-static int sub_should_substitute(que_state *tq, sc_thr_ctx *from) {
+static int port_should_substitute(que_state *tq, sc_port *from) {
     if (tq->consumer == from) return 1;            /* 自替代 */
-    sc_thr_ctx *c = tq->consumer;
+    sc_port *c = tq->consumer;
     int guard = 4096;                              /* 防御：远超任何合理线程数 */
     while (c && guard-- > 0) {
         que_state *w = c->waiting;                 /* c 线程当前阻塞 sync 的队列 */
@@ -324,46 +409,16 @@ static int sub_should_substitute(que_state *tq, sc_thr_ctx *from) {
     return 0;
 }
 
-/* ready 链按优先级有序插入：head=最高优先级；同优先级稳定（FIFO，插在同级之后）。
- * 仅插入，不改 pending（pending 由 post 统一 +1）。 */
-static void que_ready_insert(que_state *q, q_msg *m) {
-    q_msg *prev = NULL, *cur = q->head;
-    while (cur && cur->prio >= m->prio) { prev = cur; cur = cur->next; }
-    m->next = cur;
-    if (prev) prev->next = m; else q->head = m;
-    if (!cur) q->tail = m;          /* 插到尾部 */
-}
-
-/* delaying 链按 deadline 升序插入；同时刻稳定（插在相等之后）。仅插入，不改 pending。 */
-static void que_delay_insert(que_state *q, q_msg *m) {
-    q_msg *prev = NULL, *cur = q->delaying;
-    while (cur && !clock_gt(cur->deadline, m->deadline)) { prev = cur; cur = cur->next; }
-    m->next = cur;
-    if (prev) prev->next = m; else q->delaying = m;
-}
-
-/* 把 delaying 链中所有已到期（deadline <= now）的项提升进 ready（按 prio 重新有序）。
- * 不改 pending（仅在两链间搬移）。 */
-static void que_promote_matured(que_state *q) {
-    if (!q->delaying) return;
-    struct timespec now;
-    P_clock_now(&now);
-    while (q->delaying) {
-        q_msg *d = q->delaying;
-        if (clock_gt(d->deadline, now)) break;   /* deadline > now：未到期，后续更晚，停 */
-        q->delaying = d->next;
-        d->delayed = 0;
-        que_ready_insert(q, d);
-    }
-}
-
 
 /* post 方法（协议指针，对称 pool.run）：rpc 调用整体打包成消息入队。
  * prio：优先级（高者先被消费，0=默认）；delay_ms：延迟毫秒（>0 则到期才可被 pull）。
  * 宿主为真实线程池（host 非 NULL 且非 (pool*)-1）时，直接转交池消费（经 pool 协议
- * 指针 host->run 派发，不入本队列），由池工作线程并发执行——此路径忽略 prio/delay
- * （池自调度）。NULL/(pool*)-1 入本队列：delay_ms>0 入 delaying 有序链，否则按 prio
- * 入 ready 有序链。
+ * 指针 host->run 派发，不入 port，无 attach）——此路径忽略 prio/delay（池自调度）。
+ * 否则按 PORT 模型投递：
+ *   - 已 attach（consumer 非空）：插入 consumer port 的单收件箱（delay_ms>0 入 delaying
+ *     有序链，否则按 prio 入 ready），唤醒该 port 的消费者（recv）。
+ *   - 未 attach（consumer 空）：暂存到本队列 staging 收件箱（首次 pull/attach 时整块
+ *     插入 port 首部，优先处理历史）。
  * 返回 1 成功 / 0 失败（队列已关闭 / 内存不足） */
 static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize,
                         int32_t prio, int64_t delay_ms) {
@@ -376,15 +431,19 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
         if (host && host != (struct pool *)-1)
             return host->run(host, fn, params, psize);
     }
-    q_msg *m = (q_msg *)malloc(sizeof(q_msg) + psize);
+    pmsg *m = (pmsg *)malloc(sizeof(pmsg) + psize);
     if (!m) return 0;
     m->next = NULL;
+    m->receiver = q;
     m->fn = fn;
     m->prio = prio;
     m->delayed = 0;
     if (params && psize) memcpy(m + 1, params, psize);
-    que_lock(q);
-    if (q->closed) { que_unlock(q); free(m); return 0; }
+
+    mt_ensure();
+    sc_mutex_lock(&g_mutex);
+    if (q->closed) { sc_mutex_unlock(&g_mutex); free(m); return 0; }
+
     if (delay_ms > 0) {
         struct timespec now, rel;
         P_clock_now(&now);
@@ -392,13 +451,22 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
         rel.tv_nsec = (long)((delay_ms % 1000) * 1000000L);
         clock_inc(now, rel, m->deadline);     /* 绝对到期时刻（单调钟） */
         m->delayed = 1;
-        que_delay_insert(q, m);
-    } else {
-        que_ready_insert(q, m);
     }
-    q->pending++;
-    sc_cond_one(&q->more);    /* 唤醒 pull 重算等待（来活，或延迟头变早需重算时限） */
-    que_unlock(q);
+
+    sc_port *cp = q->consumer;
+    if (cp) {
+        /* 已 attach：入 consumer port 单收件箱，唤醒其消费者 */
+        if (m->delayed) inbox_delay_insert(&cp->box, m);
+        else            inbox_ready_insert(&cp->box, m);
+        q->count++;
+        sc_cond_one(&cp->recv);
+    } else {
+        /* 未 attach：暂存本队列 staging（首次 attach flush 进 port 首部） */
+        if (m->delayed) inbox_delay_insert(&q->staging, m);
+        else            inbox_ready_insert(&q->staging, m);
+        q->count++;
+    }
+    sc_mutex_unlock(&g_mutex);
     return 1;
 }
 
@@ -543,10 +611,10 @@ static int32_t que_sync_core(queue *_this, void (*fn)(void *), void *params, siz
  *   - 替代命中（向自己消费的队列、或沿 consumer→waiting 链回到自己）：在当前线程直接
  *     执行 fn(params)（写回返回槽 _），立即返回 0——打破循环，无需投递/阻塞。无限等与
  *     有限超时两路同此（命中替代即同步成功）。
- *   - 未命中：发布「本线程正阻塞 sync 于 q」（from->waiting=q，置于 g_link_mu 保护下，
+ *   - 未命中：发布「本线程正阻塞 sync 于 q」（from(port)->waiting=q，置于 g_mutex 保护下，
  *     使后续可能形成循环的他方能检测到），再走 core 投递+阻塞；返回后清 waiting。
- *   - 锁序：走链/发布仅持 g_link_mu，core 投递（取 q->mu）前已释 g_link_mu；que_pull 绑
- *     consumer 时单独 g_link_mu 临界区（不嵌 q->mu）→ 全局无锁序环。
+ *   - 锁序：图操作与 core 投递均用全局唯一 g_mutex（core 经 post 入 port 收件箱），无锁序环；
+ *     调用方阻塞用每调用私有应答描述符（叶子锁，不与 g_mutex 嵌套）。
  *   - 池宿主队列：consumer 恒 NULL（池 worker 不 que_pull）→ 走链无命中 → 照常 core 投递
  *     转交池（替代对池天然禁用）。 */
 static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t psize,
@@ -554,22 +622,22 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     que_state *q = (que_state *)_this;
     if (!q || !fn) return -1;
 
-    sc_thr_ctx *from = &g_self;
-    mt_link_ensure();
-    sc_mutex_lock(&g_link_mu);
-    if (sub_should_substitute(q, from)) {
-        sc_mutex_unlock(&g_link_mu);
+    sc_port *from = port_self();
+    if (!from) return -1;
+    sc_mutex_lock(&g_mutex);
+    if (port_should_substitute(q, from)) {
+        sc_mutex_unlock(&g_mutex);
         fn(params);                          /* 本线程直接执行（写回返回槽 _），打破循环 */
         return 0;
     }
     from->waiting = q;                        /* 发布：本线程正阻塞 sync 于 q（供他方循环检测） */
-    sc_mutex_unlock(&g_link_mu);
+    sc_mutex_unlock(&g_mutex);
 
     int32_t ret = que_sync_core(_this, fn, params, psize, prio, delay_ms, timeout_ms);
 
-    sc_mutex_lock(&g_link_mu);
+    sc_mutex_lock(&g_mutex);
     from->waiting = NULL;                     /* 清除：已返回（成功/超时/失败均清） */
-    sc_mutex_unlock(&g_link_mu);
+    sc_mutex_unlock(&g_mutex);
     return ret;
 }
 
@@ -663,25 +731,40 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
     return &b->base;
 }
 
-/* pull 方法：取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
- * 返回 1 处理了一条 / 0 超时且队列空 / -1 队列已关闭（且排空）。
+/* pull 方法：从本线程 port 单收件箱取队首消息在当前线程执行。timeout_ms <0 无限等 / 0 立即 / >0 毫秒。
+ * 返回 1 处理了一条 / 0 超时且收件箱空 / -1 队列已关闭（且本队列排空）。
+ *   - 首次对某队列 pull：惰性 attach——把该队列绑到本线程 port（consumer=port），并把队列
+ *     staging 暂存消息整块插入 port 收件箱首部（优先处理历史），之后该队列消息直接进 port。
+ *   - 单收件箱聚合：port 收件箱汇集所有 attach 到本 port 的队列的消息，pull 取队头（不限发起队列）
+ *     在本线程执行——故对任一 attach 的队列调 pull 都驱动同一 port 邮箱（跨队列全局时序）。
  * P5：先把 delaying 中已到期项提升进 ready（按 prio），再取 ready 队头（最高优先级）；
  * ready 空时按 min(pull 截止, delaying 头到期时刻) 定时等，醒来重算（鲁棒于虚假唤醒）。 */
 static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q) return -1;
 
-    /* P5d：惰性绑定「消费者即谁 pull」。仅首次（或更换消费线程）时进 g_link_mu 临界区更新；
-     * 无锁比较读至多触发一次冗余加锁（consumer 仅 NULL→&g_self 单向转变，竞态无害）。
-     * 独立于 q->mu 之外（不嵌套）→ 与 que_sync 走链的锁序互不成环。 */
-    if (q->consumer != &g_self) {
-        mt_link_ensure();
-        sc_mutex_lock(&g_link_mu);
-        q->consumer = &g_self;
-        sc_mutex_unlock(&g_link_mu);
-    }
+    sc_port *port = port_self();
+    if (!port) return -1;
 
-    que_lock(q);
+    sc_mutex_lock(&g_mutex);
+
+    /* 惰性 attach：首次 pull 把队列绑到本线程 port，并 flush staging 历史进 port 首部 */
+    if (q->consumer != port) {
+        q->consumer = port;
+        q->anext = port->attached;
+        port->attached = q;
+        /* staging.ready 整块前插 port 收件箱首部（保历史内部序，优先于 port 既有消息） */
+        if (q->staging.head) {
+            q->staging.tail->next = port->box.head;
+            port->box.head = q->staging.head;
+            if (!port->box.tail) port->box.tail = q->staging.tail;
+            q->staging.head = q->staging.tail = NULL;
+        }
+        /* staging.delaying 按 deadline 并入 port delaying */
+        pmsg *d = q->staging.delaying;
+        while (d) { pmsg *n = d->next; inbox_delay_insert(&port->box, d); d = n; }
+        q->staging.delaying = NULL;
+    }
 
     /* pull 自身的绝对截止（仅 timeout_ms>0 时有意义） */
     struct timespec pull_deadline;
@@ -696,70 +779,125 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     }
 
     for (;;) {
-        que_promote_matured(q);                 /* 已到期延迟项提升进 ready */
-        if (q->head) break;                     /* ready 有货 → 取队头 */
-        if (q->closed) { que_unlock(q); return -1; }   /* 已关闭且排空 */
-        if (timeout_ms == 0) { que_unlock(q); return 0; }  /* 立即模式 */
+        inbox_promote(&port->box);              /* 已到期延迟项提升进 ready */
+        if (port->box.head) break;              /* ready 有货 → 取队头 */
+        if (q->closed) { sc_mutex_unlock(&g_mutex); return -1; }  /* 本队列已关闭且排空 */
+        if (timeout_ms == 0) { sc_mutex_unlock(&g_mutex); return 0; }  /* 立即模式 */
 
         /* 本轮等待时限 = min(pull 截止, delaying 头到期时刻)，取较早者 */
         struct timespec now, wake;
         uint8_t have_wake = 0;
         P_clock_now(&now);
-        if (q->delaying) { wake = q->delaying->deadline; have_wake = 1; }
+        if (port->box.delaying) { wake = port->box.delaying->deadline; have_wake = 1; }
         if (have_pull_deadline && (!have_wake || clock_gt(wake, pull_deadline))) {
             wake = pull_deadline; have_wake = 1;
         }
 
         if (!have_wake) {
-            sc_cond_wait(&q->more, &q->mu, 0, 0);          /* 无限等来活 */
+            sc_cond_wait(&port->recv, &g_mutex, 0, 0);          /* 无限等来活 */
         } else if (clock_gt(wake, now)) {
             struct timespec rel;
-            clock_dec(wake, now, rel);                      /* 相对时限 = wake - now（>0） */
-            sc_cond_wait(&q->more, &q->mu, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
+            clock_dec(wake, now, rel);                          /* 相对时限 = wake - now（>0） */
+            sc_cond_wait(&port->recv, &g_mutex, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
         }
         /* 醒来：若是 pull 自身超时且仍无可取货，返 0；否则回到循环顶重算（虚假唤醒亦安全） */
         if (have_pull_deadline) {
             struct timespec now2;
             P_clock_now(&now2);
             if (clock_ge(now2, pull_deadline)) {
-                que_promote_matured(q);
-                if (!q->head && !q->closed) { que_unlock(q); return 0; }
+                inbox_promote(&port->box);
+                if (!port->box.head && !q->closed) { sc_mutex_unlock(&g_mutex); return 0; }
             }
         }
     }
 
-    q_msg *m = q->head;
-    q->head = m->next;
-    if (!q->head) q->tail = NULL;
-    q->pending--;
-    que_unlock(q);
+    pmsg *m = port->box.head;
+    port->box.head = m->next;
+    if (!port->box.head) port->box.tail = NULL;
+    if (m->receiver) m->receiver->count--;
+    sc_mutex_unlock(&g_mutex);
 
     m->fn((void *)(m + 1));                                     /* 参数紧随消息节点 */
     free(m);
     return 1;
 }
 
-/* drop 方法：解绑宿主 → 排空残留消息（ready + delaying 均释放，不执行）→ 唤醒 pull 退出 → 回收整块。 */
+/* port_release：线程退出 TLS 析构触发——把本 port 所有 attached 队列解绑（consumer 置空，
+ * 令 main 后续 q->drop() 见 consumer==NULL 安全回收），释放 port 收件箱残留消息与 port 自身。
+ * 正确程序里消费线程退出前已 pull 干净（收件箱空），此处仅做兜底回收。
+ * 注：残留同步消息（被阻塞调用方）此处仅释放不唤醒——R2 引入 shadow session 后以 CLOSED 唤醒。 */
+static void port_release(sc_port *p) {
+    sc_mutex_lock(&g_mutex);
+    /* 解绑所有 attached 队列（consumer 置空、清在途计数） */
+    que_state *q = p->attached;
+    while (q) {
+        que_state *nq = q->anext;
+        q->consumer = NULL;
+        q->anext = NULL;
+        q->count = 0;
+        q = nq;
+    }
+    p->attached = NULL;
+    /* 释放收件箱残留消息（ready + delaying） */
+    pmsg *m = p->box.head;
+    while (m) { pmsg *n = m->next; free(m); m = n; }
+    m = p->box.delaying;
+    while (m) { pmsg *n = m->next; free(m); m = n; }
+    p->box.head = p->box.tail = p->box.delaying = NULL;
+    sc_mutex_unlock(&g_mutex);
+    sc_cond_final(&p->recv);
+    sc_cond_final(&p->send);
+    free(p);
+    if (g_port == p) g_port = NULL;
+}
+
+/* drop 方法：关闭队列 → 若已 attach 则从 port 解绑并清其在 port 收件箱的残留 → 排空 staging
+ * 暂存 → 回收 queue 整块。约定 drop 在消费线程退出（join）之后调用：此时 consumer 已被
+ * port_release 置空，仅需清 staging 并释放本对象。 */
 static void que_drop(queue *_this) {
     que_state *q = (que_state *)_this;
     if (!q) return;
-    que_lock(q);
+    sc_mutex_lock(&g_mutex);
     q->closed = 1;
-    q_msg *m = q->head;                  /* 排空 ready：丢弃未处理消息（fire-and-forget） */
-    while (m) { q_msg *n = m->next; free(m); m = n; }
-    q->head = q->tail = NULL;
-    m = q->delaying;                     /* 排空 delaying：丢弃未到期延迟消息 */
-    while (m) { q_msg *n = m->next; free(m); m = n; }
-    q->delaying = NULL;
-    q->pending = 0;
-    sc_cond_all(&q->more);               /* 唤醒所有阻塞 pull，令其见 closed 退出 */
-    que_unlock(q);
-    sc_mutex_final(&q->mu);
-    sc_cond_final(&q->more);
+    /* 兜底：若仍 attach（异常路径，正常 drop 在 join 后 consumer 已空）则从 port 解绑并清残留 */
+    sc_port *cp = q->consumer;
+    if (cp) {
+        /* 从 attached 链摘除 */
+        que_state **pp = &cp->attached;
+        while (*pp) { if (*pp == q) { *pp = q->anext; break; } pp = &(*pp)->anext; }
+        q->anext = NULL;
+        /* 清 port 收件箱中归属本队列的消息（ready） */
+        pmsg **rp = &cp->box.head; pmsg *prev = NULL;
+        for (pmsg *t = cp->box.head; t; ) {
+            pmsg *nx = t->next;
+            if (t->receiver == q) { if (prev) prev->next = nx; else cp->box.head = nx; free(t); }
+            else { prev = t; }
+            t = nx;
+        }
+        cp->box.tail = prev;
+        (void)rp;
+        /* 清 port 收件箱 delaying 中归属本队列的消息 */
+        prev = NULL;
+        for (pmsg *t = cp->box.delaying; t; ) {
+            pmsg *nx = t->next;
+            if (t->receiver == q) { if (prev) prev->next = nx; else cp->box.delaying = nx; free(t); }
+            else { prev = t; }
+            t = nx;
+        }
+        q->consumer = NULL;
+    }
+    /* 排空 staging 暂存（未 attach 时投递的历史；正常已在 attach 时 flush 入 port） */
+    pmsg *m = q->staging.head;
+    while (m) { pmsg *n = m->next; free(m); m = n; }
+    m = q->staging.delaying;
+    while (m) { pmsg *n = m->next; free(m); m = n; }
+    q->staging.head = q->staging.tail = q->staging.delaying = NULL;
+    q->count = 0;
+    sc_mutex_unlock(&g_mutex);
     free(q);                             /* 整块回收（queue 对象与盒子同生命周期） */
 }
 
-/* default_queue：「默认 FIFO」消息队列构造（填充协议 vtable，返回 queue&）。
+/* default_queue：「PORT 单收件箱」消息队列构造（填充协议 vtable，返回 queue&）。
  *   - host：宿主三态——NULL 未绑/延迟、(pool*)-1 当前/主线程（手动 pull）、&pool
  *     线程池（post 自动转交池消费，用 pool->join() 作屏障，无需 pull）
  *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收（池宿主须另行 drop 池）*/
@@ -773,8 +911,6 @@ struct queue *default_queue(struct pool *host) {
     q->base.async = que_async;
     q->base.pull = que_pull;
     q->base.drop = que_drop;
-    sc_mutex_init(&q->mu);
-    sc_cond_init(&q->more);
     q->host = host;          /* &pool：post 自动转交池消费；NULL/(pool*)-1：手动 pull */
     return &q->base;
 }
