@@ -59,7 +59,7 @@ bool isAssignOp(const std::string& op) {
 // 用于成员名位置容忍关键字拼写：成员/方法名永不可能是语句关键字，
 // 故 .run() / .done() 等与语句关键字同名的方法可被正常解析。
 bool isKeywordTok(Tok k) {
-    return k >= Tok::KwDef && k <= Tok::KwDim;
+    return k >= Tok::KwDef && k <= Tok::KwMod;
 }
 
 // Parser 内部类 —— 封装所有语法分析状态
@@ -803,6 +803,88 @@ struct Parser {
         { bool save = inMacroBody; inMacroBody = true;
           parseStmts(d->body);
           inMacroBody = save; }
+        accept(Tok::Dedent);
+        return d;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    // mod 模块单例解析
+    //
+    // mod N:                       声明即创建 —— 等价 def 单例类型 N_m + var 实例 N。
+    //     a: i4                    > 模块状态字段（与结构体字段同义）
+    //     fnc init:                > 构造函数（声明即注入到模块生命周期，自动运行）
+    //         ...
+    //     fnc drop:                > 析构函数（同上，逆序自动运行）
+    //         ...
+    //     @fnc proc                > 导出成员函数（外部链接 + 写入 .h，支持跨模块调用）
+    //         ...
+    //     fnc helper               > 未导出成员函数（static，模块私有）
+    //         ...
+    //
+    // 实现：本函数产出单例类型 StructD（name=N_m, modName=N），成员函数收集进
+    //   pendingMethods（由 parseProgram 提升为顶层 FuncD）；实例 var N: N_m 由
+    //   parseProgram 在结构之后补出。类型与实例的导出由 parseProgram 据 @ 前缀设定
+    //   （@mod → 导出；mod → 私有 static），成员函数按各自 @fnc 控制；构造/析构
+    //   （init/drop）禁止导出。
+    DeclPtr parseMod() {
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        d->kind = Decl::StructD;
+        advance();                                      // 跳过 mod 关键字
+        if (!at(Tok::Ident)) err("期望模块名");
+        std::string inst = advance().text;              // 模块实例名 N
+        d->name = inst + "_m";                          // 单例类型名 N_m
+        d->modName = inst;
+        expect(Tok::Colon, "':'");
+        expect(Tok::Newline, "换行");
+        expect(Tok::Indent, "缩进的模块体");
+
+        for (;;) {
+            skipNewlines();                             // 跳过空行
+            if (at(Tok::Dedent) || at(Tok::End)) break;
+
+            bool memberExport = acceptOp("@");          // 成员函数导出前缀
+
+            // fnc 成员函数（必带函数体）：fnc name[: ret, params] \n\tbody
+            if (at(Tok::KwFnc)) {
+                auto m = std::make_unique<Decl>();
+                m->line = cur().line;
+                m->kind = Decl::FuncD;
+                advance();                              // 跳过 fnc
+                if (!at(Tok::Ident) && !isKeywordTok(cur().kind)) err("期望成员函数名");
+                m->methodName = advance().text;
+                if (accept(Tok::DColon))
+                    err(m->line, "mod 成员函数不支持 :: C 实现接口形态");
+                if (accept(Tok::Colon)) {               // : ret, params...（可省略）
+                    if (!at(Tok::Newline))
+                        parseFncVars(m->structCommon);
+                } else if (!at(Tok::Newline))
+                    err("期望 ':' 或换行");
+                expect(Tok::Newline, "换行");
+                if (!at(Tok::Indent))
+                    err(m->line, "模块成员函数必须带函数体（缩进块）");
+                advance();                              // 跳过 Indent
+                parseStmts(m->body);
+                accept(Tok::Dedent);
+                // 构造/析构禁止导出（语义约束：模块生命周期由编译器自动驱动，不对外暴露）
+                if (memberExport && (m->methodName == "init" || m->methodName == "drop"))
+                    err(m->line, "模块的构造（init）/析构（drop）函数不可导出（@）");
+                m->exported = memberExport;
+                m->methodOwner = d->name;
+                m->name = mangleMethodName(d->name, m->methodName);
+                pendingMethods.push_back(std::move(m));
+            }
+            // 否则按模块状态字段处理
+            else {
+                if (memberExport) err("@ 导出前缀只能作用于模块成员函数（fnc）");
+                Field f = parseFieldItem();
+                if (acceptOp("=")) f.init = parseExpr();
+                if (f.type.fnKind == TypeRef::FncKind::PlainPtr)
+                    err(f.line, "模块成员函数请用 fnc 关键字声明（mod 内不支持 name: fnc 形态）");
+                expect(Tok::Newline, "换行");
+                d->structCommon.fields.push_back(std::move(f));
+            }
+        }
         accept(Tok::Dedent);
         return d;
     }
@@ -2169,6 +2251,41 @@ struct Parser {
                     pendingMethods.clear();
                     break;
 
+                // 模块单例（mod）：声明即创建 —— 单例类型 N_m + 实例 var N: N_m。
+                //   导出由 @ 前缀统一控制：`@mod` → 类型与实例 extern（跨模块可见）；
+                //   `mod`（无 @）→ 私有模块，类型与实例 static（仅本单元）。成员函数按各自
+                //   @fnc 导出；私有模块禁止导出成员函数（@fnc）——单例不可见，导出无意义且
+                //   会生成引用 static 类型的悬空头原型。构造/析构自动接入模块生命周期。
+                case Tok::KwMod: {
+                    auto modStruct = parseMod();
+                    std::string inst = modStruct->modName;     // 实例名 N
+                    std::string tname = modStruct->name;       // 类型名 N_m
+                    modStruct->exported = exported;            // @mod → 导出；mod → 私有
+                    // 私有模块不得导出成员函数（一致性守卫）
+                    if (!exported)
+                        for (auto& m : pendingMethods)
+                            if (m->exported)
+                                err(m->line, "私有模块（未 @ 导出）的成员函数不可导出（@fnc）；"
+                                             "请用 @mod 导出整个模块");
+                    prog.decls.push_back(std::move(modStruct));
+                    for (auto& m : pendingMethods)             // 成员函数保留各自 @fnc 导出标记
+                        prog.decls.push_back(std::move(m));
+                    pendingMethods.clear();
+                    // 配套实例：var N: N_m（导出随模块 + modInstance 标记，触发自动构造/析构）
+                    auto instVar = std::make_unique<Decl>();
+                    instVar->line = prog.decls.back()->line;
+                    instVar->kind = Decl::VarD;
+                    instVar->exported = exported;
+                    instVar->modInstance = true;
+                    Field f;
+                    f.name = inst;
+                    f.type.name = tname;
+                    f.line = instVar->line;
+                    instVar->structCommon.fields.push_back(std::move(f));
+                    prog.decls.push_back(std::move(instVar));
+                    break;
+                }
+
                 // 函数定义
                 case Tok::KwFnc:
                     prog.decls.push_back(parseFnc());   
@@ -2214,7 +2331,7 @@ struct Parser {
 
                 default:
                     // 顶层只允许程序结构对象的几种关键字
-                    err("顶层只允许 inc/def/fnc/rpc/var/let/tls/mix，得到 '" + cur().text + "'");
+                    err("顶层只允许 inc/def/fnc/rpc/var/let/tls/mod/mix，得到 '" + cur().text + "'");
             }
         }
 

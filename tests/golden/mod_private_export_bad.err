@@ -1,0 +1,2 @@
+mod_private_export_bad.sc:9: [1;31m错误[0m: 私有模块（未 @ 导出）的成员函数不可导出（@fnc）；请用 @mod 导出整个模块
+  |      @fnc value: i4

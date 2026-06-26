@@ -888,13 +888,30 @@ static bool programHasExports(const Program& prog) {
 // 根模块导出注入（语义侧）：把根（入口/集成单元）的 @导出 声明以 external 并入消费单元，
 //   仅供跨模块语法/语义可见（类型/方法/全局），不发定义、不参与链接——C 层定义与 extern
 //   原型由注入的 scm_<root>.h 提供。与 resolveUnitDeps 的向下合并同构，源头固定为根模块。
-//   仅并入类型/函数/变量/别名声明，跳过 inc/add（避免污染消费单元的 include 与构建指令）。
+//   仅并入类型/函数/变量/别名声明，跳过 add（避免污染构建指令）。
+//   另：兄弟模块互相可见——根以 @inc（@导出 inc）引入的各 .sc 模块互为「兄弟」，其 @导出
+//   彼此可见（把该 @inc 边及兄弟 @导出 并入消费单元）。普通 inc 为根私有依赖，不参与互见。
 static void expandGenericMixes(Program& prog);  // 前置声明（定义见下）
-static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPath) {
+static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPath,
+                             const std::filesystem::path& unitPath = {},
+                             bool skipRootSelf = false) {
     const std::string origin = rootPath.string();
-    for (auto& d : prog.decls) if (d->origin == origin) return;  // 已并入：幂等
+    if (!skipRootSelf)
+        for (auto& d : prog.decls) if (d->origin == origin) return;  // 已并入根自身导出：幂等
     const std::string text = readWholeFile(rootPath);
     if (text.empty()) return;
+    auto canon = [](const std::string& s) {
+        return s.empty() ? std::string()
+                         : std::filesystem::weakly_canonical(s).string();
+    };
+    const std::string unitKey = unitPath.empty() ? std::string()
+                                                 : canon(unitPath.string());
+    // 消费单元已直接 inc 的 .sc 模块来源：其导出已并入本单元，不再经根重复注入兄弟边。
+    std::unordered_set<std::string> preexistingDep;
+    for (auto& d : prog.decls)
+        if (d->kind == Decl::IncD && d->external && endsWith(d->origin, ".sc"))
+            preexistingDep.insert(canon(d->origin));
+    std::unordered_set<std::string> injectedInc;  // 本次注入的兄弟 inc，去重
     try {
         Program mp = parse(lex(text));
         // 解析根的依赖（带入其 inc 进来的宏定义）并展开根的顶层 mix，使「由宏展开产生的
@@ -902,9 +919,50 @@ static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPat
         //   可见——与根自身编译时 scm_<root>.h 收录这些符号保持一致。
         resolveUnitDeps(mp, rootPath);
         expandGenericMixes(mp);
+        // 兄弟互相可见仅限「@导出 inc」（@inc）：收集根里以 @inc 引入的兄弟 .sc 来源集合。
+        //   普通 inc（无 @）是根的私有依赖，不参与兄弟互见——避免「全自动」过度暴露。
+        std::unordered_set<std::string> exportedSiblingOrigins;
+        for (auto& md : mp.decls)
+            if (md->kind == Decl::IncD && md->exported && md->external
+                && endsWith(md->name, ".sc"))
+                exportedSiblingOrigins.insert(canon(md->origin));
         for (auto& md : mp.decls) {
-            if (!md->exported || md->external) continue;   // 仅并根自身导出（跳过依赖并入的外部导出）
-            if (md->kind == Decl::IncD || md->kind == Decl::AddD) continue;
+            // 兄弟模块互相可见（仅 @inc）：根（集成单元）以 @inc 引入的各 .sc 模块互为
+            //   「兄弟」，其 @导出 默认彼此可见。把根的每条 @导出兄弟 inc 边及其外部导出并入
+            //   当前消费单元（排除消费单元自身、以及消费单元已直接 inc 的来源），代码层经注入的
+            //   #include "scm_<兄弟>.h" 提供 C 声明，语义层经 external 声明提供可见性。
+            if (md->kind == Decl::IncD) {
+                if (!md->exported || !md->external || !endsWith(md->name, ".sc"))
+                    continue;                                        // 仅 @inc 兄弟边
+                const std::string depKey = canon(md->origin);
+                if (depKey.empty() || depKey == unitKey) continue;   // 跳过自身
+                if (preexistingDep.count(depKey)) continue;          // 已直接 inc
+                if (!injectedInc.insert(depKey).second) continue;    // 去重
+                auto inc = std::make_unique<Decl>();
+                inc->kind = Decl::IncD;
+                inc->name = md->name;
+                inc->origin = md->origin;
+                inc->external = true;
+                inc->exported = true;
+                inc->line = md->line;
+                prog.decls.push_back(std::move(inc));
+                continue;
+            }
+            if (md->kind == Decl::AddD) continue;
+            if (!md->exported) continue;
+            if (md->external) {
+                // 兄弟模块导出：仅当来自根的 @inc 兄弟边时跨兄弟可见（普通 inc 不暴露）。
+                const std::string depKey = canon(md->origin);
+                if (depKey.empty() || depKey == unitKey) continue;   // 跳过自身
+                if (preexistingDep.count(depKey)) continue;          // 消费单元已有
+                if (!exportedSiblingOrigins.count(depKey)) continue; // 非 @inc 兄弟：不暴露
+                prog.decls.push_back(std::move(md));
+                continue;
+            }
+            // 根自身 @导出：以 external 并入消费单元。仅当本单元接受根自身前奏时注入
+            //   （根导出 inc 闭包单元 skipRootSelf=true：其 C 层不注入 scm_<root>.h 以防循环，
+            //   故语义层也不并入根自身导出——否则会引用到缺失 C 声明的根导出符号）。
+            if (skipRootSelf) continue;
             md->external = true;
             md->origin = origin;
             prog.decls.push_back(std::move(md));
@@ -1219,10 +1277,14 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
         u.prog = parse(lex(src));                   // 解析源代码为 AST
         u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
         mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
-        // 根模块导出注入（语义可见性）：非根、非内置、且不在根导出 inc 闭包内的单元并入根 @导出
-        if (!rootPrelude.empty() && canon != rootPrelude && !isBuiltinUnit(canon)
-            && !(preludeSkip && preludeSkip->count(key)))
-            mergeRootPrelude(u.prog, rootPrelude);
+        // 根模块导出注入（语义可见性）：非根、非内置单元并入根前奏。
+        //   · 非闭包单元：并入根自身 @导出 + @inc 兄弟可见性。
+        //   · 根导出 inc 闭包单元（skipRootSelf）：仅并入 @inc 兄弟可见性（不并根自身导出，
+        //     与 C 层不注入 scm_<root>.h 一致，防循环包含）。
+        if (!rootPrelude.empty() && canon != rootPrelude && !isBuiltinUnit(canon)) {
+            const bool inClosure = preludeSkip && preludeSkip->count(key);
+            mergeRootPrelude(u.prog, rootPrelude, canon, inClosure);
+        }
         expandGenericMixes(u.prog);                 // 泛型宏单态化：克隆宏体+替换类型参数→具体声明
         ensureBuiltinHeaderSymbols(canon.parent_path());  // 注册 platform.h 符号（一次性）
         semanticCheck(u.prog);                      // 再检查：导入类型/方法可见 + 本模块函数体语义复检
@@ -1874,8 +1936,9 @@ int main(int argc, char** argv) {
             const auto rootModule = findRootModule(unitDirOf(unitPath));
             if (!rootModule.empty() && rootModule != uCanon) {
                 std::unordered_set<std::string> skip;
-                collectExportedIncClosure(rootModule, skip);        // 根导出 inc 闭包不接受注入
-                if (!skip.count(uCanon.string())) mergeRootPrelude(prog, rootModule);
+                collectExportedIncClosure(rootModule, skip);        // 根导出 inc 闭包不接受根自身前奏
+                const bool inClosure = skip.count(uCanon.string()) != 0;
+                mergeRootPrelude(prog, rootModule, uCanon, inClosure);  // 闭包单元仍获 @inc 兄弟可见性
             }
         }
 

@@ -11,10 +11,6 @@
 #include "mem.h"
 #include "platform.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-
 /* shm（跨进程共享内存）所需平台头 */
 #if !P_WIN
 #   include <sys/mman.h>     /* mmap/munmap/shm_open/shm_unlink/MAP_* */

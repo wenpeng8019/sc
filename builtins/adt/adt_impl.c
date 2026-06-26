@@ -7,12 +7,6 @@
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include "mem/mem.h"    /* list 段式存储用 chunk/chunk0/refit/recycle（不受全局 -DSC_POOL 影响） */
 
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdarg.h>
-#include <stdio.h>
-
 /* ---------------- string ---------------- */
 
 /* 确保容量至少 need+1（含 NUL），按 2 倍扩容 */

@@ -3,8 +3,6 @@
  */
 #include "mt.h"
 #include "platform.h"
-#include <stdlib.h>
-#include <string.h>
 
 /* 线程/互斥/条件变量的跨平台原语均由 platform.h 提供（POSIX 下已含 pthread.h） */
 

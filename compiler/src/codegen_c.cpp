@@ -6282,6 +6282,11 @@ struct CGen {
                 // 外部 @def 结构体由模块头提供；但其分身句柄 T__project 仍需本工程生成。
                 if (d->kind == Decl::StructD && !d->projectSelf.empty())
                     emitProjectTypedef(*d);
+                // 外部导出的全局变量（如 mod 单例实例）：虽不在本单元发出定义（由模块头
+                //   extern 提供），但其类型须登记进 globalsT，跨模块方法调用糖才能解析接收者
+                //   类型（instance.method() → Type_method(&instance)）。
+                if (d->kind == Decl::VarD || d->kind == Decl::LetD)
+                    for (auto& f : d->structCommon.fields) regVar(f);
                 continue;
             }
             // 头支撑单元：自身 @导出类型由手写头提供完整定义，跳过内联（避免与拼接的

@@ -1,0 +1,2 @@
+mod_export_init_bad.sc:5: [1;31m错误[0m: 模块的构造（init）/析构（drop）函数不可导出（@）
+  |      @fnc init:

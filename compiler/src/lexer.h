@@ -64,6 +64,7 @@ enum class Tok {
     KwOffsetof, // offsetof
     KwCls,      // cls  — 定义类（复用 def 结构体机制 + 注入分派器 _class）
     KwDim,      // dim  — 类维度（折叠进唯一分派器的 switch 分支，返回恒 tril）
+    KwMod,      // mod  — 定义模块单例对象（def 类型 T_m + var 实例 T，自动构造/析构）
 
     // ---- 特殊 ----
     Ellipsis,   // ...  可变参数占位

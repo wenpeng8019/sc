@@ -452,6 +452,12 @@ struct Decl {
     bool isClass = false;           // cls 类定义（StructD）：首部注入 synthetic _class 分派器指针，
                                     // 各 dim 折叠进唯一分派器 T_hyper_impl 的 switch 分支
 
+    std::string modName;            // mod 模块单例（StructD）：本结构为 `mod N` 生成的单例类型 N_m，
+                                    // modName=实例名 N（codegen_sc 据此回写 `mod N:` 块，
+                                    // 并抑制配套 VarD 实例；codegen_c 按普通 struct+var 处理）。
+    bool modInstance = false;       // mod 配套实例（VarD）：`mod N` 自动生成的 `var N: N_m`，
+                                    // codegen_sc 跳过（已并入 mod 块回写），codegen_c 正常发出。
+
     bool heapOnly = false;          // 堆专属类型 def/cls NAME&: {}（名后紧跟 &）：
                                     // 应用层不存在 NAME 值类型，仅 NAME&（普通指针）/NAME@（自动指针）。
                                     // 禁止一切值形态（局部/全局 var、值成员、值参、值返回、值数组）。

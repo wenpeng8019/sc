@@ -237,6 +237,29 @@ struct SGen {
                 break;
             case Decl::StructD:
             case Decl::UnionD: {
+                // mod 模块单例：回写 `mod N:` 缩进块（字段 + 成员函数，含各自 @ 导出），
+                //   配套 VarD 实例由 VarD 分支据 modInstance 跳过。
+                if (d.kind == Decl::StructD && !d.modName.empty()) {
+                    ind(); out << (d.exported ? "@mod " : "mod ") << d.modName << ":\n";
+                    depth++;
+                    for (auto& f : d.structCommon.fields) {
+                        if (f.synthetic) continue;
+                        ind(); out << fieldToStr(f, true) << "\n";
+                    }
+                    auto mi = methodImpls.find(d.name);
+                    if (mi != methodImpls.end()) {
+                        for (const Decl* m : mi->second) {
+                            if (m->kind != Decl::FuncD) continue;
+                            ind(); out << (m->exported ? "@fnc " : "fnc ")
+                                       << m->methodName << fncItems(*m) << "\n";
+                            depth++;
+                            emitStmts(m->body);
+                            depth--;
+                        }
+                    }
+                    depth--;
+                    break;
+                }
                 const char* open = d.kind == Decl::StructD ? "{" : "(";
                 const char* close = d.kind == Decl::StructD ? "}" : ")";
                 std::string mark = d.linked ? "~ "
@@ -303,7 +326,9 @@ struct SGen {
                 emitStmts(d.body);
                 depth--;
                 break;
-            case Decl::VarD: emitVarLine(d.exported ? "@var" : "var", d.structCommon.fields); break;
+            case Decl::VarD:
+                if (d.modInstance) break;   // mod 配套实例：已并入 `mod N:` 块回写，跳过
+                emitVarLine(d.exported ? "@var" : "var", d.structCommon.fields); break;
             case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.structCommon.fields); break;
             case Decl::TlsD: emitVarLine("tls", d.structCommon.fields); break;
             case Decl::TestD:

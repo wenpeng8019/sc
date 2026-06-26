@@ -23,6 +23,7 @@ const KEYWORDS = [
     ['var', '定义变量'],
     ['let', '定义常量'],
     ['tls', '定义线程局部变量（static 存储期，每线程独立实例）'],
+    ['mod', '定义模块单例（声明即创建：def 类型 N_m + var 实例 N，自动构造/析构；@mod 导出，mod 私有）'],
     ['inc', '引入头文件（对齐 C 的 #include）'],
     ['return', '返回'],
     ['if', '条件分支'],
@@ -256,7 +257,7 @@ function fallbackItems(doc) {
     const items = [];
     const seen = new Set();
     for (let i = 0; i < doc.lineCount; i++) {
-        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|rpc|var|let|tls)\s+([A-Za-z_]\w*)/);
+        const m = doc.lineAt(i).text.match(/^\s*@?(def|fnc|rpc|var|let|tls|mod)\s+([A-Za-z_]\w*)/);
         if (m && !seen.has(m[2])) {
             seen.add(m[2]);
             const kind = m[1] === 'def' ? K.Class : (m[1] === 'fnc' || m[1] === 'rpc') ? K.Function
@@ -454,7 +455,7 @@ const fileScanCache = new Map();   // fsPath -> { mtime, text, lines, decls }
 function parseTopDecls(lines) {
     const heads = [];
     for (let i = 0; i < lines.length; i++) {
-        const m = lines[i].match(/^@?(def|fnc|rpc|var|let|tls|inc|add)\b\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)?/);
+        const m = lines[i].match(/^@?(def|fnc|rpc|var|let|tls|mod|inc|add)\b\s*([A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)?/);
         if (m) heads.push({ i, kw: m[1], name: m[2] || '' });
     }
     const decls = [];
@@ -624,7 +625,7 @@ function registerSemanticProviders(context) {
                 if (!rec) continue;
                 for (const d of rec.decls) {
                     if (!d.name) continue;
-                    if (!['def', 'fnc', 'rpc', 'var', 'let', 'tls'].includes(d.kind)) continue;
+                    if (!['def', 'fnc', 'rpc', 'var', 'let', 'tls', 'mod'].includes(d.kind)) continue;
                     if (ql && !d.name.toLowerCase().includes(ql)) continue;
                     const p = new vscode.Position(d.start, Math.max(0, rec.lines[d.start].indexOf(d.name)));
                     out.push(new vscode.SymbolInformation(

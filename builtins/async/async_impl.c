@@ -12,7 +12,7 @@
  * 用法：inc async.sc —— 引入 delay 等叶子原语声明并链接本实现。
  */
 #include "async.h"
-#include "../op.h"
+#include "op.h"
 
 #ifdef SCC_WITH_UV
 #include <uv.h>

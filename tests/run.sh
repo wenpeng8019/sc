@@ -75,6 +75,7 @@ POSITIVE=(
     examples/feature44.sc
     examples/feature45.sc
     examples/feature30/feature30.sc
+    examples/feature46/feature46.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     examples/feature4_lib.sc
@@ -107,6 +108,8 @@ POSITIVE=(
     tests/cases/macro.sc
     tests/cases/macro_fnc.sc
     tests/cases/args_native/args_native.sc
+    tests/cases/mod_basic.sc
+    tests/cases/mod_cross/mod_cross.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物
@@ -145,6 +148,8 @@ NEGATIVE=(
     tests/cases/int_range_bad.sc
     tests/cases/case_exhaustive_bad.sc
     tests/cases/bare_rpc_bad.sc
+    tests/cases/mod_export_init_bad.sc
+    tests/cases/mod_private_export_bad.sc
 )
 
 # 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。

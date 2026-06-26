@@ -20,17 +20,17 @@ typedef struct com__project {
 void sc_mod_feature30_mod_init(void); void sc_mod_feature30_mod_drop(void);
 
 void app_report(metric m) {
-    /* line 32 */
+    /* line 38 */
     printf("[report] %s = %d\n", m.tag, m.value);
 }
 
 int32_t main(void) {
     sc_mod_feature30_mod_init();
-    /* line 36 */
+    /* line 42 */
     sensor_sample("temp", 21);
-    /* line 37 */
+    /* line 43 */
     sensor_sample("humidity", 55);
-    /* line 38 */
+    /* line 44 */
     {
         int32_t _ret = 0;
         sc_mod_feature30_mod_drop();

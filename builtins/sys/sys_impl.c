@@ -10,11 +10,6 @@
 #include "sys.h"
 #include "platform.h"
 
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <errno.h>
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /**
