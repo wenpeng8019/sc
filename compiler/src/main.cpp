@@ -987,7 +987,7 @@ static std::string genericArgText(const Expr& a) {
 
 static void expandGenericMixes(Program& prog) {
     // 收集可展开的函数宏（非 C 桥接 :: 、非对象 =value）按名索引；含外部依赖宏（mix 可能
-    // 引用 inc 进来的依赖宏，如下游 inc env.sc 后 mix ARGS_B）。
+    // 引用 inc 进来的依赖宏，如下游 inc sys.sc 后 mix ARGS_B）。
     std::unordered_map<std::string, const Decl*> macros;
     for (auto& d : prog.decls)
         if (d->kind == Decl::MacroD && !d->cImpl && !d->macroObject)

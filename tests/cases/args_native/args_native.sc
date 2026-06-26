@@ -1,4 +1,4 @@
-# ARGS 原生机制（inc env.sc + mix ARGS_*）+ 根模块导出注入（@@）专项回归
+# ARGS 原生机制（inc sys.sc + mix ARGS_*）+ 根模块导出注入（@@）专项回归
 # 覆盖点：
 # 1) 参数定义宏在 sc 中原生定义并展开为真实全局声明（参与 AST / 语义 / 生命期）
 # 2) 顶层 mix ARGS_* 展开出的 ARGS_DEF_xxx 由「声明即构造」自动登记到 arg_defs
@@ -8,7 +8,7 @@
 
 @@                                  # 根模块标记：开启「导出注入」（root-prelude）
 
-inc env.sc
+inc sys.sc
 inc args_native_mod.sc              # 引入消费子模块（其内部直接引用根的 ARGS_verbose）
 
 mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")

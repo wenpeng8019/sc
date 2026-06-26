@@ -2,7 +2,7 @@
 
 @@
 
-inc env.sc
+inc sys.sc
 
 inc args_native_mod.sc
 

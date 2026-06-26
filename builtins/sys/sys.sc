@@ -1,15 +1,15 @@
-# env —— sc 运行环境 / 系统路径内置模块
+# sys —— sc 运行环境 / 系统路径内置模块
 #
-# 本文件是 env 接口的唯一事实源：
+# 本文件是 sys 接口的唯一事实源：
 #   @fnc name:: 声明 C 侧实现的自由函数（无函数体）：转 C 生成 extern 原型，
-#   实现在 env_impl.c（链接期注入）。
-# C ABI 契约见同目录 env.h，默认实现见 env_impl.c；跨平台经由 builtins/platform.h。
-# 用法：inc env.sc
+#   实现在 sys_impl.c（链接期注入）。
+# C ABI 契约见同目录 sys.h，默认实现见 sys_impl.c；跨平台经由 builtins/platform.h。
+# 用法：inc sys.sc
 
 # ---------------- 命令行参数解析（ARGS_*，C 实现接口）----------------
 #
 # ARGS 机制已原生定义在本文件：参数类型、参数定义结构、以及 ARGS_* 宏族。
-# 典型用法：下游模块 inc env.sc 后，在顶层写
+# 典型用法：下游模块 inc sys.sc 后，在顶层写
 #   mix ARGS_B(abc, ...)
 # 定义参数（宏内部定义全局 ARGS_abc / ARGS_DEF_abc）；编译器会对
 # 顶层 mix ARGS_* 做自动登记，ARGS_DEF_abc 由「声明即构造」自注册进
@@ -18,11 +18,11 @@
 #   说明：sc 路径下 arg_defs 已由构造自注册（非空），ARGS_parse 直接遍历它、
 #   完全不读变参，故连结尾的 nil 也可省略。仅当一个参数都没定义（arg_defs 为空、
 #   走纯 C 变参回退）时才需显式传 nil 作终止符；定义了任意 ARGS_* 即无此顾虑。
-# 详见本文件与 env.h 的示例说明。
+# 详见本文件与 sys.h 的示例说明。
 #
 # 示例（sc）：
 #
-#   inc env.sc
+#   inc sys.sc
 #
 #   mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")
 #   mix ARGS_S(true,  input,   'i', "input",   "Input file path")
@@ -66,13 +66,13 @@
     slot: &
     next: arg_def_st&
 
-    fnc init::    # 构造：把自身挂入全局注册链表 arg_defs（C 实现于 env_impl.c）
+    fnc init::    # 构造：把自身挂入全局注册链表 arg_defs（C 实现于 sys_impl.c）
 }
 
 # 已声明参数的全局注册链表头：每个 arg_def_st 构造（init）时把自己挂入此链。
 #   sc 侧顶层 mix ARGS_* 展开为真实全局 ARGS_DEF_xxx 后，编译器「声明即构造」自动调用
 #   arg_def_st.init 完成登记；ARGS_parse 优先采用本链（非 nil 时忽略 ... 变参）。
-#   C 侧定义于 env_impl.c。
+#   C 侧定义于 sys_impl.c。
 let arg_defs:: arg_def_st&
 
 # 参数定义宏：各自声明「具体类型」的全局 ARGS_<name>（值即 app 属性）与描述符 ARGS_DEF_<name>，
@@ -190,26 +190,26 @@ def ARGS_PRE: cb_pre, name, s_cmd, l_cmd, desc
 # ---------------- 系统路径查询（C 实现接口）----------------
 # 返回码约定（ret，即 i4 语义别名）：
 #   0  成功
-#  -1  系统调用失败（ENV_ERR）
-#  -2  buffer 容量不足（ENV_ERR_CAPACITY）
+#  -1  系统调用失败（SYS_ERR）
+#  -2  buffer 容量不足（SYS_ERR_CAPACITY）
 #
 # 所有函数把结果路径写入调用方提供的 buffer（NUL 结尾），size 为其字节容量。
 # 建议 buffer 至少 PATH_MAX（4096）字节；download_dir/exe_file 在部分平台
 # 要求 buffer >= PATH_MAX，过小将返回 -2。
 
 # 当前工作目录（cwd）。
-@fnc env_work_dir:: ret, buf: char&, size: u4
+@fnc sys_work_dir:: ret, buf: char&, size: u4
 
 # 当前用户 home 目录。POSIX 优先 $HOME，回退 getpwuid_r；Windows 取用户配置目录。
-@fnc env_home_dir:: ret, buf: char&, size: u4
+@fnc sys_home_dir:: ret, buf: char&, size: u4
 
 # 用户下载目录。Windows: Downloads 已知文件夹；macOS: sysdir；
 # Linux: $XDG_DOWNLOAD_DIR，回退 ~/Downloads。
-@fnc env_download_dir:: ret, buf: char&, size: u4
+@fnc sys_download_dir:: ret, buf: char&, size: u4
 
 # 当前可执行文件的绝对路径（已规范化）。
-@fnc env_exe_file:: ret, buf: char&, size: u4
+@fnc sys_exe_file:: ret, buf: char&, size: u4
 
 # 在系统临时目录创建一个唯一的空临时文件，返回其路径。
 # 注意：会真实创建文件（避免命名竞争），调用方用完应自行删除。
-@fnc env_tmp_file:: ret, buf: char&, size: u4
+@fnc sys_tmp_file:: ret, buf: char&, size: u4

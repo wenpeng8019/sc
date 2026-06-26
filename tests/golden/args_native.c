@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "builtins/env/env.h"
+#include "builtins/sys/sys.h"
 #include "scm__Users_wenpeng_dev_c_sc_tests_cases_args_native_args_native_mod_sc.h"
 
 typedef struct com__project {
@@ -18,11 +18,11 @@ static arg_def_st ARGS_DEF_input = {"input", "Input source", ARG_STR, 'i', "inpu
 const char **ARGS_files = NULL;
 static arg_def_st ARGS_DEF_files = {"files", "Input file list", ARG_LS, 'f', "files", false, &(ARGS_files), NULL};
 
-void sc_mod_env_init(void); void sc_mod_env_drop(void);
+void sc_mod_sys_init(void); void sc_mod_sys_drop(void);
 void sc_mod_args_native_mod_init(void); void sc_mod_args_native_mod_drop(void);
 
 int32_t main(int32_t argc, char **argv) {
-    sc_mod_env_init();
+    sc_mod_sys_init();
     sc_mod_args_native_mod_init();
     arg_def_st_init(&ARGS_DEF_verbose);
     arg_def_st_init(&ARGS_DEF_count);
@@ -40,7 +40,7 @@ int32_t main(int32_t argc, char **argv) {
     {
         int32_t _ret = 0;
         sc_mod_args_native_mod_drop();
-        sc_mod_env_drop();
+        sc_mod_sys_drop();
         return _ret;
     }
 }

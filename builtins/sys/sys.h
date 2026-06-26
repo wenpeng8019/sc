@@ -1,11 +1,11 @@
-/* env.h —— sc 运行环境 / 系统路径模块的 C ABI 契约（与 builtins/env/env.sc 同步维护）
+/* sys.h —— sc 运行环境 / 系统路径模块的 C ABI 契约（与 builtins/sys/sys.sc 同步维护）
  *
  * 所有函数把结果路径写入调用方提供的 buf（NUL 结尾），size 为字节容量。
- * 返回码：0 成功 / ENV_ERR 系统失败 / ENV_ERR_CAPACITY buf 太小。
- * 跨平台实现见 env_impl.c，平台适配统一经由 builtins/platform.h。
+ * 返回码：0 成功 / SYS_ERR 系统失败 / SYS_ERR_CAPACITY buf 太小。
+ * 跨平台实现见 sys_impl.c，平台适配统一经由 builtins/platform.h。
  */
-#ifndef SC_ENV_H
-#define SC_ENV_H
+#ifndef SC_SYS_H
+#define SC_SYS_H
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -21,7 +21,7 @@ extern "C" {
  *
  * sc（推荐）:
  *
- *   inc env.sc
+ *   inc sys.sc
  *   mix ARGS_B(false, verbose, 'v', "verbose", "Enable verbose output")
  *
  *   fnc main: i4, argc: i4, argv: char&&
@@ -90,7 +90,7 @@ typedef struct arg_def {
 
 /* 已声明参数的全局注册链表头：arg_def_st 构造（arg_def_st_init）时把自身挂入此链。
  * sc 侧顶层 mix ARGS_* 展开为真实全局后，编译器「声明即构造」自动调用 arg_def_st_init
- * 完成登记；ARGS_parse 优先采用本链（非 NULL 时忽略 ... 变参）。定义见 env_impl.c。 */
+ * 完成登记；ARGS_parse 优先采用本链（非 NULL 时忽略 ... 变参）。定义见 sys_impl.c。 */
 extern arg_def_st* arg_defs;
 
 /* arg_def_st 构造函数：把 _this 挂入全局注册链表 arg_defs（头插）。
@@ -214,24 +214,24 @@ int ARGS_ls_count(const char** ls);
 ///////////////////////////////////////////////////////////////////////////////
 
 /* 返回码（对应 sc 侧 ret：0 成功，非 0 失败） */
-#define ENV_OK            0
-#define ENV_ERR          (-1)   /* 系统调用失败 */
-#define ENV_ERR_CAPACITY (-2)   /* buf 容量不足 */
+#define SYS_OK            0
+#define SYS_ERR          (-1)   /* 系统调用失败 */
+#define SYS_ERR_CAPACITY (-2)   /* buf 容量不足 */
 
 /* 当前工作目录（cwd） */
-int32_t env_work_dir(char *buf, uint32_t size);
+int32_t sys_work_dir(char *buf, uint32_t size);
 
 /* 当前用户 home 目录 */
-int32_t env_home_dir(char *buf, uint32_t size);
+int32_t sys_home_dir(char *buf, uint32_t size);
 
 /* 用户下载目录 */
-int32_t env_download_dir(char *buf, uint32_t size);
+int32_t sys_download_dir(char *buf, uint32_t size);
 
 /* 当前可执行文件的规范化绝对路径 */
-int32_t env_exe_file(char *buf, uint32_t size);
+int32_t sys_exe_file(char *buf, uint32_t size);
 
 /* 在系统临时目录创建唯一空临时文件，返回其路径（调用方负责删除） */
-int32_t env_tmp_file(char *buf, uint32_t size);
+int32_t sys_tmp_file(char *buf, uint32_t size);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -239,4 +239,4 @@ int32_t env_tmp_file(char *buf, uint32_t size);
 }
 #endif
 
-#endif /* SC_ENV_H */
+#endif /* SC_SYS_H */
