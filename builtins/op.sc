@@ -409,13 +409,13 @@ def operand: {
 # ---------------- future：异步结果句柄（类型擦除） ----------------
 # 字段为 C ABI 布局占位（实际定义在 op.h；sc 侧仅按方法访问，不直接读字段）。
 @def future: {
-    _ready: i4          # 0=未就绪, 1=已就绪
-    _result: &          # 类型擦除结果
-    _frame: &           # 等待者状态机帧（await 点登记）
-    _resume: &          # 等待者恢复入口
-    _next: &            # 就绪队列链接（运行时内部）
-    _id: i4             # future<ID> 事件 id（>=0=可派发；-1=无标签）
-    _ctx: &             # future<ID>(ctx) 用户上下文：发起时挂、派发时 f->ctx() 取回
+    ready: i4           # 0=未就绪, 1=已就绪
+    result: &           # 类型擦除结果
+    frame: &            # 等待者状态机帧（await 点登记）
+    resume: &           # 等待者恢复入口
+    next: &             # 就绪队列链接（运行时内部）
+    id: i4              # future<ID> 事件 id（>=0=可派发；-1=无标签）
+    ctx: &              # future<ID>(ctx) 用户上下文：发起时挂、派发时 f->ctx() 取回
 
     fnc init::          # future()：伪类构造，登记到当前事件循环（未就绪）
     fnc ready:: bool    # f.ready()：是否已就绪
