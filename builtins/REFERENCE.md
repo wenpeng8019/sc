@@ -754,6 +754,29 @@ delay=0），带优先级/延迟的即发即忘用 `async<...>` 丢弃返回的 
 1=超时/-1=关闭）区分（须同时带 timeout）。`async` 暂不支持 timeout。循环死锁替代为后续
 架构升级阶段。详见 syntax.md §15.2 与 `examples/feature42.sc`。
 
+#### session——rpc 延迟应答会话（op 层接口协议）
+
+`sync work(args), q` 默认由 rpc 体 `return` 即时应答。若消费者无法当场算出结果（等 io、
+攒批、转交），可在被 sync 驱动的 rpc 体内裸 `async`（不接调用、直接换行）取出当前调用
+会话，求值为 `session&`，本次 sync 转为**延迟应答**（rpc 体 `return` 值被忽略）；之后任意
+线程、任意时刻 `done s, result` 兑现——写回最初调用方返回槽并唤醒，调用方一直阻塞到那刻。
+
+机制与 future（fnc 单线程异步 `async`→`future`→`done`）对称，仅换一层语境（mt 跨线程
+应答）。`session` 与 queue/promise 同属 op 层「接口协议」（vtable 全为每对象方法指针，
+默认导入；C 结构体 `{ h; respond }` 见 op.h），由实现模块 mt 填充 `respond` 指针——故
+`done` 经协议指针派发、语言内核**零 emit mt 符号**。会话身份（当前正执行的 rpc 调用）由
+op 内核按线程 TLS 维护（`op_session_begin/current/taken`，op_impl.c，与异步后端无关）。
+
+| 关键字 | 形态 | 说明 |
+|------|------|------|
+| `async`（裸） | rpc 体内、其后换行 | 取当前 sync 调用会话 → `session&`；本次 sync 转延迟应答。与 `async rpc(...)`（→`future&`）按是否接调用区分 |
+| `done s [, r]` | 语句 | 延迟应答：`r` 按其**静态类型原值**写回调用方返回槽（与即时应答原地写 `_` 同布局/宽度，非 future 的 `void*` 擦除）；省略 `r`=无结果。`done` 按操作数类型多态（`future&`→`future_done`；`session&`→会话应答） |
+
+会话句柄寄存调用方栈（随其阻塞存活）；调用方超时/drop 放弃后，将来的 `done` 安全丢弃
+（会话置 CLOSED）。循环死锁替代/自替代路径（本地直接执行）不支持延迟应答（防误领，置空
+会话）。详见 syntax.md §15.3 与 `examples/feature45.sc`。构造由 mt 在 `sync` 内部完成
+（会话嵌在调用方栈帧），无独立构造入口。
+
 #### promise——mt-future（async 投递的结果句柄）
 
 promise 与 queue/pool/task 同属 op 层「接口协议」（vtable 全为每对象方法指针），由

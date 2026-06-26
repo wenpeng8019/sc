@@ -2324,6 +2324,56 @@ rpc compute: i4, n: i4
 说明：用到 `async`/`await`/`done`/`future`/`async_init` 等却未 `inc async.sc`
 会在链接期报错（异步运行时是可选模块，按需引入）。
 
+#### rpc 延迟应答：裸 `async` → `session&`（与 future 对称）
+
+`sync work(args), q` 把 rpc 投递给队列消费者执行并**阻塞等回复**——默认由 rpc 体
+`return` 即时应答。但有时消费者无法当场算出结果（要等 io、攒批、转交他人……），
+此时希望「先返回、稍后再应答」，而调用方**继续阻塞**直到结果就绪。
+
+机制与 future（`async`→`future`→`done`，fnc 单线程异步）完全对称，只是换了一层：
+在被 `sync` 驱动的 rpc 体内，**裸 `async`**（其后不接调用、直接换行）取出当前调用
+会话，求值为内置类型 `session&`；本次 sync 由此转为**延迟应答**（rpc 体的 `return`
+值被忽略）。把会话存起来，待结果就绪后（任意线程、任意时刻）`done s, result` 兑现
+——把结果写回最初调用方的返回槽并唤醒其阻塞，与 `done future` 同形。
+
+```sc
+inc mt.sc
+
+var g_sess: session& = nil
+var g_arg:  i4 = 0
+
+rpc serve: i4, x: i4
+    var s: session& = async      # 裸 async：取当前会话 → 本次 sync 转延迟应答
+    g_sess = s                   # 存起来：转交 / 攒批 / 等条件成熟
+    g_arg  = x
+    return 0                     # 立即返回，但调用方仍阻塞，等将来 done
+
+rpc server: qq: queue&
+    qq->pull(-1)                 # 进入 serve()：会话被领走（调用方仍阻塞）
+    done g_sess, g_arg * 10      # 延迟应答：现在才写回调用方返回槽并唤醒（跨线程）
+
+fnc main: i4
+    var sq: queue& = default_queue(nil)
+    var st: thread& = nil
+    run server(sq), &st
+    var r: i4 = sync serve(7), sq   # 阻塞至延迟应答兑现：r=70（而非 rpc 体的 return 0）
+```
+
+- **`async`（裸，rpc 体内）**：取当前 sync 调用会话，求值为 `session&`。与
+  `async rpc(...)`（接调用 → `future&`）按其后是否接调用表达式区分。
+- **`done s [, result]`**：兑现延迟应答。`result` 按其**静态类型原值**写回调用方
+  返回槽（与即时应答原地写 `_` 同布局、同宽度），而非 future 的 `void*` 类型擦除；
+  省略 `result` 表示无结果。`done` 按操作数类型多态分派（`future&`→`future_done`；
+  `session&`→会话应答），二者写法一致。
+- **`session`（内置类型）**：op 层接口协议对象（仿 `queue`/`promise`），由消息队列
+  实现模块（mt，`inc mt.sc`）填充其应答指针——故 `done` 经协议指针派发，编译器
+  **零 emit mt 符号**。C ABI 见 builtins/op.h，运行时见 builtins/op_impl.c（会话
+  身份 TLS）与 mt 模块（应答写回 + 唤醒）。
+- 会话句柄寄存在调用方栈上（随其阻塞存活）；调用方一旦超时/被 drop 放弃（铁律：
+  已开始执行则只挂起不放弃，见 §15.2 与 mt），将来的 `done` 安全丢弃。
+- 与 future「永不 done 则 await 永挂」对称：领走会话即承诺将来 `done`，否则调用方
+  一直阻塞——这是程序责任（同 promise 永不兑现）。
+
 ### 15.4 stringify(...) 文本格式化语句
 
 `stringify(值)` 是 JSON 字符串格式化关键字（区别于类型 `string` 与堆构造

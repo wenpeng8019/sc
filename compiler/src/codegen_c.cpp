@@ -2340,6 +2340,13 @@ struct CGen {
             //     兑现，调用方 p->wait() 阻塞取结果。语句表达式求值（参数缓冲由 promise 堆拥有）：
             //     ({ struct W _ap = {0}; 填实参; q->async(q,(void(*)(void*))W_rpc,&_ap,sizeof(_ap)); })
             case Expr::Async: {
+                // 裸 async（无操作数）：取当前 sync 驱动 rpc 的调用会话，求值为 session&
+                //   （rpc 延迟应答；rpc 体 return 不再自动应答，须之后 done s, result 兑现）。
+                //   经 op 内核 op_session_current() 取（顺带标记「已领取」=转延迟），零 emit mt 符号。
+                if (!e.a) {
+                    out << "op_session_current()";
+                    break;
+                }
                 if (e.b) {                           // 带队列目标：非阻塞带回复，求值为 promise&
                     if (!e.a || e.a->kind != Expr::Call ||
                         !e.a->a || e.a->a->kind != Expr::Ident ||
@@ -4227,12 +4234,38 @@ struct CGen {
         indent(); out << "}\n";
     }
 
-    // done 语句 → future_done 调用（future_done 在 async_impl 中实现）
-    //   done f            → future_done(f, NULL);                  无结果
-    //   done f, result    → future_done(f, <result 擦除为 void*>);  有结果
-    // future 实参为 future&（指针）原样传入；结果自动类型擦除：指针类直转
-    // (void*)，标量经 (void*)(intptr_t) 往返（与 future_get 调用点 : T& 还原对应）。
+    // done 语句 → 按操作数类型多态分派（future 单线程异步 / session rpc 延迟应答）：
+    //   future&：done f[, result]      → future_done(f, <result 擦除 void*>);
+    //   session&：done s[, result]     → s->respond(s, &临时, sizeof)；按返回类型宽度写回返回槽。
+    // future 结果擦除为 void*（指针直转，标量经 intptr_t 往返，与 f.get(): T& 对应）；
+    // session 结果按其静态类型原值写入调用方返回槽（偏移 0，与即时应答原地写 _ 同布局），
+    // 经协议指针 s->respond 派发——零 emit mt 符号。result 省略=无结果。
     void emitDoneStmt(const Stmt& s) {
+        VType tv;
+        bool isSession = exprVType(*s.expr, tv) && tv.name == "session" && tv.arr == 0;
+        if (isSession) {
+            indent();
+            if (!s.forInit) {
+                // 无结果：respond(s, NULL, 0)（rpc 无返回值）
+                out << "("; emitExpr(*s.expr, true); out << ")->respond(";
+                emitExpr(*s.expr, true); out << ", NULL, 0);\n";
+                return;
+            }
+            // 有结果：按 result 静态类型存临时再 respond，宽度 = sizeof(返回类型)
+            VType rv;
+            bool ok = exprVType(*s.forInit, rv);
+            out << "({ ";
+            if (ok) {
+                out << cTypeOf(rv.name, rv.ptr) << " _dv = (";
+            } else {
+                out << "intptr_t _dv = (intptr_t)(";   // 兜底：无法静态推断时按 intptr_t 宽度
+            }
+            emitExpr(*s.forInit, true);
+            out << "); (";
+            emitExpr(*s.expr, true); out << ")->respond(";
+            emitExpr(*s.expr, true); out << ", &_dv, sizeof(_dv)); });\n";
+            return;
+        }
         indent();
         out << "future_done(";
         emitExpr(*s.expr, true);     // future&（指针）

@@ -92,7 +92,7 @@ std::string rec(const Expr& e, bool top) {
         case Expr::Await:
             return "await " + rec(*e.a, false);
         case Expr::Async:
-            return "async " + rec(*e.a, false);
+            return e.a ? "async " + rec(*e.a, false) : "async";   // 裸 async（取会话）：无操作数
         case Expr::Sync:
             return "sync " + rec(*e.a, false);
     }

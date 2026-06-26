@@ -623,6 +623,19 @@ future *future_new(void) {
     return f;
 }
 
+/* ---------------- session：rpc 延迟应答会话 TLS（见 op.h；后端中立） ----------------
+ * 当前正在执行的 rpc 调用会话 + 是否被「裸 async」领取，按线程隔离（消费者各自一份）。
+ * 纯本线程读写、无跨线程共享，故无需加锁；身份对象由实现模块（mt）在调用方栈构造，
+ * op 内核只透传指针。begin 在执行 rpc 体前调用、current 由体内裸 async 取用并置领取标记、
+ * taken 在体返回后查询以决定即时应答（未领取）抑或延迟应答（已领取，等将来 done 兑现）。
+ * 与异步后端（poll/libuv）无关，故置于后端条件编译之外。 */
+static TLS session *g_cur_session;
+static TLS int      g_cur_session_taken;
+
+void op_session_begin(session *s) { g_cur_session = s; g_cur_session_taken = 0; }
+session *op_session_current(void) { g_cur_session_taken = 1; return g_cur_session; }
+int op_session_taken(void) { return g_cur_session_taken; }
+
 #ifdef SCC_WITH_UV
 /* ===================== 后端 B：libuv（-DSCC_WITH_UV） ===================== */
 #include <uv.h>

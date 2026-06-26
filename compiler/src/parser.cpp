@@ -1353,6 +1353,10 @@ struct Parser {
         if (at(Tok::KwAsync)) {
             auto e = mk(Expr::Async);
             advance();
+            // 裸 async（其后即换行/终止）：取当前 sync 驱动 rpc 的调用会话，求值为 session&
+            //   （rpc 延迟应答，a 留空区分于带操作数的 future/promise 发起形态，见 op.sc @def session）。
+            if (at(Tok::Newline))
+                return e;                       // a==nullptr：裸 async → session&
             parseRpcOpts(e->syncOpts, "async");     // 可选 <prio:N, delay:ms>
             e->a = parseUnary();                // 操作数：rpc 调用
             if (accept(Tok::Comma))

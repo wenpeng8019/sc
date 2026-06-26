@@ -348,6 +348,32 @@ void     future_done(future *f, void *result);  /* done 关键字：置就绪 + 
  * 1=已就绪（不让出、直接续跑）；0=未就绪（保存状态后让出）。 */
 uint8_t  future_await(future *f, void *frame, void (*resume)(void *));
 
+/* ---------------- session：rpc 延迟应答会话句柄（接口协议） ----------------
+ * 与 future（fnc 单线程异步）对称的「rpc 延迟应答」机制：sync 驱动的 rpc 体内裸 `async`
+ * 取出当前调用会话（求值为 session&），rpc 体 return 不再自动应答；之后（任意线程、任意
+ * 时刻）`done s, result` 兑现——把结果写回调用方返回槽并唤醒其阻塞，与 `done future` 同形。
+ *
+ * 是 op 层「接口协议」对象（仿 queue/promise）：respond 为每对象方法指针，由消息队列实现
+ * 模块（mt，inc mt.sc）填充——故语言内核（done 兑现）经协议指针派发、零 emit mt 符号。
+ * respond(s, src, n)：从 src 拷 n 字节到调用方返回槽（偏移 0，与即时应答原地写 _ 对齐）并
+ * 唤醒；n==0/src==NULL=无结果（rpc 无返回值）。
+ *
+ * 会话身份（当前正在执行的 rpc 调用会话）由 op 内核 TLS 维护（op_session_begin 在消费者
+ * 执行 rpc 体前设置，裸 `async` 经 op_session_current 取出并标记「已领取」=转延迟应答）。
+ * session 句柄本身由实现模块在调用方栈上构造（随调用方阻塞存活），op 内核只透传其指针。 */
+typedef struct session {
+    void  *h;                                              /* 实现私有区指针（实现私有） */
+    void (*respond)(struct session *_this, void *src, size_t n);  /* done 兑现：写回返回槽 + 唤醒 */
+} session;
+
+/* 当前 rpc 调用会话 TLS（op 内核维护，消息队列实现模块在执行 rpc 体前后调用）：
+ *   op_session_begin(s) —— 执行 rpc 体前置当前会话为 s、清「已领取」标记；
+ *   op_session_current() —— 裸 `async` 取当前会话，并标记「已领取」（转延迟应答）；
+ *   op_session_taken()  —— rpc 体返回后查询是否被领取（决定即时应答 vs 延迟应答）。 */
+void     op_session_begin(session *s);
+session *op_session_current(void);
+int      op_session_taken(void);
+
 /* op 层暴露给"异步功能库"（async 模块叶子原语生态）的钩子：
  *   op_timer_arm —— 基础定时器：在 ms 毫秒后兑现 f（done）。两后端各自实现
  *                   （poll=单调时钟截止表；libuv=uv_timer）。delay 即在其上构建。

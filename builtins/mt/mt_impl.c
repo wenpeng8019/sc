@@ -322,6 +322,7 @@ typedef struct sync_sess {
     int32_t    state;             /* SS_QUEUED/PULLING/DONE/CLOSED（g_mutex 保护） */
     void      *params;            /* 调用方 rpc 参数缓冲（含返回槽，执行器原地写回） */
     void     (*fn)(void *);       /* rpc 实际函数（执行器调用 fn(params)） */
+    session    pub;               /* R4：暴露给语言内核的会话句柄（h=&本会话，respond 填 mt_session_respond） */
 } sync_sess;
 
 /* ---- 线程退出 TLS 析构：消费线程退出时自动 detach 全部 attached queue + 释放 port ----
@@ -517,12 +518,32 @@ static int inbox_remove(inbox *b, pmsg *m) {
 
 /* 线程池宿主同步执行器（R2）：池工作线程在调用方栈缓冲上实跑 rpc，再据会话状态唤醒调用方。
  * 池路径不入 port 收件箱、无超时摘除（提交即承诺执行），故无 SS_QUEUED/PULLING 区分，
- * 调用方一律死等至 SS_DONE/CLOSED。post 拷贝的是 sess 指针（参数仍在调用方栈，不复制）。 */
+ * 调用方一律死等至 SS_DONE/CLOSED。post 拷贝的是 sess 指针（参数仍在调用方栈，不复制）。
+ * R4：执行前置当前会话；若 rpc 体裸 async 领取了会话（转延迟应答）→ 不自动应答，调用方
+ * 继续死等，待将来 done 经 mt_session_respond 兑现。 */
 static void pool_sess_run(void *arg) {
     sync_sess *s = *(sync_sess **)arg;       /* post 拷贝的是 &sess 指针 */
+    op_session_begin(&s->pub);               /* R4：置当前会话（裸 async 据此取用） */
     s->fn(s->params);                        /* 在调用方栈参数上执行（写返回槽 _） */
+    if (op_session_taken()) return;          /* R4：已转延迟应答 → 不自动应答，待将来 done 兑现 */
     sc_mutex_lock(&g_mutex);
     if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
+    sc_mutex_unlock(&g_mutex);
+}
+
+/* R4：session 协议的 respond 实现（填入 sess.pub.respond）——done s, result 经此兑现延迟应答。
+ * 把结果（src 起 n 字节，由编译器按返回类型宽度给出）原地写回调用方返回槽（params 偏移 0，
+ * 与即时应答写 _ 同布局），置 SS_DONE 并唤醒死等的调用方。任意线程安全（g_mutex 保护）；
+ * 调用方已 drop/退出（SS_CLOSED）则丢弃（调用方早已返回 -1，其栈上会话或已失效，绝不触碰）。
+ * n==0/src==NULL=无结果（rpc 无返回值）。 */
+static void mt_session_respond(session *s, void *src, size_t n) {
+    sync_sess *ss = (sync_sess *)s->h;
+    sc_mutex_lock(&g_mutex);
+    if (ss->state != SS_CLOSED) {
+        if (n && src) memcpy(ss->params, src, n);   /* 写回返回槽 _（偏移 0，宽度=返回类型 sizeof） */
+        ss->state = SS_DONE;
+        sc_cond_one(ss->cond);
+    }
     sc_mutex_unlock(&g_mutex);
 }
 
@@ -555,6 +576,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     /* ---- 循环死锁替代（P5d）---- */
     if (q->consumer == from) {                   /* 自替代：向自己消费的队列 sync */
         sc_mutex_unlock(&g_mutex);
+        op_session_begin(NULL);                  /* R4：本地替代不支持延迟应答，置空会话防误领 */
         fn(params);                              /* 本线程直接执行（写回返回槽 _） */
         return 0;
     }
@@ -562,6 +584,7 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
         sc_port *victim = q->consumer;           /* 受害端口=目标队列的消费者（仿参考 to_port） */
         if (victim) victim->substituting = 1;
         sc_mutex_unlock(&g_mutex);
+        op_session_begin(NULL);                  /* R4：本地替代不支持延迟应答，置空会话防误领 */
         fn(params);                              /* 在本线程替代执行（写回返回槽 _） */
         sc_mutex_lock(&g_mutex);
         if (victim) {
@@ -578,6 +601,8 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     sess.state  = SS_QUEUED;
     sess.params = params;
     sess.fn     = fn;
+    sess.pub.h       = &sess;                    /* R4：会话句柄回指本会话（mt_session_respond 据此找返回槽） */
+    sess.pub.respond = mt_session_respond;       /* R4：done s 经此协议指针兑现（零 emit mt 符号） */
 
     int32_t ret;
 
@@ -845,13 +870,18 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     if (m->sess) {
         /* 同步消息（R2）：标记 PULLING（铁律——此后调用方超时只挂起不放弃），在调用方栈
          * 参数上实跑 rpc（写返回槽 _），完成后置 DONE 并唤醒调用方。消息节点由本执行方释放。
-         * pull 与调用方超时摘除均在 g_mutex 下串行，故标记 PULLING 后调用方必不再碰 m。 */
+         * pull 与调用方超时摘除均在 g_mutex 下串行，故标记 PULLING 后调用方必不再碰 m。
+         * R4：执行前置当前会话；若 rpc 体裸 async 领取（转延迟应答）→ 不自动应答，调用方继续
+         * 死等（PULLING），待将来 done 经 mt_session_respond 兑现（会话句柄在调用方栈，存活）。 */
         sync_sess *s = m->sess;
         s->state = SS_PULLING;
+        op_session_begin(&s->pub);                             /* R4：置当前会话（裸 async 据此取用） */
         sc_mutex_unlock(&g_mutex);
         s->fn(s->params);                                      /* 在调用方栈参数上执行 */
         sc_mutex_lock(&g_mutex);
-        if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
+        if (!op_session_taken()) {                             /* R4：未领取 → 即时应答（R2 原行为） */
+            if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
+        }                                                      /* 已领取 → 延迟应答，调用方继续死等 */
         sc_mutex_unlock(&g_mutex);
         free(m);
         return 1;

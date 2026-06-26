@@ -423,6 +423,25 @@ def operand: {
     fnc ctx:: &         # f.ctx()：取发起时挂载的用户上下文（无则 nil）
 }
 
+# ---------------- session：rpc 延迟应答会话句柄（接口协议） ----------------
+# 与 future（fnc 单线程异步：async→future→done）对称的「rpc 延迟应答」机制：sync 驱动的
+# rpc 体内裸 `async` 取出当前调用会话（求值为 session&），rpc 体 return 不再自动应答；之后
+# （任意线程、任意时刻）`done s, result` 兑现——写回调用方返回槽并唤醒其阻塞，与 done future
+# 同形。session 是 op 层接口协议（仿 queue/promise）：respond 为每对象方法指针，由消息队列
+# 实现模块（mt，inc mt.sc）填充，故语言内核（done 兑现）经协议指针派发、零 emit mt 符号。
+#   rpc serve: i4, x: i4
+#       var s: session& = async    # 取当前会话：本次 sync 改为延迟应答（return 值被忽略）
+#       g_saved = s                # 存起来：转交 / 攒批 / 等条件成熟
+#       return 0
+#   # 之后任意线程、任意时刻：
+#   done s, result                 # 兑现：写回调用方返回槽 + 唤醒（result 自动类型擦除）
+# 句柄由实现模块在调用方栈上构造（随调用方阻塞存活）；C 结构体（vtable）见 op.h。
+@def session: {
+    h: &                 # 实现私有区指针（实现私有）
+
+    fnc respond: src: &, n: u8   # done 兑现：从 src 拷 n 字节到调用方返回槽 + 唤醒（n=0 无结果）
+}
+
 # ---------------- 事件循环生命周期 ----------------
 @fnc async_init::           # 建立当前线程事件循环
 @fnc async_loop:: proc: &   # 驱动事件循环至全部异步完成；proc=按 id 派发回调
