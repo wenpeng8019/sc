@@ -36,6 +36,11 @@ dep any: c:"wf.clean" map o:"wf.report"
     return false
 
 fnc main: i4
+    # 本模块为三量之主：各须 form 激活方可 set/get 与级联（自下游向上游 form，初值灌定）
+    form report, (0: @)
+    form clean,  (0: @)
+    form raw,    (0: @)
+
     # 深度分层（编译期烘焙的常量，O(1) 查表）：raw=0 → clean=1 → report=2
     printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
 

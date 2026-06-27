@@ -6,7 +6,7 @@
 > 语义下跨函数、跨模块（限同进程）自动传播。
 
 - 语法层：关键字 `tok` / `dep` / `form` + 上下文门词 `all` / `any`，类型为 `token&`（op 层声明）。
-- 运行时层：`builtins/tok/tok_impl.c` 内的 `token_bind` / `token_get` / `token_set` / `token_form` /
+- 运行时层：`builtins/tok/tok_impl.c` 内的 `token_bind` / `token_get` / `token_set` / `token_pulse` / `token_form` /
   `token_depend`，经 op→tok 隐式依赖随工程**始终链接**（无需 `inc`）。
 - 编译层：声明降解为隐藏的 combine / follow 函数 + 注册调用，注入到 `main` / 模块 `init` 序章。
 
@@ -16,10 +16,18 @@
 
 1. **观念即共享量**：同一个字符串 id 在任何位置 `tok x: "id"` 引用到的是**同一个** token。
    声明是「create-or-get」——首次创建、后续幂等返回（adt 哈希 dict 按字符串 id intern）。
-2. **设值即传播**：`x.set(v)` 不只是写值，还会触发挂在该 token 上的全部依赖关系（`dep`）重算。
-3. **两种身份**：
-   - **form（形成主）**——带 combine 回调，输入要先经回调「合成」再落值（去抖、取峰、累加…）。
+2. **设值即传播（唯变更才传播）**：`x.set(v)` 不只是写值，还会触发挂在该 token 上的全部依赖
+   关系（`dep`）重算。但**仅当新值 ≠ 原值**时才落值并传播——新值与原值相等则静默丢弃，`follow`
+   不再跑（对齐 c_prototype `C_input` 的 `C_equal` 短路）。form 候选的「新值」指 combine 合成
+   结果（如取峰：`set` 较小值→合成不变→抑制）；enforce 的「新值」即输入值。`tok_modified()`
+   返回的 **modified 哨兵**与任何值都「不相等」——combine 体内 `return tok_modified()` 即可
+   在合成结果不变时**强制刷新**传播（对齐 `C_modified`）。调用点一侧则用 `t.pulse(v, tag)`
+   脉冲设值绕过抑制（拉取流水线/迭代：每次 `set` 皆事件，同值也不可丢）——见 §1.4。
+3. **两种身份（按有无 combine）**：
+   - **form 候选**——带 combine 回调，输入要先经回调「合成」再落值（去抖、取峰、累加…）。
    - **enforce（纯从）**——无 combine，`set` 直接赋值。
+   两者都须经 `form` 语句**激活**方就绪：共享量需「主的启动点」，未 `form` 的 token 不就绪，
+   其 `set` 仅入挂起队列、暂不落值/传播，待该 token 被 `form` 后回放。bind 仅取共享壳（未就绪）。
 4. **声明式依赖**：`dep all/any:` 声明 token 间的依赖关系，任一上游变更即唤起 `follow` 回调，
    由**与门（all）/ 或门（any）**决定触发时机；`follow` 返回值动态切换下次门逻辑。
 5. **边界（v2）**：
@@ -65,6 +73,8 @@ tok level: "sensor.level"
   | `this->sender` | 输入者（恒空 `@`，预留） |
   | `this->tag`    | `set` 随附标签（`i4`，体内分流用） |
 - 返回 `@`（新值）。无 combine 体 = enforce 纯从。
+- **变更检测**：合成结果与原值相等时 `set` 静默丢弃、不传播。如需在「值不变」时仍强制刷新，
+  combine 体内 `return tok_modified()`（modified 哨兵与任何值都不相等，强制传播一次）。
 
 ### 1.2 `form` —— 形成 / 灌初值
 
@@ -73,7 +83,9 @@ form level, (0: @)          # 初始化 form token，灌初值 0（@）并升格
 ```
 
 - 形态：`form <token 句柄>, <初值>`（语言内置语句关键字，与 `run` / `done` 同级；初值为 `@`）。
-- 语义：给 form token 置初值并标记已置值，随后回放 form 前挂起的 `set`。
+- 语义：给 token 灌初值、**升格为就绪主**（共享量的启动点），随后回放 form 前挂起的 `set`。
+  对**任何**自有 token 均适用（不限 combine 形成主）：未 `form` 的 token 不就绪，其 `set` 只入挂起
+  队列、不传播；`form` 后方落值并触发依赖。enforce（无 combine）`form` 即直赋型主。
 
 ### 1.3 `dep` + `all` / `any` —— 依赖关系
 
@@ -229,6 +241,51 @@ back loss, (1: @)      # 自 loss 反向遍历，先灌梯度种子 1（可省 s
 
 - 形态：`back <token 句柄>[, <种子>]`。种子非空则先灌入起点（不触发前向级联），随后反向 BFS。
 - 编译期已保证 `map` 图为 DAG（环检测），反向遍历必终止。降解为 `token_back(t, seed, 0)`。
+- **两种模式（自动分派，互斥）**：`token_back` 先扫可达节点——
+  - **边反向**（无 `exec` 节点）：按反拓扑序对各上游 `dep` 以 `acting=TOK_BACK` 唤起 `follow`，
+    follow 体判 `this->active == TOK_BACK` 走反向计算（读目标、写源；如梯度反传，见 `feature49`）。
+  - **节点 drain**（图中存在 `exec` 节点）：按节点 `depth` 降序对各注册节点唤起
+    `exec(t, t->ctx)`，节点自己出队跑 kernel——`dep` 只管前向路由，处理归节点（见 §1.3.5）。
+- **提前中止（break）**：钩子（follow / exec）返回**非 0** 即停止本轮反向遍历（返回 0 = 走完全程，
+  向后兼容）。供「drain」拉取式协作层用：worker 自 sink `back`，最深可认领节点认领并处理一帧后返回
+  非 0 中止扫描，worker 再发起下一轮——天然「最近未处理者先行 / 下游优先排空」。
+
+#### drain 驱动 ≠ form input 驱动（仍须 form 启动点，但无须 combine）
+
+`back` / `TOK_BACK` 是一条**独立于前向推送的拉取驱动**通道，**与 combine 合成正交**（但依然需要 form 就绪）：
+
+- **前向推送驱动**有两种：`set` 变更（`TOK_ALL_CHANGED` / 变更项下标）与 form 就绪
+  （`TOK_ALL_READY` / `TOK_ANY_READY`）。两者都要求**目标已 form**——共享量唯被 `form`
+  激活（主的启动点）后方就绪，`set` 方落值并传播；未 form 则 `set` 仅入挂起队列、不传播。
+- **drain 拉取驱动**是第三种：计算由 worker 主动 `back` 触发，而非由上游 `set` / `form` 推动；
+  follow 的前向分支只把上游数据**入队**（截断同步级联）、反向分支（`TOK_BACK`）才认领并处理。
+- 正交点在 **combine**，不在 **form**：纯 drain 流水线**无需写 combine 体**（每帧独立流过、不跨帧
+  合并），但**仍须对每个传播节点 `form`**——否则节点 token 不就绪，路由器 `set` 落不进、流水线停摆。
+  combine 仅当某节点需**跨帧合并**（去抖 / 峰值保持 / 累加）时才引入。
+  完整脚手架见 `templates/workflow-graph/workflow.sc`（缓冲队列 + 线程池 + drain，各节点 form 无 combine）。
+
+
+### 1.3.5 节点侧车 `ctx` + 节点钩子 `exec`（经 `form` 绑定）
+
+`dep` 是**边**（关系路由），`tok` 是**点**（函数实现）。`form` 是节点配置的**唯一入口**——一处灌初值、
+升格 form 主、绑侧车 `ctx`、挂处理钩子 `exec`，使 `dep` 体退化为纯路由（不硬编码节点变量、不含算子）：
+
+| 形态 | 降解 | 语义 |
+|------|------|------|
+| `form t, v, &n` | `token_form(t, v, 0, &n, 0)` | 绑定节点私有上下文（**侧车**）到 token；后续 `t.ctx()` 取回 |
+| `form t, v, &n, exec` | `token_form(t, v, 0, &n, exec)` | 同时挂**节点处理钩子** `exec`（拉取/推送两模式共用，见下） |
+| `t.ctx()` | `token_ctx(t)` | 取本 token 的侧车（`&`；未绑定=空 `&`）——节点处理态的通用载体 |
+
+- 钩子类型：`@fnc token_exec_fn: i4, t: token&, ctx: &`。**单一 `exec` 统一两模式**，模式由**谁驱动**决定（非钩子属性）：
+  - **拉取**（`back` 驱动）：`back` 节点模式下按节点 `depth` 降序唤起 `exec(t, t.ctx())`，节点出队跑 kernel、`t.set` 产出；返非 0=认领并处理一节点、中止本轮扫描。
+  - **推送**（`set` 驱动）：`set` 值变更落定后于**锁外**、向下游传播前唤起 `exec(t, t.ctx())`（副作用/观察：产出、统计、日志、外部推送）。
+- **职责分工**：`combine` 须纯（锁内只算值，不得 set/get 其它 token）；`dep` 只管前向路由；处理/副作用归 `exec`（锁外，MT 安全）。一个节点只会被其一种模式驱动（取决于模板用 `back` 还是 `set`）。
+- **两类模板对照**：
+  - 拉取式（`templates/workflow-graph/`）：`dep` 经 `t.ctx()` 把帧**入队**到下游节点；worker `back` →
+    `exec` 出队跑 kernel。异步缓冲、多线程。
+  - 推送式（`templates/push-reactive/`）：`dep` 把上游值**前推** `t.set(s.get())` 触发下游 `combine`
+    同步重算；`exec` 做节点观察/产出。同步级联、单线程。变更检测在此是**反应式记忆化**
+    （同值截断级联），与拉取式「同值丢帧需 `pulse` 逃生」相反（见 §1.4 `pulse`）。
 
 
 ### 1.4 取值 / 设值
@@ -236,9 +293,18 @@ back loss, (1: @)      # 自 loss 反向遍历，先灌梯度种子 1（可省 s
 token 句柄是 `token&`（指针），用**箭头** `->` 调方法：
 
 ```sc
-level->set((150: @), 0)         # 设值（@ 值 + i4 标签）→ 触发依赖级联
+level->set((150: @), 0)         # 设值（@ 值 + i4 标签）→ 仅值变更才落值并触发依赖级联（记忆化/去抖）
 var lv: i8 = (level->get(): i8)  # 取值（返回 @，调用点 (e: T@) / (e: i8) 还原）
+level->pulse((150: @), 0)        # 脉冲设值：绕过相等抑制，即便同值也强制传播
 ```
+
+- `set` **记忆化**：唯「新值≠原值」才落值传播（combine 取合成结果、enforce 取输入值；对齐 c_prototype
+  的 `C_input`）——推送/反应式里这是**去抖/级联自截断**（特性）。
+- `pulse` **脉冲**：绕过相等抑制，同值也落值并强制传播。用于**拉取流水线 / 迭代驱动**（每次 `set` 皆事件、
+  相同值也不可丢）：如 `templates/workflow-graph/`（源帧入队 ping）、`templates/dnn-framework/`（训练循环
+  每 epoch 喂同一输入 `x` 须重跑前向）。降解为 `token_pulse(t, v, tag)`。
+- 另有 `tok_modified()`（combine 体内 `return tok_modified()`）强制本次合成传播——区别：`pulse` 在**调用点**
+  对任意 token 强制（含 enforce/map），`tok_modified` 在 **combine 体内**强制（仅 form 候选）。
 
 ---
 
@@ -253,9 +319,9 @@ var lv: i8 = (level->get(): i8)  # 取值（返回 @，调用点 (e: T@) / (e: i
 | `dep all/any: …` + 体 | 隐藏 `__scdep_<N>_follow`（`tokHidden`，单形参 `this: __scdep_in&`，返回 `bool`；体首注入各依赖项局部名糖 `var a: token& = this->toks[i]`）+ `DepD`（记 `depAll` / `depItems` / `tokFn`） |
 | `dep …: 源 map 目标` + 体 | 同上，另记 `depTargets`；源与目标均注入局部名糖（`toks` = 源++目标）。注册降解为 `token_depend_map(_deps={源++目标}, nsrc, ntgt, all, tramp, NULL)`（仅源反挂触发，目标随 follow 传入；编译期对 map 边查有向环），并烘焙 depth/critical/fanin/reach/batch/dom 等图度量为 `token_set_*` 常量 |
 | `dep …: 源 loop 目标` + 体 | 同上，但记 `depLoop`；豁免环检测，注册降解为 `token_depend_loop(...)`（源不反挂）；编译期对 loop 边跑 Tarjan，烘焙 `token_set_scc(t, 簇编号, 簇大小)` |
-| `form t, v` | `FormS` 语句 → `token_form(t, v, 0)`（`v` 为 `@`） |
+| `form t, v[, ctx[, exec]]` | `FormS` 语句 → `token_form(t, v, 0, ctx, exec)`（`v` 为 `@`；可选第三参 `ctx`=`&n` 侧车、第四参 `exec`=节点处理钩子，缺省传 `NULL`/`0`） |
 | `back t[, seed]` | `BackS` 语句 → `token_back(t, seed, 0)`（`seed` 省略时传空 `@`） |
-| `t->set(v, tag)` / `t->get()` | 方法分派 → `token_set(t, v, tag)` / `token_get(t)` |
+| `t->set(v, tag)` / `t->pulse(v, tag)` / `t->get()` | 方法分派 → `token_set(t, v, tag)`（记忆化）/ `token_pulse(t, v, tag)`（脉冲强制传播）/ `token_get(t)` |
 | `t->depth()` / `t->scc()` / `t->loop_run(n)` … | 方法分派 → `token_depth(t)` / `token_scc(t)` / `token_loop_run(t, n)` …（O(1) 查烘焙常量） |
 
 注册代码注入到 `main` 序章（或模块 `init` / 测试 runner）：
@@ -274,8 +340,7 @@ follow / combine 的 C ABI 签名以上下文结构传递；combine 直接收 `_
 
 ```c
 static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_0_follow(&_self);
 }
 ```
@@ -289,17 +354,22 @@ static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
 | `token *token_bind(const char *id, token_combine cb)` | create-or-get：按 id intern（adt 哈希 dict）；`cb` 非空则挂为 form 主，幂等补挂 |
 | `sc_afat token_get(token *t)` | 取当前值（`@`） |
 | `void token_set(token *t, sc_afat v, int32_t tag)` | 有 combine 则 `value = cb(this{base,input:v,sender,tag})`，否则直接赋值；触发变更依赖 |
-| `void token_form(token *t, sc_afat v, int32_t tag)` | 灌初值、升格 form 主、回放挂起、触发就绪依赖 |
+| `void token_form(token *t, sc_afat v, int32_t tag, void *ctx)` | 灌初值、升格 form 主、回放挂起、触发就绪依赖；`ctx` 非空则绑定为节点私有上下文（侧车） |
 | `void token_depend(token **ts, int n, int all, token_follow cb, void *ctx)` | 注册依赖：拷贝依赖项数组，反挂到各 token 的 `deps[]` |
 | `void token_depend_map(token **ts, int nsrc, int ntgt, int all, token_follow cb, void *ctx)` | 注册 map 依赖（`ts` = 源 `nsrc` ++ 目标 `ntgt`）：门/武装/反挂仅覆盖源，目标只随 `follow` 传入；二者共用 `tok_depend_impl(ts, nsrc, nsrc+ntgt, …)` |
 | `void token_depend_loop(token **ts, int nsrc, int ntgt, int all, token_follow cb, void *ctx)` | 注册 loop 反馈依赖：源**不反挂**（杜绝自动级联无限环），登记全局 loop 表，由 `token_loop_run` 按 SCC 簇驱动；目标仍建反向邻接 |
 | `void token_set_depth/crit/degree/reach/batch/dom/scc(...)` | 烘焙写入：编译期算好的图度量（深度 / 关键路径+松弛 / 扇入扇出 / 可达数 / 波次宽度 / 支配检查点+子树 / SCC 簇）以常量写入句柄（注册时调用） |
 | `int token_depth/critical/slack/fanin/fanout/reach/batch/batch_width/checkpoint/dom_size/scc/scc_size(token *t)` | O(1) 查询：读烘焙好的图度量常量（无图遍历），对应 §1.3.2 的 `t.*()` 方法 |
 | `int token_loop_run(token *t, int max)` | 驱动 `t` 所在 SCC 反馈簇迭代至多 `max` 轮（`acting=TOK_LOOP`），返回实际轮数；非反馈簇（簇大小≤1）不迭代 |
-| `void token_back(token *t, sc_afat seed, int32_t tag)` | `back t[, seed]`：自 `t` 沿反向邻接按反拓扑序以 `acting=TOK_BACK` 唤起上游 follow；`seed` 非空先灌入 `t` |
+| `void token_back(token *t, sc_afat seed, int32_t tag)` | `back t[, seed]`：自 `t` 沿反向邻接按反拓扑序遍历；若图中存在 `exec` 节点则进**节点 drain 模式**（按 depth 降序对各注册节点唤起 `exec(t, t->ctx)`，返非 0 即 break），否则走边反向 `follow`（`acting=TOK_BACK`）；`seed` 非空先灌入 `t` |
+| `void token_form(token *t, sc_afat v, int32_t tag, void *ctx, token_exec exec)` | `form t, v[, ctx[, exec]]`：灌初值并升格；可同时绑定节点侧车 `ctx` 与统一节点钩子 `exec` |
+| `void token_set(token *t, sc_afat v, int32_t tag)` / `void token_pulse(token *t, sc_afat v, int32_t tag)` | `t.set(v, tag)`：同值抑制的记忆化设值；`t.pulse(v, tag)`：绕过相等抑制、同值也强制传播 |
+| `void *token_ctx(token *t)` | `t.ctx()`：取节点私有上下文（`form t,v,&n[,exec]` 绑定的侧车；未绑定=`NULL`） |
 
 上下文结构（C ABI，见 `tok.h`）：`__sctok_in { sc_afat sender, base, input; int32_t tag; }`、
-`__scdep_in { token **toks; int32_t count; int32_t active; }`。
+`__scdep_in { token **toks; int32_t count; int32_t active; void *ctx; }`（`ctx`=注册时透传的关系私有边状态）。
+节点钩子类型：`token_drain`/`token_apply` 均为 `int (*)(token *t, void *ctx)`——前者 `back` 拉取唤起（返非 0=break），
+后者 `set` 变更后锁外唤起（节点级副作用/观察）。
 
 ### 3.1 门逻辑与触发
 

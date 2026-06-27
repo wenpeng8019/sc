@@ -40,6 +40,13 @@ dep any: c:"nn.y" map o:"nn.loss"
     return false
 
 fnc main: i4
+    # 本模块为各量之主：前向链与梯度量均须 form 激活（自输出向输入 form，初值灌定）
+    form gx,   (0: @)
+    form gy,   (0: @)
+    form loss, (0: @)
+    form y,    (0: @)
+    form x,    (0: @)
+
     # 前向：x=4 → y=8 → loss=13
     x->set((4: @), 0)
     printf("forward: x=%lld y=%lld loss=%lld\n", (x->get(): i8), (y->get(): i8), (loss->get(): i8))

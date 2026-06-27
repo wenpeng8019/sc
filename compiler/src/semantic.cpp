@@ -1432,10 +1432,12 @@ struct Checker {
                 (void)inferExpr(*s.expr, locals, s.line);              // future
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 结果
                 break;
-            // -- form：tok 句柄 + 初值（值在 codegen 自动 void* 擦除） ------------
+            // -- form：tok 句柄 + 初值（值在 codegen 自动 void* 擦除）+ 可选侧车 ctx ----
             case Stmt::FormS:
                 (void)inferExpr(*s.expr, locals, s.line);              // tok 句柄
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 初值
+                if (s.forCond) (void)inferExpr(*s.forCond, locals, s.line); // 节点侧车 ctx
+                if (s.forStep) (void)inferExpr(*s.forStep, locals, s.line); // 节点处理钩子 exec
                 break;
             // -- back：tok 句柄 + 可选梯度种子（种子在 codegen 自动 @ 擦除） -------
             case Stmt::BackS:

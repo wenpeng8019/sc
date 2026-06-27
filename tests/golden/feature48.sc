@@ -19,6 +19,9 @@ dep any: c:"wf.clean" map o:"wf.report"
     return false
 
 fnc main: i4
+    form report, (0: @)
+    form clean, (0: @)
+    form raw, (0: @)
     printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
     raw->set((0 - 5: @), 0)
     printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))

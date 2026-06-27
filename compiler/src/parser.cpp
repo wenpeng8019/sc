@@ -2339,6 +2339,10 @@ struct Parser {
                 s->expr = parseExpr();                              // tok 句柄
                 expect(Tok::Comma, "','（form 需要初值：form t, v）");
                 s->forInit = parseExpr();                           // 初值（void&）
+                if (accept(Tok::Comma))                             // 可选第三参：节点私有上下文（侧车）
+                    s->forCond = parseExpr();                       // form t, v, &n —— 绑定 tok ctx
+                if (accept(Tok::Comma))                             // 可选第四参：节点处理钩子 exec
+                    s->forStep = parseExpr();                       // form t, v, &n, exec —— 挂节点钩子
                 expect(Tok::Newline, "换行");
                 return s;
             }

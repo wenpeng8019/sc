@@ -54,24 +54,26 @@ int32_t main(void) {
     { token *_deps0[] = { a, b }; token_depend_loop(_deps0, 1, 1, 1, __scdep_0_tramp, NULL); }
     { token *_deps1[] = { b, a }; token_depend_loop(_deps1, 1, 1, 1, __scdep_1_tramp, NULL); }
     /* line 33 */
-    token_set(a, ((sc_afat){(void *)(intptr_t)(100), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_form(b, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 34 */
-    printf("init: a=%lld  scc=%d size=%d\n", ((int64_t)((token_get(a)).p)), token_scc(a), token_scc_size(a));
+    token_form(a, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    /* line 36 */
+    token_set(a, ((sc_afat){(void *)(intptr_t)(100), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 37 */
-    int32_t rounds = token_loop_run(a, 10);
-    /* line 38 */
-    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, ((int64_t)((token_get(a)).p)), ((int64_t)((token_get(b)).p)));
+    printf("init: a=%lld  scc=%d size=%d\n", ((int64_t)((token_get(a)).p)), token_scc(a), token_scc_size(a));
     /* line 40 */
+    int32_t rounds = token_loop_run(a, 10);
+    /* line 41 */
+    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, ((int64_t)((token_get(a)).p)), ((int64_t)((token_get(b)).p)));
+    /* line 43 */
     return 0;
 }
 
 static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_0_follow(&_self);
 }
 static int __scdep_1_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_1_follow(&_self);
 }

@@ -71,26 +71,30 @@ int32_t main(void) {
     { token *_deps0[] = { raw, clean }; token_depend_map(_deps0, 1, 1, 0, __scdep_0_tramp, NULL); }
     { token *_deps1[] = { clean, report }; token_depend_map(_deps1, 1, 1, 0, __scdep_1_tramp, NULL); }
     /* line 40 */
-    printf("depth: raw=%d clean=%d report=%d\n", token_depth(raw), token_depth(clean), token_depth(report));
+    token_form(report, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    /* line 41 */
+    token_form(clean, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 42 */
-    token_set(raw, ((sc_afat){(void *)(intptr_t)(0 - 5), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
-    /* line 43 */
-    printf("raw=-5: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    token_form(raw, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 45 */
-    token_set(raw, ((sc_afat){(void *)(intptr_t)(21), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
-    /* line 46 */
-    printf("raw=21: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    printf("depth: raw=%d clean=%d report=%d\n", token_depth(raw), token_depth(clean), token_depth(report));
+    /* line 47 */
+    token_set(raw, ((sc_afat){(void *)(intptr_t)(0 - 5), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 48 */
+    printf("raw=-5: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    /* line 50 */
+    token_set(raw, ((sc_afat){(void *)(intptr_t)(21), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    /* line 51 */
+    printf("raw=21: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    /* line 53 */
     return 0;
 }
 
 static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_0_follow(&_self);
 }
 static int __scdep_1_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_1_follow(&_self);
 }

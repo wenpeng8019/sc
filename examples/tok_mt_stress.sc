@@ -41,6 +41,7 @@ rpc hammer: base: i4, rounds: i4
 
 fnc main: i4
     form counter, (0: @)            # 初始化 form 主
+    form peak, (0: @)               # 峰值镜像亦须 form 激活，否则 follow 内 set 仅入挂起
 
     var T: i4 = 8                   # 线程数
     var R: i4 = 20000              # 每线程轮数

@@ -88,24 +88,32 @@ int32_t main(void) {
     { token *_deps0[] = { x, y }; token_depend_map(_deps0, 1, 1, 0, __scdep_0_tramp, NULL); }
     { token *_deps1[] = { y, loss }; token_depend_map(_deps1, 1, 1, 0, __scdep_1_tramp, NULL); }
     /* line 44 */
-    token_set(x, ((sc_afat){(void *)(intptr_t)(4), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_form(gx, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 45 */
-    printf("forward: x=%lld y=%lld loss=%lld\n", ((int64_t)((token_get(x)).p)), ((int64_t)((token_get(y)).p)), ((int64_t)((token_get(loss)).p)));
+    token_form(gy, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    /* line 46 */
+    token_form(loss, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    /* line 47 */
+    token_form(y, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 48 */
-    token_back(loss, ((sc_afat){(void *)(intptr_t)(1), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
-    /* line 49 */
-    printf("backward(seed=1): gy=%lld gx=%lld\n", ((int64_t)((token_get(gy)).p)), ((int64_t)((token_get(gx)).p)));
+    token_form(x, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 51 */
+    token_set(x, ((sc_afat){(void *)(intptr_t)(4), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    /* line 52 */
+    printf("forward: x=%lld y=%lld loss=%lld\n", ((int64_t)((token_get(x)).p)), ((int64_t)((token_get(y)).p)), ((int64_t)((token_get(loss)).p)));
+    /* line 55 */
+    token_back(loss, ((sc_afat){(void *)(intptr_t)(1), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    /* line 56 */
+    printf("backward(seed=1): gy=%lld gx=%lld\n", ((int64_t)((token_get(gy)).p)), ((int64_t)((token_get(gx)).p)));
+    /* line 58 */
     return 0;
 }
 
 static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_0_follow(&_self);
 }
 static int __scdep_1_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_1_follow(&_self);
 }

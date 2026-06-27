@@ -241,6 +241,288 @@ struct pool *default_pool(uint32_t n) {
     return &p->base;
 }
 
+/* ---------------- sem_pool：pool 协议的「信号量限流」策略实现 ---------------- */
+/* 与 default_pool / drain_pool 并列——同为 pool&、同凭 run 投递。它是有界并发的「一次性
+ * worker 派发器」：run = 任务入队（FIFO）+ 计数（队列长度即「待派计数」），永不阻塞；
+ * 调度按「剩余信号量」(max - running) 启动线程——一个槽位起一个线程跑一个队头任务；worker
+ * 只跑一个任务即退（线程结束、不自循环），退出腾出槽位时再把下一个排队任务交给新线程。
+ * sem_state 首字段即 pool base，故 (pool*) 与 (sem_state*) 同址互转。worker 为脱离线程，
+ * drop 经「running→0」条件等待汇合。
+ *
+ * 一致性（核心）：池自有任务队列，故无需 drain_pool 的世代代检，仅一条不变式即足——
+ *   不变式：running < max ⟹ 队列空。
+ * 维持：running 与队列同受池锁 mu 守护；每当①run 入队后、②worker 退出 running-- 后，都在
+ * mu 下执行 sem_take（若 running<max 且队非空：running++ 并摘队头派发）。归纳可知：running<max
+ * 时队列必空，故排队任务必在「running==max」下，待某 worker 退出腾槽即被派发，绝不滞留；
+ * 且 running==0 ⟹ 队列空 ⟹ 全部完成（join/drop 仅需等 running→0）。线程创建在锁外完成，
+ * sem_take 预留槽位（running++）后再起线程，失败则回滚并丢弃该任务（仅线程创建失败的罕见路径）。 */
+typedef struct sem_state sem_state;
+
+/* 任务节点：联合分配 [sem_task][rpc 参数]；既作 FIFO 节点，又作 worker 线程实参
+ * （故内嵌 p 回指池，worker 拿到节点即有 p/fn/params 全部上下文）。 */
+typedef struct sem_task {
+    struct sem_task *next;       /* FIFO 链（派发后即不再用） */
+    sem_state       *p;          /* 回指池（worker 经此取 running/mu/队列） */
+    void           (*fn)(void *);/* rpc 实际函数，参数紧随本节点 */
+} sem_task;
+
+struct sem_state {
+    pool       base;       /* op 层 pool 协议（run/join/drop）：首字段，与 sem_state 同址 */
+    mtx_state  mu;
+    cnd_state  idle;       /* running→0 唤醒 join/drop 等待者 */
+    sem_task  *head, *tail;/* 溢出 FIFO（running==max 时排队；队列长度=待派计数） */
+    uint32_t   max;        /* 并发上限（信号量容量） */
+    uint32_t   running;    /* 当前在跑 worker 数（已占信号量） */
+    uint8_t    shutdown;   /* 置停：弃排队、不再派发 */
+};
+
+static int sem_spawn(sem_state *p, sem_task *t);
+
+/* 须持 mu：剩余信号量>0 且队非空 → 预留一个槽位（running++）并摘队头返回；否则 NULL。 */
+static sem_task *sem_take(sem_state *p) {
+    if (!p->shutdown && p->running < p->max && p->head) {
+        sem_task *t = p->head;
+        p->head = t->next;
+        if (!p->head) p->tail = NULL;
+        p->running++;
+        return t;
+    }
+    return NULL;
+}
+
+/* 一次性 worker：跑绑定的那一个任务即退；退出腾槽时把下一个排队任务交给新线程（不自循环）。 */
+#if P_WIN
+static DWORD WINAPI sem_worker(LPVOID arg) {
+#else
+static void *sem_worker(void *arg) {
+#endif
+    sem_task  *t = (sem_task *)arg;
+    sem_state *p = t->p;
+    t->fn((void *)(t + 1));               /* 跑一次（参数紧随节点） */
+    sc_recycle(t);
+    sc_mutex_lock(&p->mu);
+    p->running--;                         /* 释放信号量槽 */
+    sem_task *go = sem_take(p);           /* 根据剩余信号量：腾出的槽派给下一个排队任务 */
+    if (p->running == 0) sc_cond_all(&p->idle);   /* go 非空时 running 已回补，不会误判 */
+    sc_mutex_unlock(&p->mu);
+    if (go) sem_spawn(p, go);             /* 交给新线程（本线程随即退出） */
+    return 0;
+}
+
+/* 锁外起线程跑任务 t（sem_take 已预留槽）。失败则回滚槽位并丢弃 t（罕见：线程创建失败）。 */
+static int sem_spawn(sem_state *p, sem_task *t) {
+#if P_WIN
+    HANDLE h = CreateThread(NULL, 0, sem_worker, t, 0, NULL);
+    if (h) { CloseHandle(h); return 1; }   /* CloseHandle 即脱离，线程继续运行 */
+#else
+    pthread_t th;
+    if (pthread_create(&th, NULL, sem_worker, t) == 0) { pthread_detach(th); return 1; }
+#endif
+    sc_mutex_lock(&p->mu);                 /* 起线程失败：归还槽、丢弃任务 */
+    p->running--;
+    if (p->running == 0) sc_cond_all(&p->idle);
+    sc_mutex_unlock(&p->mu);
+    sc_recycle(t);
+    return 0;
+}
+
+/* run 方法（pool 协议）：任务入队 + 计数（永不阻塞）；剩余信号量>0 即起线程跑一次。
+ * 返回 1（已入队/已派发）/ 0（池已停或内存不足） */
+static uint8_t sem_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+    sem_state *p = (sem_state *)_this;
+    if (!p || !fn) return 0;
+    sem_task *t = (sem_task *)sc_chunk(sizeof(sem_task) + psize);   /* 任务联合块：确定性池化 */
+    if (!t) return 0;
+    t->next = NULL; t->p = p; t->fn = fn;
+    if (params && psize) memcpy(t + 1, params, psize);
+    sc_mutex_lock(&p->mu);
+    if (p->shutdown) { sc_mutex_unlock(&p->mu); sc_recycle(t); return 0; }
+    if (p->tail) p->tail->next = t; else p->head = t;   /* 入队（计数+1） */
+    p->tail = t;
+    sem_task *go = sem_take(p);          /* 根据剩余信号量启动线程（不变式：running<max 时队头即 t） */
+    sc_mutex_unlock(&p->mu);
+    if (go) sem_spawn(p, go);
+    return 1;
+}
+
+/* join 方法：屏障，等已提交任务全部完成（running→0；不变式保证此时队亦空）。之后仍可 run。 */
+static void sem_join(pool *_this) {
+    sem_state *p = (sem_state *)_this;
+    if (!p) return;
+    sc_mutex_lock(&p->mu);
+    while (p->running > 0 || p->head)
+        sc_cond_wait(&p->idle, &p->mu, 0, 0);
+    sc_mutex_unlock(&p->mu);
+}
+
+/* drop 方法：置停 → 弃排队任务 → 等在跑 worker 退出 → 回收整块（含 pool 对象本身）。 */
+static void sem_drop(pool *_this) {
+    sem_state *p = (sem_state *)_this;
+    if (!p) return;
+    sc_mutex_lock(&p->mu);
+    p->shutdown = 1;
+    sem_task *t = p->head;               /* 丢弃未派发的排队任务（置停后 sem_take 不再派发） */
+    while (t) { sem_task *n = t->next; sc_recycle(t); t = n; }
+    p->head = p->tail = NULL;
+    while (p->running > 0)
+        sc_cond_wait(&p->idle, &p->mu, 0, 0);
+    sc_mutex_unlock(&p->mu);
+    sc_mutex_final(&p->mu);
+    sc_cond_final(&p->idle);
+    free(p);
+}
+
+/* sem_pool：「信号量限流」策略池构造（填充 pool 协议 vtable，返回 pool&）。
+ *   - n：并发上限；0 → CPU 逻辑核数
+ *   - 返回 &p->base（失败 NULL）；构造时不启线程，首个 run 才按需起 */
+struct pool *sem_pool(uint32_t n) {
+    if (n == 0) n = P_ncpu();
+    sem_state *p = (sem_state *)malloc(sizeof(sem_state));
+    if (!p) return NULL;
+    memset(p, 0, sizeof(*p));
+    p->base.h    = p;
+    p->base.run  = sem_run;
+    p->base.join = sem_join;
+    p->base.drop = sem_drop;
+    p->max  = n;
+    sc_mutex_init(&p->mu);
+    sc_cond_init(&p->idle);
+    return &p->base;
+}
+
+/* ---------------- drain_pool：pool 协议的「按需自调度」策略实现 ---------------- */
+/* 与 default_pool 并列——同为 pool&、同凭 run 投递，仅策略相反：default_pool 是常驻 worker
+ * 消费内部 FIFO 任务队列（run = 入队，fn 执行一次）；drain_pool 无任务队列，worker 反复跑
+ * 投递的工作单元 fn 直到一轮无新投递即退；run = 通知有新活 + 按需激活一个 worker（上限 n）。
+ * drn_state 首字段即 pool base，故 (pool*) 与 (drn_state*) 同址互转。worker 为脱离线程，
+ * drop 经「running→0」条件等待汇合。
+ *
+ * 一致性（核心）：running 计数与工作世代 gen 同受池锁 mu 守护。worker 与 run 经「世代代检」
+ * 消除丢唤醒——即便工作单元 fn 内部另有锁（如外部图的锁）也不漏活：
+ *   - run：mu 下 gen++（标记来新活）后，若 running<max 则 running++ 并脱离投一个 worker；
+ *     已达上限则仅 gen++（在跑 worker 将经代检再扫一轮）。
+ *   - worker：每轮【前】在 mu 下快照 seen=gen，再解锁跑 fn（fn 自身循环排空至本视角无活后返）；
+ *     fn 返回后在 mu 下复检 gen——若 gen!=seen（fn 期间有人 run）则再来一轮，否则 running-- 退出。
+ *     run 的 (gen++,判 running) 与 worker 的 (查 gen,running--) 各在 mu 下原子成段，故全序：
+ *     要么 worker 先退出腾 running → run 见 running<max 投新 worker；要么 run 先 gen++ →
+ *     worker 复检见 gen 变而再来一轮。生产者只需「先令工作源可见，再 run<dp>」。 */
+typedef struct {
+    pool         base;       /* op 层 pool 协议（run/join/drop）：首字段，与 drn_state 同址 */
+    mtx_state    mu;
+    cnd_state    idle;       /* running→0 唤醒 join/drop 等待者 */
+    uint32_t     max;        /* worker 上限 */
+    uint32_t     running;    /* 当前在跑 worker 数 */
+    uint64_t     gen;        /* 工作世代：每次 run 自增（防丢唤醒） */
+    uint8_t      shutdown;   /* 置停：worker 见之即退，run 不再激活 */
+} drn_state;
+
+/* worker 私有实体：联合分配 [drn_arg][rpc 参数]（fn 反复调用同一参数副本，drain 自调度场景同源） */
+typedef struct {
+    drn_state *p;
+    void     (*fn)(void *);
+} drn_arg;
+
+/* worker 脱离循环：步进前快照 gen → 锁外跑 fn（fn 自身排空）→ 世代代检：gen 变则再来一轮，否则退 */
+#if P_WIN
+static DWORD WINAPI drn_worker(LPVOID arg) {
+#else
+static void *drn_worker(void *arg) {
+#endif
+    drn_arg   *a = (drn_arg *)arg;
+    drn_state *p = a->p;
+    void     (*fn)(void *) = a->fn;
+    void      *params = (void *)(a + 1);
+    for (;;) {
+        sc_mutex_lock(&p->mu);
+        if (p->shutdown) { if (--p->running == 0) sc_cond_all(&p->idle); sc_mutex_unlock(&p->mu); break; }
+        uint64_t seen = p->gen;          /* 步进前快照工作世代 */
+        sc_mutex_unlock(&p->mu);
+
+        fn(params);                      /* 工作单元：fn 自身循环排空至本视角无活后返回 */
+
+        sc_mutex_lock(&p->mu);
+        if (!p->shutdown && p->gen != seen) { sc_mutex_unlock(&p->mu); continue; }  /* 期间有新 run → 再来一轮 */
+        if (--p->running == 0) sc_cond_all(&p->idle);   /* 确认无新活：退出 */
+        sc_mutex_unlock(&p->mu);
+        break;
+    }
+    sc_recycle(a);
+    return 0;
+}
+
+/* run 方法（pool 协议）：通知有新活——gen++ 标记；running<max 则预留名额并脱离激活一个 worker。
+ * 返回 1（已通知/已激活）/ 0（池已停或激活失败） */
+static uint8_t drn_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+    drn_state *p = (drn_state *)_this;
+    if (!p || !fn) return 0;
+    sc_mutex_lock(&p->mu);
+    p->gen++;
+    int spawn = (!p->shutdown && p->running < p->max);
+    if (spawn) p->running++;
+    uint8_t alive = (uint8_t)(!p->shutdown);
+    sc_mutex_unlock(&p->mu);
+    if (!spawn) return alive;            /* 已达上限：仅 gen++ 通知在跑 worker 经代检再扫一轮 */
+    drn_arg *a = (drn_arg *)sc_chunk(sizeof(drn_arg) + psize);   /* 工作实体联合块：确定性池化 */
+    if (a) {
+        a->p = p; a->fn = fn;
+        if (params && psize) memcpy(a + 1, params, psize);
+#if P_WIN
+        HANDLE h = CreateThread(NULL, 0, drn_worker, a, 0, NULL);
+        if (h) { CloseHandle(h); return 1; }    /* CloseHandle 即脱离，线程继续运行 */
+#else
+        pthread_t th;
+        if (pthread_create(&th, NULL, drn_worker, a) == 0) { pthread_detach(th); return 1; }
+#endif
+        sc_recycle(a);
+    }
+    sc_mutex_lock(&p->mu);                /* 激活失败：归还预留名额 */
+    if (--p->running == 0) sc_cond_all(&p->idle);
+    sc_mutex_unlock(&p->mu);
+    return 0;
+}
+
+/* join 方法：屏障，等当前在跑 worker 全部退出（running→0；之后仍可继续 run） */
+static void drn_join(pool *_this) {
+    drn_state *p = (drn_state *)_this;
+    if (!p) return;
+    sc_mutex_lock(&p->mu);
+    while (p->running > 0)
+        sc_cond_wait(&p->idle, &p->mu, 0, 0);
+    sc_mutex_unlock(&p->mu);
+}
+
+/* drop 方法：置停 → 等 worker 全部退出 → 回收整块（含 pool 对象本身） */
+static void drn_drop(pool *_this) {
+    drn_state *p = (drn_state *)_this;
+    if (!p) return;
+    sc_mutex_lock(&p->mu);
+    p->shutdown = 1;
+    while (p->running > 0)
+        sc_cond_wait(&p->idle, &p->mu, 0, 0);
+    sc_mutex_unlock(&p->mu);
+    sc_mutex_final(&p->mu);
+    sc_cond_final(&p->idle);
+    free(p);
+}
+
+/* drain_pool：「按需自调度」策略池构造（填充 pool 协议 vtable，返回 pool&）。
+ *   - n：worker 上限；0 → CPU 逻辑核数
+ *   - 返回 &p->base（失败 NULL）；构造时不启 worker，首个 run<dp> 才按需激活 */
+struct pool *drain_pool(uint32_t n) {
+    if (n == 0) n = P_ncpu();
+    drn_state *p = (drn_state *)malloc(sizeof(drn_state));
+    if (!p) return NULL;
+    memset(p, 0, sizeof(*p));
+    p->base.h    = p;
+    p->base.run  = drn_run;
+    p->base.join = drn_join;
+    p->base.drop = drn_drop;
+    p->max  = n;
+    sc_mutex_init(&p->mu);
+    sc_cond_init(&p->idle);
+    return &p->base;
+}
+
 /* ---------------- queue + port：消息队列协议的「PORT 单收件箱」实现 ---------------- */
 /* queue 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「每线程 PORT」模型实现
  * （完整机制规格见 builtins/mt.md）——port 是每线程的单一收件箱中枢，多个 queue 归并进同一

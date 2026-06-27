@@ -30,6 +30,9 @@ dep all: p:"fp.b" loop q:"fp.a"
     return false
 
 fnc main: i4
+    form b, (0: @)             # 反馈簇两成员均为本模块所主，须 form 激活方可 set/get
+    form a, (0: @)
+
     a->set((100: @), 0)        # 初值 a=100（loop 源不级联，仅置初值，不触发反馈）
     printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
 

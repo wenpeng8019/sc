@@ -78,6 +78,37 @@
 # 将来可按其它策略另起 *_pool(n) 构造（如 work-stealing / 优先级），均返回 pool&。
 @fnc default_pool:: pool&, n: u4     # 构造默认线程池（FIFO 队列 + n 个固定工作线程）
 
+# ---------------- sem_pool：pool 协议的「信号量限流」策略实现 ----------------
+# sem_pool 与 default_pool / drain_pool 并列——同为 pool&、同凭 run 投递。它是「有界并发的
+# 一次性 worker 派发器」：run = 任务入队 + 计数自增，永不阻塞；调度按「剩余信号量」(n - 在跑)
+# 启动线程，每个 worker 只跑一个任务即退（线程结束、不自循环）；腾出槽位时把下一个排队任务
+# 交给新线程。与 default_pool 的别（都封顶 n 并发、fn 各执行一次）：default_pool 是 n 个常驻
+# 线程复用、空闲驻留；sem_pool 无常驻线程，按需起、一任务一线程、用完即弃（线程级隔离、空闲零驻留，
+# 代价是每任务一次线程创建）。与 drain_pool 的别：drain_pool 反复重跑 fn 排空池外工作源（需世代代检）；
+# sem_pool 的 fn 只跑一次、任务由池自有队列承载（不变式「在跑<上限 ⟹ 队列空」即足，无须代检）。
+#   var sp: pool& = sem_pool(4)      # 并发上限 4；构造时不启线程
+#   run<sp> work(a, b)               # 入队 + 计数；剩余信号量>0 即起线程跑一次
+#   sp->join()                       # 屏障：等已提交任务全部完成（running→0 且队空）
+#   sp->drop()                       # 析构：置停 → 弃排队任务 → 等在跑退出 → 回收
+# C 结构体（vtable）同 pool（见 op.h）；构造、信号量调度与一次性 worker 见 mt_impl.c。
+@fnc sem_pool:: pool&, n: u4         # 构造信号量限流池（并发上限 n；一任务一线程、用完即退）
+
+# ---------------- drain_pool：pool 协议的「按需自调度」策略实现 ----------------
+# drain_pool 与 default_pool 并列——同为 pool&、同凭 run 投递，仅策略相反：default_pool
+# 是常驻 worker 消费内部 FIFO 任务队列（run = 入队，fn 执行一次）；drain_pool 没有任务队列，
+# worker 反复跑投递的工作单元 rpc 直到一轮无新投递即退；run = 通知有新活 + 按需激活一个
+# worker（上限 n）。适合「任务在外部图/队列里、由应用自调度」的场景（如 workflow 的 back
+# drain：worker 自身 while 循环反向遍历认领可用节点，无节点可认领即返回）。
+#   var dp: pool& = drain_pool(4)    # 上限 4 worker；构造时不启 worker
+#   run<dp> work_unit(a, b)          # 通知有新活：内部按需补投一个 worker（反复跑 work_unit）
+#   dp->join()                       # 屏障：等当前 worker 全部退出（running→0）
+#   dp->drop()                       # 析构：置停 → 等 worker 退出 → 回收
+# 工作单元 rpc 自身应循环排空至「本视角无活」后返回；drain_pool 经世代代检（running 计数 +
+# 工作世代 gen 由池内部锁守护）保证：worker 返回后若期间有新 run 则再来一轮，否则 running--
+# 退出——故末个 worker 不会在尚有活时退出，应用层无须再手搓「在跑计数 + 补投」信号量。
+# C 结构体（vtable）同 pool（见 op.h）；构造、按需激活与世代代检见 mt_impl.c。
+@fnc drain_pool:: pool&, n: u4       # 构造按需自调度池（上限 n worker；run<dp> 投递工作单元 rpc）
+
 # ---------------- queue：消息队列协议的「默认」实现 ----------------
 # queue 类型与 post/pull/drop 方法是 op 层「消息队列接口协议」（默认导入，vtable，
 # 见 op.sc）；本模块按「默认 FIFO」策略提供具名构造 default_queue，犹如 io 的 file()

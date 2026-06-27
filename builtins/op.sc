@@ -325,7 +325,12 @@ def operand: {
 #   run work(a, b), p     # 入池：p 为 pool&（经构造取得），任务排队执行
 #                         # → p->run(p, work_rpc, &参数, sizeof(参数))
 # 构造：实现模块（mt，inc mt.sc）按策略命名 *_pool(n)，均返回 pool&，犹如 com 的
-#   file()。当前默认实现 default_pool(n)（mt）。C 结构体（vtable）见 op.h，
+#   file()。两种内置策略：
+#     · default_pool(n)：常驻 worker 消费内部 FIFO 任务队列（run = 入队，执行一次）；
+#     · drain_pool(n)  ：按需自调度——无任务队列，worker 反复跑投递的工作单元 rpc 直到
+#       一轮无新投递即退；run = 通知有新活 + 按需激活一个 worker（上限 n）。
+#   二者同为 pool&、同凭 run 投递，仅运行时 run 指针指向不同策略——这正是 pool 抽象的
+#   价值（pool 即「线程调度组件」，run 是唯一投递动词）。C 结构体（vtable）见 op.h，
 #   默认带入每个 C 单元；填充与工作线程实现见 mt_impl.c。
 @def pool: {
     h: &                 # 实现私有区指针（队列 + 同步原语 + 工作线程，实现私有）
@@ -457,7 +462,8 @@ def operand: {
 #   dep all/any: ...   声明 token 间依赖关系（follow 回调，all=与门 / any=或门，体内见 this）
 #   dep …: 源 map 目标 声明 源→目标 图边（DAG，编译期环检测 + 深度烘焙）
 #   dep …: 源 loop 目标 声明 受控反馈环边（成环合法，编译期 SCC 缩点烘焙；t.loop_run(max) 驱动迭代）
-#   back t[, seed]     反向遍历依赖图（反向传播骨架）：自输出 t 沿反向邻接按反拓扑序唤起 follow
+#   back t[, seed]     反向遍历依赖图（反向传播 / drain 骨架）：自输出 t 沿反向邻接按反拓扑序唤起 follow；
+#                      follow 返回非 0 即提前中止本轮遍历（drain 协作层：认领并处理一个最深节点后停扫重扫）
 # 均为模块域静态对象（不支持 @ 导出），注册延迟到模块 init（编译器生成 token_bind/token_depend）。
 # tok 类型是语言内核机制，协议声明在此（默认导入，供编译器识别方法分派）；C 结构体/原型
 # 与运行时已下沉至独立模块 builtins/tok/（tok.h 经 op.h 默认带入每个 C 单元；tok_impl.c
@@ -466,7 +472,8 @@ def operand: {
     h: &                    # 不透明运行时句柄（实现私有）
 
     fnc get:: @             # t.get()：取当前值（@，调用点用 (e:T@) 还原）
-    fnc set:: v: @, tag: i4 # t.set(v, tag)：设值（随附 tag）并触发依赖级联
+    fnc set:: v: @, tag: i4 # t.set(v, tag)：设值（随附 tag），唯值变更才落值并触发依赖级联（记忆化/去抖）
+    fnc pulse:: v: @, tag: i4 # t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也强制传播（拉取流水线/迭代：每次 set 皆事件）
     fnc depth:: i4          # t.depth()：依赖图深度（源=0；编译期烘焙的常量，O(1) 查表）
     fnc critical:: i4       # t.critical()：是否在关键路径（最长链）上（dep…map；编译期烘焙，O(1)）
     fnc slack:: i4          # t.slack()：松弛余量（可深多少跳而不拖慢全局；0=关键点）
@@ -480,7 +487,19 @@ def operand: {
     fnc scc:: i4            # t.scc()：受控反馈簇编号（dep loop；编译期 Tarjan 烘焙，O(1)；非反馈=0）
     fnc scc_size:: i4       # t.scc_size()：所属反馈簇大小（>1 或含自环=反馈；0/1=非反馈）
     fnc loop_run:: i4, max: i4  # t.loop_run(max)：驱动 t 所在反馈簇迭代至多 max 轮，返回实际轮数
+    fnc ctx:: &             # t.ctx()：取节点私有上下文（侧车；form t,v,&n 绑定；未绑定=空 &）——节点处理态载体
 }
+
+# 节点处理钩子类型（form 第 4 参 exec 契约）：统一拉取/推送两模式（模式由谁驱动决定，非钩子属性）：
+#   · 拉取（back sink）：按反拓扑序对各注册节点唤起 fn(t, t.ctx())——出队一帧 → 跑 kernel → t.set 产出
+#     （触发前向路由）；返回非 0=已认领并处理一节点、请求中止本轮 back 扫描。
+#   · 推送（token_set）：值变更落定后、向下游传播前于锁外唤起 fn(t, t.ctx())——节点级副作用/观察点
+#     （sink 产出、统计、日志、外部推送）。与 combine 正交：combine 纯算值（锁内），处理/副作用归 exec（锁外，MT 安全）。
+@fnc token_exec_fn: i4, t: token&, ctx: &
+
+# tok_modified()：返回 modified 哨兵 @。combine 体内 `return tok_modified()` 表示「强制刷新」——
+#   即使合成结果与原值相等也强制传播（对齐 c_prototype 的 C_modified；set 默认仅在新值≠原值时传播）。
+@fnc tok_modified:: @
 
 # combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&，成员均 @（自描述胖指针）。
 #   sender —— 发送者（当前恒空 @，预留）；base —— 当前值；input —— 本次输入；tag —— set 随附标签。
@@ -494,12 +513,14 @@ def operand: {
 
 # follow 上下文（this）：dep follow 体的唯一形参 __scdep_in&。
 #   toks —— 依赖项句柄数组（token&&，下标取第 i 项 token&）；count —— 依赖项数；
-#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标；-4=back 反向遍历）。
+#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标；-4=back 反向遍历）；
+#   ctx —— 注册时透传的关系私有上下文（dep 边状态；无则空 &）。
 #   a:"id" 局部名糖由编译器注入 `var a: token& = this->toks[i]`。
 @def __scdep_in: {
     toks: token&&
     count: i4
     active: i4
+    ctx: &
 }
 
 # com 通讯机制

@@ -18,6 +18,7 @@ dep any: l:"sensor.level"
 
 fnc main: i4
     form level, (0: @)
+    form alert, (0: @)
     level->set((50: @), 0)
     var lv: i8 = (level->get(): i8)
     var al: i8 = (alert->get(): i8)

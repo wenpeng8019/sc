@@ -4313,15 +4313,22 @@ struct CGen {
         out << ");\n";
     }
 
-    // form 语句 → token_form(t, v, 0) —— 给 form token 灌初值（@）并升格为 form 主。
-    //   初值须为 @（自描述胖指针）；form 不带 tag，标签恒 0。
+    // form 语句 → token_form(t, v, 0, ctx, exec) —— 给 form token 灌初值（@）并升格为 form 主，
+    //   可选第三参 ctx（&n 侧车）绑定为节点私有上下文、第四参 exec 挂节点处理钩子（无则 NULL）。
+    //   初值须为 @；form 不带 tag，标签恒 0。
     void emitFormStmt(const Stmt& s) {
         indent();
         out << "token_form(";
         emitExpr(*s.expr, true);     // tok&（句柄指针）
         out << ", ";
         emitExpr(*s.forInit, true);  // @ 初值
-        out << ", 0);\n";
+        out << ", 0, ";
+        if (s.forCond) { out << "(void*)"; emitExpr(*s.forCond, true); }  // 可选侧车 ctx
+        else out << "(void*)0";
+        out << ", ";
+        if (s.forStep) { out << "(token_exec)"; emitExpr(*s.forStep, true); }  // 可选节点钩子 exec
+        else out << "(token_exec)0";
+        out << ");\n";
     }
 
     // back t[, seed]：反向遍历（反向传播骨架）→ token_back(t, seed, 0)。
@@ -6293,8 +6300,7 @@ struct CGen {
         for (auto& dr : depRegs) {
             std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";
             out << "static int " << tramp << "(token **_ts, int _n, int _acting, void *_ctx) {\n";
-            out << "    (void)_ctx;\n";
-            out << "    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;\n";
+            out << "    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;\n";
             out << "    return (int)" << dr.fn << "(&_self);\n}\n";
         }
         if (!depRegs.empty()) out << "\n";

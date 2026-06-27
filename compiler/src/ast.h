@@ -304,9 +304,11 @@ struct Stmt {
         DoneS,      // done 标记就绪    done future [, result]（异步特性）
                     //                > expr=future（future&），forInit=可选结果（自动 void* 擦除）
                     //                  + 等价 future_done(future, result)；result 省略=NULL
-        FormS,      // form token 初始化  form t, v（灌初值 + 升格为 form 主）
-                    //                > expr=tok 句柄（tok&），forInit=初值（void& 自动指针）
-                    //                  + 等价 tok_form(t, v)；首个执行者成为分布式值主
+        FormS,      // form token 初始化  form t, v[, ctx[, exec]]（灌初值 + 升格为 form 主 + 可选挂侧车/钩子）
+                    //                > expr=tok 句柄（tok&），forInit=初值（void& 自动指针），
+                    //                  forCond=可选节点私有上下文（&n 侧车，绑定到 tok ctx），
+                    //                  forStep=可选节点处理钩子 exec（token_exec_fn，绑定到 tok exec）
+                    //                  + 等价 token_form(t, v, 0, ctx, exec)；首个执行者成为分布式值主
         BackS,      // back 反向遍历    back t[, seed]（反向传播骨架）
                     //                > expr=tok 句柄（tok&），forInit=可选梯度种子（@ 自动擦除）
                     //                  + 等价 token_back(t, seed)；沿反向邻接按反拓扑序唤起 follow

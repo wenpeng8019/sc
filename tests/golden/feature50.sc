@@ -17,6 +17,8 @@ dep all: p:"fp.b" loop q:"fp.a"
     return false
 
 fnc main: i4
+    form b, (0: @)
+    form a, (0: @)
     a->set((100: @), 0)
     printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
     var rounds: i4 = a->loop_run(10)

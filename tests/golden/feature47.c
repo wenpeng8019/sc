@@ -49,35 +49,36 @@ int32_t main(void) {
     alert = token_bind("sensor.alert", NULL);
     { token *_deps0[] = { level }; token_depend(_deps0, 1, 0, __scdep_0_tramp, NULL); }
     /* line 38 */
-    token_form(level, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
-    /* line 40 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(50), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_form(level, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    /* line 39 */
+    token_form(alert, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 41 */
-    int64_t lv = ((int64_t)((token_get(level)).p));
+    token_set(level, ((sc_afat){(void *)(intptr_t)(50), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 42 */
-    int64_t al = ((int64_t)((token_get(alert)).p));
+    int64_t lv = ((int64_t)((token_get(level)).p));
     /* line 43 */
+    int64_t al = ((int64_t)((token_get(alert)).p));
+    /* line 44 */
     printf("after 50:  level=%lld alert=%lld\n", lv, al);
-    /* line 45 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(150), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 46 */
-    lv = ((int64_t)((token_get(level)).p));
+    token_set(level, ((sc_afat){(void *)(intptr_t)(150), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 47 */
-    al = ((int64_t)((token_get(alert)).p));
-    /* line 48 */
-    printf("after 150: level=%lld alert=%lld\n", lv, al);
-    /* line 50 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(30), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
-    /* line 51 */
     lv = ((int64_t)((token_get(level)).p));
+    /* line 48 */
+    al = ((int64_t)((token_get(alert)).p));
+    /* line 49 */
+    printf("after 150: level=%lld alert=%lld\n", lv, al);
+    /* line 51 */
+    token_set(level, ((sc_afat){(void *)(intptr_t)(30), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
     /* line 52 */
+    lv = ((int64_t)((token_get(level)).p));
+    /* line 53 */
     printf("after 30:  level=%lld\n", lv);
-    /* line 54 */
+    /* line 55 */
     return 0;
 }
 
 static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    (void)_ctx;
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;
+    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
     return (int)__scdep_0_follow(&_self);
 }

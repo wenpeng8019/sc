@@ -179,6 +179,8 @@ struct SGen {
                 ind();
                 out << "form " << exprToStr(*s.expr);
                 if (s.forInit) out << ", " << exprToStr(*s.forInit);
+                if (s.forCond) out << ", " << exprToStr(*s.forCond);
+                if (s.forStep) out << ", " << exprToStr(*s.forStep);
                 out << "\n";
                 break;
             case Stmt::BackS:

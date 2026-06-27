@@ -1,9 +1,9 @@
 # feature47：分布式 token 依赖（tok / dep / form）—— 声明式跨量传播。
 #
 # tok 是「分布式 token」：以字符串 id 唯一标识的共享量，值为类型擦除 @（此例当 i8 装箱用）。
-#   · tok t: "id"        声明 token 句柄（enforce 纯从：set 直接赋值）
-#   · tok t: "id"<缩进体>  声明并挂 combine 回调（form 候选：紧随缩进体即 combine）
-#   · form t, v          初始化 form token：灌初值并升格为 form 主
+#   · tok t: "id"        声明 token 句柄（无 combine 体；仍须由主 form 激活后 set/get 方生效）
+#   · tok t: "id"<缩进体>  声明并挂 combine 回调（紧随缩进体即 combine）
+#   · form t, v          灌初值并升格为「主」就绪起点；无论有无 combine 体均须 form 方可用
 #   · dep all/any: ...   声明 token 间依赖（follow 回调，all=与门 / any=或门）
 #   · t.get() / t.set(v, tag) 取值 / 设值（set 触发依赖级联，tag 随附标签）
 # 均为模块域静态对象，注册延迟到模块 init（编译器生成 tok_bind / tok_depend）；运行时
@@ -24,7 +24,7 @@ tok level: "sensor.level"
         m = i
     return (m: @)                        # 装箱回 @
 
-# ---- enforce 从：告警标志（无体，set 直接赋值）----
+# ---- 告警标志：无 combine 体（直赋型）；须由本模块 form 激活后方可 set/get ----
 tok alert: "sensor.alert"
 
 # ---- 依赖：level 变更即评估，超阈值则点亮 alert（or 门：任一变更触发）----
@@ -35,7 +35,8 @@ dep any: l:"sensor.level"
     return false                         # 维持 or 门
 
 fnc main: i4
-    form level, (0: @)                   # 初始化 form 主，初值 0
+    form level, (0: @)                   # 初始化主，初值 0（峰值保持 combine）
+    form alert, (0: @)                   # 直赋型亦须 form 激活，否则 set 仅入挂起、get 读不到
 
     level->set((50: @), 0)               # 50 → 不超阈值
     var lv: i8 = (level->get(): i8)

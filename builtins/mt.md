@@ -82,7 +82,7 @@
 | `cond` | mt.sc | 条件变量 | `init/drop/one/all/wait` |
 | `barrier` | mt.sc | N 方汇合屏障 | `init(n)/drop/wait` |
 | `thread` | op.sc 内核 | joinable 线程句柄 | `join` |
-| `pool` | op.sc 内核协议 | 线程池接口（vtable） | `run/join/drop`；mt 提供 `default_pool(n)` |
+| `pool` | op.sc 内核协议 | 线程池接口（vtable，run 投递目标） | `run/join/drop`；mt 提供两种策略 `default_pool(n)`（常驻 FIFO）/ `drain_pool(n)`（按需自调度） |
 | `queue` | op.sc 内核协议 | 消息队列接口（vtable） | `post/sync/async/pull/drop`；mt 提供 `default_queue(host)` |
 | `future` | op.sc 内核 | 单线程异步句柄（`async→future→done`） | `await`；`done f, r` 兑现 |
 | `promise` | op.sc 内核协议 | 跨线程异步句柄（`queue.async` 返回） | `ready/wait/drop` |
@@ -363,6 +363,35 @@ run<p> work(a, b)
 p.join()                           # 屏障：等已提交任务完成（池仍可用）
 p.drop()                           # 析构：等完成 → 停池 → 回收
 ```
+
+### 9.7 按需自调度池（drain_pool —— pool 的另一种策略）
+
+`pool` 是 sc 对「线程调度组件」的核心抽象，**投递动词只有 `run`**。mt 提供两种策略，均返回
+`pool&`、均凭 `run` 投递，只是运行时 `run` 指针指向不同实现：
+
+- `default_pool(n)`：常驻 worker 消费**内部 FIFO 任务队列**——`run<p> f()` 入队，`f` 执行一次。
+- `drain_pool(n)`：**按需自调度**——无任务队列，worker 反复跑投递的工作单元 rpc 直到一轮无新
+  投递即退；`run<dp> f()` = 通知有新活 + 按需激活一个 worker（上限 n）。适合「任务在外部图/
+  队列里、由应用自调度」的场景（如 `templates/workflow-graph` 的 `back` drain）。
+
+```sc
+rpc work_unit: id: i4              # 工作单元：自身循环排空至「本视角无活」后返回
+    while <还有活>
+        <处理一单位>              # 重活在锁外
+    return 0                       # 无活即返回（池代检无新 run 则令本 worker 退出）
+
+var dp: pool& = drain_pool(4)      # 上限 4 worker；构造时不启 worker
+run<dp> work_unit(0)               # 生产者投放后调用：通知有新活，内部按需激活 worker
+dp->join()                         # 屏障：等当前 worker 全部退出（running→0）
+dp->drop()                         # 析构：置停 → 等 worker 退出 → 回收
+```
+
+**一致性（核心）**：`running`（在跑 worker 数）本质是个信号量，连同「有新活」世代 `gen`
+均由**池内部锁**守护，经**世代代检**消除丢唤醒——`run` 先 `gen++` 再判 `running<max` 激活；
+worker 每轮跑 `work_unit` 前在锁下快照 `seen=gen`、返回后在锁下复检 `gen!=seen`（其间有人
+`run`）则再来一轮、否则 `running--` 退出。两段各在池锁下原子成段，故即便工作单元内部另有锁
+（如外部图的锁），只需「先令工作源可见、再 `run<dp>`」即不漏活。**应用层无须再手搓「在跑
+计数 + 补投」信号量——这正是 `pool` 抽象（线程调度组件）该承担的职责。**
 
 ---
 

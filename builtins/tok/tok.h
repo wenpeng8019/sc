@@ -42,11 +42,13 @@ typedef struct __sctok_in {
  *   toks   —— 依赖项句柄数组（token**，下标 [i] 取第 i 项 token&）；
  *   count  —— 依赖项个数；
  *   active —— 本次触发动作码（见下 acting）：负数为门事件码，>=0 为或门变更项下标。
+ *   ctx    —— 注册时透传的用户上下文（dep 关系的私有边状态；无则空 &）。
  *   dep 的 a:"id" 局部名糖由编译器注入 `var a: token& = this->toks[i]`。 */
 typedef struct __scdep_in {
     token  **toks;
     int32_t  count;
     int32_t  active;
+    void    *ctx;
 } __scdep_in;
 
 /* combine 回调：form 候选据上下文 this（base/input/sender/tag）算出新值（@ 擦除）。 */
@@ -57,14 +59,28 @@ typedef sc_afat (*token_combine)(__sctok_in *self);
  *     -3 (ALL_CHANGED)：与门全部已变更（set 触发）；
  *     -1 (ANY_READY)  ：或门首次任一就绪 / 任一变更（acting 退化）；
  *     -4 (BACK)       ：反向遍历（back t）——this->active==-4 即走反向计算（读目标写源）；
+ *                       BACK 下返回值另作「中止反向遍历」信号：非 0=停止本轮 back 扫描
+ *                       （drain 协作层用：认领并处理一节点后中止重扫），0=继续遍历（如反向传播）；
  *     idx >= 0        ：或门，本次变更的依赖项下标。
  *   编译器生成的蹦床把本签名打包为 __scdep_in& 后调用合成的 follow 体。 */
 typedef int (*token_follow)(token **ts, int n, int acting, void *ctx);
+/* exec 钩子：节点（token）私有的处理回调，统一拉取/推送两模式（模式由谁驱动决定，非钩子属性）：
+ *   · 拉取（back sink）：按反拓扑序对每个注册了 exec 的节点唤起 exec(t, t->ctx)——从侧车（ctx）
+ *     出队一帧、跑节点 kernel、t.set 产出（触发前向路由），返回非 0 = 「已认领并处理一节点」即
+ *     请求中止本轮 back 扫描。
+ *   · 推送（token_set）：值变更落定后、于锁外（combine 临界区已退出）、向下游 dep 传播之前唤起
+ *     exec(t, t->ctx)——节点级副作用/观察点（sink 产出、统计、日志、外部推送）；仅在值变更时唤起。
+ *   与 combine/follow 正交：combine 须纯（锁内只算值），dep 只管前向路由，节点处理/副作用归 exec
+ *   （锁外，MT 安全）。一个节点只会被其一种模式驱动（取决于模板用 back 还是 set）。 */
+typedef int (*token_exec)(token *t, void *ctx);
 
 token      *token_bind(const char *id, token_combine combine);  /* create-or-get：按 id intern 句柄，combine 非空则挂为 form 候选 */
 sc_afat     token_get(token *t);                                /* t.get()：取当前值（@，调用点 (e:T@) 还原） */
-void        token_set(token *t, sc_afat v, int32_t tag);        /* t.set(v, tag)：设值（随附 tag）并触发依赖级联 */
-void        token_form(token *t, sc_afat v, int32_t tag);       /* form t, v：灌初值并升格为 form 主 */
+void        token_set(token *t, sc_afat v, int32_t tag);        /* t.set(v, tag)：设值（随附 tag）；唯新值≠原值才落值并触发依赖级联（记忆化/去抖） */
+void        token_pulse(token *t, sc_afat v, int32_t tag);      /* t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也落值并强制传播（拉取流水线/迭代：每次 set 皆事件） */
+sc_afat     tok_modified(void);                                 /* modified 哨兵 @：combine 体内 return tok_modified() → 强制刷新传播（即使值未变） */
+void        token_form(token *t, sc_afat v, int32_t tag, void *ctx, token_exec exec);  /* form t, v[, ctx[, exec]]：灌初值并升格为 form 主；ctx 非空则绑定节点私有上下文（侧车），exec 非空则挂节点处理钩子 */
+void       *token_ctx(token *t);                                /* t.ctx()：取本 token 的私有上下文（form 绑定的侧车；未绑定=空 &） */
 void        token_depend(token **ts, int n, int all, token_follow follow, void *ctx);  /* dep：注册依赖关系（all=与门/或门） */
 void        token_depend_map(token **ts, int nsrc, int ntgt, int all, token_follow follow, void *ctx);  /* dep…map：源(nsrc)→目标(ntgt) 显式图边；ts=源++目标，仅源触发 */
 void        token_set_depth(token *t, int depth);               /* 烘焙：编译期算好的依赖图深度写入句柄（注册时调用，常量入参） */
@@ -83,7 +99,7 @@ int         token_batch_width(token *t);                        /* t.batch_width
 void        token_set_dom(token *t, int checkpoint, int dom_size); /* 烘焙：编译期支配树算好的检查点标志 + 支配子树规模写入句柄 */
 int         token_checkpoint(token *t);                         /* t.checkpoint()：是否为支配咽喉（缓存边界；O(1)） */
 int         token_dom_size(token *t);                           /* t.dom_size()：支配子树规模（缓存可覆盖的下游 token 数） */
-void        token_back(token *t, sc_afat seed, int32_t tag);    /* back t[, seed]：反向遍历（反向传播骨架）——自 t 沿反向邻接收上游 dep，按深度降序（反拓扑）以 acting=TOK_BACK 唤起 follow；seed 非空先灌入 t */
+void        token_back(token *t, sc_afat seed, int32_t tag);    /* back t[, seed]：反向遍历（反向传播 / drain 骨架）——自 t 沿反向邻接收上游 dep，按深度降序（反拓扑）以 acting=TOK_BACK 唤起 follow；follow 返回非 0 即提前中止本轮遍历（drain 拉取）；seed 非空先灌入 t */
 void        token_depend_loop(token **ts, int nsrc, int ntgt, int all, token_follow follow, void *ctx);  /* dep loop：受控反馈环——源不反挂（不自动级联），登记全局 loop 表，由 token_loop_run 按 SCC 簇驱动 */
 void        token_set_scc(token *t, int scc_id, int scc_size); /* 烘焙：编译期 Tarjan 算好的 SCC 反馈簇划分写入句柄（注册时调用，常量入参） */
 int         token_scc(token *t);                                /* t.scc()：读受控反馈簇编号（O(1)；非反馈/未烘焙=0） */

@@ -29,6 +29,11 @@ dep any: c:"nn.y" map o:"nn.loss"
     return false
 
 fnc main: i4
+    form gx, (0: @)
+    form gy, (0: @)
+    form loss, (0: @)
+    form y, (0: @)
+    form x, (0: @)
     x->set((4: @), 0)
     printf("forward: x=%lld y=%lld loss=%lld\n", (x->get(): i8), (y->get(): i8), (loss->get(): i8))
     back loss, (1: @)
