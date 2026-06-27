@@ -55,7 +55,7 @@ const std::unordered_map<std::string, Tok> kKeywords = {
     {"cls", Tok::KwCls},   {"dim", Tok::KwDim},
     {"mod", Tok::KwMod},
     {"tok", Tok::KwTok},   {"dep", Tok::KwDep},
-    {"form", Tok::KwForm},
+    {"form", Tok::KwForm}, {"back", Tok::KwBack},
 };
 
 // 校验字面量后缀是否为合法组合（限制为 C 标准后缀 + b/w 扩展）。

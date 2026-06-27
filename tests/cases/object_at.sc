@@ -41,8 +41,8 @@ fnc main: i4
 
     # object@ → 具体类 T@ 还原（downcast）：源 .p 是擦除的 _class 槽，
     # 须 container_of 回算实体基址（Node 为 ~ 链表类，_class 偏移≠0，覆盖偏移修复）。
-    var back: Node@ = (ok: Node@)
-    printf("back age=%d\n", back->age)
+    var bk: Node@ = (ok: Node@)
+    printf("back age=%d\n", bk->age)
 
     # object@ → 裸 @ → 具体类 T@：裸 @ 承接 object@ 即 object 风味（dtor=sc_obj_drop、
     # .p=&_class）。还原 Node@ 时运行时据 dtor==sc_obj_drop 补 offsetof(Node,_class)，

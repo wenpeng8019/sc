@@ -12,6 +12,7 @@
 // ============================================================
 #include "codegen_c.h"
 #include "error.h"
+#include "tok/graph.h"   // builtins/tok/graph 图算法规范接口（编译期烘焙 dep…map 深度等图属性为生成代码常量）
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -205,8 +206,8 @@ struct CGen {
     // ---- 分布式 token（tok/dep）注册支撑 ----
     // tok 句柄与 dep 依赖关系均为模块域静态对象，注册延迟到模块 init（tok_bind/tok_depend），
     //   在 gInits 之后注入（绑定先于依赖；依赖项引用已绑定的 tok 句柄）。
-    struct TokBind { std::string var; std::string id; std::string fn; };       // 句柄变量 + id 串 + combine C 名（空=无）
-    struct DepReg  { bool all; std::string fn; std::vector<std::string> vars; }; // 门逻辑 + follow C 名 + 各依赖项 tok 句柄变量
+    struct TokBind { std::string var; std::string id; std::string fn; int depth = 0; int sccId = 0; int sccSize = 0; int critical = 0; int slack = -1; int fanin = 0; int fanout = 0; int reach = 0; int batchWidth = 0; int checkpoint = 0; int domSize = 0; bool inMap = false; };  // 句柄变量 + id 串 + combine C 名（空=无）+ 依赖图深度 + SCC 反馈簇 + 关键路径标志/松弛（slack=-1 未烘焙）+ 扇入扇出度 + 可达下游数 + 波次并行宽度 + 支配检查点/子树规模 + 是否在 map DAG 中
+    struct DepReg  { bool all; std::string fn; std::vector<std::string> vars; std::vector<std::string> targetVars; bool loop = false; }; // 门逻辑 + follow C 名 + 源依赖项 tok 句柄变量 + map 目标句柄变量 + 是否 dep loop 受控反馈环
     std::vector<TokBind> tokBinds;  // 本单元 tok 句柄绑定（源序）
     std::vector<DepReg>  depRegs;   // 本单元 dep 依赖注册（源序）
 
@@ -4161,6 +4162,9 @@ struct CGen {
             case Stmt::FormS:
                 emitFormStmt(s);
                 break;
+            case Stmt::BackS:
+                emitBackStmt(s);
+                break;
             case Stmt::PrintS:
                 emitPrintStmt(s);
                 break;
@@ -4317,6 +4321,18 @@ struct CGen {
         emitExpr(*s.expr, true);     // tok&（句柄指针）
         out << ", ";
         emitExpr(*s.forInit, true);  // @ 初值
+        out << ", 0);\n";
+    }
+
+    // back t[, seed]：反向遍历（反向传播骨架）→ token_back(t, seed, 0)。
+    //   有 seed：擦除为 @ 灌入起点；无 seed：传空 @（运行时不灌种子，保留 t 当前值）。
+    void emitBackStmt(const Stmt& s) {
+        indent();
+        out << "token_back(";
+        emitExpr(*s.expr, true);     // tok&（句柄指针）
+        out << ", ";
+        if (s.forInit) emitExpr(*s.forInit, true);   // @ 梯度种子
+        else           out << "(sc_afat){(void *)0, (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}";  // 空 @：无种子
         out << ", 0);\n";
     }
 
@@ -6025,6 +6041,7 @@ struct CGen {
                 if (d->external || d->kind != Decl::DepD) continue;
                 DepReg dr;
                 dr.all = d->depAll;
+                dr.loop = d->depLoop;
                 dr.fn = d->tokFn;
                 for (auto& it : d->depItems) {
                     auto m = idToVar.find(it.second);
@@ -6033,7 +6050,123 @@ struct CGen {
                             "\" 未声明对应 tok（同单元内须先 tok 声明）", d->line};
                     dr.vars.push_back(m->second);
                 }
+                for (auto& it : d->depTargets) {         // map 目标项：同样须为同单元已声明 tok
+                    auto m = idToVar.find(it.second);
+                    if (m == idToVar.end())
+                        throw CompileError{"dep map 目标 \"" + it.second +
+                            "\" 未声明对应 tok（同单元内须先 tok 声明）", d->line};
+                    dr.targetVars.push_back(m->second);
+                }
                 depRegs.push_back(std::move(dr));
+            }
+        }
+        // 图烘焙（baked constants）：对 dep…map 边建有向图，调 builtins/tok/graph 规范接口算每个
+        //   token 的依赖图深度（源=0，多前驱取最长路），回填 tokBinds[i].depth。结果在
+        //   emitTokRegistrations 中作为字面量常量随 token_set_depth 写入——运行时零图遍历
+        //   （lightmap 式预计算：编译期算贵的，运行时只查表）。无 map 的 token 深度恒 0。
+        {
+            std::unordered_map<std::string, int> vidx;   // token id → 顶点编号（首见序）
+            std::vector<int> eu, ev;                     // 边表：eu[i] -> ev[i]
+            auto vid = [&](const std::string& id) -> int {
+                auto it = vidx.find(id);
+                if (it != vidx.end()) return it->second;
+                int n = (int)vidx.size();
+                vidx.emplace(id, n);
+                return n;
+            };
+            for (auto& d : prog.decls) {
+                if (d->external || d->kind != Decl::DepD || d->depTargets.empty()) continue;
+                if (d->depLoop) continue;                // loop 边成环：排除出 depth 图（否则整图退化全 0）
+                for (auto& s : d->depItems)
+                    for (auto& t : d->depTargets) {
+                        eu.push_back(vid(s.second));
+                        ev.push_back(vid(t.second));
+                    }
+            }
+            if (!eu.empty()) {
+                sc_graph g;
+                g.nv = (int)vidx.size();
+                g.ne = (int)eu.size();
+                g.eu = eu.data();
+                g.ev = ev.data();
+                std::vector<int> depth((size_t)g.nv, 0);
+                sc_graph_depth(&g, depth.data());        // 环已由语义分析拦截，此处必为 DAG
+                std::vector<int> crit((size_t)g.nv, 0), slack((size_t)g.nv, 0);
+                sc_graph_critical(&g, crit.data(), slack.data());  // 关键路径 + 松弛（同一 map DAG）
+                std::vector<int> indeg((size_t)g.nv, 0), outdeg((size_t)g.nv, 0);
+                sc_graph_degree(&g, indeg.data(), outdeg.data());  // 扇入/扇出度（枢纽识别）
+                std::vector<int> reach((size_t)g.nv, 0);
+                sc_graph_reach(&g, reach.data());        // 可达下游数（脏标记影响范围）
+                std::vector<int> bwidth((size_t)g.nv, 0);
+                sc_graph_batches(&g, nullptr, bwidth.data(), nullptr);  // 拓扑波次并行宽度（接 MT）
+                std::vector<int> ckpt((size_t)g.nv, 0), domsz((size_t)g.nv, 0);
+                sc_graph_dominators(&g, ckpt.data(), domsz.data());     // 支配检查点 + 子树规模（缓存边界）
+                for (auto& tb : tokBinds) {
+                    auto it = vidx.find(tb.id);
+                    if (it == vidx.end()) continue;
+                    size_t v    = (size_t)it->second;
+                    tb.inMap    = true;
+                    tb.depth    = depth[v];
+                    tb.critical = crit[v];
+                    tb.slack    = slack[v];
+                    tb.fanin    = indeg[v];
+                    tb.fanout   = outdeg[v];
+                    tb.reach    = reach[v];
+                    tb.batchWidth = bwidth[v];
+                    tb.checkpoint = ckpt[v];
+                    tb.domSize  = domsz[v];
+                }
+            }
+        }
+        // SCC 烘焙（baked constants）：对 dep loop 受控反馈环的 源→目标 边建有向图，调 sc_graph_scc
+        //   （Tarjan）算每个 token 的强连通簇编号 + 簇大小，回填 tokBinds[i].sccId/sccSize。多顶点簇
+        //   （或自环）即反馈簇——结果随 token_set_scc 烘焙为字面量，运行时 token_loop_run 据此 O(1) 驱动
+        //   迭代。loop 边走此独立路径，与 all/any/map 的 depth 烘焙互不干扰。
+        {
+            std::unordered_map<std::string, int> vidx;   // token id → 顶点编号（首见序，仅 loop 边参与）
+            std::vector<std::string> vids;               // 顶点 → token id
+            std::vector<int> eu, ev;                     // loop 边表：eu[i] -> ev[i]
+            auto vid = [&](const std::string& id) -> int {
+                auto it = vidx.find(id);
+                if (it != vidx.end()) return it->second;
+                int n = (int)vidx.size();
+                vidx.emplace(id, n);
+                vids.push_back(id);
+                return n;
+            };
+            for (auto& d : prog.decls) {
+                if (d->external || d->kind != Decl::DepD || !d->depLoop) continue;
+                for (auto& s : d->depItems)
+                    for (auto& t : d->depTargets) {
+                        int u = vid(s.second), v = vid(t.second);
+                        eu.push_back(u);
+                        ev.push_back(v);
+                    }
+            }
+            if (!eu.empty()) {
+                sc_graph g;
+                g.nv = (int)vidx.size();
+                g.ne = (int)eu.size();
+                g.eu = eu.data();
+                g.ev = ev.data();
+                std::vector<int> comp((size_t)g.nv, 0);
+                int ncomp = 0;
+                sc_graph_scc(&g, comp.data(), &ncomp);
+                std::vector<int> compSize((size_t)ncomp, 0);   // 各簇成员数
+                for (int v = 0; v < g.nv; v++) compSize[(size_t)comp[v]]++;
+                // 自环（源==目标）令该单点簇也成反馈：标记成员数 < 2 但有自环的簇为反馈（簇大小补到 2）
+                std::vector<char> compSelf((size_t)ncomp, 0);
+                for (int e = 0; e < g.ne; e++)
+                    if (eu[(size_t)e] == ev[(size_t)e]) compSelf[(size_t)comp[eu[(size_t)e]]] = 1;
+                for (auto& tb : tokBinds) {
+                    auto it = vidx.find(tb.id);
+                    if (it == vidx.end()) continue;
+                    int c = comp[(size_t)it->second];
+                    int sz = compSize[(size_t)c];
+                    if (sz < 2 && compSelf[(size_t)c]) sz = 2;  // 自环单点簇也视为反馈
+                    tb.sccId = c;
+                    tb.sccSize = sz;
+                }
             }
         }
         mainHasTeardown = isEntryUnit && (!gDrops.empty() || !depTokens.empty());
@@ -6119,15 +6252,37 @@ struct CGen {
                 out << c;
             }
             out << "\", " << (tb.fn.empty() ? "NULL" : "(token_combine)" + tb.fn) << ");\n";
+            if (tb.depth)                                // 烘焙：依赖图深度（编译期常量）写入句柄；深度 0（源/非图）省略
+                out << pad << "token_set_depth(" << tb.var << ", " << tb.depth << ");\n";
+            if (tb.slack >= 0)                           // 烘焙：关键路径标志 + 松弛（编译期常量）；仅在 map DAG 中的 token（slack>=0）发出
+                out << pad << "token_set_crit(" << tb.var << ", " << tb.critical << ", " << tb.slack << ");\n";
+            if (tb.inMap) {                              // 烘焙：map DAG 图度量（编译期常量）——扇入扇出 / 影响范围 / 波次宽度 / 支配检查点
+                out << pad << "token_set_degree(" << tb.var << ", " << tb.fanin << ", " << tb.fanout << ");\n";
+                out << pad << "token_set_reach(" << tb.var << ", " << tb.reach << ");\n";
+                out << pad << "token_set_batch(" << tb.var << ", " << tb.batchWidth << ");\n";
+                out << pad << "token_set_dom(" << tb.var << ", " << tb.checkpoint << ", " << tb.domSize << ");\n";
+            }
+            if (tb.sccSize > 1)                          // 烘焙：SCC 反馈簇划分（编译期常量）写入句柄；非反馈（簇大小≤1）省略
+                out << pad << "token_set_scc(" << tb.var << ", " << tb.sccId << ", " << tb.sccSize << ");\n";
         }
         for (size_t i = 0; i < depRegs.size(); ++i) {
             auto& dr = depRegs[i];
             std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";  // _follow → _tramp
-            out << pad << "{ token *_deps" << i << "[] = {";
-            for (size_t j = 0; j < dr.vars.size(); ++j)
-                out << (j ? ", " : " ") << dr.vars[j];
-            out << " }; token_depend(_deps" << i << ", " << dr.vars.size() << ", "
-                << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
+            if (dr.targetVars.empty()) {                 // 无 map 目标：原 token_depend（ABI 不变）
+                out << pad << "{ token *_deps" << i << "[] = {";
+                for (size_t j = 0; j < dr.vars.size(); ++j)
+                    out << (j ? ", " : " ") << dr.vars[j];
+                out << " }; token_depend(_deps" << i << ", " << dr.vars.size() << ", "
+                    << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
+            } else {                                     // map/loop：_deps = 源 ++ 目标；token_depend_map / token_depend_loop
+                out << pad << "{ token *_deps" << i << "[] = {";
+                bool first = true;
+                for (auto& v : dr.vars)        { out << (first ? " " : ", ") << v; first = false; }
+                for (auto& v : dr.targetVars)  { out << (first ? " " : ", ") << v; first = false; }
+                out << " }; " << (dr.loop ? "token_depend_loop" : "token_depend_map")
+                    << "(_deps" << i << ", " << dr.vars.size() << ", "
+                    << dr.targetVars.size() << ", " << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
+            }
         }
     }
 

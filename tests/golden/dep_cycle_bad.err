@@ -1,0 +1,2 @@
+dep_cycle_bad.sc:5: [1;31m错误[0m: token 依赖图存在环（dep…map）: "g.a" -> "g.b" -> "g.a"。请打破环路（依赖图须为有向无环图 DAG）
+  |  dep any: x:"g.a" map y:"g.b"

@@ -307,6 +307,9 @@ struct Stmt {
         FormS,      // form token 初始化  form t, v（灌初值 + 升格为 form 主）
                     //                > expr=tok 句柄（tok&），forInit=初值（void& 自动指针）
                     //                  + 等价 tok_form(t, v)；首个执行者成为分布式值主
+        BackS,      // back 反向遍历    back t[, seed]（反向传播骨架）
+                    //                > expr=tok 句柄（tok&），forInit=可选梯度种子（@ 自动擦除）
+                    //                  + 等价 token_back(t, seed)；沿反向邻接按反拓扑序唤起 follow
         PrintS,     // print 日志输出   print[<chn>] arg, arg, ...（括号可省）
                     //                > printChn=通道 u1 的 C 表达式文本（默认 "0"），透传给 C print
                     //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
@@ -435,10 +438,12 @@ struct Decl {
                     //            调用表达式存 expr（Expr::Call）
 
         // -- tok 分布式 token 依赖机制 --
-        DepD,       // token 依赖关系  dep all/any: a:"id1", b:"id2" \n\tbody
-                    //            depAll=门逻辑（true=与门 all / false=或门 any）；
-                    //            depItems=依赖项 [(局部名, id 串)...]；tokFn=follow 回调 C 名；
-                    //            随模块默认 init 注册（tok_depend）。配套 follow FuncD（tokHidden）。
+        DepD,       // token 依赖关系  dep all/any: a:"id1", b:"id2" [map|loop o:"id3"] \n\tbody
+                    //            depAll=门逻辑（true=与门 all / false=或门 any，与边拓扑正交）；
+                    //            depItems=源依赖项 [(局部名, id 串)...]；depTargets=map/loop 目标项（可空）；
+                    //            depLoop=边拓扑为受控反馈环（loop 替 map：豁免环检测、走 SCC 烘焙）；
+                    //            tokFn=follow 回调 C 名；随模块默认 init 注册（token_depend[_map/_loop]）。
+                    //            配套 follow FuncD（tokHidden）。map=DAG 边（环检测）；loop=反馈边（SCC）。
     } kind;
 
     std::string name;               // 类型名 / 函数名；IncD 时为头文件文本
@@ -476,8 +481,12 @@ struct Decl {
                                     //   DepD：follow 回调 C 名。
     bool tokHidden = false;         // 合成的 combine/follow FuncD：codegen_sc 跳过（已并入 tok/dep 块回写），
                                     //   codegen_c 正常 static 发出。
-    bool depAll = false;            // DepD：门逻辑（true=与门 all / false=或门 any）。
-    std::vector<std::pair<std::string, std::string>> depItems;  // DepD：依赖项 [(局部名, id 串)...]
+    bool depAll = false;            // DepD：门逻辑（true=与门 all / false=或门 any；与 map/loop 边拓扑正交）。
+    bool depLoop = false;           // DepD：边拓扑为受控反馈环（loop 替 map）——豁免环检测，走独立烘焙路径（SCC 缩点 + token_depend_loop）。
+    std::vector<std::pair<std::string, std::string>> depItems;  // DepD：源依赖项（触发/上游）[(局部名, id 串)...]
+    std::vector<std::pair<std::string, std::string>> depTargets; // DepD：map 目标项（输出/下游）[(局部名, id 串)...]
+                                    //   非空 = `dep ...: 源 map 目标 - 体`，显式声明 源→目标 依赖图边
+                                    //   （编译期环检测）；follow 体可同时按局部名引用源与目标 token。
 
     bool heapOnly = false;          // 堆专属类型 def/cls NAME&: {}（名后紧跟 &）：
                                     // 应用层不存在 NAME 值类型，仅 NAME&（普通指针）/NAME@（自动指针）。

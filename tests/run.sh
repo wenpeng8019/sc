@@ -77,6 +77,14 @@ POSITIVE=(
     examples/feature30/feature30.sc
     examples/feature46/feature46.sc
     examples/feature47.sc
+    examples/feature48.sc
+    examples/feature49.sc
+    examples/feature50.sc
+    examples/feature51.sc
+    examples/feature52.sc
+    examples/feature53.sc
+    examples/feature54.sc
+    examples/feature55.sc
     examples/feature_forward.sc
     examples/feature_export_inc.sc
     examples/feature4_lib.sc
@@ -151,6 +159,7 @@ NEGATIVE=(
     tests/cases/bare_rpc_bad.sc
     tests/cases/mod_export_init_bad.sc
     tests/cases/mod_private_export_bad.sc
+    tests/cases/dep_cycle_bad.sc
 )
 
 # 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。

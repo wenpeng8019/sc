@@ -17,6 +17,7 @@
 // ============================================================
 #include "semantic.h"
 #include "error.h"
+#include "tok/graph.h"   // builtins/tok/graph 图算法规范接口（dep…map 环检测等编译期预计算）
 
 #include <algorithm>
 #include <cstdlib>
@@ -532,6 +533,54 @@ struct Checker {
 
         for (auto& kv : g)
             if (state[kv.first] == 0) dfs(kv.first);
+    }
+
+    // token 依赖图（dep…map）有向环检测：每条 `dep …: 源 map 目标` 贡献 源→目标 有向边，
+    //   全单元汇总成有向图。本检查只做「适配」——把 token id 映射为整数顶点、抽出边表，
+    //   实际环检测算法委托给 builtins/graph 规范接口 sc_graph_cycle（算法不入编译器源码）。
+    //   环（含自环 a→a）意味着 follow 写入会回灌触发自身或上游，形成无终止级联——编译期即
+    //   拒绝，提示环路径。无 map 的普通 dep 不贡献边。
+    void checkTokDepGraphCycles() const {
+        std::unordered_map<std::string, int> idx;          // token id → 顶点编号（首见序）
+        std::vector<std::string> ids;                      // 顶点 → token id
+        std::vector<int> idLine;                           // 顶点首见所在 dep 行（报错定位）
+        auto vid = [&](const std::string& id, int line) -> int {
+            auto it = idx.find(id);
+            if (it != idx.end()) return it->second;
+            int n = (int)ids.size();
+            idx.emplace(id, n);
+            ids.push_back(id);
+            idLine.push_back(line);
+            return n;
+        };
+        std::vector<int> eu, ev;                           // 边表：eu[i] -> ev[i]
+        for (auto& d : prog.decls) {
+            if (d->external || d->kind != Decl::DepD || d->depTargets.empty()) continue;
+            if (d->depLoop) continue;                      // dep loop：受控反馈环，豁免环检测（边走 SCC 烘焙路径，不入 DAG 校验）
+            for (auto& s : d->depItems)
+                for (auto& t : d->depTargets) {
+                    eu.push_back(vid(s.second, d->line));
+                    ev.push_back(vid(t.second, d->line));
+                }
+        }
+        if (eu.empty()) return;
+
+        sc_graph g;
+        g.nv = (int)ids.size();
+        g.ne = (int)eu.size();
+        g.eu = eu.data();
+        g.ev = ev.data();
+        std::vector<int> cyc((size_t)g.nv + 1);
+        int clen = 0;
+        if (sc_graph_cycle(&g, cyc.data(), &clen)) {       // 有环 → 回填环路径，格式化报错
+            std::string path;
+            for (int i = 0; i < clen; i++) {
+                if (i) path += " -> ";
+                path += "\"" + ids[cyc[i]] + "\"";
+            }
+            err(idLine[cyc[0]], "token 依赖图存在环（dep…map）: " + path +
+                "。请打破环路（依赖图须为有向无环图 DAG）");
+        }
     }
 
     // ---- 表达式类型推导 ----
@@ -1388,6 +1437,11 @@ struct Checker {
                 (void)inferExpr(*s.expr, locals, s.line);              // tok 句柄
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 初值
                 break;
+            // -- back：tok 句柄 + 可选梯度种子（种子在 codegen 自动 @ 擦除） -------
+            case Stmt::BackS:
+                (void)inferExpr(*s.expr, locals, s.line);              // tok 句柄
+                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 可选种子
+                break;
             // -- print：逐项检查实参表达式（格式覆盖 Cast 解包到被格式化的子表达式）
             case Stmt::PrintS:
                 for (auto& a : s.printArgs) {
@@ -2080,6 +2134,7 @@ struct Checker {
         checkDimConsistency();          // 1.55 维度无歧义：同名维度参数签名须一致
         checkDeclTypes();               // 1.6 顶层声明的类型位置校验（返回/形参/字段/全局）
         checkAggregateByValueCycles();  // 2. 按值包含环检测
+        checkTokDepGraphCycles();       // 2.1 token 依赖图（dep…map）有向环检测
         checkFatBoundaries();           // 2.5 自动指针 T@ 边界检查
         checkDeadCode();                // 2.6 不可达（死）代码检测
         checkMissingReturn();           // 2.7 非 void 函数缺少 return 检测

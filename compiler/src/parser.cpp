@@ -60,7 +60,7 @@ bool isAssignOp(const std::string& op) {
 // 用于成员名位置容忍关键字拼写：成员/方法名永不可能是语句关键字，
 // 故 .run() / .done() 等与语句关键字同名的方法可被正常解析。
 bool isKeywordTok(Tok k) {
-    return k >= Tok::KwDef && k <= Tok::KwMod;
+    return (k >= Tok::KwDef && k <= Tok::KwMod) || k == Tok::KwBack;  // KwBack 容忍作成员/方法名（adt 的 array.back()、fnc back:: 等）；语句位 back 仍归 back 语句
 }
 
 // Parser 内部类 —— 封装所有语法分析状态
@@ -913,6 +913,16 @@ struct Parser {
     //         b:"id2"                      a/b 等局部名糖注入 `var a: token& = this->toks[i]`
     //         -
     //         <follow体>
+    //   dep all/any:                     —— map 形态：显式声明 源→目标 依赖图边（编译期环检测）
+    //         a:"id1"                      源（触发/上游，门按其状态开合，反挂触发）
+    //         map                          'map' 单独成行作分隔（块式）；行内 `… map o:"id3"`
+    //         o:"id3"                      目标（输出/下游，follow 写入，不触发本 dep）
+    //         -                            源 [0..nsrc)、目标 [nsrc..nsrc+ntgt) 均注入局部名糖
+    //         <follow体>                   运行时 token_depend_map(_deps={源++目标}, nsrc, ntgt, …)
+    //   dep all/any:                     —— loop 形态：'loop' 替 'map'（边拓扑维度，与 all/any 门正交），
+    //         a:"id1"                      声明 受控反馈环 边——豁免环检测，编译期 Tarjan 缩点烘焙 SCC
+    //         loop                         反馈簇（token_set_scc 常量），运行时 t.loop_run(max) 按簇迭代。
+    //         o:"id3"                      源不反挂 deps（杜绝 set 自动级联无限环）；运行时 token_depend_loop。
 
     // token id 串 → 合法 C 标识符片段（非字母数字一律折叠为 '_'）。
     static std::string sanitizeTokId(const std::string& id) {
@@ -992,30 +1002,39 @@ struct Parser {
         advance();                                       // 跳过 dep
         if (!at(Tok::Ident) || (cur().text != "all" && cur().text != "any"))
             err("dep 后期望门逻辑 all（与门）或 any（或门）");
-        bool depAll = (advance().text == "all");
+        bool depAll  = (advance().text == "all");
+        bool depLoop = false;                            // 反馈边标记：由 map/loop 分隔符设置（loop=受控反馈环，与 all/any 门逻辑正交）
         expect(Tok::Colon, "':'");
 
-        std::vector<std::pair<std::string, std::string>> items;
-        auto parseItem = [&]() {
+        std::vector<std::pair<std::string, std::string>> items;    // 源依赖项（触发/上游）
+        std::vector<std::pair<std::string, std::string>> targets;  // map 目标项（输出/下游）
+        auto parseItemInto = [&](std::vector<std::pair<std::string, std::string>>& dst) {
             if (!at(Tok::Ident)) err("期望依赖项局部名");
             std::string nm = advance().text;
             expect(Tok::Colon, "':'");
             if (!at(Tok::Str)) err("依赖项局部名后期望字符串 id（如 \"a.b.1\"）");
             std::string id = unquoteStr(advance().text);
-            items.push_back({nm, id});
+            dst.push_back({nm, id});
         };
 
         std::vector<StmtPtr> body;
-        if (!at(Tok::Newline)) {                         // 行内形态：a:"id1", b:"id2" \n\tbody
-            parseItem();
-            while (accept(Tok::Comma)) parseItem();
+        if (!at(Tok::Newline)) {                         // 行内形态：a:"id1", b:"id2" [map o:"id3"] \n\tbody
+            parseItemInto(items);
+            while (accept(Tok::Comma)) parseItemInto(items);
+            if (at(Tok::Ident) && (cur().text == "map" || cur().text == "loop")) {  // 行内 map/loop：源 后接目标项
+                depLoop = (cur().text == "loop");         // loop=受控反馈环（豁免环检测，走 SCC 烘焙）
+                advance();
+                parseItemInto(targets);
+                while (accept(Tok::Comma)) parseItemInto(targets);
+            }
             expect(Tok::Newline, "换行");
             expect(Tok::Indent, "缩进的 follow 体");
             parseStmts(body);
             accept(Tok::Dedent);
-        } else {                                         // 块式：缩进逐行项 + '-' 分隔 + follow 体
+        } else {                                         // 块式：缩进逐行项 + 可选 'map' 分隔目标 + '-' 分隔 + follow 体
             advance();                                   // 跳过 Newline
             expect(Tok::Indent, "缩进的依赖项块");
+            bool inTargets = false;                      // 'map' 之后切入目标项收集
             for (;;) {
                 skipNewlines();
                 if (at(Tok::Dedent) || at(Tok::End)) break;
@@ -1024,12 +1043,20 @@ struct Parser {
                     parseStmts(body);
                     break;
                 }
-                parseItem();
+                if (at(Tok::Ident) && (cur().text == "map" || cur().text == "loop") && peek().kind == Tok::Newline) {
+                    depLoop = (cur().text == "loop");    // loop=受控反馈环（豁免环检测，走 SCC 烘焙）
+                    advance(); advance();                // 'map'/'loop' 分隔符 → 其后为目标项（输出/下游）
+                    inTargets = true;
+                    continue;
+                }
+                parseItemInto(inTargets ? targets : items);
                 expect(Tok::Newline, "换行");
             }
             accept(Tok::Dedent);
         }
         if (items.empty()) err(line, "dep 至少需要一个依赖项");
+        if (depLoop && targets.empty())
+            err(line, "dep … loop 后需要至少一个目标项（反馈边的下游）");
 
         std::string followFn = "__scdep_" + std::to_string(depCounter++) + "_follow";
         auto fn = std::make_unique<Decl>();              // 合成 follow FuncD（唯一形参 this: __scdep_in&，返回 bool）
@@ -1048,8 +1075,9 @@ struct Parser {
 
         // 依赖项局部名糖：为每个 a:"id" 在体首注入 `var a: token& = this->toks[i]`，
         //   令 follow 体可直接以局部名引用第 i 个依赖项句柄（token&）。
+        //   排布：源在前（[0..nsrc)，触发/上游），map 目标在后（[nsrc..nsrc+ntgt)，输出/下游）。
         std::vector<StmtPtr> injected;
-        for (size_t i = 0; i < items.size(); i++) {
+        auto injectSugar = [&](const std::string& nm, size_t i) {
             auto ident = std::make_unique<Expr>();       // this
             ident->kind = Expr::Ident; ident->text = "this"; ident->line = line;
             auto mem = std::make_unique<Expr>();         // this->toks
@@ -1061,7 +1089,7 @@ struct Parser {
             sub->kind = Expr::Index; sub->a = std::move(mem); sub->b = std::move(idx);
             sub->line = line;
             Field vf;                                    // var <name>: token&
-            vf.name = items[i].first;
+            vf.name = nm;
             vf.type.name = "token";
             vf.type.ptr = 1;
             vf.line = line;
@@ -1071,7 +1099,10 @@ struct Parser {
             vs->line = line;
             vs->decls.push_back(std::move(vf));
             injected.push_back(std::move(vs));
-        }
+        };
+        size_t slot = 0;
+        for (auto& it : items)   injectSugar(it.first, slot++);   // 源
+        for (auto& it : targets) injectSugar(it.first, slot++);   // map 目标
         for (auto& s : body) injected.push_back(std::move(s));
         fn->body = std::move(injected);
         prog.decls.push_back(std::move(fn));
@@ -1080,7 +1111,9 @@ struct Parser {
         dep->line = line;
         dep->kind = Decl::DepD;
         dep->depAll = depAll;
+        dep->depLoop = depLoop;
         dep->depItems = std::move(items);
+        dep->depTargets = std::move(targets);
         dep->tokFn = followFn;
         prog.decls.push_back(std::move(dep));
     }
@@ -2297,14 +2330,25 @@ struct Parser {
                 return s;
             }
 
-            // form 初始化语句：form t, v —— 给 form token t 灌初值并升格为 form 主。
-            //   降解为 tok_form(t, (void*)v)。expr=tok 句柄，forInit=初值。
+            // back 反向遍历语句：back t[, seed] —— 自输出 token t 反向遍历依赖图（反向传播骨架）。
+            //   降解为 token_back(t, seed)。expr=tok 句柄，forInit=可选梯度种子（省略=不灌种子）。
+            //   back 为一等语句关键字；成员位（array.back() / fnc back::）由 isKeywordTok 容忍。
             case Tok::KwForm: {
                 auto s = mkStmt(Stmt::FormS);
                 advance();
                 s->expr = parseExpr();                              // tok 句柄
                 expect(Tok::Comma, "','（form 需要初值：form t, v）");
                 s->forInit = parseExpr();                           // 初值（void&）
+                expect(Tok::Newline, "换行");
+                return s;
+            }
+
+            case Tok::KwBack: {
+                auto s = mkStmt(Stmt::BackS);
+                advance();
+                s->expr = parseExpr();                              // tok 句柄
+                if (accept(Tok::Comma))
+                    s->forInit = parseExpr();                       // 可选梯度种子（@）
                 expect(Tok::Newline, "换行");
                 return s;
             }

@@ -186,6 +186,9 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::FormS:
             return node("form", "", exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
+        case Stmt::BackS:
+            return node("back", "", exprToStr(*s.expr) +
+                        (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
         case Stmt::PrintS: {
             std::string d;
             for (size_t i = 0; i < s.printArgs.size(); i++) {
@@ -314,6 +317,9 @@ std::string declNode(const Decl& d) {
             std::string detail = (d.depAll ? "all:" : "any:");
             for (size_t i = 0; i < d.depItems.size(); i++)
                 detail += (i ? ", " : " ") + d.depItems[i].first + ":\"" + d.depItems[i].second + "\"";
+            std::string sep = d.depLoop ? " loop " : " map ";  // loop=受控反馈环边；map=DAG 边
+            for (size_t i = 0; i < d.depTargets.size(); i++)
+                detail += (i ? ", " : sep) + d.depTargets[i].first + ":\"" + d.depTargets[i].second + "\"";
             return node("dep", "", detail, d.line);
         }
     }

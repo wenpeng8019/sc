@@ -181,6 +181,12 @@ struct SGen {
                 if (s.forInit) out << ", " << exprToStr(*s.forInit);
                 out << "\n";
                 break;
+            case Stmt::BackS:
+                ind();
+                out << "back " << exprToStr(*s.expr);
+                if (s.forInit) out << ", " << exprToStr(*s.forInit);
+                out << "\n";
+                break;
             case Stmt::PrintS:
                 ind();
                 out << "print";
@@ -399,19 +405,23 @@ struct SGen {
             case Decl::MixD:
                 ind(); out << "mix " << (d.expr ? exprToStr(*d.expr) : "") << "\n";
                 break;
-            case Decl::DepD: {         // dep 依赖关系：dep all/any: 项... + follow 体
+            case Decl::DepD: {         // dep 依赖关系：dep all/any: 源... [map|loop 目标...] + follow 体
                 ind();
                 out << "dep " << (d.depAll ? "all:" : "any:");
                 for (size_t i = 0; i < d.depItems.size(); i++)
                     out << (i ? ", " : " ") << d.depItems[i].first
                         << ":\"" << d.depItems[i].second << "\"";
+                const char* sep = d.depLoop ? " loop " : " map ";  // loop=受控反馈环边；map=DAG 边
+                for (size_t i = 0; i < d.depTargets.size(); i++)   // map/loop 目标项（输出/下游）
+                    out << (i ? ", " : sep) << d.depTargets[i].first
+                        << ":\"" << d.depTargets[i].second << "\"";
                 out << "\n";
                 auto it = tokHiddenFns.find(d.tokFn);  // 回写隐藏 follow FuncD 体
                 if (it != tokHiddenFns.end()) {
-                    // 体首注入了 depItems.size() 条局部名糖（var a: token& = this->toks[i]），
+                    // 体首注入了 depItems+depTargets 条局部名糖（var a: token& = this->toks[i]），
                     // 回写源码时跳过这些合成语句，仅输出用户原始 follow 体。
                     depth++;
-                    size_t skip = d.depItems.size();
+                    size_t skip = d.depItems.size() + d.depTargets.size();
                     const auto& fb = it->second->body;
                     for (size_t i = skip; i < fb.size(); i++) emitStmt(*fb[i]);
                     depth--;

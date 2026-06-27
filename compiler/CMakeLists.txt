@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(scc CXX)
+project(scc CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,14 @@ add_executable(scc
     src/codegen_sc.cpp
     src/semantic.cpp
     src/cheaders.cpp
+    # 图算法（builtins/tok/graph）：编译期被 scc 引入，对 tok 依赖图（dep…map）做
+    # 环检测/拓扑/深度/逆拓扑预计算，结果烘焙为生成代码常量。graph.h 为编译期生产者
+    # 与运行时消费者共享的规范接口（spec interface）。图是 tok 的一部分，故同居 tok 目录。
+    ../builtins/tok/graph_impl.c
 )
+
+# builtins 根入 -I：使 src 可 #include "tok/graph.h" 引用图算法规范接口
+target_include_directories(scc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../builtins)
 
 target_compile_options(scc PRIVATE -Wall -Wextra)
 

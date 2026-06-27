@@ -14,6 +14,7 @@
         { "include": "#for-in" },
         { "include": "#tok-decl" },
         { "include": "#dep-decl" },
+        { "include": "#dep-map-sep" },
         { "include": "#var-decl" },
         { "include": "#label-decl" },
         { "include": "#ret-call-sugar" },
@@ -143,6 +144,13 @@
                 "2": { "name": "keyword.control.gate.sc" }
             }
         },
+        "dep-map-sep": {
+            "match": "(?:^\\s*(map|loop)\\s*$)|(\\b(?:map|loop)\\b)(?=\\s+[A-Za-z_][A-Za-z0-9_]*\\s*:\\s*\")",
+            "captures": {
+                "1": { "name": "keyword.control.gate.sc" },
+                "2": { "name": "keyword.control.gate.sc" }
+            }
+        },
         "label-decl": {
             "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:(?=\\s*(#.*)?$)",
             "captures": {
@@ -160,7 +168,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue|run|sync|done|await|async|final|form)\\b"
+                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue|run|sync|done|await|async|final|form|back)\\b"
                 },
                 {
                     "name": "keyword.control.io.sc",

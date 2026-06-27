@@ -68,6 +68,7 @@ enum class Tok {
     KwTok,      // tok  — 声明分布式 token（带体=form 主候选 / 无体=enforce 从），模块域静态
     KwDep,      // dep  — 声明 token 依赖关系（dep all/any: a:"id", ... 体即 follow 回调）
     KwForm,     // form — 初始化 form token：form t, v（灌初值 + 校验 t 为 form 类型）
+    KwBack,     // back — 反向遍历依赖图：back t[, seed]（反向传播骨架，反拓扑序唤起 follow）
 
     // ---- 特殊 ----
     Ellipsis,   // ...  可变参数占位

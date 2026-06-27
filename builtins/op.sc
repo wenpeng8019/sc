@@ -455,6 +455,9 @@ def operand: {
 #   tok t: "id"<缩进体>  声明并挂 combine 回调（form 候选：缩进体即 combine，体内见 this）
 #   form t, v          初始化 form token：灌初值并升格为 form 主
 #   dep all/any: ...   声明 token 间依赖关系（follow 回调，all=与门 / any=或门，体内见 this）
+#   dep …: 源 map 目标 声明 源→目标 图边（DAG，编译期环检测 + 深度烘焙）
+#   dep …: 源 loop 目标 声明 受控反馈环边（成环合法，编译期 SCC 缩点烘焙；t.loop_run(max) 驱动迭代）
+#   back t[, seed]     反向遍历依赖图（反向传播骨架）：自输出 t 沿反向邻接按反拓扑序唤起 follow
 # 均为模块域静态对象（不支持 @ 导出），注册延迟到模块 init（编译器生成 token_bind/token_depend）。
 # tok 类型是语言内核机制，协议声明在此（默认导入，供编译器识别方法分派）；C 结构体/原型
 # 与运行时已下沉至独立模块 builtins/tok/（tok.h 经 op.h 默认带入每个 C 单元；tok_impl.c
@@ -464,6 +467,19 @@ def operand: {
 
     fnc get:: @             # t.get()：取当前值（@，调用点用 (e:T@) 还原）
     fnc set:: v: @, tag: i4 # t.set(v, tag)：设值（随附 tag）并触发依赖级联
+    fnc depth:: i4          # t.depth()：依赖图深度（源=0；编译期烘焙的常量，O(1) 查表）
+    fnc critical:: i4       # t.critical()：是否在关键路径（最长链）上（dep…map；编译期烘焙，O(1)）
+    fnc slack:: i4          # t.slack()：松弛余量（可深多少跳而不拖慢全局；0=关键点）
+    fnc fanin:: i4          # t.fanin()：扇入度（被多少上游 map 依赖；编译期烘焙，O(1)）
+    fnc fanout:: i4         # t.fanout()：扇出度（驱动多少下游 map 目标；高=枢纽/广播源）
+    fnc reach:: i4          # t.reach()：变更后须重算的下游 token 数（脏标记影响范围/失效爆炸半径；O(1)）
+    fnc batch:: i4          # t.batch()：拓扑波次编号（=depth；同波 token 可并行触发，接 MT）
+    fnc batch_width:: i4    # t.batch_width()：本波次并行宽度（与本 token 同深度、可并行的 token 数）
+    fnc checkpoint:: i4     # t.checkpoint()：是否为支配咽喉/缓存边界（编译期支配树烘焙，O(1)）
+    fnc dom_size:: i4       # t.dom_size()：支配子树规模（本检查点缓存可覆盖的下游 token 数）
+    fnc scc:: i4            # t.scc()：受控反馈簇编号（dep loop；编译期 Tarjan 烘焙，O(1)；非反馈=0）
+    fnc scc_size:: i4       # t.scc_size()：所属反馈簇大小（>1 或含自环=反馈；0/1=非反馈）
+    fnc loop_run:: i4, max: i4  # t.loop_run(max)：驱动 t 所在反馈簇迭代至多 max 轮，返回实际轮数
 }
 
 # combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&，成员均 @（自描述胖指针）。
@@ -478,7 +494,7 @@ def operand: {
 
 # follow 上下文（this）：dep follow 体的唯一形参 __scdep_in&。
 #   toks —— 依赖项句柄数组（token&&，下标取第 i 项 token&）；count —— 依赖项数；
-#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标）。
+#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标；-4=back 反向遍历）。
 #   a:"id" 局部名糖由编译器注入 `var a: token& = this->toks[i]`。
 @def __scdep_in: {
     toks: token&&
