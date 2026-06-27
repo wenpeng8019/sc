@@ -789,6 +789,37 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
                 deps.push_back(memPath);
         }
     }
+    // op → tok 隐式硬依赖：tok/dep/form 是语言关键字（恒可用，无需 inc），其运行时
+    //   （token_bind/get/set/form/depend）须始终随工程链接。把 builtins/tok/tok.sc 纳入
+    //   单元图（等同隐式 inc），递归加载使 tok 单元生成并拼接链接 tok_impl.c。op 恒被
+    //   默认导入，故 tok 运行时恒随工程链接。token 协议（@def token）在 op.sc，C ABI
+    //   在 tok.h（经 op.h 默认带入），本依赖仅为携带 tok_impl.c。
+    {
+        const std::string stem = srcPath.stem().string();
+        if (stem == "op") {
+            std::filesystem::path tokPath = baseDir / "tok" / "tok.sc";  // builtins/op → builtins/tok
+            tokPath = std::filesystem::weakly_canonical(tokPath);
+            if (std::filesystem::exists(tokPath)
+                && std::find(deps.begin(), deps.end(), tokPath) == deps.end())
+                deps.push_back(tokPath);
+        }
+    }
+    // tok → adt 隐式硬依赖：tok 运行时（tok_impl.c）的全局 token 表 g_toks 用 adt 哈希（dict）
+    //   做字符串 id 的 O(1) intern，故编译 tok 单元时自动把 builtins/adt/adt.sc 纳入单元图
+    //   （递归加载使 adt 生成并拼接链接 adt_impl.c，导出声明 dict_* 供 tok_impl.c 调用）。
+    //   adt 恒 → mem（上面已连）；op 恒被默认导入、op → tok → adt，故 adt 运行时恒随工程链接。
+    //   单元图按规范化路径全局去重，与用户 inc adt.sc 不重复链接；adt 的 @导出只并入 tok
+    //   单元、不入用户根单元，故不影响生成代码（goldens 不变）。
+    {
+        const std::string stem = srcPath.stem().string();
+        if (stem == "tok") {
+            std::filesystem::path adtPath = baseDir.parent_path() / "adt" / "adt.sc";  // builtins/tok → builtins/adt
+            adtPath = std::filesystem::weakly_canonical(adtPath);
+            if (std::filesystem::exists(adtPath)
+                && std::find(deps.begin(), deps.end(), adtPath) == deps.end())
+                deps.push_back(adtPath);
+        }
+    }
     // 合并直接依赖的 @导出声明（external 标记）：供跨模块语法糖
     //（方法调用/声明即构造/方法字段）识别，不参与本单元代码生成。
     // 宏定义（def 宏）一律并入（无论是否 @导出）：宏经 C #define 由模块头透传，

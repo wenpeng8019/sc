@@ -6,6 +6,7 @@
 #include "adt.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include "mem/mem.h"    /* list 段式存储用 chunk/chunk0/refit/recycle（不受全局 -DSC_POOL 影响） */
+#include <ctype.h>      /* string_trim/lower/upper 的 isspace/tolower/toupper */
 
 /* ---------------- string ---------------- */
 

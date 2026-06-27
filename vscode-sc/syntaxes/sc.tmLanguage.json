@@ -12,6 +12,8 @@
         { "include": "#cls-decl" },
         { "include": "#fnc-decl" },
         { "include": "#for-in" },
+        { "include": "#tok-decl" },
+        { "include": "#dep-decl" },
         { "include": "#var-decl" },
         { "include": "#label-decl" },
         { "include": "#ret-call-sugar" },
@@ -49,7 +51,7 @@
         },
         "export-prefix": {
             "name": "storage.modifier.export.sc",
-            "match": "^\\s*(@)(?=inc|def|fnc|var|let)"
+            "match": "^\\s*(@)(?=inc|def|fnc|rpc|var|let|tls|mod)"
         },
         "root-marker": {
             "name": "storage.modifier.root.sc",
@@ -127,6 +129,20 @@
                 "2": { "name": "variable.other.declaration.sc" }
             }
         },
+        "tok-decl": {
+            "match": "^\\s*(tok)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.var.sc" },
+                "2": { "name": "variable.other.declaration.sc" }
+            }
+        },
+        "dep-decl": {
+            "match": "^\\s*(dep)\\s+(all|any)\\b",
+            "captures": {
+                "1": { "name": "keyword.declaration.sc" },
+                "2": { "name": "keyword.control.gate.sc" }
+            }
+        },
         "label-decl": {
             "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:(?=\\s*(#.*)?$)",
             "captures": {
@@ -144,7 +160,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.sc",
-                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue|run|sync|done|await|async|final)\\b"
+                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue|run|sync|done|await|async|final|form)\\b"
                 },
                 {
                     "name": "keyword.control.io.sc",
@@ -156,7 +172,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|tls|mod|inc|add|tst|cls)\\b"
+                    "match": "\\b(def|fnc|rpc|var|let|tls|mod|inc|add|tst|cls|tok|dep)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",

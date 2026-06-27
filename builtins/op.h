@@ -392,6 +392,12 @@ int      op_session_taken(void);
 void     op_timer_arm(future *f, uint32_t ms);
 void    *op_uv_loop(void);
 
+/* ---------------- tok / dep / form：分布式 token 依赖机制 ----------------
+ * 句柄类型协议（@def token，方法 get/set）声明在 op.sc；C ABI 与运行时已下沉至独立
+ * 模块 builtins/tok/（tok.h 契约 + tok_impl.c 实现，经 op→tok 隐式依赖始终随工程链接）。
+ * 此处带入其 C ABI 头，使 token / token_* 原型随 op.h 进入每个 C 单元（恒可用）。 */
+#include "tok/tok.h"
+
 /* ---------------- com / limit / ioq：设备通讯机制 ----------------
  * com 是机制框架：具体 io 依赖设备，由 com 的 read/write/error 每对象方法指针
  * （MethodPtr，C 侧为结构体函数指针字段）实现——非成员函数（伪类无派生）。

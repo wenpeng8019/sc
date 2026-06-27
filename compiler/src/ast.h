@@ -304,6 +304,9 @@ struct Stmt {
         DoneS,      // done 标记就绪    done future [, result]（异步特性）
                     //                > expr=future（future&），forInit=可选结果（自动 void* 擦除）
                     //                  + 等价 future_done(future, result)；result 省略=NULL
+        FormS,      // form token 初始化  form t, v（灌初值 + 升格为 form 主）
+                    //                > expr=tok 句柄（tok&），forInit=初值（void& 自动指针）
+                    //                  + 等价 tok_form(t, v)；首个执行者成为分布式值主
         PrintS,     // print 日志输出   print[<chn>] arg, arg, ...（括号可省）
                     //                > printChn=通道 u1 的 C 表达式文本（默认 "0"），透传给 C print
                     //                > printCompat=true 时为括号兼容模式（C printf 语法，实参原样传递）
@@ -430,6 +433,12 @@ struct Decl {
                     //            对象宏值存 expr。
         MixD,       // 顶层 mix 展开  mix name(args) → 输出 name(args)（无分号，宏体自含）
                     //            调用表达式存 expr（Expr::Call）
+
+        // -- tok 分布式 token 依赖机制 --
+        DepD,       // token 依赖关系  dep all/any: a:"id1", b:"id2" \n\tbody
+                    //            depAll=门逻辑（true=与门 all / false=或门 any）；
+                    //            depItems=依赖项 [(局部名, id 串)...]；tokFn=follow 回调 C 名；
+                    //            随模块默认 init 注册（tok_depend）。配套 follow FuncD（tokHidden）。
     } kind;
 
     std::string name;               // 类型名 / 函数名；IncD 时为头文件文本
@@ -457,6 +466,18 @@ struct Decl {
                                     // 并抑制配套 VarD 实例；codegen_c 按普通 struct+var 处理）。
     bool modInstance = false;       // mod 配套实例（VarD）：`mod N` 自动生成的 `var N: N_m`，
                                     // codegen_sc 跳过（已并入 mod 块回写），codegen_c 正常发出。
+
+    // ---- tok 分布式 token 机制 ----
+    bool isTok = false;             // tok 句柄（VarD）：`tok t:"id"` 降解的 `var t: tok&`，模块域静态；
+                                    // codegen_c 在模块 init 注入 t = tok_bind(tokId, tokFn)。
+    std::string tokId;              // isTok VarD：token 的字符串 id（跨进程唯一键）；
+                                    //   DepD 不用此字段（id 在 depItems 内）。
+    std::string tokFn;              // isTok VarD：combine 回调 C 名（空=无体，纯 enforce/从）；
+                                    //   DepD：follow 回调 C 名。
+    bool tokHidden = false;         // 合成的 combine/follow FuncD：codegen_sc 跳过（已并入 tok/dep 块回写），
+                                    //   codegen_c 正常 static 发出。
+    bool depAll = false;            // DepD：门逻辑（true=与门 all / false=或门 any）。
+    std::vector<std::pair<std::string, std::string>> depItems;  // DepD：依赖项 [(局部名, id 串)...]
 
     bool heapOnly = false;          // 堆专属类型 def/cls NAME&: {}（名后紧跟 &）：
                                     // 应用层不存在 NAME 值类型，仅 NAME&（普通指针）/NAME@（自动指针）。

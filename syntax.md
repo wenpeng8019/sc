@@ -2491,6 +2491,57 @@ print(“E: 错误 code=%d”, -1)        # 格式串前缀 “X:” 设级别
   （会与清理流程重入，属未定义行为）；`goto` 跨作用域跳转不触发被跳过作用域的 `final`
   （与既有 `goto` 清理缺口一致）。
 
+### 15.8 分布式 token（tok / dep / form / all / any）
+
+`tok` 声明一个**分布式 token**（观念量 / notion）：以字符串 id 唯一标识的共享量，值类型擦除为
+`@`（裸自动指针，读出时由调用点 `(e: T@)` 还原；裸指针/整数可经 `(e: @)` 装箱）。「设值即广播、
+依赖即重算」——`set` 不只是写值，还会触发挂在该 token 上的依赖关系（`dep`）重算。详见
+[builtins/tok.md](builtins/tok.md)。
+
+```sc
+# form 形成主：紧随缩进 combine 体（输入先经回调合成再落值；此例取较大者 = 峰值保持）
+tok level: "sensor.level"
+    var b: i8 = (this->base: i8)    # combine 上下文 this：当前值/输入/发送者/标签
+    var i: i8 = (this->input: i8)
+    var m: i8 = b
+    if i > b
+        m = i
+    return (m: @)                   # 装箱回 @
+
+# enforce 纯从：无 combine，set 直接赋值
+tok alert: "sensor.alert"
+
+# 依赖：任一上游变更即触发 follow（any=或门 / all=与门）
+dep any: l:"sensor.level"
+    var v: i8 = (l->get(): i8)      # 依赖项局部名糖 → this->toks[0]（token&，用 -> 取值）
+    if v > 100
+        alert->set((1: @), 0)
+    return false                    # 返回下次门逻辑：false=或门 / true=与门
+
+fnc main: i4
+    form level, (0: @)             # form：灌初值并升格为 form 主
+    level->set((150: @), 0)        # 触发依赖 → alert 置 1
+    return 0
+```
+
+- **`tok t: "id"`**：声明 token 句柄（`token&`）。紧随的缩进块（无引导冒号）即 **combine 体**——
+  有体 = **form 形成主**（输入经回调合成），无体 = **enforce 纯从**（直接赋值）。combine 体唯一上下文
+  形参 `this: __sctok_in&`，成员皆 `@`：`this->base`（当前值）/ `this->input`（输入）/
+  `this->sender`（发送者，恒空 `@`）/ `this->tag`（`set` 随附标签 `i4`），返回 `@`（新值）。
+- **`form t, v`**：语言内置语句（与 `run`/`done` 同级），给 form token 灌初值（`@`）并升格为 form 主。
+- **`dep all/any: …`**：声明 token 间依赖。`all`=与门（全部依赖项变更齐才触发），`any`=或门
+  （任一变更即触发），二者为上下文标识。依赖项写作 `<局部名>:"<id>"`，可行内逗号分隔，或块形态
+  （每行一项，`-` 单独成行分隔依赖项与 follow 体）。follow 体唯一上下文形参 `this: __scdep_in&`：
+  `this->toks`（依赖项数组 `token&&`）/ `this->count`（个数 `i4`）/ `this->active`（触发动作码
+  `i4`，负=门事件、≥0 为或门变更项下标）；各局部名 `a:"id"` 由编译器注入糖
+  `var a: token& = this->toks[i]`。返回 `bool` = 下次门逻辑。
+- **取值/设值**：句柄是 `token&`（指针），用箭头 `->` 调 `t->get()`（返回 `@`）/ `t->set(v, tag)`
+  （`v` 为 `@`、`tag` 为 `i4`）；`set` 触发依赖级联。
+- **边界（v2）**：模块域静态对象，不支持 `@` 导出（注册延迟到模块 `init` / `main` 序章）；id 为
+  进程内字符串键；协议（`@def token` 及上下文 `@def __sctok_in` / `@def __scdep_in`）声明在
+  `builtins/op.sc`，C ABI 与运行时为独立模块 `builtins/tok/`（`tok.h` + `tok_impl.c`，经 op→tok
+  隐式依赖始终随工程链接，无需 `inc`）。
+
 ## 16. 设备通讯（com 端点与流操作符）
 
 sc 在语言层提供一套**设备通讯**基础能力：内置类型 `com`（通讯端点）配合

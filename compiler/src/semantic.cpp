@@ -1383,6 +1383,11 @@ struct Checker {
                 (void)inferExpr(*s.expr, locals, s.line);              // future
                 if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 结果
                 break;
+            // -- form：tok 句柄 + 初值（值在 codegen 自动 void* 擦除） ------------
+            case Stmt::FormS:
+                (void)inferExpr(*s.expr, locals, s.line);              // tok 句柄
+                if (s.forInit) (void)inferExpr(*s.forInit, locals, s.line); // 初值
+                break;
             // -- print：逐项检查实参表达式（格式覆盖 Cast 解包到被格式化的子表达式）
             case Stmt::PrintS:
                 for (auto& a : s.printArgs) {

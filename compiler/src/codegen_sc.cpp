@@ -18,6 +18,8 @@ struct SGen {
     int depth = 0;
     // 成员函数表：所属类型 → 方法 Decl 列表（再生时印回结构体内部）
     std::unordered_map<std::string, std::vector<const Decl*>> methodImpls;
+    // tok/dep 合成的隐藏回调（combine/follow）：C 名 → Decl，供 tok/dep 块回写其体
+    std::unordered_map<std::string, const Decl*> tokHiddenFns;
 
     void ind() { for (int i = 0; i < depth; i++) out << "    "; }
 
@@ -170,6 +172,12 @@ struct SGen {
             case Stmt::DoneS:
                 ind();
                 out << "done " << exprToStr(*s.expr);
+                if (s.forInit) out << ", " << exprToStr(*s.forInit);
+                out << "\n";
+                break;
+            case Stmt::FormS:
+                ind();
+                out << "form " << exprToStr(*s.expr);
                 if (s.forInit) out << ", " << exprToStr(*s.forInit);
                 out << "\n";
                 break;
@@ -328,6 +336,19 @@ struct SGen {
                 break;
             case Decl::VarD:
                 if (d.modInstance) break;   // mod 配套实例：已并入 `mod N:` 块回写，跳过
+                if (d.isTok) {              // tok 句柄：tok <name>: "<id>"[紧随 combine 体]
+                    ind();
+                    out << "tok " << (d.structCommon.fields.empty() ? "" : d.structCommon.fields.front().name)
+                        << ": \"" << d.tokId << "\"";
+                    out << "\n";
+                    if (!d.tokFn.empty()) { // 带 combine：回写隐藏 FuncD 体（紧随缩进体，无引导冒号）
+                        auto it = tokHiddenFns.find(d.tokFn);
+                        if (it != tokHiddenFns.end()) {
+                            depth++; emitStmts(it->second->body); depth--;
+                        }
+                    }
+                    break;
+                }
                 emitVarLine(d.exported ? "@var" : "var", d.structCommon.fields); break;
             case Decl::LetD: emitVarLine(d.exported ? "@let" : "let", d.structCommon.fields); break;
             case Decl::TlsD: emitVarLine("tls", d.structCommon.fields); break;
@@ -378,6 +399,25 @@ struct SGen {
             case Decl::MixD:
                 ind(); out << "mix " << (d.expr ? exprToStr(*d.expr) : "") << "\n";
                 break;
+            case Decl::DepD: {         // dep 依赖关系：dep all/any: 项... + follow 体
+                ind();
+                out << "dep " << (d.depAll ? "all:" : "any:");
+                for (size_t i = 0; i < d.depItems.size(); i++)
+                    out << (i ? ", " : " ") << d.depItems[i].first
+                        << ":\"" << d.depItems[i].second << "\"";
+                out << "\n";
+                auto it = tokHiddenFns.find(d.tokFn);  // 回写隐藏 follow FuncD 体
+                if (it != tokHiddenFns.end()) {
+                    // 体首注入了 depItems.size() 条局部名糖（var a: token& = this->toks[i]），
+                    // 回写源码时跳过这些合成语句，仅输出用户原始 follow 体。
+                    depth++;
+                    size_t skip = d.depItems.size();
+                    const auto& fb = it->second->body;
+                    for (size_t i = skip; i < fb.size(); i++) emitStmt(*fb[i]);
+                    depth--;
+                }
+                break;
+            }
         }
     }
 
@@ -401,6 +441,10 @@ struct SGen {
                 (d->kind == Decl::FuncD && !d->methodOwner.empty()) ||
                 (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())))
                 methodImpls[d->methodOwner].push_back(d.get());
+        // 预扫：tok/dep 合成的隐藏 combine/follow 回调，按 C 名建表（tok/dep 块回写其体）
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncD && d->tokHidden)
+                tokHiddenFns[d->name] = d.get();
         out << "# 由 scc --emit-sc 从 AST 再生成\n\n";
         if (prog.isRoot) out << "@@\n\n";              // 根模块标记（头部）
         for (auto& d : prog.decls) {
@@ -412,6 +456,8 @@ struct SGen {
             // 结构内成员函数随所属类型输出，顶层不单独成段
             if ((d->kind == Decl::FuncD && !d->methodOwner.empty())
                 || (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())) continue;
+            // tok/dep 合成的隐藏回调（combine/follow）：随 tok/dep 块回写，顶层不输出
+            if (d->kind == Decl::FuncD && d->tokHidden) continue;
             emitDecl(*d);
             out << "\n";
         }

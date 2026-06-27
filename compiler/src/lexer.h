@@ -65,6 +65,9 @@ enum class Tok {
     KwCls,      // cls  — 定义类（复用 def 结构体机制 + 注入分派器 _class）
     KwDim,      // dim  — 类维度（折叠进唯一分派器的 switch 分支，返回恒 tril）
     KwMod,      // mod  — 定义模块单例对象（def 类型 T_m + var 实例 T，自动构造/析构）
+    KwTok,      // tok  — 声明分布式 token（带体=form 主候选 / 无体=enforce 从），模块域静态
+    KwDep,      // dep  — 声明 token 依赖关系（dep all/any: a:"id", ... 体即 follow 回调）
+    KwForm,     // form — 初始化 form token：form t, v（灌初值 + 校验 t 为 form 类型）
 
     // ---- 特殊 ----
     Ellipsis,   // ...  可变参数占位

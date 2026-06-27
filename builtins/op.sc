@@ -449,6 +449,43 @@ def operand: {
                             #   nil=纯协程驱动（无 future<ID> 派发）
 @fnc async_final::          # 销毁当前线程事件循环
 
+# ---------------- tok：分布式 token（tok/dep/form 机制句柄） ----------------
+# tok 是「分布式 token」：跨进程以字符串 id 唯一标识的共享量，值为类型擦除 @。
+#   tok t: "id"        声明 token 句柄（enforce 纯从）
+#   tok t: "id"<缩进体>  声明并挂 combine 回调（form 候选：缩进体即 combine，体内见 this）
+#   form t, v          初始化 form token：灌初值并升格为 form 主
+#   dep all/any: ...   声明 token 间依赖关系（follow 回调，all=与门 / any=或门，体内见 this）
+# 均为模块域静态对象（不支持 @ 导出），注册延迟到模块 init（编译器生成 token_bind/token_depend）。
+# tok 类型是语言内核机制，协议声明在此（默认导入，供编译器识别方法分派）；C 结构体/原型
+# 与运行时已下沉至独立模块 builtins/tok/（tok.h 经 op.h 默认带入每个 C 单元；tok_impl.c
+# 经 op→tok 隐式依赖始终随工程编译链接）。
+@def token: {
+    h: &                    # 不透明运行时句柄（实现私有）
+
+    fnc get:: @             # t.get()：取当前值（@，调用点用 (e:T@) 还原）
+    fnc set:: v: @, tag: i4 # t.set(v, tag)：设值（随附 tag）并触发依赖级联
+}
+
+# combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&，成员均 @（自描述胖指针）。
+#   sender —— 发送者（当前恒空 @，预留）；base —— 当前值；input —— 本次输入；tag —— set 随附标签。
+#   combine 体内用 this->base / this->input / this->sender / this->tag 取上下文，return 新值（@）。
+@def __sctok_in: {
+    sender: @
+    base: @
+    input: @
+    tag: i4
+}
+
+# follow 上下文（this）：dep follow 体的唯一形参 __scdep_in&。
+#   toks —— 依赖项句柄数组（token&&，下标取第 i 项 token&）；count —— 依赖项数；
+#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标）。
+#   a:"id" 局部名糖由编译器注入 `var a: token& = this->toks[i]`。
+@def __scdep_in: {
+    toks: token&&
+    count: i4
+    active: i4
+}
+
 # com 通讯机制
 # ----------------------------------------------------------------------------- 
 # 语言层面提供设备通讯的基础能力

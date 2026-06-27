@@ -183,6 +183,9 @@ std::string stmtNode(const Stmt& s) {
         case Stmt::DoneS:
             return node("done", "", exprToStr(*s.expr) +
                         (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
+        case Stmt::FormS:
+            return node("form", "", exprToStr(*s.expr) +
+                        (s.forInit ? ", " + exprToStr(*s.forInit) : ""), s.line);
         case Stmt::PrintS: {
             std::string d;
             for (size_t i = 0; i < s.printArgs.size(); i++) {
@@ -275,6 +278,10 @@ std::string declNode(const Decl& d) {
         case Decl::VarD:
         case Decl::LetD:
         case Decl::TlsD: {
+            if (d.kind == Decl::VarD && d.isTok) {       // tok 句柄：tok <name>: "<id>"
+                std::string nm = d.structCommon.fields.empty() ? "" : d.structCommon.fields.front().name;
+                return node("tok", nm, "\"" + d.tokId + "\"" + (d.tokFn.empty() ? "" : " :"), d.line);
+            }
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
                 c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
@@ -303,6 +310,12 @@ std::string declNode(const Decl& d) {
         }
         case Decl::MixD:
             return node("mix", "", d.expr ? exprToStr(*d.expr) : "", d.line);
+        case Decl::DepD: {
+            std::string detail = (d.depAll ? "all:" : "any:");
+            for (size_t i = 0; i < d.depItems.size(); i++)
+                detail += (i ? ", " : " ") + d.depItems[i].first + ":\"" + d.depItems[i].second + "\"";
+            return node("dep", "", detail, d.line);
+        }
     }
     return "{}";
 }

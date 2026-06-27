@@ -42,6 +42,7 @@ const ICONS = {
     alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', rpc: 'symbol-event',
     macro: 'symbol-snippet', mix: 'expand-all',
     var: 'symbol-variable', let: 'symbol-constant', tls: 'symbol-variable',
+    tok: 'broadcast', dep: 'git-merge', form: 'zap',
     param: 'symbol-parameter', field: 'symbol-field', item: 'symbol-enum-member',
     case: 'list-selection', arm: 'list-flat', through: 'arrow-right',
     if: 'git-branch', else: 'git-branch', while: 'sync', for: 'sync',

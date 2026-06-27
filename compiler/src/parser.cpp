@@ -23,6 +23,7 @@
 #include "parser.h"
 #include "error.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -76,6 +77,9 @@ struct Parser {
     
     // 结构体内成员函数：parseDef 期间收集，parseProgram 提升为顶层 Decl
     std::vector<DeclPtr> pendingMethods;
+
+    // dep 依赖项的 follow 回调命名计数器（每个 dep 一个唯一序号）
+    int depCounter = 0;
 
     // 当前正在解析函数体的 Decl（供 await 回写 hasAwait 标记其所在 rpc）
     Decl* curParseFn = nullptr;
@@ -887,6 +891,198 @@ struct Parser {
         }
         accept(Tok::Dedent);
         return d;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    // tok / dep 分布式 token 依赖机制
+    //
+    // 设计：tok/dep 均为「模块域静态对象」，声明即定义，注册延迟到模块默认 init
+    //   （tok_bind / tok_depend）。不支持 @ 导出。运行时 tok* 句柄按字符串 id
+    //   create-or-get（幂等），跨进程以 id 退化比对。值为 @（类型擦除自描述胖指针）。
+    //
+    //   tok t: "id"        —— enforce 纯从（无 combine）
+    //   tok t: "id"        —— form 候选（紧随缩进体即 combine：体内 this 上下文 → 新值 @）
+    //         <combine体>          combine 体唯一上下文形参 this: __sctok_in&
+    //                              （this->base 当前值 / this->input 输入 / this->sender / this->tag）
+    //   form t, v          —— 初始化语句：灌初值 + 升格为 form 主（见 parseStatement）
+    //
+    //   dep all/any: a:"id1", b:"id2"   —— 行内依赖项列表 + 缩进 follow 体
+    //         <follow体>                   follow 体唯一上下文形参 this: __scdep_in&
+    //   dep all/any:                     —— 块式：缩进逐行依赖项 + '-' 分隔 + follow 体
+    //         a:"id1"                      （this->toks 依赖数组 / this->count / this->active）；
+    //         b:"id2"                      a/b 等局部名糖注入 `var a: token& = this->toks[i]`
+    //         -
+    //         <follow体>
+
+    // token id 串 → 合法 C 标识符片段（非字母数字一律折叠为 '_'）。
+    static std::string sanitizeTokId(const std::string& id) {
+        std::string out;
+        for (char c : id)
+            out += (std::isalnum((unsigned char)c)) ? c : '_';
+        return out;
+    }
+
+    // 去掉字符串字面量两端的引号（Str token 文本含引号）。
+    static std::string unquoteStr(const std::string& s) {
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+            return s.substr(1, s.size() - 2);
+        return s;
+    }
+
+    // 解析 tok 句柄声明（降解为 VarD{isTok} +（带体）combine FuncD{tokHidden}）。
+    void parseTok(Program& prog, bool exported) {
+        int line = cur().line;
+        if (exported) err("tok 不支持 @ 导出（模块域静态对象）");
+        advance();                                       // 跳过 tok
+        if (!at(Tok::Ident)) err("期望 token 句柄名");
+        std::string handle = advance().text;
+        expect(Tok::Colon, "':'");
+        if (!at(Tok::Str)) err("tok 句柄后期望字符串 id（如 \"a.b.1\"）");
+        std::string id = unquoteStr(advance().text);
+
+        std::string combineFn;
+        std::vector<StmtPtr> body;
+        bool hasBody = false;
+        expect(Tok::Newline, "换行");
+        if (at(Tok::Indent)) {                           // 紧随缩进体 → combine 体（form 候选）
+            advance();
+            parseStmts(body);
+            accept(Tok::Dedent);
+            hasBody = true;
+        }
+
+        if (hasBody) {                                   // 带体 → form 候选：合成 combine FuncD
+            combineFn = "__sctok_" + sanitizeTokId(id) + "_combine";
+            auto fn = std::make_unique<Decl>();
+            fn->line = line;
+            fn->kind = Decl::FuncD;
+            fn->name = combineFn;
+            fn->tokHidden = true;
+            fn->structCommon.type = std::make_shared<TypeRef>();
+            fn->structCommon.type->fat = true;           // 返回 @（新值）
+            Field self;                                  // 单形参 this: __sctok_in&（combine 上下文）
+            self.name = "this";
+            self.type.name = "__sctok_in";
+            self.type.ptr = 1;
+            self.line = line;
+            fn->structCommon.fields.push_back(std::move(self));
+            fn->body = std::move(body);
+            prog.decls.push_back(std::move(fn));
+        }
+
+        auto v = std::make_unique<Decl>();               // 句柄：var t: token&（模块域静态）
+        v->line = line;
+        v->kind = Decl::VarD;
+        v->isTok = true;
+        v->tokId = id;
+        v->tokFn = combineFn;
+        Field f;
+        f.name = handle;
+        f.type.name = "token";
+        f.type.ptr = 1;
+        f.line = line;
+        v->structCommon.fields.push_back(std::move(f));
+        prog.decls.push_back(std::move(v));
+    }
+
+    // 解析 dep 依赖关系（降解为 DepD + follow FuncD{tokHidden}）。
+    void parseDep(Program& prog, bool exported) {
+        int line = cur().line;
+        if (exported) err("dep 不支持 @ 导出（模块域静态对象）");
+        advance();                                       // 跳过 dep
+        if (!at(Tok::Ident) || (cur().text != "all" && cur().text != "any"))
+            err("dep 后期望门逻辑 all（与门）或 any（或门）");
+        bool depAll = (advance().text == "all");
+        expect(Tok::Colon, "':'");
+
+        std::vector<std::pair<std::string, std::string>> items;
+        auto parseItem = [&]() {
+            if (!at(Tok::Ident)) err("期望依赖项局部名");
+            std::string nm = advance().text;
+            expect(Tok::Colon, "':'");
+            if (!at(Tok::Str)) err("依赖项局部名后期望字符串 id（如 \"a.b.1\"）");
+            std::string id = unquoteStr(advance().text);
+            items.push_back({nm, id});
+        };
+
+        std::vector<StmtPtr> body;
+        if (!at(Tok::Newline)) {                         // 行内形态：a:"id1", b:"id2" \n\tbody
+            parseItem();
+            while (accept(Tok::Comma)) parseItem();
+            expect(Tok::Newline, "换行");
+            expect(Tok::Indent, "缩进的 follow 体");
+            parseStmts(body);
+            accept(Tok::Dedent);
+        } else {                                         // 块式：缩进逐行项 + '-' 分隔 + follow 体
+            advance();                                   // 跳过 Newline
+            expect(Tok::Indent, "缩进的依赖项块");
+            for (;;) {
+                skipNewlines();
+                if (at(Tok::Dedent) || at(Tok::End)) break;
+                if (atOp("-") && peek().kind == Tok::Newline) {
+                    advance(); advance();                // '-' 分隔符 → 其后为 follow 体
+                    parseStmts(body);
+                    break;
+                }
+                parseItem();
+                expect(Tok::Newline, "换行");
+            }
+            accept(Tok::Dedent);
+        }
+        if (items.empty()) err(line, "dep 至少需要一个依赖项");
+
+        std::string followFn = "__scdep_" + std::to_string(depCounter++) + "_follow";
+        auto fn = std::make_unique<Decl>();              // 合成 follow FuncD（唯一形参 this: __scdep_in&，返回 bool）
+        fn->line = line;
+        fn->kind = Decl::FuncD;
+        fn->name = followFn;
+        fn->tokHidden = true;
+        fn->structCommon.type = std::make_shared<TypeRef>();
+        fn->structCommon.type->name = "bool";            // 返回下次门逻辑（true=与门 / false=或门）
+        Field self;                                      // this: __scdep_in&（follow 上下文）
+        self.name = "this";
+        self.type.name = "__scdep_in";
+        self.type.ptr = 1;
+        self.line = line;
+        fn->structCommon.fields.push_back(std::move(self));
+
+        // 依赖项局部名糖：为每个 a:"id" 在体首注入 `var a: token& = this->toks[i]`，
+        //   令 follow 体可直接以局部名引用第 i 个依赖项句柄（token&）。
+        std::vector<StmtPtr> injected;
+        for (size_t i = 0; i < items.size(); i++) {
+            auto ident = std::make_unique<Expr>();       // this
+            ident->kind = Expr::Ident; ident->text = "this"; ident->line = line;
+            auto mem = std::make_unique<Expr>();         // this->toks
+            mem->kind = Expr::Member; mem->op = "->"; mem->text = "toks";
+            mem->a = std::move(ident); mem->line = line;
+            auto idx = std::make_unique<Expr>();         // [i]
+            idx->kind = Expr::IntLit; idx->text = std::to_string(i); idx->line = line;
+            auto sub = std::make_unique<Expr>();         // this->toks[i]
+            sub->kind = Expr::Index; sub->a = std::move(mem); sub->b = std::move(idx);
+            sub->line = line;
+            Field vf;                                    // var <name>: token&
+            vf.name = items[i].first;
+            vf.type.name = "token";
+            vf.type.ptr = 1;
+            vf.line = line;
+            vf.init = std::move(sub);
+            auto vs = std::make_unique<Stmt>();
+            vs->kind = Stmt::VarS;
+            vs->line = line;
+            vs->decls.push_back(std::move(vf));
+            injected.push_back(std::move(vs));
+        }
+        for (auto& s : body) injected.push_back(std::move(s));
+        fn->body = std::move(injected);
+        prog.decls.push_back(std::move(fn));
+
+        auto dep = std::make_unique<Decl>();             // 依赖关系载体
+        dep->line = line;
+        dep->kind = Decl::DepD;
+        dep->depAll = depAll;
+        dep->depItems = std::move(items);
+        dep->tokFn = followFn;
+        prog.decls.push_back(std::move(dep));
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -2101,6 +2297,18 @@ struct Parser {
                 return s;
             }
 
+            // form 初始化语句：form t, v —— 给 form token t 灌初值并升格为 form 主。
+            //   降解为 tok_form(t, (void*)v)。expr=tok 句柄，forInit=初值。
+            case Tok::KwForm: {
+                auto s = mkStmt(Stmt::FormS);
+                advance();
+                s->expr = parseExpr();                              // tok 句柄
+                expect(Tok::Comma, "','（form 需要初值：form t, v）");
+                s->forInit = parseExpr();                           // 初值（void&）
+                expect(Tok::Newline, "换行");
+                return s;
+            }
+
             // print 日志输出语句：print[<chn>] arg, arg, ...（括号可省）
             //   <chn> = u1 通道（整数字面量或宏/常量名），默认 0，透传给 C print。
             //   实参为 python 风格拼接：字符串字面量=纯文本；其余表达式按静态类型
@@ -2285,6 +2493,16 @@ struct Parser {
                     prog.decls.push_back(std::move(instVar));
                     break;
                 }
+
+                // tok 分布式 token 句柄声明（模块域静态，注册延迟到模块默认 init）
+                case Tok::KwTok:
+                    parseTok(prog, exported);
+                    break;
+
+                // dep token 依赖关系声明（合成 follow 回调 + DepD 载体）
+                case Tok::KwDep:
+                    parseDep(prog, exported);
+                    break;
 
                 // 函数定义
                 case Tok::KwFnc:

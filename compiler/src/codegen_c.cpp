@@ -202,6 +202,14 @@ struct CGen {
     //   使全局对象的 init 体内类型查询/dim 调用可用）。pair = {对象名, 类名}。
     std::vector<std::pair<std::string, std::string>> gClassInstalls;
 
+    // ---- 分布式 token（tok/dep）注册支撑 ----
+    // tok 句柄与 dep 依赖关系均为模块域静态对象，注册延迟到模块 init（tok_bind/tok_depend），
+    //   在 gInits 之后注入（绑定先于依赖；依赖项引用已绑定的 tok 句柄）。
+    struct TokBind { std::string var; std::string id; std::string fn; };       // 句柄变量 + id 串 + combine C 名（空=无）
+    struct DepReg  { bool all; std::string fn; std::vector<std::string> vars; }; // 门逻辑 + follow C 名 + 各依赖项 tok 句柄变量
+    std::vector<TokBind> tokBinds;  // 本单元 tok 句柄绑定（源序）
+    std::vector<DepReg>  depRegs;   // 本单元 dep 依赖注册（源序）
+
     // ---- 单元测试（--test）支撑 ----
     struct TestCase { const Decl* d; std::string cname; };  // tst 用例 + 生成的 C 函数名
     std::vector<TestCase> testCases;  // 本单元 tst 用例（源序），测试目标时填充
@@ -2206,6 +2214,17 @@ struct CGen {
                     if (e.op.empty()) {
                         // 擦除为裸 @
                         if (srcFat && srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }  // 已是裸 @：恒等
+                        // 源非胖（裸指针/整数）：装箱为非托管裸 @（p=值, tar=NULL, own=SC_OWN_RAW,
+                        //   dtor=NULL）——纯类型擦除指针搬运，无 ARC 记账（解绑 no-op）。整数经
+                        //   intptr_t 擦入指针槽（与 void& 擦除一致），指针/数组直取。
+                        if (!srcFat) {
+                            VType svt;
+                            bool isPtr = exprVType(*e.a, svt) && (svt.ptr > 0 || svt.arr > 0);
+                            out << "((sc_afat){" << (isPtr ? "(void *)(" : "(void *)(intptr_t)(");
+                            emitExpr(*e.a, true);
+                            out << "), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0})";
+                            break;
+                        }
                         // class 类型 T@ → object 风味擦除：.p 偏移到 &_class（+offsetof(T,_class)）、
                         // dtor 取通用蹦床 sc_obj_drop（运行时经 SC_DIM_DROP 动态派发析构）。使裸 @ 始终
                         // 携带派发能力，四向过桥对称：T@→@→object@ 亦无损（还原 object@ 直取 &_class）。
@@ -4139,6 +4158,9 @@ struct CGen {
             case Stmt::DoneS:
                 emitDoneStmt(s);
                 break;
+            case Stmt::FormS:
+                emitFormStmt(s);
+                break;
             case Stmt::PrintS:
                 emitPrintStmt(s);
                 break;
@@ -4287,7 +4309,17 @@ struct CGen {
         out << ");\n";
     }
 
-    // print 语句 → print(chn, fmt, args...)
+    // form 语句 → token_form(t, v, 0) —— 给 form token 灌初值（@）并升格为 form 主。
+    //   初值须为 @（自描述胖指针）；form 不带 tag，标签恒 0。
+    void emitFormStmt(const Stmt& s) {
+        indent();
+        out << "token_form(";
+        emitExpr(*s.expr, true);     // tok&（句柄指针）
+        out << ", ";
+        emitExpr(*s.forInit, true);  // @ 初值
+        out << ", 0);\n";
+    }
+
     //   python 风格拼接：字符串字面量→格式串纯文本（% 转义为 %%）；其余实参按静态
     //   类型自动补 printf 说明符并作可变参数（必要的 64 位说明符经 inttypes 宏跨平台）；
     //   (expr: "%fmt") 显式格式覆盖（值原样传入，不再自动加 cast）。
@@ -4558,6 +4590,7 @@ struct CGen {
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
         for (auto& ci : gClassInstalls) out << "    " << ci.first << "._class = " << ci.second << "_hyper_impl;\n";
         for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
+        emitTokRegistrations("    ");
         for (auto& tc : testCases)
             out << "    sc__run_case(\"" << tc.d->name << "\", &" << tc.cname
                 << ", " << (tc.d->testSkip ? 1 : 0) << ");\n";
@@ -5963,6 +5996,11 @@ struct CGen {
         //   drop：类型有 drop 方法 → 注入析构（不论是否显式初值，对象存在即析构）。
         for (auto& d : prog.decls) {
             if (d->external || d->kind != Decl::VarD) continue;
+            // tok 句柄（isTok VarD）：登记 tok_bind 绑定（句柄本身为 tok* 指针，不入 gInits）。
+            if (d->isTok && !d->structCommon.fields.empty()) {
+                tokBinds.push_back({d->structCommon.fields.front().name, d->tokId, d->tokFn});
+                continue;
+            }
             for (auto& f : d->structCommon.fields) {
                 if (f.type.ptr != 0 || !f.type.arrayDims.empty() || f.type.hasInline
                     || f.type.fat || f.type.project
@@ -5979,6 +6017,25 @@ struct CGen {
                 if (dm) gDrops.push_back({f.name, dm->name});
             }
         }
+        // dep 依赖关系：解析每个依赖项 id → 已绑定 tok 句柄变量名（同单元内声明序在前）。
+        {
+            std::unordered_map<std::string, std::string> idToVar;
+            for (auto& tb : tokBinds) idToVar[tb.id] = tb.var;
+            for (auto& d : prog.decls) {
+                if (d->external || d->kind != Decl::DepD) continue;
+                DepReg dr;
+                dr.all = d->depAll;
+                dr.fn = d->tokFn;
+                for (auto& it : d->depItems) {
+                    auto m = idToVar.find(it.second);
+                    if (m == idToVar.end())
+                        throw CompileError{"dep 依赖项 \"" + it.second +
+                            "\" 未声明对应 tok（同单元内须先 tok 声明）", d->line};
+                    dr.vars.push_back(m->second);
+                }
+                depRegs.push_back(std::move(dr));
+            }
+        }
         mainHasTeardown = isEntryUnit && (!gDrops.empty() || !depTokens.empty());
     }
 
@@ -5993,6 +6050,11 @@ struct CGen {
         if (!isEntryUnit && !modToken.empty()) {
             out << "void sc_mod_" << modToken << "_init(void); void sc_mod_"
                 << modToken << "_drop(void);\n";
+            any = true;
+        }
+        for (auto& dr : depRegs) {                       // dep follow 蹦床前向声明（main/init 引用在前）
+            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";
+            out << "static int " << tramp << "(token **, int, int, void *);\n";
             any = true;
         }
         if (any) out << "\n";
@@ -6014,6 +6076,7 @@ struct CGen {
         for (auto& t : depTokens) out << "    sc_mod_" << t << "_init();\n";
         for (auto& ci : gClassInstalls) out << "    " << ci.first << "._class = " << ci.second << "_hyper_impl;\n";
         for (auto& g : gInits)    out << "    " << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n";
+        emitTokRegistrations("    ");
         out << "}\n";
         out << "void sc_mod_" << modToken << "_drop(void) {\n";
         out << "    static int _done = 0; if (_done) return; _done = 1;\n";
@@ -6042,8 +6105,45 @@ struct CGen {
         for (auto& t : depTokens) { indent(); out << "sc_mod_" << t << "_init();\n"; }
         for (auto& ci : gClassInstalls) { indent(); out << ci.first << "._class = " << ci.second << "_hyper_impl;\n"; }
         for (auto& g : gInits)    { indent(); out << g.fn << "(&" << g.var << (g.ownArg.empty() ? "" : ", " + g.ownArg) << ");\n"; }
+        std::string pad((size_t)depth * 4, ' ');
+        emitTokRegistrations(pad);
     }
 
+    // 分布式 token 注册：tok_bind 绑定各句柄（combine 回调或 NULL），随后 tok_depend
+    //   注册各依赖关系（门逻辑 + follow 蹦床）。绑定先于依赖（依赖引用已绑定句柄）。
+    void emitTokRegistrations(const std::string& pad) {
+        for (auto& tb : tokBinds) {
+            out << pad << tb.var << " = token_bind(\"";
+            for (char c : tb.id) {                       // 最小转义：引号 / 反斜杠
+                if (c == '"' || c == '\\') out << '\\';
+                out << c;
+            }
+            out << "\", " << (tb.fn.empty() ? "NULL" : "(token_combine)" + tb.fn) << ");\n";
+        }
+        for (size_t i = 0; i < depRegs.size(); ++i) {
+            auto& dr = depRegs[i];
+            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";  // _follow → _tramp
+            out << pad << "{ token *_deps" << i << "[] = {";
+            for (size_t j = 0; j < dr.vars.size(); ++j)
+                out << (j ? ", " : " ") << dr.vars[j];
+            out << " }; token_depend(_deps" << i << ", " << dr.vars.size() << ", "
+                << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
+        }
+    }
+
+    // dep follow 蹦床：把运行时 token_follow 通用签名打包为 follow 体的 __scdep_in& 上下文
+    //   （toks=依赖项数组 / count=个数 / active=触发动作码），调用合成的 follow 函数
+    //   （返回 bool→下次门逻辑）。前向声明在 emitLifecycleDecls 产出。
+    void emitDepTrampolines() {
+        for (auto& dr : depRegs) {
+            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";
+            out << "static int " << tramp << "(token **_ts, int _n, int _acting, void *_ctx) {\n";
+            out << "    (void)_ctx;\n";
+            out << "    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting;\n";
+            out << "    return (int)" << dr.fn << "(&_self);\n}\n";
+        }
+        if (!depRegs.empty()) out << "\n";
+    }
     // main 尾声：析构入口自有全局（逆序），再递归各直接依赖模块 drop（逆序）。
     // 由 emitScopeCleanupAt（i==0 且 inMainFunc）在所有现有清理 phase 之后发出。
     void emitMainEpilogue() {
@@ -6364,6 +6464,7 @@ struct CGen {
                     if (d->macroConsumed) break;  // 泛型 mix：已展开为具体声明，不再输出宏调用
                     emitMixExpand(*d);   // 顶层 mix → 宏调用展开（声明）
                     break;
+                case Decl::DepD: break;  // dep 依赖关系：无独立声明，注册经模块 init 注入
             }
         }
         out << "\n";
@@ -6395,6 +6496,7 @@ struct CGen {
         emitHookFwdDecls();      // 退化路径：启动/退出钩子前置声明（供 main/sc_mod 显式调用）
         out << lambdaOut.str();   // 提升的匿名函数定义（在函数体前，确保被引用前已定义）
         out << funcsPart;
+        emitDepTrampolines();     // dep follow 蹦床定义（在合成 follow 函数体之后）
         // 类机制分派器定义（每个 cls 一个 T_hyper_impl，折叠其全部 dim + 保留维度）
         if (usesClassRt) {
             // object@ 通用析构蹦床：入边归零时 sc_fat_on_zero_d 静态拿不到擦除类型的析构，
@@ -6515,6 +6617,8 @@ struct CGen {
                     break;
                 case Decl::AddD: break;  // 构建指令，不产生 C 输出
                 case Decl::TestD: break;  // tst 用例不导出
+                case Decl::MacroD: case Decl::MixD: break;  // 宏/展开：不入导出头
+                case Decl::DepD: break;  // dep 不可导出（parser 已拦截）
             }
         }
         out << "\n#endif /* " << guard << " */\n";
