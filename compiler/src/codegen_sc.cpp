@@ -267,7 +267,7 @@ struct SGen {
                         for (const Decl* m : mi->second) {
                             if (m->kind != Decl::FuncD) continue;
                             ind(); out << (m->exported ? "@fnc " : "fnc ")
-                                       << m->methodName << fncItems(*m) << "\n";
+                                       << m->methodName << fncItemsK(*m) << "\n";
                             depth++;
                             emitStmts(m->body);
                             depth--;
@@ -329,7 +329,7 @@ struct SGen {
                     out << X << "fnc " << d.methodOwner << "::" << d.methodName
                         << fncItems(d) << "\n";
                 else
-                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItemsK(d) << "\n";
                 break;
             case Decl::FuncD:
                 if (!d.methodOwner.empty()) break;  // 成员函数已在结构体内输出
@@ -337,7 +337,7 @@ struct SGen {
                 if (!d.funcTypeName.empty())
                     out << X << "fnc " << d.name << " -> " << d.funcTypeName << "\n";
                 else
-                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItems(d) << "\n";
+                    out << X << (d.isRpc ? "rpc " : "fnc ") << d.name << fncItemsK(d) << "\n";
                 depth++;
                 emitStmts(d.body);
                 depth--;
@@ -444,6 +444,13 @@ struct SGen {
             s += (i ? ", " : " ") + parts[i];
         if (d.structCommon.variadic) s += parts.empty() ? " ..." : ", ...";
         return s.empty() ? s : ":" + s;
+    }
+
+    // 关键字优先 fnc/rpc 发射的签名：冒号不可省（严格语法），void 无参亦补 ':'
+    // （字段式 name: fnc 与 :: C 接口形态仍用 fncItems，分隔符本就在位）
+    std::string fncItemsK(const Decl& d) {
+        std::string s = fncItems(d);
+        return s.empty() ? ":" : s;
     }
 
     std::string run(const Program& prog) {

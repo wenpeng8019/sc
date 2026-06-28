@@ -23,5 +23,5 @@
 @var g_audit: audit
 
 # 导出函数：供入口调用，间接驱动模块全局状态。
-@fnc lib_audit
+@fnc lib_audit:
     g_audit.note()

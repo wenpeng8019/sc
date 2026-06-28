@@ -14,5 +14,5 @@
 
 @var g_audit: audit
 
-@fnc lib_audit
+@fnc lib_audit:
     g_audit.note()

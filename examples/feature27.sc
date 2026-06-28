@@ -21,7 +21,7 @@
 #   $ 在生成的 C 中映射为合法标识符 _sc_ret（$ 非 C99 标准标识符）。
 
 #-------------- 字面量后缀 --------------
-fnc show_suffix
+fnc show_suffix:
     var a: = 5b          # i1
     var b: = 300w        # i2
     var c: = 7ub         # u1
@@ -39,7 +39,7 @@ fnc classify: ret, n: i4
         return 0
     return 1
 
-fnc demo_sugar
+fnc demo_sugar:
     # ! → 失败（非 ok）时进入；classify(-2) 返回 -1 → 进块
     ! classify(-2)
         printf("fail branch, $=%d\n", $)

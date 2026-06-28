@@ -8,7 +8,7 @@
 #   - 指令类型无关，忽略入参/返回值类型；当前提供原子读写 get/set/get_acq/set_rel
 
 # 任意类型操作数：值接收者 . → 透传 sc_<op>(&v, ...)
-fnc demo_scalar
+fnc demo_scalar:
     var x: i4 = 0
     x.set(42)                          # → sc_set(&x, 42)     原子写
     var y: i4 = x.get()                # → sc_get(&x)         原子读

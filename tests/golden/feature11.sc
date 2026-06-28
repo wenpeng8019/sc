@@ -1,6 +1,6 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-fnc demo_scalar
+fnc demo_scalar:
     var x: i4 = 0
     x.set(42)
     var y: i4 = x.get()

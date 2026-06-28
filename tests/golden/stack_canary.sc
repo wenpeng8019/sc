@@ -4,7 +4,7 @@ var gtable[6]: i4
 
 var gmat[2][3]: i4
 
-fnc fill_buf
+fnc fill_buf:
     var tmp[8]: i4
     var i: i4 = 0
     for i = 0; i < 8; i++

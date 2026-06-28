@@ -1,6 +1,6 @@
 # 由 scc --emit-sc 从 AST 再生成
 
-fnc show_suffix
+fnc show_suffix:
     var a: = 5b
     var b: = 300w
     var c: = 7ub
@@ -16,7 +16,7 @@ fnc classify: ret, n: i4
         return 0
     return 1
 
-fnc demo_sugar
+fnc demo_sugar:
     ! classify(-2)
         printf("fail branch, $=%d\n", $)
     ! classify(0)

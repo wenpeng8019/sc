@@ -1139,8 +1139,9 @@ fnc area: i4
 - 单行参数定义和多行参数定义都支持。
 - **省略返回类型即无返回值**（void）：首项是否参数由“是否带内嵌
   冒号”区分，如 `fnc add: i4, a:i4, b:i4` 返回 i4，而
-  `fnc show: a:i4, b:i4` 无返回值。无返回值且无参数时 `:` 可一并
-  省略（如 `fnc tick`）。无返回值函数不能 `return 表达式`。
+  `fnc show: a:i4, b:i4` 无返回值。签名分隔冒号 `:` 不可省略——
+  即便无返回值且无参数也须写 `fnc tick:`（`fnc tick` 报错）。无返回值
+  函数不能 `return 表达式`。
 - void 指针返回类型写裸 `&`（如 `@fnc list::pop: &`）。
 
 ### 11.3 方法（成员函数）
@@ -1436,7 +1437,7 @@ fnc classify: ret, n: i4
         return 0
     return 1
 
-fnc demo
+fnc demo:
     ! classify(0)                  # 成功分支：$ == 0
         printf("ok, $=%d\n", $)
     > classify(7)                  # 告警分支：$ > 0
@@ -1898,7 +1899,7 @@ start:
 fnc add: i4, a:i4, b:i4
     return a + b
 
-fnc noop
+fnc noop:
     return
 
 # 变量/常量声明
@@ -3151,7 +3152,8 @@ var lv: i4 = config.level()
 
 - **状态字段**：`mod` 体内直接以 `name: T[ = 初值]` 声明（同结构体字段），构成单例类型 `N_m` 的
   布局。字段不能写成 `name: fnc`（成员函数请用 `fnc` 关键字声明）。
-- **成员函数**：`fnc 名[: 返回, 形参...]` + 缩进函数体。接收者隐式为 `this`（`N_m&`），体内以
+- **成员函数**：`fnc 名: [返回, 形参...]` + 缩进函数体（签名分隔冒号不可省，
+  无返回无参亦写 `fnc 名:`）。接收者隐式为 `this`（`N_m&`），体内以
   `this->字段` / `this->方法()` 访问。`mod` 成员函数**必带函数体**，且**不支持** `::` C 实现接口
   形态（那是普通 `@def` 方法的写法）。
 - 调用展开：`inst.method(args)` → `N_m_method(&inst, args)`（接收者取址前置）。

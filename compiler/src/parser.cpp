@@ -316,14 +316,14 @@ struct Parser {
         d->methodName = advance().text;
         if (accept(Tok::DColon)) d->cImpl = true;   // :: → C 实现接口
 
-        // 解析 : ret, params...（:: 后可直接跟签名，或可选的 ':'）
+        // 解析 : ret, params...（:: 后可直接跟签名；非 :: 成员函数 ':' 不可省）
         if (d->cImpl && !at(Tok::Colon) && !at(Tok::Newline))
             parseFncVars(d->structCommon);
         else if (accept(Tok::Colon)) {
             if (!at(Tok::Newline))
                 parseFncVars(d->structCommon);
-        } else if (!at(Tok::Newline))
-            err("期望 ':' 或换行");
+        } else if (!d->cImpl)
+            err("期望 ':'（fnc 签名分隔符不可省略，无返回无参亦写 'name:'）");
         expect(Tok::Newline, "换行");
 
         // 无缩进 → 函数指针字段 或 C 实现声明
@@ -859,11 +859,11 @@ struct Parser {
                 m->methodName = advance().text;
                 if (accept(Tok::DColon))
                     err(m->line, "mod 成员函数不支持 :: C 实现接口形态");
-                if (accept(Tok::Colon)) {               // : ret, params...（可省略）
+                if (accept(Tok::Colon)) {               // : ret, params...（分隔冒号不可省）
                     if (!at(Tok::Newline))
                         parseFncVars(m->structCommon);
-                } else if (!at(Tok::Newline))
-                    err("期望 ':' 或换行");
+                } else
+                    err("期望 ':'（fnc 签名分隔符不可省略，无返回无参亦写 'name:'）");
                 expect(Tok::Newline, "换行");
                 if (!at(Tok::Indent))
                     err(m->line, "模块成员函数必须带函数体（缩进块）");
@@ -1220,7 +1220,7 @@ struct Parser {
 
         // 解析函数返回类型和参数列表
         // + :: 之后可直接跟签名（:: 即分隔），也可用 ':' 显式分隔（兼容）
-        // + 非 :: 函数必须有 ':' 分隔签名
+        // + 非 :: 函数必须有 ':' 分隔签名（严格语法：分隔冒号不可省，无返回无参亦写 'name:'）
         if (d->cImpl && !at(Tok::Colon) && !at(Tok::Newline)) {
             // :: 后直接跟返回类型/参数（无 ':' 分隔）
             parseFncVars(d->structCommon);
@@ -1228,8 +1228,8 @@ struct Parser {
             if (!at(Tok::Newline)) {
                 parseFncVars(d->structCommon);
             }
-        } else if (!at(Tok::Newline) && !d->cImpl) {
-            err("期望 ':' 或换行");
+        } else if (!d->cImpl) {
+            err("期望 ':'（fnc/rpc 签名分隔符不可省略，无返回无参亦写 'name:'）");
         }
         expect(Tok::Newline, "换行");
 

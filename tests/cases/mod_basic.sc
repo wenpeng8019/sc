@@ -14,14 +14,14 @@ inc stdio.h
         printf("drop %s n=%d\n", this->tag, this->n)
         return
 
-    @fnc bump
+    @fnc bump:
         this->do_step()
         return
 
     @fnc value: i4
         return this->n
 
-    fnc do_step
+    fnc do_step:
         this->n = this->n + 1
         return
 

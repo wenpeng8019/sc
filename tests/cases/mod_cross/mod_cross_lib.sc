@@ -13,6 +13,6 @@
     @fnc sum: i4
         return this->total
 
-    fnc reset
+    fnc reset:
         this->total = 0
         return
