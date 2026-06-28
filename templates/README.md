@@ -7,20 +7,20 @@
 
 | 模板 | 类型 | 核心机制 | 起点文件 |
 |------|------|----------|----------|
-| [workflow-graph/](workflow-graph/) | 工作流计算图框架（类 OpenVX，**拉取式**） | `tok` 节点 + `dep…map` DAG 边 + `back`/`exec` 拉取 + 线程池缓冲 | `workflow.sc` |
-| [push-reactive/](push-reactive/) | 推送式反应数据流（类响应式电子表格，**推送式**） | `tok` 格 + `dep…map` 同步级联 + `exec` 节点观察 + 变更检测记忆化 | `reactive.sc` |
+| [workflow-graph/](workflow-graph/) | 工作流计算图（**驱动模型三连**：同一张 tok DAG、三种执行模型） | 见子目录：`back-drain`（拉取式 back 反向扫描）、`list-schedule`（就绪队列列表调度）、`push-reactive`（推送式同步级联） | 见各子目录 |
 | [dnn-framework/](dnn-framework/) | 深度神经网络框架 | `dep…map` 前向 + `back` 反向求导 + 训练循环（`pulse` 驱迭代；`dep loop` 适配 RNN） | `dnn.sc` |
 
 ## 使用方式
 
 ```sh
 # 直接运行某个模板（类解释器）
-./compiler/build/scc templates/workflow-graph/workflow.sc
-./compiler/build/scc templates/push-reactive/reactive.sc
+./compiler/build/scc templates/workflow-graph/back-drain/workflow.sc
+./compiler/build/scc templates/workflow-graph/list-schedule/schedule.sc
+./compiler/build/scc templates/workflow-graph/push-reactive/reactive.sc
 ./compiler/build/scc templates/dnn-framework/dnn.sc
 
 # 复制一份起你自己的项目，改名后扩展
-cp -r templates/workflow-graph myproj && cd myproj
+cp -r templates/workflow-graph/back-drain myproj && cd myproj
 # 编辑 workflow.sc：加节点 = 加一个 tok + 一条 dep…map 边 + 写 kernel（拉取式经 form 第4参挂 exec，推送式写 combine）
 ```
 

@@ -3340,7 +3340,7 @@ back loss, (1: @)                   # 自 loss 反向遍历，先灌梯度种子
 流过、不跨帧合并），但**仍须对每个传播节点 `form`**——否则节点 token 不就绪，路由器 `set` 落不进、
 流水线停摆；follow 前向分支只**入队**（截断同步级联）、worker 主动 `back` 拉取后由反向分支
 （`TOK_BACK`）认领处理。combine 仅当需**跨帧合并**（去抖 / 峰值 / 累加）才引入。
-参考脚手架 `templates/workflow-graph/workflow.sc`（缓冲队列 + 线程池 + drain，各节点 form 无 combine）。
+参考脚手架 `templates/workflow-graph/back-drain/workflow.sc`（缓冲队列 + 线程池 + drain，各节点 form 无 combine）。
 
 ### 21.8 取值 / 设值与边界
 

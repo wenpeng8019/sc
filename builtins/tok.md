@@ -262,7 +262,7 @@ back loss, (1: @)      # 自 loss 反向遍历，先灌梯度种子 1（可省 s
 - 正交点在 **combine**，不在 **form**：纯 drain 流水线**无需写 combine 体**（每帧独立流过、不跨帧
   合并），但**仍须对每个传播节点 `form`**——否则节点 token 不就绪，路由器 `set` 落不进、流水线停摆。
   combine 仅当某节点需**跨帧合并**（去抖 / 峰值保持 / 累加）时才引入。
-  完整脚手架见 `templates/workflow-graph/workflow.sc`（缓冲队列 + 线程池 + drain，各节点 form 无 combine）。
+  完整脚手架见 `templates/workflow-graph/back-drain/workflow.sc`（缓冲队列 + 线程池 + drain，各节点 form 无 combine）。
 
 
 ### 1.3.5 节点侧车 `ctx` + 节点钩子 `exec`（经 `form` 绑定）
@@ -281,9 +281,9 @@ back loss, (1: @)      # 自 loss 反向遍历，先灌梯度种子 1（可省 s
   - **推送**（`set` 驱动）：`set` 值变更落定后于**锁外**、向下游传播前唤起 `exec(t, t.ctx())`（副作用/观察：产出、统计、日志、外部推送）。
 - **职责分工**：`combine` 须纯（锁内只算值，不得 set/get 其它 token）；`dep` 只管前向路由；处理/副作用归 `exec`（锁外，MT 安全）。一个节点只会被其一种模式驱动（取决于模板用 `back` 还是 `set`）。
 - **两类模板对照**：
-  - 拉取式（`templates/workflow-graph/`）：`dep` 经 `t.ctx()` 把帧**入队**到下游节点；worker `back` →
-    `exec` 出队跑 kernel。异步缓冲、多线程。
-  - 推送式（`templates/push-reactive/`）：`dep` 把上游值**前推** `t.set(s.get())` 触发下游 `combine`
+  - 拉取式（`templates/workflow-graph/back-drain/`）：`dep` 经 `t.ctx()` 把帧**入队**到下游节点；worker `back` →
+    `exec` 出队跑 kernel。异步缓冲、多线程。（另见姊妹模板 `templates/workflow-graph/list-schedule/`：同拉取语义，用就绪优先队列代替反向扫描发现。）
+  - 推送式（`templates/workflow-graph/push-reactive/`）：`dep` 把上游值**前推** `t.set(s.get())` 触发下游 `combine`
     同步重算；`exec` 做节点观察/产出。同步级联、单线程。变更检测在此是**反应式记忆化**
     （同值截断级联），与拉取式「同值丢帧需 `pulse` 逃生」相反（见 §1.4 `pulse`）。
 
@@ -301,7 +301,7 @@ level->pulse((150: @), 0)        # 脉冲设值：绕过相等抑制，即便同
 - `set` **记忆化**：唯「新值≠原值」才落值传播（combine 取合成结果、enforce 取输入值；对齐 c_prototype
   的 `C_input`）——推送/反应式里这是**去抖/级联自截断**（特性）。
 - `pulse` **脉冲**：绕过相等抑制，同值也落值并强制传播。用于**拉取流水线 / 迭代驱动**（每次 `set` 皆事件、
-  相同值也不可丢）：如 `templates/workflow-graph/`（源帧入队 ping）、`templates/dnn-framework/`（训练循环
+  相同值也不可丢）：如 `templates/workflow-graph/back-drain/`（源帧入队 ping）、`templates/dnn-framework/`（训练循环
   每 epoch 喂同一输入 `x` 须重跑前向）。降解为 `token_pulse(t, v, tag)`。
 - 另有 `tok_modified()`（combine 体内 `return tok_modified()`）强制本次合成传播——区别：`pulse` 在**调用点**
   对任意 token 强制（含 enforce/map），`tok_modified` 在 **combine 体内**强制（仅 form 候选）。

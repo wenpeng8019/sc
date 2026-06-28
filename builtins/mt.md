@@ -372,7 +372,7 @@ p.drop()                           # 析构：等完成 → 停池 → 回收
 - `default_pool(n)`：常驻 worker 消费**内部 FIFO 任务队列**——`run<p> f()` 入队，`f` 执行一次。
 - `drain_pool(n)`：**按需自调度**——无任务队列，worker 反复跑投递的工作单元 rpc 直到一轮无新
   投递即退；`run<dp> f()` = 通知有新活 + 按需激活一个 worker（上限 n）。适合「任务在外部图/
-  队列里、由应用自调度」的场景（如 `templates/workflow-graph` 的 `back` drain）。
+  队列里、由应用自调度」的场景（如 `templates/workflow-graph/back-drain` 的 `back` drain）。
 
 ```sc
 rpc work_unit: id: i4              # 工作单元：自身循环排空至「本视角无活」后返回

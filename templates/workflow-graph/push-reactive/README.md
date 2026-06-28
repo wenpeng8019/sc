@@ -2,12 +2,12 @@
 
 把一张 `tok` 依赖图当作**反应式电子表格**：设一个源格，沿图**同步级联**重算所有下游派生格，
 派生格的值一落定，挂在格上的**节点钩子 `exec`** 即时反应。**无队列、无线程**——求值与传播全在
-设值线程内同步完成。本模板与 [workflow-graph](../workflow-graph/)（拉取式）成**对照对**：
+设值线程内同步完成。本模板与 [back-drain](../back-drain/)（拉取式）成**对照对**：
 同一张图，两种执行模型。
 
 ## 拉取式 vs 推送式（同图，反执行）
 
-| | 拉取式（workflow-graph） | 推送式（本模板） |
+| | 拉取式（back-drain） | 推送式（本模板） |
 |---|---|---|
 | 触发 | 源 set → dep 路由**入队** | 源 set → 沿图**同步级联** |
 | 计算时机 | worker 经 `back` 拉取（`exec`）后才跑 | 级联中即时 `combine` |
@@ -31,7 +31,7 @@
 ## 运行
 
 ```sh
-./compiler/build/scc templates/push-reactive/reactive.sc
+./compiler/build/scc templates/workflow-graph/push-reactive/reactive.sc
 ```
 
 输出：先打印整张反应图的烘焙度量表，再以 8 个读数同步级联，最后打印各观察格的确定性统计。
