@@ -47,6 +47,8 @@ void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *)) {
  *   里直通 libc 的宏，本文件无需定义；开启 -DSC_POOL 时编译下述函数，亦转发 mem 三件套。 */
 #include "mem/mem.h"
 void *sc_chunk(size_t n)  { return chunk((uint64_t)n); }
+void *sc_chunk0(size_t n) { return chunk0((uint64_t)n); }
+void *sc_refit(void *p, size_t n) { return refit(p, (uint64_t)n); }
 void  sc_recycle(void *p) { recycle(p); }
 #ifdef SC_POOL
 void *sc_alloc(size_t n)            { return chunk((uint64_t)n); }

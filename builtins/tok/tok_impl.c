@@ -60,15 +60,39 @@ typedef struct tok_dep {
     void          *ctx;
 } tok_dep;
 
+/* form 前挂起队列（懒分配）：未 form 的 token 收到 set 才创建本结构挂到 t->pending；
+ * form-first（先 form 再 set，如 dnn 训练）全程 pending==NULL，零分配零占用。池化分配。 */
+typedef struct tok_pending {
+    sc_afat *vals;          /* 挂起的 set 输入值（可增长，池化） */
+    int32_t *tags;          /* 对应挂起输入的 tag */
+    int      n, cap;
+} tok_pending;
+
+/* back 反向调度缓存（懒构建 + graph-epoch 失效刷新）：token_back 的「反向可达 dep/节点
+ * 有序表」只依赖静态图结构，与值无关——故按 sink token 缓存，建图后恒命中，零重算零分配。
+ * 仅当 g_graph_epoch 变化（注册了新 dep / 新挂 exec）才重建。池化分配。 */
+typedef struct tok_back_cache {
+    uint32_t epoch;         /* 构建时的 g_graph_epoch；!= 当前则重建 */
+    int      mode;          /* 1=边反向（list 为 tok_dep*，按 rank 降序）/ 2=节点 drain（list 为 token*，按 depth 降序） */
+    int      n, cap;        /* 有序表长 / 容量 */
+    void   **list;          /* 有序调度表（tok_dep*[] 或 token*[]，池化） */
+} tok_back_cache;
+
 struct token {
+    /* —— 8 字节成员先排（消除与 4 字节字段交错产生的填充）—— */
     char         *id;        /* 字符串唯一键 */
-    sc_afat       value;     /* 当前值（@ 类型擦除自描述胖指针） */
-    int32_t       tag;       /* 当前值随附标签（最近一次 set/form 的 tag） */
     token_combine combine;   /* 非空=有 combine 合成体；空=enforce 直赋。与就绪无关：就绪唯凭 form */
-    int           state;     /* TOK_NEW / TOK_READY */
     tok_dep     **deps;      /* 动态：引用本 token 的依赖关系（可增长数组） */
-    int           ndeps, capdeps;
     tok_dep     **producers; /* 动态：以本 token 为 map 目标的依赖关系（反向邻接：目标←dep，供 back 回溯上游） */
+    void         *ctx;       /* 节点私有上下文（侧车）：form 绑定，follow/exec 经 token_ctx 取用（拉取式流水线的队列+状态机+kernel，或推送式的观察统计等） */
+    token_exec    exec;      /* 节点处理钩子（form 绑定）：拉取(back)模式反拓扑唤起、推送(set)模式值变更落定后锁外唤起；dep 只管路由、combine 须纯，节点处理/副作用归此 */
+    tok_pending  *pending;   /* form 前挂起队列（懒分配，池化）：NULL=无挂起；form-first 全程 NULL */
+    tok_back_cache *back;    /* 反向调度缓存（懒构建，池化）：NULL=未建；按 graph-epoch 刷新 */
+    sc_afat       value;     /* 当前值（@ 类型擦除自描述胖指针；32B = 4 指针） */
+    /* —— 4 字节成员（紧凑收尾）—— */
+    int32_t       tag;       /* 当前值随附标签（最近一次 set/form 的 tag） */
+    int           state;     /* TOK_NEW / TOK_READY */
+    int           ndeps, capdeps;
     int           nprod, capprod;
     int           depth;     /* dep…map 依赖图深度（源=0；编译期烘焙的常量，token_set_depth 写入，token_depth 读） */
     int           scc_id;    /* dep loop 受控反馈簇编号（编译期 Tarjan 烘焙；token_set_scc 写，token_scc 读） */
@@ -81,11 +105,6 @@ struct token {
     int           batch_width; /* 同波次并行宽度：与本 token 同深度的 token 数（拓扑分批；token_set_batch 写，token_batch_width 读） */
     int           checkpoint; /* 支配检查点标志：是否为缓存边界咽喉（编译期烘焙，token_set_dom 写，token_checkpoint 读） */
     int           dom_size;  /* 支配子树规模：缓存可覆盖的下游 token 数（token_dom_size 读） */
-    sc_afat      *pendvals;  /* form 前挂起的 set 输入值（动态；form 时回放后释放） */
-    int32_t      *pendtags;  /* 对应挂起输入的 tag */
-    int           npending, cappending;
-    void         *ctx;       /* 节点私有上下文（侧车）：form 绑定，follow/exec 经 token_ctx 取用（拉取式流水线的队列+状态机+kernel，或推送式的观察统计等） */
-    token_exec    exec;      /* 节点处理钩子（form 绑定）：拉取(back)模式反拓扑唤起、推送(set)模式值变更落定后锁外唤起；dep 只管路由、combine 须纯，节点处理/副作用归此 */
     int           mt;        /* MT token（id 以 '/' 开头）：值经 seqlock 同步；0=非 MT，零开销 */
     uint32_t      seq;       /* seqlock 序列号：偶=稳定可读 / 奇=写者占用中（兼写者自旋互斥） */
 };
@@ -94,6 +113,10 @@ struct token {
 static dict       g_toks;          /* key_size=-1：dict 自持 id 拷贝 */
 static sc_mutex_t g_toks_mtx;      /* 守护 bind 的 intern 并发 */
 static int        g_toks_init = 0; /* 惰性构造（首次 bind 单线程，模块 init 阶段） */
+
+/* 依赖图世代计数：任一拓扑变更（注册 dep / 挂 exec）即自增，使各 token 的 back 调度缓存失效。
+ * 建图在模块 init 单线程完成；运行期（训练循环）拓扑不变 → epoch 稳定 → back 缓存恒命中。 */
+static uint32_t   g_graph_epoch = 0;
 
 /* dep loop 全局注册表：所有 token_depend_loop 登记于此，token_loop_run 按 SCC 簇筛选驱动迭代。
  * 注册在模块 init 单线程（建图先于任何迭代），故无并发；运行期只读遍历。 */
@@ -153,7 +176,7 @@ static sc_afat tok_run_combine(token *t, sc_afat base, sc_afat input, int32_t ta
 
 static char *tok_strdup(const char *s) {
     size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
+    char *p = (char *)sc_chunk(n);          /* 池化：id 进程生命周期，随建图一次性分配 */
     if (p) memcpy(p, s, n);
     return p;
 }
@@ -224,7 +247,7 @@ token *token_bind(const char *id, token_combine combine) {
         sc_mutex_unlock(&g_toks_mtx);
         return t;
     }
-    t = (token *)calloc(1, sizeof(token));
+    t = (token *)sc_chunk0(sizeof(token));           /* 池化清零：token 句柄进程生命周期 */
     t->id = tok_strdup(id);
     t->combine = combine;
     t->state = TOK_NEW;                               /* 对齐 c_prototype：bind 仅取共享壳，未就绪；唯 form 升 READY */
@@ -285,20 +308,35 @@ static void tok_fire(token *t, int ready) {
     }
 }
 
-/* set 内核：force=0 记忆化（同值抑制，对齐 c_prototype 的 C_input）；force=1 脉冲（绕过抑制，
+/* form 前挂起一条 set 输入：懒分配 tok_pending（首次挂起才创建，池化）。
+ * form-first（先 form 后 set）全程不触此路径，t->pending 恒 NULL，零分配零占用。 */
+static void tok_pending_push(token *t, sc_afat v, int32_t tag) {
+    tok_pending *q = t->pending;
+    if (!q) { q = (tok_pending *)sc_chunk0(sizeof(tok_pending)); t->pending = q; }
+    if (q->n == q->cap) {
+        q->cap = q->cap ? q->cap * 2 : 4;
+        q->vals = (sc_afat *)sc_refit(q->vals, (size_t)q->cap * sizeof(sc_afat));
+        q->tags = (int32_t *)sc_refit(q->tags, (size_t)q->cap * sizeof(int32_t));
+    }
+    q->vals[q->n] = v;
+    q->tags[q->n] = tag;
+    q->n++;
+}
+/* form 时丢弃挂起队列（回放后调用）：释放池化缓冲并清空指针。 */
+static void tok_pending_drop(token *t) {
+    tok_pending *q = t->pending;
+    if (!q) return;
+    sc_recycle(q->vals); sc_recycle(q->tags); sc_recycle(q);
+    t->pending = NULL;
+}
+
+/* set 内核：force=0 记忆化（同值抑制，对齐 c_prototype 的 C_input）；force=1 脉冲（绕过抑制,
  *   同值也落值并强制传播）。未 form 一律入挂起队列（脉冲亦然，待 form 回放）。 */
 static void tok_set_impl(token *t, sc_afat v, int32_t tag, int force) {
     if (!t) return;
     if (!t->mt) {                                      /* 非 MT 快路径：无锁无原子 */
         if (t->state == TOK_NEW) {                      /* 未 form（含 enforce 未被主 form）：入挂起队列，不落值不传播 */
-            if (t->npending == t->cappending) {
-                t->cappending = t->cappending ? t->cappending * 2 : 4;
-                t->pendvals = (sc_afat *)realloc(t->pendvals, (size_t)t->cappending * sizeof(sc_afat));
-                t->pendtags = (int32_t *)realloc(t->pendtags, (size_t)t->cappending * sizeof(int32_t));
-            }
-            t->pendvals[t->npending] = v;
-            t->pendtags[t->npending] = tag;
-            t->npending++;
+            tok_pending_push(t, v, tag);
             return;
         }
         sc_afat oldv = t->value;
@@ -313,14 +351,7 @@ static void tok_set_impl(token *t, sc_afat v, int32_t tag, int force) {
     /* MT：写者经 seq 取得独占（兼互斥），改值后发布，再锁外传播 */
     uint32_t s = tok_write_begin(t);
     if (t->state == TOK_NEW) {                         /* 未 form：入挂起队列（token 私有，仅写者触碰） */
-        if (t->npending == t->cappending) {
-            t->cappending = t->cappending ? t->cappending * 2 : 4;
-            t->pendvals = (sc_afat *)realloc(t->pendvals, (size_t)t->cappending * sizeof(sc_afat));
-            t->pendtags = (int32_t *)realloc(t->pendtags, (size_t)t->cappending * sizeof(int32_t));
-        }
-        t->pendvals[t->npending] = v;
-        t->pendtags[t->npending] = tag;
-        t->npending++;
+        tok_pending_push(t, v, tag);
         tok_write_end(t, s);
         return;
     }
@@ -344,20 +375,19 @@ void token_pulse(token *t, sc_afat v, int32_t tag) {
 void token_form(token *t, sc_afat v, int32_t tag, void *ctx, token_exec exec) {
     if (!t) return;
     if (ctx) t->ctx = ctx;                             /* 绑定节点私有上下文（侧车）：form = 灌值 + 升格 + 挂侧车 + 挂钩子 */
-    if (exec) t->exec = exec;                          /* 绑定节点处理钩子（拉取 back / 推送 set 共用） */
+    if (exec) { t->exec = exec; g_graph_epoch++; }     /* 挂节点处理钩子；新挂 exec 改变 back 调度模式 → 失效 back 缓存 */
     if (!t->mt) {                                      /* 非 MT 快路径 */
         t->value = v;
         t->tag = tag;
         t->state = TOK_READY;
-        if (t->npending) {                             /* 回放 form 前挂起的 action（按 combine 合并） */
-            for (int i = 0; i < t->npending; i++) {
-                t->value = t->combine ? tok_run_combine(t, t->value, t->pendvals[i], t->pendtags[i])
-                                      : t->pendvals[i];
-                t->tag = t->pendtags[i];
+        if (t->pending) {                              /* 回放 form 前挂起的 action（按 combine 合并） */
+            tok_pending *q = t->pending;
+            for (int i = 0; i < q->n; i++) {
+                t->value = t->combine ? tok_run_combine(t, t->value, q->vals[i], q->tags[i])
+                                      : q->vals[i];
+                t->tag = q->tags[i];
             }
-            free(t->pendvals); free(t->pendtags);
-            t->pendvals = NULL; t->pendtags = NULL;
-            t->npending = t->cappending = 0;
+            tok_pending_drop(t);
         }
         tok_fire(t, 1);
         return;
@@ -366,15 +396,14 @@ void token_form(token *t, sc_afat v, int32_t tag, void *ctx, token_exec exec) {
     uint32_t s = tok_write_begin(t);
     t->state = TOK_READY;                              /* 升格 form 主（写者独占下） */
     tok_store_value(t, v, tag);                        /* 灌初值（原子发布；seq 仍奇，读者重试） */
-    if (t->npending) {                                 /* 回放挂起：每步以当前值为 base 经 combine 合并 */
-        for (int i = 0; i < t->npending; i++) {
-            sc_afat nv = t->combine ? tok_run_combine(t, tok_value_excl(t), t->pendvals[i], t->pendtags[i])
-                                    : t->pendvals[i];
-            tok_store_value(t, nv, t->pendtags[i]);
+    if (t->pending) {                                  /* 回放挂起：每步以当前值为 base 经 combine 合并 */
+        tok_pending *q = t->pending;
+        for (int i = 0; i < q->n; i++) {
+            sc_afat nv = t->combine ? tok_run_combine(t, tok_value_excl(t), q->vals[i], q->tags[i])
+                                    : q->vals[i];
+            tok_store_value(t, nv, q->tags[i]);
         }
-        free(t->pendvals); free(t->pendtags);
-        t->pendvals = NULL; t->pendtags = NULL;
-        t->npending = t->cappending = 0;
+        tok_pending_drop(t);
     }
     tok_write_end(t, s);
     tok_fire(t, 1);                                    /* 锁外：就绪事件触发依赖门 */
@@ -386,15 +415,16 @@ void *token_ctx(token *t) { return t ? t->ctx : NULL; }
 
 
 static void tok_depend_impl(token **ts, int ntrig, int ntot, int all, token_follow follow, void *ctx) {
-    tok_dep *d = (tok_dep *)calloc(1, sizeof(tok_dep));
-    d->ts = (token **)malloc((size_t)(ntot ? ntot : 1) * sizeof(token *));
+    g_graph_epoch++;                                  /* 拓扑变更：注册新 dep 即失效所有 back 调度缓存 */
+    tok_dep *d = (tok_dep *)sc_chunk0(sizeof(tok_dep));
+    d->ts = (token **)sc_chunk((size_t)(ntot ? ntot : 1) * sizeof(token *));
     memcpy(d->ts, ts, (size_t)ntot * sizeof(token *));
     d->n = ntrig;
     d->ntot = ntot;
     d->all = all;
     d->follow = follow;
     d->ctx = ctx;
-    d->armed = (unsigned char *)calloc((size_t)(ntrig ? ntrig : 1), 1);
+    d->armed = (unsigned char *)sc_chunk0((size_t)(ntrig ? ntrig : 1));
     d->remain = ntrig;
     for (int i = 0; i < ntot; i++)                     /* 先定门：任一成员（含 map 目标）MT 则整条 dep 走全局锁 */
         if (ts[i] && ts[i]->mt) { d->mt = 1; break; }
@@ -408,7 +438,7 @@ static void tok_depend_impl(token **ts, int ntrig, int ntot, int all, token_foll
         if (!t) continue;
         if (t->ndeps == t->capdeps) {
             t->capdeps = t->capdeps ? t->capdeps * 2 : 4;
-            t->deps = (tok_dep **)realloc(t->deps, (size_t)t->capdeps * sizeof(tok_dep *));
+            t->deps = (tok_dep **)sc_refit(t->deps, (size_t)t->capdeps * sizeof(tok_dep *));
         }
         t->deps[t->ndeps++] = d;
     }
@@ -417,7 +447,7 @@ static void tok_depend_impl(token **ts, int ntrig, int ntot, int all, token_foll
         if (!t) continue;
         if (t->nprod == t->capprod) {
             t->capprod = t->capprod ? t->capprod * 2 : 4;
-            t->producers = (tok_dep **)realloc(t->producers, (size_t)t->capprod * sizeof(tok_dep *));
+            t->producers = (tok_dep **)sc_refit(t->producers, (size_t)t->capprod * sizeof(tok_dep *));
         }
         t->producers[t->nprod++] = d;
     }
@@ -549,28 +579,19 @@ static int dep_back_rank(tok_dep *d) {
     return md;
 }
 
-/* back t[, seed]：反向遍历（反向传播骨架）。自输出 token t 出发，沿 producers[] 反向邻接
- * 收集全部上游 dep（去重），按 dep_back_rank 降序（反拓扑：靠近输出者先行）依次以
- * acting=TOK_BACK 唤起其 follow——follow 体内 this->active==TOK_BACK 即走反向计算（读目标
- * 写源；梯度数学由用户体负责，多 dep 写同一源的累积经 form combine(sum) 完成）。
- * seed 非空则先灌入 t（梯度种子，如 loss.backward(1)），不触发前向级联。
- * 编译期已保证图为 DAG（环检测），反向 BFS 必终止。
- *
- * 提前中止（break）：follow 返回非 0 即停止本轮反向遍历——供「drain」式协作层用：worker
- *   自 sink back，最深可认领节点的 follow 认领并处理后返回非 0 中止扫描，worker 再发起下一轮
- *   back 重扫，天然实现「最近未处理优先」的拉取式流水线排空。返回 0（如反向传播）则全程遍历，
- *   行为不变（向后兼容）。 */
-void token_back(token *t, sc_afat seed, int32_t tag) {
-    if (!t) return;
-    if (seed.p) {                                /* 种子非空：灌起点值（不触发前向 deps） */
-        if (!t->mt) { t->value = seed; t->tag = tag; }
-        else { uint32_t s = tok_write_begin(t); tok_store_value(t, seed, tag); tok_write_end(t, s); }
-    }
-    token   **seen = NULL; int nseen = 0, capseen = 0;   /* 已入队 token 去重 */
-    token   **work = NULL; int nwork = 0, capwork = 0;   /* 待展开 token 工作栈 */
-    tok_dep **deps = NULL; int ndep  = 0, capdep  = 0;   /* 反向可达 dep 集（去重） */
-    seen = (token **)malloc((capseen = 8) * sizeof(token *));
-    work = (token **)malloc((capwork = 8) * sizeof(token *));
+/* back 调度构建：自 sink t 沿 producers[] 反向 BFS，按图是否注册节点 exec 自动分派两种语义，
+ * 把唤起序列烘进 t->back（tok_back_cache）。BFS 临时去重表（seen/work/deps）走池化短命缓冲
+ * （sc_chunk/sc_refit/sc_recycle），构建末即回收——稳态训练循环只在首轮（或拓扑变更后）构建一次，
+ * 此后 token_back 纯读缓存、零分配零去重零排序。
+ *   mode 2（drain：图中有节点 exec）：缓存「按 depth 降序的注册 exec 节点」列表。
+ *   mode 1（边反向：无任何 exec，如梯度反传）：缓存「按 dep_back_rank 降序的可达 dep」列表。 */
+static tok_back_cache *tok_back_build(token *t) {
+    tok_back_cache *bc = t->back;
+    if (!bc) bc = (tok_back_cache *)sc_chunk0(sizeof(tok_back_cache)); /* 句柄进程生命周期 */
+    int capseen = 8, nseen = 0, capwork = 8, nwork = 0, capdep = 8, ndep = 0;
+    token   **seen = (token **)sc_chunk((size_t)capseen * sizeof(token *));   /* 短命：构建末回收 */
+    token   **work = (token **)sc_chunk((size_t)capwork * sizeof(token *));
+    tok_dep **deps = (tok_dep **)sc_chunk((size_t)capdep * sizeof(tok_dep *));
     seen[nseen++] = t;
     work[nwork++] = t;
     while (nwork) {
@@ -580,8 +601,8 @@ void token_back(token *t, sc_afat seed, int32_t tag) {
             int dup = 0;
             for (int k = 0; k < ndep; k++) if (deps[k] == d) { dup = 1; break; }
             if (!dup) {
-                if (ndep == capdep) { capdep = capdep ? capdep * 2 : 8;
-                    deps = (tok_dep **)realloc(deps, (size_t)capdep * sizeof(tok_dep *)); }
+                if (ndep == capdep) { capdep *= 2;
+                    deps = (tok_dep **)sc_refit(deps, (size_t)capdep * sizeof(tok_dep *)); }
                 deps[ndep++] = d;
             }
             for (int j = 0; j < d->n; j++) {     /* d 的触发源即上游，继续向上展开 */
@@ -591,47 +612,93 @@ void token_back(token *t, sc_afat seed, int32_t tag) {
                 for (int k = 0; k < nseen; k++) if (seen[k] == u) { vis = 1; break; }
                 if (vis) continue;
                 if (nseen == capseen) { capseen *= 2;
-                    seen = (token **)realloc(seen, (size_t)capseen * sizeof(token *)); }
+                    seen = (token **)sc_refit(seen, (size_t)capseen * sizeof(token *)); }
                 seen[nseen++] = u;
                 if (nwork == capwork) { capwork *= 2;
-                    work = (token **)realloc(work, (size_t)capwork * sizeof(token *)); }
+                    work = (token **)sc_refit(work, (size_t)capwork * sizeof(token *)); }
                 work[nwork++] = u;
             }
         }
     }
-    /* 按 dep_back_rank 降序排（反拓扑序，规模小用插入排序）：目标深者先唤起 */
-    for (int i = 1; i < ndep; i++) {
-        tok_dep *d = deps[i]; int r = dep_back_rank(d); int j = i - 1;
-        while (j >= 0 && dep_back_rank(deps[j]) < r) { deps[j + 1] = deps[j]; j--; }
-        deps[j + 1] = d;
-    }
-    /* 自动分派两种反向语义（互斥，按图是否注册了节点 exec 决定）：
-     *   (1) 拉取式 drain（图中有节点注册 exec）：节点拥有处理逻辑——按反拓扑序（节点 depth 降序：
-     *       靠近 sink 者先行）对各注册节点唤起 exec(t, t->ctx)，返回非 0 即中止本轮（认领并处理一节点）。
-     *       此模式下 dep 只管前向路由（follow 永不以 BACK 唤起），节点处理彻底归节点自身。
-     *   (2) 边反向（无任何 exec，如梯度反传）：保持原语义——按 dep 反拓扑序唤起 follow(...,TOK_BACK)，
-     *       follow 体内 this->active==TOK_BACK 走反向计算（读目标写源）。feature49 等反传图走此路径，行为不变。 */
     int has_exec = 0;
     for (int i = 0; i < nseen; i++) if (seen[i] && seen[i]->exec) { has_exec = 1; break; }
-    if (has_exec) {                              /* 节点 drain 模式：反拓扑序遍历节点（depth 降序） */
+    if (has_exec) {                              /* mode 2：节点 drain，缓存 exec 节点（depth 降序） */
         for (int i = 1; i < nseen; i++) {        /* 插入排序按 depth 降序（规模小） */
             token *x = seen[i]; int d = x->depth; int j = i - 1;
             while (j >= 0 && seen[j]->depth < d) { seen[j + 1] = seen[j]; j--; }
             seen[j + 1] = x;
         }
-        for (int i = 0; i < nseen; i++) {
-            token *x = seen[i];
-            if (x && x->exec && x->exec(x, x->ctx))
-                break;                           /* 已认领并处理一节点 → 中止本轮 back 扫描（调用方按需重扫） */
+        int cnt = 0;
+        for (int i = 0; i < nseen; i++) if (seen[i] && seen[i]->exec) cnt++;
+        if (bc->cap < cnt) { bc->cap = cnt ? cnt : 1;
+            bc->list = (void **)sc_refit(bc->list, (size_t)bc->cap * sizeof(void *)); }
+        bc->n = 0;
+        for (int i = 0; i < nseen; i++) if (seen[i] && seen[i]->exec) bc->list[bc->n++] = seen[i];
+        bc->mode = 2;
+    } else {                                     /* mode 1：边反向，缓存 dep（dep_back_rank 降序） */
+        for (int i = 1; i < ndep; i++) {
+            tok_dep *d = deps[i]; int r = dep_back_rank(d); int j = i - 1;
+            while (j >= 0 && dep_back_rank(deps[j]) < r) { deps[j + 1] = deps[j]; j--; }
+            deps[j + 1] = d;
         }
-    } else {
-        for (int i = 0; i < ndep; i++) {         /* 边反向：逐个反向唤起 follow（active=TOK_BACK） */
-            tok_dep *d = deps[i];
+        if (bc->cap < ndep) { bc->cap = ndep ? ndep : 1;
+            bc->list = (void **)sc_refit(bc->list, (size_t)bc->cap * sizeof(void *)); }
+        bc->n = ndep;
+        for (int i = 0; i < ndep; i++) bc->list[i] = deps[i];
+        bc->mode = 1;
+    }
+    sc_recycle(seen); sc_recycle(work); sc_recycle(deps);
+    bc->epoch = g_graph_epoch;                   /* 末置 epoch：缓存就绪标记（发布前最后一步） */
+    return bc;
+}
+
+static int g_back_lock = 0;                      /* back 缓存构建锁：仅首构建/拓扑变更后争用 */
+
+/* back t[, seed]：反向遍历（反向传播骨架）。自输出 token t 出发，沿 producers[] 反向邻接
+ * 收集全部上游 dep（去重），按 dep_back_rank 降序（反拓扑：靠近输出者先行）依次以
+ * acting=TOK_BACK 唤起其 follow——follow 体内 this->active==TOK_BACK 即走反向计算（读目标
+ * 写源；梯度数学由用户体负责，多 dep 写同一源的累积经 form combine(sum) 完成）。
+ * seed 非空则先灌入 t（梯度种子，如 loss.backward(1)），不触发前向级联。
+ * 编译期已保证图为 DAG（环检测），反向 BFS 必终止。
+ *
+ * 调度缓存：唤起序列烘进 t->back，按 g_graph_epoch 命中——拓扑稳定（训练循环 / drain 运行期）
+ *   下仅首轮构建，此后纯读缓存、零分配零去重零排序。构建经全局锁双检：稳态（epoch 命中）走无锁
+ *   快路径，仅首构建/拓扑变更后入锁（release 发布 t->back，快路径 acquire 读，多 worker 并发 back
+ *   同一 sink 安全）。拓扑变更（dep 注册 / 新挂 exec）经 g_graph_epoch++ 自动失效缓存。
+ *
+ * 提前中止（break）：follow/exec 返回非 0 即停止本轮反向遍历——供「drain」式协作层用：worker
+ *   自 sink back，最深可认领节点的钩子认领并处理后返回非 0 中止扫描，worker 再发起下一轮
+ *   back 重扫，天然实现「最近未处理优先」的拉取式流水线排空。返回 0（如反向传播）则全程遍历，
+ *   行为不变（向后兼容）。 */
+void token_back(token *t, sc_afat seed, int32_t tag) {
+    if (!t) return;
+    if (seed.p) {                                /* 种子非空：灌起点值（不触发前向 deps） */
+        if (!t->mt) { t->value = seed; t->tag = tag; }
+        else { uint32_t s = tok_write_begin(t); tok_store_value(t, seed, tag); tok_write_end(t, s); }
+    }
+    tok_back_cache *bc = (tok_back_cache *)sc_get_ord(&t->back);
+    if (!bc || bc->epoch != g_graph_epoch) {     /* 缓存缺失/失效：双检入锁构建（稳态不入此） */
+        for (;;) { int e = 0; if (sc_test_and_set_acq(&g_back_lock, &e, 1)) break; }
+        bc = (tok_back_cache *)sc_get_ord(&t->back);
+        if (!bc || bc->epoch != g_graph_epoch) {
+            bc = tok_back_build(t);
+            sc_set_rel(&t->back, bc);             /* release 发布：快路径 acquire 读必见已构建完整缓存 */
+        }
+        sc_set_rel(&g_back_lock, 0);
+    }
+    if (bc->mode == 2) {                          /* drain：按 depth 降序唤起注册 exec 节点 */
+        for (int i = 0; i < bc->n; i++) {
+            token *x = (token *)bc->list[i];
+            if (x && x->exec && x->exec(x, x->ctx))
+                break;                           /* 已认领并处理一节点 → 中止本轮 back 扫描 */
+        }
+    } else {                                      /* 边反向：按反拓扑序唤起 follow（active=TOK_BACK） */
+        for (int i = 0; i < bc->n; i++) {
+            tok_dep *d = (tok_dep *)bc->list[i];
             if (d->follow && d->follow(d->ts, d->ntot, TOK_BACK, d->ctx))
                 break;                           /* follow 返回非 0 = 请求中止反向遍历 */
         }
     }
-    free(seen); free(work); free(deps);
 }
 
 /* 烘焙：编译期 Tarjan 算好的 SCC 反馈簇划分，注册时以常量写入句柄（lightmap 式预计算）。 */
@@ -654,28 +721,29 @@ int token_scc_size(token *t) {
  * 反向邻接 producers[]（供 back / 查询）。SCC 簇划分由编译期 Tarjan 烘焙（token_set_scc）。 */
 void token_depend_loop(token **ts, int nsrc, int ntgt, int all, token_follow follow, void *ctx) {
     int ntot = nsrc + ntgt;
-    tok_dep *d = (tok_dep *)calloc(1, sizeof(tok_dep));
-    d->ts = (token **)malloc((size_t)(ntot ? ntot : 1) * sizeof(token *));
+    g_graph_epoch++;                             /* 拓扑变更：注册 loop dep 即失效所有 back 调度缓存 */
+    tok_dep *d = (tok_dep *)sc_chunk0(sizeof(tok_dep));
+    d->ts = (token **)sc_chunk((size_t)(ntot ? ntot : 1) * sizeof(token *));
     memcpy(d->ts, ts, (size_t)ntot * sizeof(token *));
     d->n = nsrc;
     d->ntot = ntot;
     d->all = all;
     d->follow = follow;
     d->ctx = ctx;
-    d->armed = (unsigned char *)calloc((size_t)(nsrc ? nsrc : 1), 1);
+    d->armed = (unsigned char *)sc_chunk0((size_t)(nsrc ? nsrc : 1));
     d->remain = nsrc;
     for (int i = nsrc; i < ntot; i++) {          /* 反向邻接：目标记下产出它的 dep（供 back / 查询） */
         token *t = ts[i];
         if (!t) continue;
         if (t->nprod == t->capprod) {
             t->capprod = t->capprod ? t->capprod * 2 : 4;
-            t->producers = (tok_dep **)realloc(t->producers, (size_t)t->capprod * sizeof(tok_dep *));
+            t->producers = (tok_dep **)sc_refit(t->producers, (size_t)t->capprod * sizeof(tok_dep *));
         }
         t->producers[t->nprod++] = d;
     }
     if (g_nloop == g_caploop) {                  /* 登记全局 loop 列表（token_loop_run 据 SCC 簇筛选驱动） */
         g_caploop = g_caploop ? g_caploop * 2 : 8;
-        g_loop_deps = (tok_dep **)realloc(g_loop_deps, (size_t)g_caploop * sizeof(tok_dep *));
+        g_loop_deps = (tok_dep **)sc_refit(g_loop_deps, (size_t)g_caploop * sizeof(tok_dep *));
     }
     g_loop_deps[g_nloop++] = d;
 }

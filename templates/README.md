@@ -8,7 +8,8 @@
 | 模板 | 类型 | 核心机制 | 起点文件 |
 |------|------|----------|----------|
 | [workflow-graph/](workflow-graph/) | 工作流计算图（**驱动模型三连**：同一张 tok DAG、三种执行模型） | 见子目录：`back-drain`（拉取式 back 反向扫描）、`list-schedule`（就绪队列列表调度）、`push-reactive`（推送式同步级联） | 见各子目录 |
-| [dnn-framework/](dnn-framework/) | 深度神经网络框架 | `dep…map` 前向 + `back` 反向求导 + 训练循环（`pulse` 驱迭代；`dep loop` 适配 RNN） | `dnn.sc` |
+| [dnn-framework/](dnn-framework/) | 深度神经网络框架（**层级**粒度：tok=层） | `dep…map` 前向 + `back` 反向求导 + 训练循环（`pulse` 驱迭代；`dep loop` 适配 RNN） | `dnn.sc` |
+| [dnn-design/](dnn-design/) | 神经元级 DNN / 自动微分机（**神经元**粒度：tok=神经元；研究/学习用） | `dep all` 全连接突触束 + `back` 反向传播 + 带动量 SGD（autograd 复用 back 反拓扑序）；utils 通用模块 + hello-dnn 示例工程 | `hello-dnn/hello.sc` |
 
 ## 使用方式
 
@@ -18,6 +19,7 @@
 ./compiler/build/scc templates/workflow-graph/list-schedule/schedule.sc
 ./compiler/build/scc templates/workflow-graph/push-reactive/reactive.sc
 ./compiler/build/scc templates/dnn-framework/dnn.sc
+./compiler/build/scc templates/dnn-design/hello-dnn/hello.sc
 
 # 复制一份起你自己的项目，改名后扩展
 cp -r templates/workflow-graph/back-drain myproj && cd myproj

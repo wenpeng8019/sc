@@ -12,9 +12,8 @@
 #ifndef SC_OP_H
 #define SC_OP_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdlib.h>
+#include "platform.h"   /* 跨平台原子 RMW（sc_get_and_inc_ord / sc_inc_ord 等，三平台分支）；
+                          * platform.h 末尾回带 op.h，靠 SC_OP_H/SC_PLATFORM_H 双护栏消解循环 */
 
 #ifdef __cplusplus
 extern "C" {
@@ -96,15 +95,20 @@ void *sc_realloc(void *p, size_t n);
 void  sc_free(void *p);
 #endif
 
-/* ---------------- 确定性池化分配 sc_chunk / sc_recycle ----------------
- * 与 sc_alloc/sc_free（随 SC_POOL 在 libc↔mem 间切换）不同，sc_chunk/sc_recycle 恒走
- * mem 池（chunk/recycle）——不受 SC_POOL 开关影响，始终池化。用于「短命高频、必池化」
- * 的分配：典型为 rpc 传参的联合节点（run 线程 / pool 任务 / queue 消息 / promise 各自
- * [节点][rpc 参数]，每次调用一份、随即回收）。这类对象池化收益最大，故不留作可选。
- * 实现见 op_impl.c（转发 mem chunk/recycle）；op 单元恒隐式依赖 mem（编译器自动纳入
- * 单元图，无需 inc mem.sc）。与 adt 的 list 段式存储直接走 mem 同哲学。 */
-void *sc_chunk(size_t n);
-void  sc_recycle(void *p);
+/* ---------------- 确定性池化分配 sc_chunk / sc_chunk0 / sc_refit / sc_recycle ----------------
+ * 与 sc_alloc/sc_free（随 SC_POOL 在 libc↔mem 间切换）不同，本组恒走 mem 池
+ * （chunk/chunk0/refit/recycle）——不受 SC_POOL 开关影响，始终池化。完整对应
+ * malloc/calloc/realloc/free 四件套，故除「短命高频」联合节点外，亦可承载需「恒池化」的
+ * 长生命周期可增长 / 须清零结构（如 tok 运行时的句柄、依赖记录、动态邻接表）：这类对象
+ * 数量多、尺寸小、进程生命周期，走池化分配减碎片、免散落 libc 调用。
+ * 典型短命用例：rpc 传参的联合节点（run 线程 / pool 任务 / queue 消息 / promise 各自
+ * [节点][rpc 参数]，每次调用一份、随即回收）。
+ * 实现见 op_impl.c（转发 mem chunk/chunk0/refit/recycle）；op 单元恒隐式依赖 mem
+ * （编译器自动纳入单元图，无需 inc mem.sc）。与 adt 的 list 段式存储直接走 mem 同哲学。 */
+void *sc_chunk(size_t n);            /* 池化 malloc：size==0 视为 1；失败 NULL */
+void *sc_chunk0(size_t n);           /* 池化 calloc：分配并清零；失败 NULL */
+void *sc_refit(void *p, size_t n);   /* 池化 realloc：保留内容；失败 NULL 且原块有效 */
+void  sc_recycle(void *p);           /* 池化 free：sc_recycle(NULL) 安全空操作 */
 
 /* ---------------- --check=mem 越界 canary（头尾哨兵 + 地址派生魔数） ----------------
  * 仅在 --check=mem 构建下，T__new_ref 把 ref 头堆对象扩成：
@@ -131,10 +135,10 @@ void sc_stack_canary_check(const unsigned char *p, size_t n, const void *anchor,
  * 在编译期已知维度的栈数组下标处做越界校验。命中即报 stderr 并 abort（致命，防 UB 继续扩散）。
  *   · __sc_ptr_check：p==NULL 时报「空指针解引用」并 abort，否则原样返回 p。
  *   · __sc_bound_check：idx<0 || idx>=len 时报「数组下标越界」并 abort，否则返回 idx。
- * SC_PTRCHK 用 __typeof__ 保型且仅求值一次（__typeof__ 操作数不求值，gcc/clang 通用）。 */
+ * SC_PTRCHK 用 P_TYPEOF 保型且仅求值一次（typeof 操作数不求值；P_TYPEOF 见 platform.h，跨平台）。 */
 const void *__sc_ptr_check(const void *p, const char *who);
 long        __sc_bound_check(long idx, long len, const char *who);
-#define SC_PTRCHK(p, who)      ((__typeof__(p))__sc_ptr_check((const void *)(p), (who)))
+#define SC_PTRCHK(p, who)      ((P_TYPEOF(p))__sc_ptr_check((const void *)(p), (who)))
 #define SC_BOUNDCHK(i, n, who) (__sc_bound_check((long)(i), (long)(n), (who)))
 
 /* 绑定一条边：目标.in++、持有者.out++（哨兵 own 跳过 out 记账）。
@@ -145,12 +149,12 @@ static inline void sc_fat_bind(sc_fat *f, void *tgt, sc_ref *tr, int32_t *ow) {
     f->own = ow;
     if (f->tar) {
         if (SC_TAR_HDR(f->tar)->flags & SC_REF_ATOM)
-            __atomic_fetch_add(f->tar, 1, __ATOMIC_SEQ_CST);
+            sc_get_and_inc_ord(f->tar, 1);            /* 跨平台原子 fetch_add（新值不取，弃返回） */
         else (*f->tar)++;
     }
     if (SC_OWN_REAL(f->own)) {
         if (SC_OWN_HDR(f->own)->flags & SC_REF_ATOM)
-            __atomic_fetch_add(f->own, 1, __ATOMIC_SEQ_CST);
+            sc_get_and_inc_ord(f->own, 1);           /* 跨平台原子 fetch_add */
         else (*f->own)++;
     }
 }
@@ -162,13 +166,13 @@ static inline void sc_fat_unbind_d(sc_fat *f, void (*dtor)(void *)) {
     if (f->tar) {
         int32_t nv;
         if (SC_TAR_HDR(f->tar)->flags & SC_REF_ATOM)
-            nv = __atomic_sub_fetch(f->tar, 1, __ATOMIC_SEQ_CST);
+            nv = sc_inc_ord(f->tar, -1);             /* 跨平台原子 sub_fetch（取新值判 0） */
         else nv = --(*f->tar);
         if (nv == 0) sc_fat_on_zero_d(f, dtor);
     }
     if (SC_OWN_REAL(f->own) && f->p) {
         if (SC_OWN_HDR(f->own)->flags & SC_REF_ATOM)
-            __atomic_fetch_sub(f->own, 1, __ATOMIC_SEQ_CST);
+            sc_get_and_inc_ord(f->own, -1);          /* 跨平台原子 fetch_sub（弃返回） */
         else (*f->own)--;
     }
     f->p = (void *)0; f->tar = (int32_t *)0;

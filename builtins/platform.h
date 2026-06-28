@@ -625,6 +625,22 @@ static inline int sc_barrier_wait(sc_barrier_t* b) {
 // 时在 op.sc 与本文件三个平台分支中成对添加同名 sc_<op>。
 //-----------------------------------------------------------------------------
 
+/* 跨平台 typeof（P_TYPEOF）：把编译器专有的 typeof token 收敛到本可移植层，
+ * 避免 __typeof__ 等扩展 token 散落各头文件（如 op.h 的 SC_PTRCHK 保型转换）。
+ *   - gcc/clang：__typeof__（双下划线形式，不触发 -Wlanguage-extension-token）
+ *   - C++：decltype（标准）
+ *   - C23：标准 typeof
+ *   - 其余（含 VS2022 17.9+ MSVC C）：回退 __typeof__ */
+#if defined(__GNUC__) || defined(__clang__)
+#  define P_TYPEOF(x) __typeof__(x)
+#elif defined(__cplusplus)
+#  define P_TYPEOF(x) decltype(x)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#  define P_TYPEOF(x) typeof(x)
+#else
+#  define P_TYPEOF(x) __typeof__(x)
+#endif
+
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 // C11 atomics
 #   include <stdatomic.h>
