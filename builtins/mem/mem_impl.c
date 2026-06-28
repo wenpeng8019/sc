@@ -30,19 +30,25 @@
 
 #define MEM_ALIGN_UP(x, a)  (((uintptr_t)(x) + ((a) - 1)) & ~(uintptr_t)((a) - 1))
 
-/* ---------------- 调试构建（可选）：-DMEM_DEBUG 开启双重释放 / 野指针释放检测 ----------------
+/* ---------------- 调试构建（可选）：-DMEM_DEBUG 开启双重释放 / 野指针 / 尾部越界检测 ----------------
  * 开启后对象头增设 magic 守卫字段：分配置 MEM_MAGIC_ALLOC，归还置 MEM_MAGIC_FREE。
  * recycle/refit/mem_usable 校验 magic，捕获重复 recycle、释放非本池指针等错误（best-effort）。
- * 缓冲区越界检测由编译器 --check=mem 金丝雀机制负责，此处不重复。默认关闭，零开销。
+ * 另在每块可用区末尾预留 MEM_TAIL 字节并写入 MEM_MAGIC_TAIL 金丝雀——这是 chunk 自带、
+ * 不依赖编译器 --check=mem 的独立向后越界写检测：recycle/refit/mem_usable 校验该金丝雀，
+ * 损坏即判定缓冲区尾部溢出。默认关闭，发布构建 MEM_TAIL==0、所有守卫退化为空操作，零开销。
  */
 #ifdef MEM_DEBUG
 #include <stdio.h>
 #define MEM_MAGIC_ALLOC  ((size_t)0x5CA11AC1u)
 #define MEM_MAGIC_FREE   ((size_t)0x5CF4EEEDu)
+#define MEM_MAGIC_TAIL   ((size_t)0x5CB0DEADu)   /* 尾部金丝雀：缓冲区向后越界写检测 */
+#define MEM_TAIL         ((size_t)MEM_ALIGN)     /* 每块可用区后预留字节（16，保持后续块 payload 16 对齐） */
 static void mem_die(const char *why, void *p) {
     fprintf(stderr, "[mem] 致命：%s (ptr=%p)\n", why, p);
     abort();
 }
+#else
+#define MEM_TAIL         ((size_t)0)             /* 发布构建：不预留尾部，零开销 */
 #endif
 
 /* 对象头：见 mem.h。owner/info 分时复用。 */
@@ -185,6 +191,28 @@ static inline size_t mem_classsize(unsigned idx) {
     return base + (size_t)(k + 1) * (base >> 2);
 }
 
+/* ---------------- 尾部金丝雀（MEM_DEBUG）：chunk 自带的向后越界写检测 ----------------
+ * 金丝雀落点 = payload + 可用字节数（小=class 容量 / 大、超对齐=用户请求字节），位于 MEM_TAIL
+ * 预留区内、可用区之外；用户合法写至多到 mem_usable() 边界，越界即覆盖金丝雀，归还/查询时被捕获。 */
+#ifdef MEM_DEBUG
+static size_t mem_usable_of(mem_block *b) {                    /* 该块可用字节（金丝雀落点偏移） */
+    if (b->owner == MEM_LARGE_OWNER || b->owner == MEM_ALIGNED_OWNER) return b->info;
+    return mem_classsize((unsigned)b->info);
+}
+static void mem_tail_set(mem_block *b) {                       /* 在可用区末尾写入金丝雀 */
+    size_t u = mem_usable_of(b), magic = MEM_MAGIC_TAIL;
+    memcpy((uint8_t*)b + MEM_HDR + u, &magic, sizeof magic);
+}
+static void mem_tail_check(mem_block *b, void *p) {            /* 校验金丝雀；损坏即尾部越界 */
+    size_t u = mem_usable_of(b), magic;
+    memcpy(&magic, (uint8_t*)b + MEM_HDR + u, sizeof magic);
+    if (magic != MEM_MAGIC_TAIL) mem_die("缓冲区尾部越界写（chunk 金丝雀损坏）", p);
+}
+#else
+#define mem_tail_set(b)        ((void)0)
+#define mem_tail_check(b, p)   ((void)0)
+#endif
+
 /* ---------------- 堆获取与跨线程并回 ---------------- */
 
 /* 把堆 h 绑定为当前线程堆，并登记到线程退出回调 */
@@ -237,7 +265,7 @@ static void mem_drain(mem_heap *h) {
 /* 向 OS 申请一页，切成 cls 档多块压入本地空闲链；成功返回 1 */
 static int mem_refill(mem_heap *h, unsigned cls) {
     size_t csz   = mem_classsize(cls);
-    size_t blksz = MEM_HDR + csz;
+    size_t blksz = MEM_HDR + csz + MEM_TAIL;                  /* +MEM_TAIL：尾部金丝雀预留（发布构建为 0） */
     size_t navail = MEM_PAGE_BYTES > (sizeof(mem_page) + blksz)
                   ? (MEM_PAGE_BYTES - sizeof(mem_page)) / blksz : 1;
     if (navail < 1) navail = 1;
@@ -278,6 +306,7 @@ static void *mem_alloc_small(size_t size) {
     b->owner = h;                                              /* 标记物主 */
     b->info  = cls;
     MEM_MARK_ALLOC(b);
+    mem_tail_set(b);                                          /* 可用区末尾置金丝雀 */
     h->st_live   += mem_classsize(cls);                       /* 统计：分配 */
     if (h->st_live > h->st_peak) h->st_peak = h->st_live;     /* 本堆峰值水位（本地，无原子） */
     h->st_count  += 1;
@@ -286,11 +315,12 @@ static void *mem_alloc_small(size_t size) {
 }
 
 static void *mem_alloc_large(size_t size) {
-    mem_block *b = (mem_block*)malloc(MEM_HDR + size);
+    mem_block *b = (mem_block*)malloc(MEM_HDR + size + MEM_TAIL);   /* +MEM_TAIL：尾部金丝雀预留 */
     if (!b) return NULL;
     b->owner = MEM_LARGE_OWNER;
     b->info  = size;
     MEM_MARK_ALLOC(b);
+    mem_tail_set(b);                                         /* 可用区末尾置金丝雀 */
     mem_stat_large_add(size);                                 /* 统计：大对象分配 */
     return (uint8_t*)b + MEM_HDR;
 }
@@ -302,7 +332,7 @@ static size_t mem_aligned_front(void) { return sizeof(void*) + sizeof(size_t) + 
 
 static void *mem_alloc_aligned(size_t size, size_t align) {
     size_t front = mem_aligned_front();
-    size_t total = (align - 1) + front + size;
+    size_t total = (align - 1) + front + size + MEM_TAIL;     /* +MEM_TAIL：尾部金丝雀预留 */
     uint8_t *raw = (uint8_t*)malloc(total);
     if (!raw) return NULL;
     uintptr_t payload = MEM_ALIGN_UP((uintptr_t)raw + front, align);
@@ -312,13 +342,14 @@ static void *mem_alloc_aligned(size_t size, size_t align) {
     b->owner = MEM_ALIGNED_OWNER;
     b->info  = size;
     MEM_MARK_ALLOC(b);
+    mem_tail_set(b);                                         /* 可用区末尾置金丝雀 */
     mem_stat_big_add(total, size);
     return (void*)payload;
 }
 
 static size_t mem_aligned_total(mem_block *b) {                /* 还原该对齐块的 malloc 总字节 */
     size_t align = *((size_t*)((uint8_t*)b - sizeof(size_t)));
-    return (align - 1) + mem_aligned_front() + b->info;
+    return (align - 1) + mem_aligned_front() + b->info + MEM_TAIL;
 }
 
 /* ---------------- 对外接口 ---------------- */
@@ -345,7 +376,7 @@ void *chunk_aligned(uint64_t size, uint64_t align) {
     if (a <= MEM_ALIGN) return chunk(size);          /* 默认返回值已 16 对齐 */
     if (a & (a - 1)) return NULL;                     /* align 必须是 2 的幂 */
     size_t s = (size_t)size ? (size_t)size : 1u;
-    if (a - 1 > SIZE_MAX - mem_aligned_front() - s) return NULL;  /* 防总量溢出 */
+    if (a - 1 > SIZE_MAX - mem_aligned_front() - MEM_TAIL - s) return NULL;  /* 防总量溢出 */
     return mem_alloc_aligned(s, a);
 }
 
@@ -353,16 +384,17 @@ void recycle(void *p) {
     if (!p) return;
     mem_block *b = (mem_block*)((uint8_t*)p - MEM_HDR);
     if (b->owner == MEM_LARGE_OWNER) {                        /* 大对象直通 */
-        MEM_CHECK_ALLOC(b, p); MEM_MARK_FREE(b);
+        MEM_CHECK_ALLOC(b, p); mem_tail_check(b, p); MEM_MARK_FREE(b);
         mem_stat_large_del(b->info); free(b); return;
     }
     if (b->owner == MEM_ALIGNED_OWNER) {                      /* 超对齐对象直通 */
-        MEM_CHECK_ALLOC(b, p); MEM_MARK_FREE(b);
+        MEM_CHECK_ALLOC(b, p); mem_tail_check(b, p); MEM_MARK_FREE(b);
         size_t total = mem_aligned_total(b);
         void  *raw   = *((void**)((uint8_t*)b - sizeof(size_t) - sizeof(void*)));
         mem_stat_big_del(total, b->info); free(raw); return;
     }
     MEM_CHECK_ALLOC(b, p);
+    mem_tail_check(b, p);
     mem_heap *owner = (mem_heap*)b->owner;
     if (owner == t_heap) {                                     /* 同线程：直接压回本地链 */
         unsigned cls = (unsigned)b->info;
@@ -382,6 +414,7 @@ void recycle(void *p) {
 uint64_t mem_usable(void *p) {
     if (!p) return 0;
     mem_block *b = (mem_block*)((uint8_t*)p - MEM_HDR);
+    mem_tail_check(b, p);
     if (b->owner == MEM_LARGE_OWNER || b->owner == MEM_ALIGNED_OWNER) return b->info;
     return mem_classsize((unsigned)b->info);
 }
@@ -394,6 +427,7 @@ void *refit(void *p, uint64_t size) {
 
     if (b->owner == MEM_ALIGNED_OWNER) {                      /* 超对齐：重分配并保持对齐 */
         MEM_CHECK_ALLOC(b, p);
+        mem_tail_check(b, p);
         size_t oldu  = b->info;
         size_t align = *((size_t*)((uint8_t*)b - sizeof(size_t)));
         if (want <= oldu) return p;                           /* 容量足够、对齐不变：原地 */
@@ -406,12 +440,14 @@ void *refit(void *p, uint64_t size) {
 
     if (b->owner == MEM_LARGE_OWNER) {
         MEM_CHECK_ALLOC(b, p);
+        mem_tail_check(b, p);
         size_t oldu = b->info;
         if (want > MEM_SMALL_MAX) {                            /* 大→大：原地 realloc */
-            mem_block *nb = (mem_block*)realloc(b, MEM_HDR + want);
+            mem_block *nb = (mem_block*)realloc(b, MEM_HDR + want + MEM_TAIL);
             if (!nb) return NULL;
             nb->owner = MEM_LARGE_OWNER;
             nb->info  = want;
+            mem_tail_set(nb);                                 /* 重置尾部金丝雀于新可用区末尾 */
             sc_inc(&g_large_reserved, (size_t)want - (size_t)oldu);  /* 统计：模加/减容量差 */
             size_t now = sc_inc(&g_large_live, (size_t)want - (size_t)oldu);
             size_t cur = sc_get(&g_large_peak);              /* CAS-max 更新峰值 */
@@ -428,6 +464,7 @@ void *refit(void *p, uint64_t size) {
 
     /* 小对象 */
     MEM_CHECK_ALLOC(b, p);
+    mem_tail_check(b, p);
     size_t oldu = mem_classsize((unsigned)b->info);
     if (want <= oldu) return p;                                /* 同档/更小：原地 */
     void *np = chunk(want);                                    /* 增大：搬迁 */
