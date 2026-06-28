@@ -120,6 +120,11 @@ POSITIVE=(
     tests/cases/args_native/args_native.sc
     tests/cases/mod_basic.sc
     tests/cases/mod_cross/mod_cross.sc
+    tests/cases/ts_basic.sc
+    tests/cases/nn_train.sc
+    tests/cases/neuron_train.sc
+    tests/cases/cnn_train.sc
+    tests/cases/attn_train.sc
 )
 
 # --check=mem 越界 canary 用例：复用既有 sc 源，比对 mem-check 下的 emit-c 产物

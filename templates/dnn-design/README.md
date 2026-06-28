@@ -7,15 +7,16 @@
 ```
 dnn-design/
 ├── README.md          # 本文：定位 + 与工业 ts 基建的差异 / 优劣
-├── utils/             # 可复用的 dnn 通用模块对象（@def / @fnc 导出）
-│   ├── neuron.sc      #   神经元侧车结构 neuron + 激活库 act_fwd/act_bwd
-│   ├── autograd.sc    #   突触束算子 edge_fwd/edge_bwd（自动微分核心）
-│   ├── optim.sc       #   带动量 SGD：sgd_one
+├── utils/             # 通用件已升格为内置 `neuron` 模块（见 utils/README.md）
 │   └── README.md
-└── hello-dnn/         # 最小可运行示例工程（inc 上面的 utils）
+└── hello-dnn/         # 最小可运行示例工程（`inc neuron.sc`）
     ├── hello.sc       #   2-4-1 MLP：拓扑 + 训练 + 推理
     └── README.md
 ```
+
+> 通用件（神经元侧车 / 激活库 / 突触束算子 / 优化器 / 损失）已从模板 utils 升格为可复用的
+> **独立神经元模块 `neuron`**：`inc neuron.sc` 即得，无需随模板复制。`neuron` 是纯 sc 实现
+> （`builtins/neuron/neuron.sc` 全程可读），与工业张量库 `nn` 成对。
 
 ## 定位：`tok` 是「调度 / 自动微分」层，不是张量基建
 
@@ -66,13 +67,15 @@ dnn-design/
 
 | 能力 | 实现 |
 |---|---|
-| 前向传播 | `dep` follow 体的 `edge_fwd`（`z = b + Σwᵢxᵢ` → 激活） |
-| 反向传播（链式法则） | `back loss` + follow 的 `TOK_BACK` 分支 `edge_bwd` |
-| 多种激活 | 恒等 / ReLU / Leaky-ReLU（`act_fwd`/`act_bwd`，可扩 sigmoid/tanh） |
-| 损失 | MSE（loss 边前向算损失、反向播种输出梯度） |
-| 优化器 | 带动量 SGD（`sgd_one`，可扩 Adam） |
+| 前向传播 | 神经元方法 `n->forward(ins, k)`（`z = b + Σwᵢxᵢ` → 激活），由 `edge_step` 在 dep 体统一调度 |
+| 反向传播（链式法则） | `back loss` + follow 的 `TOK_BACK` 分支 `n->backward(ins, k)` |
+| 多种激活 | 恒等 / ReLU / Leaky-ReLU / **Sigmoid** / **Tanh**（`AK_*` + `act_fwd`/`act_bwd`） |
+| 损失 | MSE（`mse_loss` + `n->seed_mse`）与 **Softmax 交叉熵**（`xent_seed`，多分类） |
+| 优化器 | 带动量 SGD（`n->sgd`）与 **Adam**（`n->adam`，含偏差校正） |
 | 训练 | mini-batch 逐样本：清梯度 → 前向 → `back` → 更新 |
 | 梯度汇聚 | fan-out>1 时 `up->grad +=` 由反拓扑序保证时序正确 |
+
+> 上表算子均出自内置 `neuron` 模块（`inc neuron.sc`），与工业 `nn` 的能力集拉齐（激活/优化器/损失）。
 
 ## 运行
 

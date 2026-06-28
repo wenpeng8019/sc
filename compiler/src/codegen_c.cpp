@@ -701,6 +701,25 @@ struct CGen {
                     out << "    " << im->name << "(_p"
                         << (typeHasFatMember(tn) ? ", &_h->out" : "") << ");\n";
                 out << "    return _p;\n}\n\n";
+
+                // 带参 + 胖目标：T__new_ref_init(init形参..., _atom) = 带头分配（复用
+                // __new_ref，init 带参时其内不自动 init）+ init(args) 转发。含胖成员时
+                // self_own 取本对象真实出边 &_h->out（由 _p 回退 SC_REF_HDR 还原头）。
+                if (im && !im->structCommon.fields.empty()) {
+                    out << "static inline " << tn << " *" << tn << "__new_ref_init(";
+                    for (size_t i = 0; i < im->structCommon.fields.size(); i++) {
+                        if (i) out << ", ";
+                        emitDeclarator(im->structCommon.fields[i]);
+                    }
+                    out << ", int32_t _atom) {\n"
+                        << "    " << tn << " *_p = " << tn << "__new_ref(_atom);\n"
+                        << "    if (_p) " << im->name << "(_p";
+                    for (auto& f : im->structCommon.fields)
+                        out << ", " << (f.name == "this" ? "_this" : f.name);
+                    if (typeHasFatMember(tn))
+                        out << ", &((sc_ref *)((char *)_p - SC_REF_HDR))->out";
+                    out << ");\n    return _p;\n}\n\n";
+                }
             }
         }
         // future<ID>(ctx?) 构造：在 future__new 基础上打 id 标签 + 可选用户上下文 ctx
@@ -2572,6 +2591,22 @@ struct CGen {
         emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true, f.type.name);
     }
 
+    // T(args) 构造：校验实参与 init 形参个数匹配，输出逗号分隔实参列表（无括号，
+    // 末尾不补逗号）。供胖目标带参构造 T@ = T(args) 各发射点复用。
+    void emitCtorInitArgs(const Decl* td, const Expr& init) {
+        const Decl* im = findMethod(td->name, "init");
+        if (!im || im->structCommon.fields.empty())
+            throw CompileError("类型 '" + td->name +
+                "' 的 init 无参数，不支持带参构造 T(...)", init.line);
+        if (init.args.size() != im->structCommon.fields.size())
+            throw CompileError("构造 '" + td->name +
+                "(...)' 实参个数与 init 形参不符", init.line);
+        for (size_t i = 0; i < init.args.size(); i++) {
+            if (i) out << ", ";
+            emitMethodArg(*init.args[i], &im->structCommon.fields[i]);
+        }
+    }
+
     // 胖指针赋值（lv=左值, own=持有者 out 表达式）：
     //   T()   → 带头堆分配 + 绑新边（目标.in++、own.out++）
     //   调用  → 移动：结构体拷贝（入边守恒）；own 非 ROOT 时改挂并 own.out++
@@ -2590,14 +2625,19 @@ struct CGen {
             return;
         }
         if (!isInit) emitFatUnbind(lv, dtorArg, bare);
-        // T() → 带头分配 + 绑定
+        // T() / T(args) → 带头分配（带参时转发 init 形参）+ 绑定
         if (const Decl* td = typeCallee(init)) {
-            if (!init.args.empty())
-                throw CompileError("自动指针 T@ 暂不支持带参构造 T(...)", init.line);
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
             indent();
-            out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
-                << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            out << td->name << " *" << tmp << " = ";
+            if (!init.args.empty()) {
+                out << td->name << "__new_ref_init(";
+                emitCtorInitArgs(td, init);
+                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            } else {
+                out << td->name << "__new_ref("
+                    << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            }
             indent();
             // 裸 @ 目标：擦除类型。class 类型走 object 风味（p 偏移到 &_class、dtor=sc_obj_drop），
             // 使裸 @ 携带派发能力、可无损还原 object@；非 class struct 走 concrete 风味（p=实体基址、
@@ -2718,14 +2758,19 @@ struct CGen {
         // 重新赋值先拆旧边（own 字段保留，解绑用成员自带 own/tar）
         emitFatUnbind(lv, fatDtorArg(tt));
         const Decl* td = typeCallee(init);
-        if (td && !init.args.empty())
-            throw CompileError("自动指针 T@ 暂不支持带参构造 T(...)", init.line);
         indent(); out << "if (SC_OWN_REAL(_self_own)) {\n";
         depth++;
         if (td) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
-            indent(); out << td->name << " *" << tmp << " = " << td->name << "__new_ref("
-                << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            indent(); out << td->name << " *" << tmp << " = ";
+            if (!init.args.empty()) {
+                out << td->name << "__new_ref_init(";
+                emitCtorInitArgs(td, init);
+                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            } else {
+                out << td->name << "__new_ref("
+                    << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            }
             indent(); out << "sc_fat_bind(&" << lv << ", " << tmp
                 << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), _self_own);\n";
         } else {
@@ -2737,7 +2782,14 @@ struct CGen {
         indent(); out << "} else {\n";
         depth++;
         if (td) {
-            indent(); out << "(" << lv << ").p = " << td->name << "__new();\n";
+            indent(); out << "(" << lv << ").p = ";
+            if (!init.args.empty()) {
+                out << td->name << "__new_init(";
+                emitCtorInitArgs(td, init);
+                out << ");\n";
+            } else {
+                out << td->name << "__new();\n";
+            }
         } else {
             std::string rhs = captureExpr(init);
             indent(); out << "(" << lv << ").p = (" << rhs << ").p;\n";

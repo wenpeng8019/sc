@@ -34,6 +34,12 @@ static inline string *string__new_ref(int32_t _atom) {
     return _p;
 }
 
+static inline string *string__new_ref_init(const char *s, int32_t _atom) {
+    string *_p = string__new_ref(_atom);
+    if (_p) string_init(_p, s);
+    return _p;
+}
+
 int32_t main(void) {
     sc_mod_adt_init();
     /* line 4 */

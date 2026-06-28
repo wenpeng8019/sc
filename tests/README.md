@@ -31,7 +31,15 @@
 ./build.sh test --update   # 有意改动产物后，重新生成黄金文件
 tests/run.sh               # 仅跑回归比对（需先 ./build.sh build）
 tests/run.sh --update      # 仅更新黄金文件
+tests/run_linalg_dual_path.sh  # 默认核 vs SCC_WITH_LAPACK 路径一致性检查
+tests/bench_ts.sh          # 轻量性能基线（ts_basic + dnn）
+python3 tests/numpy_parity_smoke.py  # 与 numpy 对拍 smoke（需 numpy）
 ```
+
+说明：
+- `run_linalg_dual_path.sh` 会在本机存在 OpenBLAS/LAPACKE 时自动启用 LAPACK 路径；
+  缺少依赖时仅做默认路径 smoke。
+- `numpy_parity_smoke.py` 走真实 `scc` 执行结果与 numpy 对比，用于快速发现语义偏差。
 
 新增专项用例：在 `cases/` 放 `.sc`，把相对路径加入 `run.sh` 的 `POSITIVE`
 （负向用例加入 `NEGATIVE`），再 `./build.sh test --update` 生成黄金文件并提交。

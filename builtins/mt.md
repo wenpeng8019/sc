@@ -439,25 +439,21 @@ int      op_session_taken(void)       { return g_cur_session_taken; }
 
 ---
 
-## 12. 与参考原型（thread_queue）的差异
+## 12. 设计取舍与已知缺口
 
-mt 的 PORT 模型源自一份 C 参考原型 `thread_queue.c`（已随本机制定稿删除）。核心机制对齐，
-差异均为 sc 铁律带来的**刻意简化**：
+mt 的 PORT 模型在「每线程单收件箱 + 全局单锁 + 优先级/延迟投递 + 循环互锁替代」之上，
+按 sc 铁律做了若干**刻意简化**：
 
-| 维度 | 参考原型 | mt（R1+R2+R4） | 结论 |
+| 维度 | 通用做法 | mt（R1+R2+R4） | 结论 |
 |---|---|---|---|
-| 每线程 PORT 单收件箱 | ✅ | ✅ | 对齐 |
-| 全局单锁 `g_mutex` | ✅ | ✅ | 对齐 |
-| 优先级 + 延迟投递 | ✅ | ✅ | 对齐 |
-| 循环互锁替代 | ✅ | ✅ | 对齐 |
-| 延迟应答取会话 | action 不应答 → `result==-2` 标记 | 裸 `async` → `op_session_taken()` | 概念对齐 |
-| 延迟应答兑现 | `thread_response`（pending 模式） | `mt_session_respond` | 概念对齐 |
-| sync 会话生命周期 | **堆影子会话**（调用方可中途 abort） | **调用方栈会话**（铁律：不中途放弃） | 刻意简化 |
-| 延迟会话登记 | **port->pending 列表** | 嵌在调用方栈，无列表 | 刻意简化 |
-| detach 唤醒延迟调用方 | ✅ 遍历 pending 以 CLOSED 唤醒 | ❌ 不登记 → 程序责任 | **唯一行为缺口** |
+| 延迟应答取会话 | action 不应答 → 标记待决 | 裸 `async` → `op_session_taken()` | 概念对齐 |
+| 延迟应答兑现 | pending 模式回写 | `mt_session_respond` | 概念对齐 |
+| sync 会话生命周期 | 堆影子会话（调用方可中途 abort） | **调用方栈会话**（铁律：不中途放弃） | 刻意简化 |
+| 延迟会话登记 | port->pending 列表 | 嵌在调用方栈，无列表 | 刻意简化 |
+| detach 唤醒延迟调用方 | 遍历 pending 以 CLOSED 唤醒 | ❌ 不登记 → 程序责任 | **唯一行为缺口** |
 | 结果写回 | 类型擦除 packet（引用计数） | 强类型 `memcpy` 写返回槽（精确宽度） | 刻意简化（sc ABI） |
 
-**唯一行为缺口**：参考原型把延迟会话挂在 `port->pending`，故执行方 port detach 时能遍历 pending
+**唯一行为缺口**：若把延迟会话挂在 `port->pending`，执行方 port detach 时便能遍历 pending
 以 `THREAD_CLOSED` 唤醒被阻塞的调用方；mt 在 pull 后即释放消息节点、仅靠应用持有变量（如 `g_sess`）
 追踪会话，所以「`done` 永不发生」时调用方死等。此缺口为**刻意接受的程序责任**（同「promise 永不兑现」），
 由铁律换来「无影子会话、无 pending 列表」的简洁。
