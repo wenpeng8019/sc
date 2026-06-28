@@ -233,8 +233,16 @@ struct Parser {
         // 裸 @（无名）：类型擦除自动指针，C 侧 sc_afat（24B 同构 + dtor 槽），供通用容器。
         if (atOp("@")) {
             advance();
-            if (ty.ptr > 0) err("胖指针 @ 不能与 & 组合（T@ 恒为单层）");
-            ty.fat = true;   // ty.name 为空 → 裸 @（类型擦除）
+            if (atOp("&")) {          // 半自动指针 T@&（单例指针）：物理普通指针 + 退域 RAII 销毁
+                advance();
+                if (ty.ptr > 0) err("半自动指针 @& 不能再叠加 &（单层）");
+                if (ty.name.empty()) err("半自动指针 @& 需具名类型");
+                ty.ptr = 1;
+                ty.autoFree = true;
+            } else {
+                if (ty.ptr > 0) err("胖指针 @ 不能与 & 组合（T@ 恒为单层）");
+                ty.fat = true;   // ty.name 为空 → 裸 @（类型擦除）
+            }
         }
 
         // 分身/切片句柄类型 T[...]（def T: <S> {} 机制）：类型侧方括号（数组维度在

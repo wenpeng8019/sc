@@ -314,6 +314,10 @@
         "meta-suffix": {
             "patterns": [
                 {
+                    "name": "storage.modifier.autopointer.sc",
+                    "match": "(?<=[A-Za-z0-9_\\]])@&"
+                },
+                {
                     "name": "storage.modifier.pointer.sc",
                     "match": "(?<=[A-Za-z0-9_\\]])&"
                 },

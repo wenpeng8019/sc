@@ -263,6 +263,13 @@ struct CGen {
     // drop（RAII 闭环）。name=变量名，dropFn=drop 方法的 C 名（T_drop）。
     struct DropVar { std::string name; std::string dropFn; };
     std::vector<std::vector<DropVar>> dropScopes;
+    // 半自动指针 T@&（单例指针）：物理普通指针 T* + 退域 RAII。退域/重新赋值覆盖旧值时，
+    // 若指向对象非 nil 则自动 drop + sc_free 销毁。autoFreeScopes 与 fatScopes 平行逐层登记；
+    // autoFreeVars 为本函数内 name→信息映射，供赋值语句拦截（先销毁旧对象再存新指针）。
+    struct AutoFreeVar { std::string name; std::string ctype; std::string dropFn; };
+    std::vector<std::vector<AutoFreeVar>> autoFreeScopes;
+    std::map<std::string, AutoFreeVar> autoFreeVars;
+    int autoFreeTmpSeq = 0;
     // 本函数内被显式 x.drop()/x->drop() 调用的变量名（预扫描）：move 语义——显式 drop
     // 抑制该变量的退域自动 drop（用户接管其生命周期，避免双重释放）。
     std::set<std::string> manualDropVars;
@@ -1255,6 +1262,7 @@ struct CGen {
     }
     void scanManualDrops(const std::vector<StmtPtr>& body) {
         manualDropVars.clear();
+        autoFreeVars.clear();
         for (auto& s : body) scanManualDropsStmt(s.get());
     }
 
@@ -2800,6 +2808,30 @@ struct CGen {
         indent(); out << "}\n";
     }
 
+    // 半自动指针 T@&（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free。
+    void emitAutoFreeDestroy(const std::string& name, const std::string& dropFn) {
+        indent();
+        out << "if (" << name << ") { ";
+        if (!dropFn.empty()) out << dropFn << "(" << name << "); ";
+        out << "sc_free(" << name << "); }\n";
+    }
+
+    // 半自动指针 T@& 赋值：先把 RHS 算入临时（避免自指/自销），与旧值不同且旧值非 nil 则
+    // 销毁旧对象（drop + free），再存入新指针。覆盖语义即「设新值自动销毁旧对象」。
+    void emitAutoFreeAssign(const AutoFreeVar& v, const Expr& rhs) {
+        std::string tmp = "_af" + std::to_string(autoFreeTmpSeq++);
+        indent(); out << "{ " << v.ctype << " *" << tmp << " = ";
+        emitExpr(rhs, true);
+        out << ";\n";
+        depth++;
+        indent(); out << "if (" << v.name << " != " << tmp << " && " << v.name << ") { ";
+        if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
+        out << "sc_free(" << v.name << "); }\n";
+        indent(); out << v.name << " = " << tmp << ";\n";
+        depth--;
+        indent(); out << "}\n";
+    }
+
     // 胖指针赋值语句入口（左值任意：根变量 / 胖成员）。返回 false 表示非胖左值。
     bool emitFatAssignStmt(const Expr& lhs, const Expr& init, bool isInit) {
         std::string lv, own;
@@ -2859,6 +2891,11 @@ struct CGen {
     // 其前另有 phase0：发出本块登记的 final 钩子（LIFO），先于拆边/断言执行。
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
         emitFinalScope(i);                                       // phase0：final 钩子
+        if (i < autoFreeScopes.size())                           // phase0.4：半自动指针 T@& 退域销毁
+            for (auto it = autoFreeScopes[i].rbegin(); it != autoFreeScopes[i].rend(); ++it) {
+                if (it->name == skip) continue;                  // 被移动返回的对象跳过
+                emitAutoFreeDestroy(it->name, it->dropFn);
+            }
         if (i < dropScopes.size())                               // phase0.5：栈值对象 RAII 自动 drop
             for (auto it = dropScopes[i].rbegin(); it != dropScopes[i].rend(); ++it) {
                 if (it->name == skip) continue;                  // 被移动返回的对象跳过
@@ -3134,6 +3171,16 @@ struct CGen {
                 if (dm && !dropScopes.empty())
                     dropScopes.back().push_back({f.name, dm->name});
             }
+            // 半自动指针 T@&（单例指针）：物理普通指针，登记退域销毁（非 nil → drop + free），
+            // 并入 autoFreeVars 供赋值拦截（设新值先销旧）。manualDropVars（move）则交用户接管。
+            if (inFunc && !isStatic && !isTls && f.type.autoFree
+                && !manualDropVars.count(f.name)) {
+                std::string afBase; int afPtr; resolveType(f.type, afBase, afPtr);
+                const Decl* dm = findMethod(f.type.name, "drop");
+                AutoFreeVar v{f.name, afBase, dm ? dm->name : std::string()};
+                if (!autoFreeScopes.empty()) autoFreeScopes.back().push_back(v);
+                autoFreeVars[f.name] = v;
+            }
             // Step4b：被 &var 借入胖指针的普通栈变量 → 注入伴生 sc_ref 头；
             // 退域两阶段清理（拆边后）对其 sc_ref_check，捕获借用比目标活得久的悬挂（§4.2/§7.3）。
             // 仅 --check=ref 开启时注入（默认构建省此开销，堆 ARC 不受影响）。
@@ -3196,6 +3243,7 @@ struct CGen {
         memCanaryScopes.emplace_back();
         fatFinalScopes.emplace_back();
         dropScopes.emplace_back();
+        autoFreeScopes.emplace_back();
         // 本作用域直接子标签登记入 labelDepth（进域可见、退域注销），供 goto 跨域清理定位。
         size_t scopeIdx = fatScopes.size() - 1;
         for (auto& s : stmts)
@@ -3211,6 +3259,7 @@ struct CGen {
         memCanaryScopes.pop_back();
         fatFinalScopes.pop_back();
         dropScopes.pop_back();
+        autoFreeScopes.pop_back();
     }
 
     // 循环体：登记 break/continue 边界（= 体作用域层）后发出语句
@@ -3940,6 +3989,15 @@ struct CGen {
                     const std::string ent = projEntityOf(s.expr->a->text);
                     if (!ent.empty()) { emitProjectAssign(s.expr->a->text, ent, *s.expr->b); break; }
                 }
+                // 半自动指针 T@& 赋值：先销毁旧对象（非 nil → drop + free）再存新指针
+                if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                    s.expr->a && s.expr->a->kind == Expr::Ident) {
+                    auto afit = autoFreeVars.find(s.expr->a->text);
+                    if (afit != autoFreeVars.end()) {
+                        emitAutoFreeAssign(afit->second, *s.expr->b);
+                        break;
+                    }
+                }
                 // 胖指针赋值：p = ... / base->m = ...（先拆旧边再绑新边，§4.1）
                 if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
                     s.expr->a && isFatExpr(*s.expr->a)) {
@@ -3993,6 +4051,9 @@ struct CGen {
                     // RAII：任意活动作用域登记了栈值对象 → return 前须自动 drop
                     bool anyDrop = false;
                     for (auto& dc : dropScopes) if (!dc.empty()) { anyDrop = true; break; }
+                    // 半自动指针 T@&：任意活动作用域登记了 → return 前须销毁（非 nil → drop + free）
+                    bool anyAutoFree = false;
+                    for (auto& ac : autoFreeScopes) if (!ac.empty()) { anyAutoFree = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
                     // return v（v 为栈值对象）= 移动：跳过其自动 drop，所有权移交调用方
                     // return (t: @) / (t: T@)：擦除/还原 cast 同样把胖左值移交返回值，
@@ -4007,6 +4068,7 @@ struct CGen {
                     else if (mv && mv->kind == Expr::Ident)
                         skip = mv->text;
                     if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop
+                        && !anyAutoFree
                         && !(inMainFunc && (mainHasTeardown || hasGcanaryHook() || hasGfatHook()))) {
                         indent();
                         out << "return";
@@ -5302,7 +5364,11 @@ struct CGen {
         depth = 0;
         auto savedManualDrops = std::move(manualDropVars);   // RAII：lambda 独立预扫描
         auto savedDropScopes  = std::move(dropScopes);
+        auto savedAutoFreeScopes = std::move(autoFreeScopes);
+        auto savedAutoFreeVars   = std::move(autoFreeVars);
         dropScopes.clear();
+        autoFreeScopes.clear();
+        autoFreeVars.clear();
         scanManualDrops(e.fncBody);
 
         Decl sigDecl;                                   // 仅承载返回类型给 emitRetType
@@ -5332,6 +5398,8 @@ struct CGen {
         curInFatInit = savedInFatInit;
         manualDropVars = std::move(savedManualDrops);
         dropScopes     = std::move(savedDropScopes);
+        autoFreeScopes = std::move(savedAutoFreeScopes);
+        autoFreeVars   = std::move(savedAutoFreeVars);
     }
 
     // ---------------- rpc：伪形参函数糖 ----------------

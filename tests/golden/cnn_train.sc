@@ -11,16 +11,16 @@ fnc main: i4
     sx[1] = 1
     sx[2] = 5
     sx[3] = 5
-    var xt: tensor& = rand_normal(4, (sx: &), 0.0, 1.0, DT_F4)
+    var xt: tensor@& = rand_normal(4, (sx: &), 0.0, 1.0, DT_F4)
     var stg[1]: i4
     stg[0] = 2
     var tb[2]: f4
     tb[0] = 0.0
     tb[1] = 1.0
-    var tt: tensor& = from_data(1, (stg: &), (tb: &), DT_F4)
-    var conv: conv& = nn_conv2d(1, 3, 3, 3, 1, 1, 0, 0)
-    var fc: linear& = nn_linear(12, 2)
-    var opt: optim& = nn_adam(0.02)
+    var tt: tensor@& = from_data(1, (stg: &), (tb: &), DT_F4)
+    var conv: conv@& = nn_conv2d(1, 3, 3, 3, 1, 1, 0, 0)
+    var fc: linear@& = nn_linear(12, 2)
+    var opt: optim@& = nn_adam(0.02)
     opt->track_conv2d(conv)
     opt->track_linear(fc)
     var fsh[2]: i4
@@ -45,9 +45,4 @@ fnc main: i4
             first = last
         nn_tape_clear()
     printf("cnn_down=%d cnn_low=%d\n", (last < first: i4), (last < 0.1: i4))
-    conv->drop()
-    fc->drop()
-    opt->drop()
-    xt->drop()
-    tt->drop()
     return 0

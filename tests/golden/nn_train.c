@@ -98,22 +98,16 @@ int32_t main(void) {
     /* line 50 */
     printf("y0_close=%d y1_close=%d\n", ((int32_t)(tensor_at(yv, 0) > 4.0)), ((int32_t)(tensor_at(yv, 1) > 7.0)));
     /* line 51 */
-    (tensor_drop(yv), sc_free(yv));
-    /* line 52 */
     nn_tape_clear();
-    /* line 54 */
-    (linear_drop(fc1), sc_free(fc1));
-    /* line 55 */
-    (linear_drop(fc2), sc_free(fc2));
-    /* line 56 */
-    (optim_drop(opt), sc_free(opt));
-    /* line 57 */
-    (tensor_drop(xt), sc_free(xt));
-    /* line 58 */
-    (tensor_drop(tt), sc_free(tt));
-    /* line 59 */
+    /* line 53 */
     {
         int32_t _ret = 0;
+        if (yv) { tensor_drop(yv); sc_free(yv); }
+        if (opt) { optim_drop(opt); sc_free(opt); }
+        if (fc2) { linear_drop(fc2); sc_free(fc2); }
+        if (fc1) { linear_drop(fc1); sc_free(fc1); }
+        if (tt) { tensor_drop(tt); sc_free(tt); }
+        if (xt) { tensor_drop(xt); sc_free(xt); }
         sc_mod_nn_drop();
         sc_mod_ts_drop();
         return _ret;

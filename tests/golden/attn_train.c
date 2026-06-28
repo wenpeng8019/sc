@@ -125,18 +125,13 @@ int32_t main(void) {
     /* line 67 */
     printf("attn_down=%d attn_low=%d\n", ((int32_t)(last < first)), ((int32_t)(last < 0.1)));
     /* line 69 */
-    (embed_drop(emb), sc_free(emb));
-    /* line 70 */
-    (linear_drop(fc), sc_free(fc));
-    /* line 71 */
-    (optim_drop(opt), sc_free(opt));
-    /* line 72 */
-    (tensor_drop(idxt), sc_free(idxt));
-    /* line 73 */
-    (tensor_drop(tt), sc_free(tt));
-    /* line 74 */
     {
         int32_t _ret = 0;
+        if (opt) { optim_drop(opt); sc_free(opt); }
+        if (fc) { linear_drop(fc); sc_free(fc); }
+        if (emb) { embed_drop(emb); sc_free(emb); }
+        if (tt) { tensor_drop(tt); sc_free(tt); }
+        if (idxt) { tensor_drop(idxt); sc_free(idxt); }
         sc_mod_nn_drop();
         sc_mod_ts_drop();
         return _ret;

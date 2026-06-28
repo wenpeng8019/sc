@@ -71,6 +71,15 @@ struct TypeRef {
 
     //---------
 
+    // 对于半自动指针（单例指针）：eg: name@&
+    // + autoFree=true 表示这是一个「半自动指针」：物理上等同普通指针（ptr==1，C 侧即 T*，
+    //   取值返回裸地址、只接受普通指针 & / nil 赋值），但附带自动指针 @ 的退域 RAII 语义：
+    //   退出作用域（或重新赋值覆盖旧值）时，若指向对象非 nil 则自动 drop + free 销毁该对象。
+    //   相当于「单例对象智能指针」（unique_ptr）。autoFree 时 ptr==1、fat==false、name 非空。
+    bool autoFree = false;
+
+    //---------
+
     // 类型限定符（const/volatile/restrict）：在 sc 中以「上下文标识符」书写，非关键字。
     // + qConst/qVolatile：写在类型名前（类型侧），约束「指向对象/对象本身」只读或易变。
     //     eg: var a: volatile i4    → volatile int32_t a

@@ -105,18 +105,13 @@ int32_t main(void) {
     /* line 56 */
     printf("cnn_down=%d cnn_low=%d\n", ((int32_t)(last < first)), ((int32_t)(last < 0.1)));
     /* line 58 */
-    (conv_drop(conv), sc_free(conv));
-    /* line 59 */
-    (linear_drop(fc), sc_free(fc));
-    /* line 60 */
-    (optim_drop(opt), sc_free(opt));
-    /* line 61 */
-    (tensor_drop(xt), sc_free(xt));
-    /* line 62 */
-    (tensor_drop(tt), sc_free(tt));
-    /* line 63 */
     {
         int32_t _ret = 0;
+        if (opt) { optim_drop(opt); sc_free(opt); }
+        if (fc) { linear_drop(fc); sc_free(fc); }
+        if (conv) { conv_drop(conv); sc_free(conv); }
+        if (tt) { tensor_drop(tt); sc_free(tt); }
+        if (xt) { tensor_drop(xt); sc_free(xt); }
         sc_mod_nn_drop();
         sc_mod_ts_drop();
         return _ret;
