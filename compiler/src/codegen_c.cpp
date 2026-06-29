@@ -83,6 +83,23 @@ std::string mapBase(const std::string& n) {
 //                          带 u/U 后缀取无符号 u4，超出 32 位 → u8
 // 穿透前缀正负号（var n: = -5）。返回 true 表示成功推断（填入 base/ptr），
 // false 表示初值非字面量，沿用旧默认规则（char*/void*）。
+
+// 拆分整数字面量为「数字部分」+「后缀部分」。正确处理十六进制：
+//   十六进制里的 b/B 是合法数字（hex 后无法附加 b 字节后缀，词法贪婪吞为数字），
+//   故 0xEFCDAB89 的 B 属数字而非后缀；十进制里 b/B/w/W 才是扩展后缀。
+//   只有后缀区可含 u/U/l/L/b/B/w/W，调用方据此判后缀、剥离 b/B/w/W。
+void splitIntLiteral(const std::string& t, std::string& digits, std::string& sfx) {
+    size_t i = 0;
+    if (t.size() >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
+        i = 2;
+        while (i < t.size() && std::isxdigit((unsigned char)t[i])) i++;
+    } else {
+        while (i < t.size() && (std::isdigit((unsigned char)t[i]) || t[i] == '.')) i++;
+    }
+    digits = t.substr(0, i);
+    sfx    = t.substr(i);
+}
+
 bool inferLiteralType(const Expr& init, std::string& base, int& ptr) {
     const Expr* e = &init;
     while (e->kind == Expr::Unary && (e->op == "-" || e->op == "+") && e->a)
@@ -96,11 +113,12 @@ bool inferLiteralType(const Expr& init, std::string& base, int& ptr) {
         }
         case Expr::IntLit: {
             const std::string& t = e->text;
-            bool uns = t.find_first_of("uU") != std::string::npos;
-            bool lng = t.find_first_of("lL") != std::string::npos;
-            bool byte = t.find_first_of("bB") != std::string::npos;   // 扩展：单字节 i1/u1
-            bool word = t.find_first_of("wW") != std::string::npos;   // 扩展：双字节 i2/u2
-            std::string digits = t.substr(0, t.find_first_of("uUlLbBwW"));
+            std::string digits, sfx;
+            splitIntLiteral(t, digits, sfx);
+            bool uns = sfx.find_first_of("uU") != std::string::npos;
+            bool lng = sfx.find_first_of("lL") != std::string::npos;
+            bool byte = sfx.find_first_of("bB") != std::string::npos;   // 扩展：单字节 i1/u1
+            bool word = sfx.find_first_of("wW") != std::string::npos;   // 扩展：双字节 i2/u2
             unsigned long long mag = 0;
             try { mag = std::stoull(digits, nullptr, 0); } catch (...) { mag = 0; }
             if (byte)      base = uns ? "u1" : "i1";
@@ -1647,11 +1665,13 @@ struct CGen {
     void emitExpr(const Expr& e, bool top = false) {
         switch (e.kind) {
             case Expr::IntLit: {
-                // b/w 为 sc 扩展后缀（单/双字节），C 不识别，输出时剥离；保留 u/l
-                std::string lit = e.text;
-                lit.erase(std::remove_if(lit.begin(), lit.end(),
-                    [](char c){ return c=='b'||c=='B'||c=='w'||c=='W'; }), lit.end());
-                out << lit;
+                // b/w 为 sc 扩展后缀（单/双字节），C 不识别，仅从后缀区剥离；保留 u/l。
+                // 注意：十六进制数字里的 b/B 属数字（如 0xEFCDAB89），不能误删。
+                std::string digits, sfx;
+                splitIntLiteral(e.text, digits, sfx);
+                sfx.erase(std::remove_if(sfx.begin(), sfx.end(),
+                    [](char c){ return c=='b'||c=='B'||c=='w'||c=='W'; }), sfx.end());
+                out << digits << sfx;
                 break;
             }
             case Expr::FloatLit:
@@ -5709,47 +5729,108 @@ struct CGen {
     //   struct X { 返回槽 _; future* _ret; int _state; future* _fut; 参数...; 提升局部...; };
     //   future* X__async(参数...)   启动器：建帧 + 造 _ret + 装参 + 首次驱动 → 返回 _ret
     //   void    X_rpc(struct X* _p) 状态机：switch(_state) 跳转，await 点切段、让出
-    // 约束（v1）：await 只能在 rpc 体顶层直线出现（不可在 if/while/for/case 内）；
-    //             仅形如  await E / var x:T = await E / x = await E 三种。
+    //
+    // 控制流支持：await 可出现在 if/while/do-while/经典 for 体内（含嵌套）。原理（protothreads/
+    //   Duff's device）：所有局部均提升到帧 _p->name，函数体内无 C 局部声明，故顶部
+    //   switch(_state){case N: goto _sN;} 可从函数顶 goto 跳进循环/分支体内的 _sN: 标签
+    //   （合法 C：goto 跳入块允许，因无被跳过的初始化）。跳入后续跑、重评循环条件，语义正确。
+    //   暂不支持：for-in / case 内 await（带 await 时报明确错误，不静默丢弃）。
+    //   await 形态：await E / var x:T = await E / x = await E / com<<>> 收发糖。
 
-    // 收集需提升到帧的局部变量（rpc 体顶层 var/let 声明），返回其字段集合。
-    std::vector<const Field*> collectAsyncLocals(const Decl& d) {
-        std::vector<const Field*> locals;
-        for (auto& s : d.body) {
-            if (s->kind == Stmt::VarS || s->kind == Stmt::LetS)
-                for (auto& f : s->decls) locals.push_back(&f);
-        }
-        return locals;
-    }
-
-    // 统计 rpc 体顶层 await 点数量（= 状态机段数 - 1）。
-    int countAsyncAwaits(const Decl& d) {
+    // 单条语句「直接」（不含嵌套体）的 await 让出点数量。
+    int directAwaits(const Stmt& s) {
         int n = 0;
-        for (auto& s : d.body) {
-            if (s->kind == Stmt::VarS || s->kind == Stmt::LetS) {
-                for (auto& f : s->decls)
-                    if (f.init && f.init->kind == Expr::Await) n++;
-            } else if (s->kind == Stmt::ExprS && s->expr) {
-                if (s->expr->kind == Expr::Await) n++;
-                else if (s->expr->kind == Expr::Binary && s->expr->op == "=" &&
-                         s->expr->b && s->expr->b->kind == Expr::Await) n++;
-                else if (s->expr->kind == Expr::Binary &&
-                         (s->expr->op == "<<" || s->expr->op == ">>")) {
-                    std::vector<ComOp> ops;            // com 收发链：每个 op 至少一个 await 点
-                    if (comChain(*s->expr, ops)) {
-                        for (auto& o : ops) {
-                            // 【F】rpc 序列化：每参数字段一个让出点；【D】/【E】各一个
-                            if (const Decl* r = comRpcTarget(o.target, o.send))
-                                n += (int)r->structCommon.fields.size();
-                            else
-                                n += 1;
-                        }
+        if (s.kind == Stmt::VarS || s.kind == Stmt::LetS) {
+            for (auto& f : s.decls)
+                if (f.init && f.init->kind == Expr::Await) n++;
+        } else if (s.kind == Stmt::ExprS && s.expr) {
+            if (s.expr->kind == Expr::Await) n++;
+            else if (s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                     s.expr->b && s.expr->b->kind == Expr::Await) n++;
+            else if (s.expr->kind == Expr::Binary &&
+                     (s.expr->op == "<<" || s.expr->op == ">>")) {
+                std::vector<ComOp> ops;            // com 收发链：每个 op 至少一个 await 点
+                if (comChain(*s.expr, ops)) {
+                    for (auto& o : ops) {
+                        // 【F】rpc 序列化：每参数字段一个让出点；【D】/【E】各一个
+                        if (const Decl* r = comRpcTarget(o.target, o.send))
+                            n += (int)r->structCommon.fields.size();
+                        else
+                            n += 1;
                     }
                 }
             }
         }
         return n;
     }
+
+    // 深度检测：语句子树（含 for-in/case 等所有嵌套体）是否含 await。
+    bool hasAwaitDeep(const Stmt& s) {
+        if (directAwaits(s) > 0) return true;
+        for (auto& c : s.body)     if (hasAwaitDeep(*c)) return true;
+        for (auto& c : s.elseBody) if (hasAwaitDeep(*c)) return true;
+        for (auto& arm : s.caseArms)
+            for (auto& c : arm.body) if (hasAwaitDeep(*c)) return true;
+        return false;
+    }
+
+    // 递归收集需提升到帧的局部变量（var/let 声明），按名去重（首见保留）。
+    // 进入受支持的控制流体（if/while/do-while/经典 for）；不进 for-in/case（其局部留作 C 局部）。
+    void collectAsyncLocalsList(const std::vector<StmtPtr>& stmts,
+                                std::vector<const Field*>& locals,
+                                std::unordered_set<std::string>& seen) {
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            if (s.kind == Stmt::VarS || s.kind == Stmt::LetS)
+                for (auto& f : s.decls)
+                    if (seen.insert(f.name).second) locals.push_back(&f);
+            switch (s.kind) {
+                case Stmt::IfS:
+                    collectAsyncLocalsList(s.body, locals, seen);
+                    collectAsyncLocalsList(s.elseBody, locals, seen);
+                    break;
+                case Stmt::WhileS:
+                case Stmt::DoWhileS:
+                    collectAsyncLocalsList(s.body, locals, seen);
+                    break;
+                case Stmt::ForS:
+                    if (!s.forIn) collectAsyncLocalsList(s.body, locals, seen);
+                    break;
+                default: break;
+            }
+        }
+    }
+    std::vector<const Field*> collectAsyncLocals(const Decl& d) {
+        std::vector<const Field*> locals;
+        std::unordered_set<std::string> seen;
+        collectAsyncLocalsList(d.body, locals, seen);
+        return locals;
+    }
+
+    // 递归统计 await 让出点数量（= 状态机段数 - 1）。遍历序须与 emitAsyncStmt 发射序一致。
+    int countAsyncAwaitsList(const std::vector<StmtPtr>& stmts) {
+        int n = 0;
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            n += directAwaits(s);
+            switch (s.kind) {
+                case Stmt::IfS:
+                    n += countAsyncAwaitsList(s.body);
+                    n += countAsyncAwaitsList(s.elseBody);
+                    break;
+                case Stmt::WhileS:
+                case Stmt::DoWhileS:
+                    n += countAsyncAwaitsList(s.body);
+                    break;
+                case Stmt::ForS:
+                    if (!s.forIn) n += countAsyncAwaitsList(s.body);
+                    break;
+                default: break;
+            }
+        }
+        return n;
+    }
+    int countAsyncAwaits(const Decl& d) { return countAsyncAwaitsList(d.body); }
 
     // 收集 rpc 体顶层的「com<<>>rpc 序列化」op（按出现顺序），供帧注入 _crpcN 槽。
     // 顺序与 emitComAwait 内 comRpcIdx 递增一致（同序遍历 statements→ops）。
@@ -5765,20 +5846,40 @@ struct CGen {
         for (auto& f : collectAsyncLocals(d)) regVar(*f);
 
         std::vector<const Decl*> v;
-        for (auto& sp : d.body) {
-            const Stmt& s = *sp;
-            if (s.kind != Stmt::ExprS || !s.expr) continue;
-            if (s.expr->kind != Expr::Binary || (s.expr->op != "<<" && s.expr->op != ">>")) continue;
-            std::vector<ComOp> ops;
-            if (!comChain(*s.expr, ops)) continue;
-            for (auto& o : ops)
-                if (const Decl* r = comRpcTarget(o.target, o.send)) v.push_back(r);
-        }
+        collectComRpcStmtsList(d.body, v);
 
         localsT  = std::move(savedLocalsT);  fnVarsL  = std::move(savedFnVarsL);
         varDimsL = std::move(savedVarDimsL); projVarsL = std::move(savedProjVarsL);
         inFunc = savedInFunc;
         return v;
+    }
+
+    // 递归收集 com<<>>rpc 序列化 op 的目标 rpc（DFS 序须与 emitAsyncStmt 发射的 comRpcIdx 递增一致）。
+    void collectComRpcStmtsList(const std::vector<StmtPtr>& stmts, std::vector<const Decl*>& v) {
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            if (s.kind == Stmt::ExprS && s.expr &&
+                s.expr->kind == Expr::Binary && (s.expr->op == "<<" || s.expr->op == ">>")) {
+                std::vector<ComOp> ops;
+                if (comChain(*s.expr, ops))
+                    for (auto& o : ops)
+                        if (const Decl* r = comRpcTarget(o.target, o.send)) v.push_back(r);
+            }
+            switch (s.kind) {
+                case Stmt::IfS:
+                    collectComRpcStmtsList(s.body, v);
+                    collectComRpcStmtsList(s.elseBody, v);
+                    break;
+                case Stmt::WhileS:
+                case Stmt::DoWhileS:
+                    collectComRpcStmtsList(s.body, v);
+                    break;
+                case Stmt::ForS:
+                    if (!s.forIn) collectComRpcStmtsList(s.body, v);
+                    break;
+                default: break;
+            }
+        }
     }
 
     // 发出 async 调用/await rpc 的实参（位置参数，逐个求值）。
@@ -6012,62 +6113,129 @@ struct CGen {
             << "; free(_p); future_done(_r, _res); return; }\n";
     }
 
-    // 发出异步 rpc 体（直线语句序列；await 点切段）。
+    // 发出异步 rpc 体（语句序列；await 点切段，支持 if/while/do-while/经典 for 内 await）。
     void emitAsyncStmts(const Decl& d) {
-        for (auto& sp : d.body) {
-            const Stmt& s = *sp;
-            if (s.line > 0 && !srcFile.empty())
-                out << "#line " << s.line << " \"" << srcFile << "\"\n";
-            switch (s.kind) {
-                case Stmt::VarS: case Stmt::LetS:
-                    for (auto& f : s.decls) {
-                        std::string base; int ptr; resolveType(f.type, base, ptr);
-                        std::string tgt = "_p->" + f.name;
-                        if (f.init && f.init->kind == Expr::Await)
-                            emitAwaitPoint(*f.init->a, &tgt, base, ptr, d);
-                        else if (f.init) {           // 普通局部（已提升到帧）：赋值
-                            indent(); out << tgt << " = "; emitExpr(*f.init, true); out << ";\n";
-                        }
-                    }
-                    break;
-                case Stmt::ExprS:
-                    if (s.expr && s.expr->kind == Expr::Binary &&
-                        (s.expr->op == "<<" || s.expr->op == ">>")) {  // com 收发（异步形态）
-                        std::vector<ComOp> ops;
-                        if (const Expr* base = comChain(*s.expr, ops)) {
-                            for (auto& o : ops) emitComAwait(*base, o, d);
-                            break;
-                        }
-                    }
-                    if (s.expr && s.expr->kind == Expr::Await) {     // 独立 await E
-                        emitAwaitPoint(*s.expr->a, nullptr, "", 0, d);
-                    } else if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
-                               s.expr->b && s.expr->b->kind == Expr::Await) {  // x = await E
-                        std::string tgt; std::string base = "void"; int ptr = 0;
-                        if (s.expr->a->kind == Expr::Ident) {
-                            tgt = "_p->" + s.expr->a->text;
-                            auto it = localsT.find(s.expr->a->text);
-                            if (it != localsT.end()) { base = mapBase(it->second.name); ptr = it->second.ptr; }
-                        }
-                        emitAwaitPoint(*s.expr->b->a, &tgt, base, ptr, d);
-                    } else {                                          // 普通语句（printf 等）
-                        indent(); emitExpr(*s.expr, true); out << ";\n";
-                    }
-                    break;
-                case Stmt::ReturnS:
-                    emitAsyncComplete(s, d);
-                    break;
-                default:
-                    indent(); out << "/* async rpc：暂不支持的语句已忽略 */\n";
-                    break;
-            }
-        }
+        emitAsyncStmtList(d.body, d);
         // 无显式 return 的 void 异步 rpc：补完成
         if (d.body.empty() || d.body.back()->kind != Stmt::ReturnS) {
             Stmt fake; fake.kind = Stmt::ReturnS;
             emitAsyncComplete(fake, d);
         }
     }
+
+    // 递归发出异步语句序列。遍历序须与 countAsyncAwaits/collectComRpcStmts 一致（状态号对齐）。
+    void emitAsyncStmtList(const std::vector<StmtPtr>& stmts, const Decl& d) {
+        for (auto& sp : stmts) {
+            const Stmt& s = *sp;
+            if (s.line > 0 && !srcFile.empty())
+                out << "#line " << s.line << " \"" << srcFile << "\"\n";
+            emitAsyncStmt(s, d);
+        }
+    }
+
+    // 发出单条异步语句。受支持控制流（if/while/do-while/经典 for）发真实 C 结构并递归其体；
+    // await 点（emitAwaitPoint/emitComAwait）内联发 _sN: 标签，供顶部 switch goto 跳入。
+    void emitAsyncStmt(const Stmt& s, const Decl& d) {
+        switch (s.kind) {
+            case Stmt::VarS: case Stmt::LetS:
+                for (auto& f : s.decls) {
+                    std::string base; int ptr; resolveType(f.type, base, ptr);
+                    std::string tgt = "_p->" + f.name;
+                    if (f.init && f.init->kind == Expr::Await)
+                        emitAwaitPoint(*f.init->a, &tgt, base, ptr, d);
+                    else if (f.init) {           // 普通局部（已提升到帧）：赋值
+                        indent(); out << tgt << " = "; emitExpr(*f.init, true); out << ";\n";
+                    }
+                }
+                break;
+            case Stmt::ExprS:
+                if (s.expr && s.expr->kind == Expr::Binary &&
+                    (s.expr->op == "<<" || s.expr->op == ">>")) {  // com 收发（异步形态）
+                    std::vector<ComOp> ops;
+                    if (const Expr* base = comChain(*s.expr, ops)) {
+                        for (auto& o : ops) emitComAwait(*base, o, d);
+                        break;
+                    }
+                }
+                if (s.expr && s.expr->kind == Expr::Await) {     // 独立 await E
+                    emitAwaitPoint(*s.expr->a, nullptr, "", 0, d);
+                } else if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                           s.expr->b && s.expr->b->kind == Expr::Await) {  // x = await E
+                    std::string tgt; std::string base = "void"; int ptr = 0;
+                    if (s.expr->a->kind == Expr::Ident) {
+                        tgt = "_p->" + s.expr->a->text;
+                        auto it = localsT.find(s.expr->a->text);
+                        if (it != localsT.end()) { base = mapBase(it->second.name); ptr = it->second.ptr; }
+                    }
+                    emitAwaitPoint(*s.expr->b->a, &tgt, base, ptr, d);
+                } else {                                          // 普通语句（printf 等）
+                    indent(); emitExpr(*s.expr, true); out << ";\n";
+                }
+                break;
+            case Stmt::ReturnS:
+                emitAsyncComplete(s, d);
+                break;
+            case Stmt::IfS: {
+                indent(); out << "if (";
+                emitScalarized(*s.expr);
+                out << ") {\n";
+                depth++; emitAsyncStmtList(s.body, d); depth--;
+                indent(); out << "}";
+                if (!s.elseBody.empty()) {
+                    out << " else {\n";
+                    depth++; emitAsyncStmtList(s.elseBody, d); depth--;
+                    indent(); out << "}\n";
+                } else out << "\n";
+                break;
+            }
+            case Stmt::WhileS:
+                indent(); out << "while (";
+                emitScalarized(*s.expr);
+                out << ") {\n";
+                depth++; emitAsyncStmtList(s.body, d); depth--;
+                indent(); out << "}\n";
+                break;
+            case Stmt::DoWhileS:
+                indent(); out << "do {\n";
+                depth++; emitAsyncStmtList(s.body, d); depth--;
+                indent(); out << "} while (";
+                emitScalarized(*s.expr);
+                out << ");\n";
+                break;
+            case Stmt::ForS:
+                if (s.forIn) {
+                    if (hasAwaitDeep(s))
+                        throw CompileError{"async rpc 暂不支持 for-in 循环体内 await；"
+                                           "请改用 while 循环", s.line};
+                    emitStmt(s);   // 无 await：按同步路径发出
+                    break;
+                }
+                indent(); out << "for (";
+                if (s.forInit) emitExpr(*s.forInit, true);
+                out << "; ";
+                if (s.forCond) emitExpr(*s.forCond, true);
+                out << "; ";
+                if (s.forStep) emitExpr(*s.forStep, true);
+                out << ") {\n";
+                depth++; emitAsyncStmtList(s.body, d); depth--;
+                indent(); out << "}\n";
+                break;
+            case Stmt::BreakS:
+                indent(); out << "break;\n";
+                break;
+            case Stmt::ContinueS:
+                indent(); out << "continue;\n";
+                break;
+            default:
+                // for-in/case 及其它语句：含 await 则明确报错（绝不静默丢弃）；否则按同步路径发出。
+                if (hasAwaitDeep(s))
+                    throw CompileError{"async rpc 暂不支持该语句内 await（仅 if/while/do-while/"
+                                       "经典 for 支持嵌套 await）", s.line};
+                emitStmt(s);
+                break;
+        }
+    }
+
 
     // 启动器：future* X__async(参数...) { 建帧 + 造 _ret + 装参 + 首次驱动 → 返回 _ret }
     void emitAsyncLauncher(const Decl& d) {

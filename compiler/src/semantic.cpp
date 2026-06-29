@@ -1677,6 +1677,9 @@ struct Checker {
 
         for (auto& d : prog.decls) {
             if (d->kind != Decl::FuncD) continue;
+            if (d->external) continue;                 // 外部模块/ C 头合并的函数：体在其自身单元已检查、
+                                                       // codegen 也不发出；此处符号环境不含其私有 inc 依赖，
+                                                       // 重查会误报「未定义」。与其余各 pass 一致跳过。
 
             std::unordered_map<std::string, Ty> locals;
 
