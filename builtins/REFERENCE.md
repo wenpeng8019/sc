@@ -4,6 +4,10 @@
 `builtins/x.sc` 与子项目形态 `builtins/x/x.sc`。
 也可用环境变量 `SCC_BUILTINS` 指定额外搜索目录。
 
+> 三大支柱文档：[REFERENCE.md](REFERENCE.md)（模块参考总览·本文）、
+> [MECHANISM.md](MECHANISM.md)（核心机制规格·T@/cls/dim/mt/tok/ts 五章）、
+> [ROADMAP.md](ROADMAP.md)（开发路线图）。
+
 当前内置模块：
 
 | 模块 | 引入方式 | 说明 |
