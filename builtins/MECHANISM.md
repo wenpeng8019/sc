@@ -17,7 +17,7 @@
 | **分布式图** tok | `tok x: "id"`、`dep…map`、`form`、`back` | `token_bind/intern` + seqlock + 图度量烘焙 | 共享量 + 依赖图 DAG + 前向/反向/迭代三机分离 |
 | **张量** ts | `ts_zeros(shape)`、`a->matmul(b)` | `ts_store`(refcount) + `tensor`(shape/strides) | numpy 存储-视图分离 + PyTorch 算子核 + BLAS 可选 |
 
-六大机制互相衔接：
+各机制互相衔接：
 - **T@ 胖指针** 是 tok 共享量的值载体（`@` 类型擦除，自描述胖指针）
 - **cls/dim 类机制** 的 `object@`（类型擦除自动指针）基于 T@ 双向引用图，`SC_DIM_DROP` 经分派器析构
 - **tok** 的 `'/'` 前缀多线程模式走 **mt** 的无锁原语（op 层 `sc_*` 原子 RMW + seqlock）
