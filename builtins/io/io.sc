@@ -1,7 +1,7 @@
-# io —— sc 输入输出内置模块（file 文件 / stream 内存 com 设备）
+# io —— sc 输入输出内置模块（file 文件 / stream 内存 / tcp 套接字 com 设备）
 #
 # 本文件是 io 接口的唯一事实源：
-#   @fnc file:: / @fnc stream:: 声明 io 原语（无函数体）：extern 原型，实现在 C 侧
+#   @fnc file:: / @fnc stream:: / @fnc tcp:: 声明 io 原语（无函数体）：extern 原型，实现在 C 侧
 # C ABI 契约见同目录 io.h，默认实现见 io_impl.c
 #
 # 用法：inc io.sc
@@ -35,3 +35,10 @@
 # 把 mem 指向的 size 字节内存绑定为 com 端点后端；read/write 取 0/1/2（禁用/同步/异步）。
 # 不分配数据缓冲（绑定调用方内存），close 仅释放端点结构、不碰 mem。
 @fnc stream:: com&, mem: &, size: u8, read: u1, write: u1
+
+# ---------------- tcp：套接字 com 设备（C 实现接口）----------------
+# 以已连接 TCP 套接字 fd 构造 com 端点；read/write 取 0/1/2（禁用/同步/异步）。
+# nonblock=true：内部置 O_NONBLOCK 并强制启用方向走异步（建 ioq）；设备全托管 fd，
+# close 负责关闭套接字。实现 readable/writable 回填 fd → 异步内核 kqueue/epoll 多路复用。
+# EAGAIN→again（异步挂起）、对端关闭→eof。listen/accept 由上层应用负责，本设备只包已连接 fd。
+@fnc tcp:: com&, fd: i4, nonblock: bool, read: u1, write: u1
