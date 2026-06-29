@@ -12,6 +12,7 @@
 | **内存安全检查** | `--check=mem`、`--check=ptr` | 栈/堆 canary 哨兵 + nil 守卫 + 下标越界 | 编译期注入运行时哨兵/校验，命中即 abort+源码定位 |
 | **自动指针** T@/T*/T@1 | `var p: T@/*/@1`、`T()`、`&expr` | `T_fat {p,tar,own}` + `sc_ref {in,out}` | 双向引用图 + ARC 自动释放 + 释放点悬挂/泄露检测 |
 | **多线程协同** queue | `run rpc()`、`sync`/`async`/`post`、`session` | PORT 单收件箱 + queue/protocol + `g_mutex` | PORT 中枢 + sync 铁律 + 循环互锁本地回退 |
+| **异步协程** | `async rpc()`、`await`、`done` | `future` + 状态机帧 + 事件循环 | rpc 编译为 stackless 状态机 + future 就绪链 + epoll/kqueue 驱动 |
 | **设备通讯** com | `com << v`、`com >> s`、`com << rpc()` | `com`(vtable) + `limit`(有界读) + `ioq`(循环缓冲) | 协议驱动的设备 io + << >> 收发糖 + 六种展开模式 |
 | **类机制** cls/dim | `cls T:`、`dim D:`、`object` | `T_hyper_impl` 分派器 + `SC_DIM_*` 枚举 | 单一分派器 + 全局维度选择子 + 三态应答 + 类型擦除 |
 | **依赖图** tok | `tok x: "id"`、`dep…map`、`form`、`back` | `token_bind/intern` + seqlock + 图度量烘焙 | 共享量 + 依赖图 DAG + 前向/反向/迭代三机分离 |
@@ -219,7 +220,92 @@ op 层为 mt 提供操作系统抽象，mt 实现为 op 协议的具体实现者
 
 ---
 
-## 4. 设备通讯 `com`：协议驱动的 io 框架
+## 4. 异步协程：`rpc` 状态机 + `future` + 事件循环
+
+> **机制框架**
+> - rpc 是协作式异步调度的基本单位：含 `await` 的 rpc 自动编译为 stackless 状态机（→ §4.1）
+> - 状态机帧 = 结构体：`_ret`（结果 future）+ `_state`（段号）+ 参数 + 跨 await 存活局部（→ §4.1）
+> - `future` 是类型擦除的异步结果句柄：就绪标记 + 结果指针 + 等待者帧 + 恢复入口（→ §4.2）
+> - 事件循环 `async_init` → `async_loop` → `async_final`：多路复用（epoll/kqueue/poll）+ 定时器驱动（→ §4.3）
+> - `done` 兑现：写回结果、标记就绪、唤醒等待者恢复状态机（→ §4.3）
+
+### 4.1 rpc：协作式调度单位 → 状态机
+
+rpc（remote procedure call）是 sc 异步模型的基本调度单位。它既可作为同步的跨线程消息载体（`run` / `sync`），也可作为异步协程——当 rpc 体内出现 `await` 表达式或 com 的 `<<` / `>>` 收发时，编译器标记该 rpc 为 `hasAwait`，将其编译为 stackless 状态机。
+
+**帧结构**：rpc 的**参数**和跨 await 存活的**局部变量**全部提升到一个结构体帧中：
+
+```c
+// 编译器为 rpc serve(x, y) { await ...; var t = ...; await ...; } 生成：
+struct serve {
+    future *_ret;       // 本次调用的结果 future（调用方通过它取返回值）
+    int     _state;     // 当前状态机段号（0 = 初始）
+    future *_fut;       // 当前正 await 的 future（挂起点）
+    // --- 原始参数 ---
+    int32_t x;
+    int32_t y;
+    // --- 提升的局部变量 ---
+    int32_t t;
+};
+```
+
+**状态机入口**用 `switch(_state)` + `goto _sN` 标签派发段号，await 点把当前段号写入 `_state` 后 `return` 让出，事件循环在 future 就绪后通过帧中保存的恢复入口 resume 状态机。
+
+**启动器 `X__async(参数...)`**：分配帧、装填参数、创建 `_ret` future、首次驱动状态机、立即返回 `_ret`。调用方拿到 `_ret` 后通过 `await` 或 `future_get` 等待结果。
+
+**await 点三段式**（编译器为每个 `await E` 生成）：
+
+```
+E 求值 → 得 future f
+future_await(f, _p, resume) → 若已就绪 → 继续执行（取结果）
+                              → 若未就绪 → _p->_state = N; return （让出）
+_s<N>:  // 恢复点：f 已就绪，取结果继续
+```
+
+约束（v1）：`await` 只能在 rpc 体顶层直线出现（不可在 if/while/for/case 内），形如 `await E` / `var x = await E` / `x = await E`。
+
+### 4.2 future：异步结果句柄
+
+`future` 是 sc 语言内核的类型擦除异步结果句柄（声明在 `op.sc`，默认导入），承载一次异步操作的完成信号与返回值：
+
+```sc
+@def future: {
+    ready:  i4       # 0=未就绪, 1=已就绪
+    result: &        # 类型擦除结果（调用点用 : T& 还原）
+    frame:  &        # 等待者状态机帧（await 点登记）
+    resume: &        # 等待者恢复入口函数指针
+    next:   &        # 就绪队列链接（事件循环内部）
+    id:     i4       # future<ID> 事件 id（>=0=可派发，-1=无标签）
+    ctx:    &        # 发起时挂载的用户上下文
+}
+```
+
+生命周期：
+- `async rpc(...)` → 编译器改写为 `X__async(...)` 启动器 → 返回 `future&`
+- `await future` → 若已就绪取结果；若未就绪挂起当前 rpc 状态机
+- `done future[, result]` → 写回结果、标记就绪、唤醒等待者 — 这是让任意异步原语接入 await 的统一兑现动词
+
+### 4.3 事件循环：多路复用 + 定时器
+
+事件循环是 sc 语言自有异步内核（`op_impl.c`，始终链接），不依赖 libuv（可选 `SCC_WITH_UV` 换后端）：
+
+- `async_init()` — 建立当前线程的事件循环（惰性 TLS）
+- `async_loop(proc)` — 驱动循环至全部 future 就绪：多路复用等待（epoll/kqueue/IOCP/poll）+ 定时器截止处理 + future 就绪链唤醒
+- `async_final()` — 销毁事件循环
+
+事件循环内部维护全局 future 就绪链表：`done` 把 future 挂入链尾 + 唤醒循环（自管道 `wake()`），循环取出整条链后逐一回调等待者的 `resume` 函数，驱动状态机继续。
+
+**异步叶子原语**（如 `delay`、自定义 `fnc`）接入方式：创建一个 future、登记进事件循环（如定时器挂入超时链表），在完成时调 `done` 兑现。
+
+### 4.4 编译器落地
+
+- parser：rpc 体扫描 `await` / com `<<` `>>` → `hasAwait` 标记
+- codegen：`hasAwait` → 帧结构注入 `_ret/_state/_fut` + 局部提升 + `switch(_state)` 状态机 + 启动器 `__async` + 同步包装抑制
+- 工程管线：op 单元始终入图（`op_impl.c` 始终链接），编译器不 emit 事件循环符号——事件循环是 op 的运行时，rpc 只是它的消费者
+
+---
+
+## 5. 设备通讯 `com`：协议驱动的 io 框架
 
 > **机制框架**
 > - 采用 vtable「协议对象」模式，实现设备自定义扩展和实现（→ §4.1）
@@ -229,7 +315,7 @@ op 层为 mt 提供操作系统抽象，mt 实现为 op 协议的具体实现者
 > - 和语言的 async 异步机制整合，实现异步 I/O 的有序访问（→ §4.2 异步展开部分、§3.5 事件循环）
 > - 内置 O(1) 性能的多路复用就绪状态通知能力，配合 async 异步机制（→ §4.5）
 
-### 4.1 类型结构：com 的 vtable 布局
+### 5.1 类型结构：com 的 vtable 布局
 
 `com` 结构体通过一组成员函数的接口，即 `fnc name:` 字段（单冒号、无函数体）的 MethodPtr 槽，实现具体设备 I/O 访问的抽象：
 
@@ -253,7 +339,7 @@ op 层为 mt 提供操作系统抽象，mt 实现为 op 协议的具体实现者
 }
 ```
 
-### 4.2 编译层：`<<`、`>>` 的识别与展开
+### 5.2 编译层：`<<`、`>>` 的识别与展开
 
 `<<` 和 `>>` 在 parser 中是普通二元运算符（`Expr::Binary`，左结合），**parser 对 com 零知识**。识别发生在 codegen 的表达式 emit 阶段，该阶段会根据操作的目标对象来执行不同操作，具体为：
 
@@ -275,7 +361,7 @@ op 层为 mt 提供操作系统抽象，mt 实现为 op 协议的具体实现者
 - 设备 io 的就绪探测与兑现由 `async_io()` 驱动
   遍历登记了的 com io 待办，探测就绪（readable/writable）后执行实际收发并兑现对应 future，接回状态机继续。
 
-### 4.3 通过 sc 的分身/切片能力，实现有界数据的读取
+### 5.3 通过 sc 的分身/切片能力，实现有界数据的读取
 
 `com` 是基于 sc 的分身容器类型（`def com: <limit>`），即 com 可借 `limit` 分身边界语法生成一个有界读视图（`com[...]` 句柄）。这里的 `limit` 对象和 `com` 一样，也是一个基于协议的结构——它的行为由用户提供的 `limit` 实现实例来定义：
 | 成员 | 类型 | 含义 |
@@ -293,7 +379,7 @@ op 层为 mt 提供操作系统抽象，mt 实现为 op 协议的具体实现者
 
 框架拿到这些接口信息后，经 `limit_read` 执行读循环，反复调用 com 的 read 接口读入 `data() + len`，按 `ending` 判停或定长读满即止。框架不内置任何协议解析——所有缓存/边界策略全在用户的实现里。
 
-### 4.4 ioq：读写缓存队列 — 启动和支持异步 I/O
+### 5.4 ioq：读写缓存队列 — 启动和支持异步 I/O
 
 com 的异步能力由 `rq` / `wq` 两个 ioq 字段启用：非 nil 即表示该 com 支持对应方向的异步访问。ioq 本质是一个自动扩容的循环缓冲，把 io 操作从"立即执行"变成"入队等待"——调用方（`<<`、`>>`）推送一段待收发数据进队后即可返回，由事件循环在设备就绪时再取出执行。
 
@@ -302,7 +388,7 @@ ioq 队列中每条目由调用方经 `push` 写入，事件循环经 `pull` 取
 - **io 缓冲项** `[size, buf]`：`size ≠ 0` 时表示一段待 io 的数据——`buf` 为数据地址，`size` 为字节数。`pull` 取出后按队列方向（rq=读/wq=写）调用 com 的 `read` 或 `write` 方法指针，把数据从设备读入 `buf` 或从 `buf` 写入设备
 - **完成回调项** `[0, cb, data]`：`size = 0` 时表示一个待调用的回调——`cb` 为函数地址，`data` 为其参数。`pull` 取出后直接调用 `cb(data)`，通常用于通知上层某段异步 io 已完成
 
-### 4.5 readable / writable — 是否支持 O(1) 多路复用的关键
+### 5.5 readable / writable — 是否支持 O(1) 多路复用的关键
 
 设备是否支持 O(1) 多路复用（epoll/kqueue/IOCP/poll），由 com 的 `readable` / `writable` 两个方法指针决定。事件循环在等待 io 就绪时调用它们探测设备状态：
 
@@ -311,7 +397,7 @@ ioq 队列中每条目由调用方经 `push` 写入，事件循环经 `pull` 取
 
 `async_io()` 是设备 io 就绪的驱动入口：遍历登记了待办 io 的 com，经上述探测确认就绪后，驱动 ioq 队首的收发，完成后兑现对应的 future 接回异步状态机。
 
-### 4.6 架构分层
+### 5.6 架构分层
 
 com 机制的完整链路，从上到下四层清晰分离：
 
@@ -322,7 +408,7 @@ com 机制的完整链路，从上到下四层清晰分离：
 
 ---
 
-## 5. 类机制 `cls` / `dim`：分派器 + 维度
+## 6. 类机制 `cls` / `dim`：分派器 + 维度
 
 > **机制框架**
 > - 每个 `cls` 对象首部注入一个分派函数指针 `_class`，
