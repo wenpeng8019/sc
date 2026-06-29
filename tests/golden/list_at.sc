@@ -23,7 +23,7 @@ inc adt.sc
     l.push((b: @))
     l.push((c: @))
     printf("len=%llu\n", l.len())
-    var g: node@ = (l.get(1): node@)
+    var g: node* = (l.get(1): node@)
     printf("get1=%d\n", g->v)
     printf("get2_raw=%d\n", (l.get(2): node&)->v)
     printf("idx_b=%lld idx_a=%lld\n", l.index_of((b: @)), l.index_of((a: @)))

@@ -471,9 +471,9 @@ def operand: {
 @def token: {
     h: &                    # 不透明运行时句柄（实现私有）
 
-    fnc get:: @             # t.get()：取当前值（@，调用点用 (e:T@) 还原）
-    fnc set:: v: @, tag: i4 # t.set(v, tag)：设值（随附 tag），唯值变更才落值并触发依赖级联（记忆化/去抖）
-    fnc pulse:: v: @, tag: i4 # t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也强制传播（拉取流水线/迭代：每次 set 皆事件）
+    fnc get:: *             # t.get()：取当前值（*，调用点用 (e:T*) 还原）
+    fnc set:: v: *, tag: i4 # t.set(v, tag)：设值（随附 tag），唯值变更才落值并触发依赖级联（记忆化/去抖）
+    fnc pulse:: v: *, tag: i4 # t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也强制传播（拉取流水线/迭代：每次 set 皆事件）
     fnc depth:: i4          # t.depth()：依赖图深度（源=0；编译期烘焙的常量，O(1) 查表）
     fnc critical:: i4       # t.critical()：是否在关键路径（最长链）上（dep…map；编译期烘焙，O(1)）
     fnc slack:: i4          # t.slack()：松弛余量（可深多少跳而不拖慢全局；0=关键点）
@@ -499,15 +499,15 @@ def operand: {
 
 # tok_modified()：返回 modified 哨兵 @。combine 体内 `return tok_modified()` 表示「强制刷新」——
 #   即使合成结果与原值相等也强制传播（对齐 c_prototype 的 C_modified；set 默认仅在新值≠原值时传播）。
-@fnc tok_modified:: @
+@fnc tok_modified:: *
 
 # combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&，成员均 @（自描述胖指针）。
 #   sender —— 发送者（当前恒空 @，预留）；base —— 当前值；input —— 本次输入；tag —— set 随附标签。
 #   combine 体内用 this->base / this->input / this->sender / this->tag 取上下文，return 新值（@）。
 @def __sctok_in: {
-    sender: @
-    base: @
-    input: @
+    sender: *
+    base: *
+    input: *
     tag: i4
 }
 

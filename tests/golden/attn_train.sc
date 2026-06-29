@@ -12,15 +12,15 @@ fnc main: i4
     ib[0] = 1.0
     ib[1] = 3.0
     ib[2] = 5.0
-    var idxt: tensor@& = from_data(1, (sidx: &), (ib: &), DT_F4)
+    var idxt: tensor@1 = from_data(1, (sidx: &), (ib: &), DT_F4)
     var stg[1]: i4
     stg[0] = 1
     var tgb[1]: f4
     tgb[0] = 1.0
-    var tt: tensor@& = from_data(1, (stg: &), (tgb: &), DT_F4)
-    var emb: embed@& = nn_embedding(6, 4)
-    var fc: linear@& = nn_linear(12, 2)
-    var opt: optim@& = nn_adam(0.02)
+    var tt: tensor@1 = from_data(1, (stg: &), (tgb: &), DT_F4)
+    var emb: embed@1 = nn_embedding(6, 4)
+    var fc: linear@1 = nn_linear(12, 2)
+    var opt: optim@1 = nn_adam(0.02)
     opt->track_embedding(emb)
     opt->track_linear(fc)
     var s3[3]: i4

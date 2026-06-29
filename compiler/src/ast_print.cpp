@@ -154,10 +154,11 @@ std::string typeToStr(const TypeRef& t) {
         s += "]";
         return s;
     }
-    if (t.autoFree) s += "@&";  // 半自动指针（单例指针）：物理 ptr==1，回写为 @&
+    if (t.autoFree) s += "@1";  // 单例指针：物理 ptr==1，回写为 @1
     else {
         for (int i = 0; i < t.ptr; i++) s += "&";
-        if (t.fat) s += "@";   // 自动指针标记（恒单层，与 ptr 互斥）
+        if (t.thin) s += "*";       // 瘦指针（只 tar、不统计 own）
+        else if (t.fat) s += "@";   // 胖指针（恒单层，与 ptr 互斥）
     }
     if (t.qRestrict) s += " restrict";
     return s;
@@ -208,8 +209,8 @@ std::string fieldDetail(const Field& f, bool withInit) {
         if (f.type.qConst) s += " const";
         if (f.type.qVolatile) s += " volatile";
         if (!f.type.name.empty()) s += " " + f.type.name;
-        // 半自动指针 T@&（单例指针）：物理 ptr==1，回写为 @&
-        if (f.type.autoFree) s += "@&";
+        // 单例指针 T@1：物理 ptr==1，回写为 @1
+        if (f.type.autoFree) s += "@1";
         else {
             // 指针 & 写在类型侧（冒号后）：i4& / &（裸 void*）
             if (f.type.ptr > 0) {
@@ -217,8 +218,9 @@ std::string fieldDetail(const Field& f, bool withInit) {
                 if (f.type.name.empty()) s += " ";
                 for (int i = 0; i < f.type.ptr; i++) s += "&";
             }
-            // 自动指针 @ 写在类型侧（冒号后）：node@
-            if (f.type.fat) s += "@";
+            // 自动指针写在类型侧（冒号后）：node@ / 瘦指针 node*
+            if (f.type.thin) s += "*";
+            else if (f.type.fat) s += "@";
         }
         // 尾置 restrict（指针别名约束）
         if (f.type.qRestrict) s += " restrict";

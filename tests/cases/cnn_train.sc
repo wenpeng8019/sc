@@ -15,7 +15,7 @@ fnc main: i4
     sx[1] = 1
     sx[2] = 5
     sx[3] = 5
-    var xt: tensor@& = rand_normal(4, (sx: &), 0.0, 1.0, DT_F4)
+    var xt: tensor@1 = rand_normal(4, (sx: &), 0.0, 1.0, DT_F4)
 
     # 目标类标 [2] = {0, 1}
     var stg[1]: i4
@@ -23,11 +23,11 @@ fnc main: i4
     var tb[2]: f4
     tb[0] = 0.0
     tb[1] = 1.0
-    var tt: tensor@& = from_data(1, (stg: &), (tb: &), DT_F4)
+    var tt: tensor@1 = from_data(1, (stg: &), (tb: &), DT_F4)
 
-    var conv: conv@& = nn_conv2d(1, 3, 3, 3, 1, 1, 0, 0)   # [2,3,3,3]
-    var fc: linear@& = nn_linear(12, 2)                    # 3*2*2=12 → 2
-    var opt: optim@& = nn_adam(0.02)
+    var conv: conv@1 = nn_conv2d(1, 3, 3, 3, 1, 1, 0, 0)   # [2,3,3,3]
+    var fc: linear@1 = nn_linear(12, 2)                    # 3*2*2=12 → 2
+    var opt: optim@1 = nn_adam(0.02)
     opt->track_conv2d(conv)
     opt->track_linear(fc)
 

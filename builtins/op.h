@@ -53,6 +53,16 @@ typedef struct sc_afat {
     void   (*dtor)(void *);
 } sc_afat;
 
+/* 瘦自动指针 T*（真瘦，24B）：前 16B（p,tar）与 sc_fat/sc_afat 同构，尾随 dtor。
+ * 只统计目标入边 tar->in，不带/不统计持有者出边 own——故不参与「未清出边」校验。
+ * dtor 由静态类型 T 填（T_drop / NULL，裸 @^ 在擦除点填），归零时自析构故通用容器无需知 T。
+ * 与 sc_fat（24B {p,tar,own}）/ sc_afat（32B {p,tar,own,dtor}）互转：拷 p/tar，各按己方记账。 */
+typedef struct sc_thin {
+    void    *p;
+    int32_t *tar;
+    void   (*dtor)(void *);
+} sc_thin;
+
 #define SC_REF_HDR  16                  /* 堆对象头偏移（≥sizeof(sc_ref)，过 max_align 对齐） */
 #define SC_REF_ATOM 1                   /* sc_ref.flags 位：对象引用计数用原子 RMW（T<atom>() 构造） */
 #define SC_REF_CANARY 2                 /* sc_ref.flags 位：对象带越界 canary（--check=mem 注入头尾哨兵） */
@@ -189,6 +199,31 @@ static inline void sc_afat_bind(sc_afat *f, void *tgt, sc_ref *tr, int32_t *ow,
 }
 static inline void sc_afat_unbind(sc_afat *f) {
     sc_fat_unbind_d((sc_fat *)f, f->dtor);
+}
+
+/* 瘦自动指针 T@^ 绑定/解绑：只统计目标入边 tar->in，不碰 own。
+ *   bind：tar->in++（原子位感知）+ 存 p/dtor；
+ *   unbind：tar->in--（触 0 → sc_fat_on_zero_d，自带 dtor 析构）；清空。
+ * 前 16B（p,tar）与 sc_fat 同构，故复用 SC_TAR_HDR / sc_fat_on_zero_d 走目标头。 */
+static inline void sc_thin_bind(sc_thin *t, void *tgt, sc_ref *tr, void (*dtor)(void *)) {
+    t->p = tgt;
+    t->tar = tr ? &tr->in : (int32_t *)0;
+    t->dtor = dtor;
+    if (t->tar) {
+        if (SC_TAR_HDR(t->tar)->flags & SC_REF_ATOM)
+            sc_get_and_inc_ord(t->tar, 1);
+        else (*t->tar)++;
+    }
+}
+static inline void sc_thin_unbind(sc_thin *t) {
+    if (t->tar) {
+        int32_t nv;
+        if (SC_TAR_HDR(t->tar)->flags & SC_REF_ATOM)
+            nv = sc_inc_ord(t->tar, -1);
+        else nv = --(*t->tar);
+        if (nv == 0) sc_fat_on_zero_d((sc_fat *)t, t->dtor);
+    }
+    t->p = (void *)0; t->tar = (int32_t *)0;
 }
 
 /* ---------------- chain：侵入式双向链表 ----------------

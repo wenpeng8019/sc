@@ -39,9 +39,9 @@ inc adt.sc
     var k1: i4 = 11
     var k2: i4 = 22
     var k3: i4 = 33
-    da.put((&k1: const &), (a1: @))              # 三次 put：各取一份 retain
-    da.put((&k2: const &), (a2: @))
-    da.put((&k3: const &), (a3: @))
+    da.put((&k1: const &), (a1: *))              # 三次 put：各取一份 retain
+    da.put((&k2: const &), (a2: *))
+    da.put((&k3: const &), (a3: *))
     printf("A len=%llu\n", da.len())
     printf("A has22=%d has99=%d\n", da.has((&k2: const &)), da.has((&k3: const &)))
     var kx: i4 = 99
@@ -51,7 +51,7 @@ inc adt.sc
     # 替换：key 22 改指向新 value（release 旧 200、retain 新 250）
     var a2b: node@ = node()
     a2b->v = 250
-    da.put((&k2: const &), (a2b: @))             # 旧 200 触零 → drop 200
+    da.put((&k2: const &), (a2b: *))             # 旧 200 触零 → drop 200
     printf("A put22b=%d len=%llu\n", (da.get((&k2: const &)): node&)->v, da.len())
 
     # each 无序遍历：sum 应为 100+250+300=650，cnt=3
@@ -92,8 +92,8 @@ inc adt.sc
     b1->v = 10
     var b2: node@ = node()
     b2->v = 20
-    db.put("alpha", (b1: @))
-    db.put("beta", (b2: @))
+    db.put("alpha", (b1: *))
+    db.put("beta", (b2: *))
     printf("B len=%llu get_beta=%d has_alpha=%d has_x=%d\n",
            db.len(), (db.get("beta"): node&)->v, db.has("alpha"), db.has("zzz"))
     db.remove("alpha")                            # drop 10
@@ -110,7 +110,7 @@ inc adt.sc
     buf[1] = 'e'
     buf[2] = 'y'
     buf[3] = 0
-    dc.put((&buf[0]: const &), (c1: @))           # dict 拷贝 "key" 一份
+    dc.put((&buf[0]: const &), (c1: *))           # dict 拷贝 "key" 一份
     buf[0] = 'X'                                  # 篡改原缓冲——拷贝键不受影响
     printf("C has_key=%d get_key=%d\n",
            dc.has((&buf[0]: const &)), dc.has(("key": const &)))

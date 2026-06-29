@@ -226,7 +226,7 @@ fnc node_drain: i4, t: token&, ctx: &
     var n: wnode& = (ctx: wnode&)            # 侧车：form t,v,&n 绑定，exec 回传
     if wn_claim(n) == 1
         var outv: i8 = n->kernel(n->cur)     # 节点算子：本节点真实计算
-        t->set((outv: @), 0)                 # 写输出 → 触发本节点下游路由器入队
+        t->set((outv: *), 0)                 # 写输出 → 触发本节点下游路由器入队
         if n->is_sink == 1
             wn_emit(outv)                    # 汇点：无下游 dep，节点自登记输出
         wn_done(n)
@@ -326,11 +326,11 @@ fnc main: i4
     # ---- form 各节点：确立就绪起点（共享量需主的启动点）。处理节点连同侧车地址 + 处理钩子绑定
     #      （form t,v,&n,exec → t->ctx() 取侧车、back 模式唤起 exec(t, ctx)）；capture 是纯源无侧车无钩子。
     #      form 期触发的 ready 入队被 flow.ready==0 守卫拦截；自此各 token 就绪，set 方落值传播。----
-    form capture, (0: @)
-    form gray,    (0: @), &gray_n,  node_drain
-    form blur,    (0: @), &blur_n,  node_drain
-    form edges,   (0: @), &edges_n, node_drain
-    form fuse,    (0: @), &fuse_n,  node_drain
+    form capture, (0: *)
+    form gray,    (0: *), &gray_n,  node_drain
+    form blur,    (0: *), &blur_n,  node_drain
+    form edges,   (0: *), &edges_n, node_drain
+    form fuse,    (0: *), &fuse_n,  node_drain
 
     print "=== workflow graph 自省（编译期烘焙度量）==="
     report()
@@ -352,7 +352,7 @@ fnc main: i4
     print "=== 提交 ", NF, " 帧，", NW, " 线程 drain 流水线 ==="
     for i in NF
         var frame: i8 = (100: i8) + (i: i8) * (10: i8)
-        capture->set((frame: @), 0)
+        capture->set((frame: *), 0)
 
     # ---- 等待排空 ----
     flow.mu.lock()
@@ -388,7 +388,7 @@ fnc main: i4
 #          wn_push((t->ctx(): wnode&), (s->get(): i8))
 #          return false
 #    并在 main 里：`N_n.t = N; N_n.kernel = N_k`（汇点再设 `N_n.is_sink = 1`）
-#      + `form N, (0:@), &N_n, node_drain`
+#      + `form N, (0:*), &N_n, node_drain`
 #    depth/critical/batch/checkpoint 等度量由编译器自动重新烘焙；算子与路由各居其位
 #    （node 管函数实现，dep 管关系路由），无须改 node_drain / worker。
 #

@@ -18,12 +18,12 @@ fnc main: i4
     var tb[2]: f4
     tb[0] = 5.0
     tb[1] = 8.0
-    var xt: tensor@& = from_data(2, sx, (xb: &), DT_F4)
-    var tt: tensor@& = from_data(2, sx, (tb: &), DT_F4)
+    var xt: tensor@1 = from_data(2, sx, (xb: &), DT_F4)
+    var tt: tensor@1 = from_data(2, sx, (tb: &), DT_F4)
 
-    var fc1: linear@& = nn_linear(2, 4)
-    var fc2: linear@& = nn_linear(4, 2)
-    var opt: optim@& = nn_sgd(0.05)
+    var fc1: linear@1 = nn_linear(2, 4)
+    var fc2: linear@1 = nn_linear(4, 2)
+    var opt: optim@1 = nn_sgd(0.05)
     opt->track_linear(fc1)
     opt->track_linear(fc2)
 
@@ -46,7 +46,7 @@ fnc main: i4
     var h2: val& = fc1->forward(x2)
     var hr2: val& = h2->relu()
     var y2: val& = fc2->forward(hr2)
-    var yv: tensor@& = y2->value()
+    var yv: tensor@1 = y2->value()
     printf("y0_close=%d y1_close=%d\n", (yv->at(0) > 4.0: i4), (yv->at(1) > 7.0: i4))
     nn_tape_clear()
 

@@ -15,7 +15,7 @@ typedef struct acc {
     int32_t cnt;
 } acc;
 
-uint8_t sum_each(const void *key, sc_afat value, void *ctx);
+uint8_t sum_each(const void *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -47,7 +47,7 @@ void node_drop(node *_this) {
     printf("drop %d\n", _this->v);
 }
 
-uint8_t sum_each(const void *key, sc_afat value, void *ctx) {
+uint8_t sum_each(const void *key, sc_thin value, void *ctx) {
     /* line 22 */
     acc *a = ((acc*)(ctx));
     /* line 23 */
@@ -89,11 +89,11 @@ int32_t main(void) {
     /* line 41 */
     int32_t k3 = 33;
     /* line 42 */
-    dict_put(&da, ((const void*)(&(k1))), ({ sc_fat _ec3 = a1; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k1))), ({ sc_fat _ec3 = a1; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
     /* line 43 */
-    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec4 = a2; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec4 = a2; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
     /* line 44 */
-    dict_put(&da, ((const void*)(&(k3))), ({ sc_fat _ec5 = a3; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k3))), ({ sc_fat _ec5 = a3; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
     /* line 45 */
     printf("A len=%llu\n", dict_len(&da));
     /* line 46 */
@@ -111,7 +111,7 @@ int32_t main(void) {
     /* line 53 */
     ((node *)(a2b).p)->v = 250;
     /* line 54 */
-    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec7 = a2b; (sc_afat){_ec7.p, _ec7.tar, _ec7.own, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec7 = a2b; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
     /* line 55 */
     printf("A put22b=%d len=%llu\n", ((node*)((dict_get(&da, ((const void*)(&(k2))))).p))->v, dict_len(&da));
     /* line 58 */
@@ -179,9 +179,9 @@ int32_t main(void) {
     /* line 94 */
     ((node *)(b2).p)->v = 20;
     /* line 95 */
-    dict_put(&db, "alpha", ({ sc_fat _ec10 = b1; (sc_afat){_ec10.p, _ec10.tar, _ec10.own, (void (*)(void *))node_drop}; }));
+    dict_put(&db, "alpha", ({ sc_fat _ec10 = b1; (sc_thin){_ec10.p, _ec10.tar, (void (*)(void *))node_drop}; }));
     /* line 96 */
-    dict_put(&db, "beta", ({ sc_fat _ec11 = b2; (sc_afat){_ec11.p, _ec11.tar, _ec11.own, (void (*)(void *))node_drop}; }));
+    dict_put(&db, "beta", ({ sc_fat _ec11 = b2; (sc_thin){_ec11.p, _ec11.tar, (void (*)(void *))node_drop}; }));
     /* line 97 */
     printf("B len=%llu get_beta=%d has_alpha=%d has_x=%d\n", dict_len(&db), ((node*)((dict_get(&db, "beta")).p))->v, dict_has(&db, "alpha"), dict_has(&db, "zzz"));
     /* line 99 */
@@ -211,7 +211,7 @@ int32_t main(void) {
     /* line 112 */
     buf[3] = 0;
     /* line 113 */
-    dict_put(&dc, ((const void*)(&(buf[0]))), ({ sc_fat _ec13 = c1; (sc_afat){_ec13.p, _ec13.tar, _ec13.own, (void (*)(void *))node_drop}; }));
+    dict_put(&dc, ((const void*)(&(buf[0]))), ({ sc_fat _ec13 = c1; (sc_thin){_ec13.p, _ec13.tar, (void (*)(void *))node_drop}; }));
     /* line 114 */
     buf[0] = 'X';
     /* line 115 */

@@ -152,7 +152,7 @@ fnc wn_push: i4, n: wnode&, v: i8
         flow.inflight = flow.inflight + 1
         if n->state == S_IDLE
             n->state = S_PEND
-            flow.rq.push(&n->weight, (n: @))         # 按权重(depth)入就绪堆；value=节点指针（装箱为 @）
+            flow.rq.push(&n->weight, (n: *))         # 按权重(depth)入就绪堆；value=节点指针（装箱为 @）
             flow.work.one()                          # 唤醒一个阻塞 worker 来 pop 堆顶
     flow.mu.unlock()
     return 0
@@ -176,7 +176,7 @@ fnc wn_done: i4, n: wnode&
     flow.inflight = flow.inflight - 1
     if n->q.is_empty() == false
         n->state = S_PEND
-        flow.rq.push(&n->weight, (n: @))         # 仍有积压：按权重重入就绪堆
+        flow.rq.push(&n->weight, (n: *))         # 仍有积压：按权重重入就绪堆
         flow.work.one()
     else
         n->state = S_IDLE
@@ -235,7 +235,7 @@ rpc worker_ls: id: i4
             var n: wnode& = wf_take()            # 锁内：pop 堆顶 + 认领一帧
             flow.mu.unlock()
             var outv: i8 = n->kernel(n->cur)     # 节点算子：本节点真实计算（锁外）
-            n->t->set((outv: @), 0)              # 写输出 → 触发下游路由器入队
+            n->t->set((outv: *), 0)              # 写输出 → 触发下游路由器入队
             if n->is_sink == 1
                 wn_emit(outv)                    # 汇点：无下游 dep，节点自登记输出
             wn_done(n)
@@ -272,11 +272,11 @@ fnc main: i4
 
     # ---- form 各节点：确立就绪起点 + 绑定侧车 ctx（form t,v,&n → t->ctx() 取侧车；本模板无 exec 钩子，
     #      发现走就绪堆而非 back）。capture 是纯源无侧车。form 期触发的入队被 flow.armed==0 守卫拦截。----
-    form capture, (0: @)
-    form gray,    (0: @), &gray_n
-    form blur,    (0: @), &blur_n
-    form edges,   (0: @), &edges_n
-    form fuse,    (0: @), &fuse_n
+    form capture, (0: *)
+    form gray,    (0: *), &gray_n
+    form blur,    (0: *), &blur_n
+    form edges,   (0: *), &edges_n
+    form fuse,    (0: *), &fuse_n
 
     print "=== list-schedule 反应图自省（编译期烘焙度量；weight=depth）==="
     report()
@@ -292,7 +292,7 @@ fnc main: i4
     print "=== 提交 ", NF, " 帧，", NW, " 线程列表调度（就绪堆 pop）==="
     for i in NF
         var frame: i8 = (100: i8) + (i: i8) * (10: i8)
-        capture->set((frame: @), 0)
+        capture->set((frame: *), 0)
 
     # ---- 等待排空 ----
     flow.mu.lock()
@@ -326,7 +326,7 @@ fnc main: i4
 #      dep all: s:"lx.U" map t:"lx.N"   # 边只前推（dep = 路由）
 #          wn_push((t->ctx(): wnode&), (s->get(): i8))
 #          return false
-#    main 中：N_n.t=N; N_n.kernel=N_k; N_n.weight=N->depth(); form N,(0:@),&N_n。
+#    main 中：N_n.t=N; N_n.kernel=N_k; N_n.weight=N->depth(); form N,(0:*),&N_n。
 #    depth/critical/reach 等度量与权重由编译器自动重新烘焙，无须手算。
 #
 # 2) 换调度纪律（只改权重与堆向，调度骨架不动）：

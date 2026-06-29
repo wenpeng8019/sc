@@ -1,7 +1,7 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static sc_afat __sctok_sensor_level_combine(__sctok_in *_this);
+static sc_thin __sctok_sensor_level_combine(__sctok_in *_this);
 static token *level = {0};
 static token *alert = {0};
 static uint8_t __scdep_0_follow(__scdep_in *_this);
@@ -14,7 +14,7 @@ typedef struct com__project {
 
 static int __scdep_0_tramp(token **, int, int, void *);
 
-static sc_afat __sctok_sensor_level_combine(__sctok_in *_this) {
+static sc_thin __sctok_sensor_level_combine(__sctok_in *_this) {
     /* line 20 */
     int64_t b = ((int64_t)((_this->base).p));
     /* line 21 */

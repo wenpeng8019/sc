@@ -71,12 +71,20 @@ struct TypeRef {
 
     //---------
 
-    // 对于半自动指针（单例指针）：eg: name@&
-    // + autoFree=true 表示这是一个「半自动指针」：物理上等同普通指针（ptr==1，C 侧即 T*，
+    // 对于半自动指针（单例指针）：eg: name@1
+    // + autoFree=true 表示这是一个「单例指针」：物理上等同普通指针（ptr==1，C 侧即 T*，
     //   取值返回裸地址、只接受普通指针 & / nil 赋值），但附带自动指针 @ 的退域 RAII 语义：
     //   退出作用域（或重新赋值覆盖旧值）时，若指向对象非 nil 则自动 drop + free 销毁该对象。
     //   相当于「单例对象智能指针」（unique_ptr）。autoFree 时 ptr==1、fat==false、name 非空。
     bool autoFree = false;
+
+    //---------
+
+    // 对于瘦指针（自动指针另一形态）：eg: name*
+    // + thin=true 表示真瘦指针 sc_thin（24B {p,tar,dtor}）：只统计目标入边 tar，
+    //   不带/不统计持有者出边 own（不参与「未清出边」校验）；dtor 随句柄供裸 * 自析。
+    //   thin 时 fat==true、ptr==0；与胖指针 @ 可互相赋值转换（拷 p/tar，各按己方记账）。
+    bool thin = false;
 
     //---------
 
@@ -247,6 +255,7 @@ struct Expr {
     bool castVolatile = false;  // Cast: 目标类型 volatile 限定（前缀）
     bool castRestrict = false;  // Cast: 目标指针 restrict 限定（尾置）
     bool castFat = false;       // Cast: 目标为自动指针 T@/裸 @（op 为空 → 裸 @ 类型擦除）
+    bool castThin = false;      // Cast: 目标为瘦指针 T*/裸 *（op 为空 → 裸 * 类型擦除）；castFat 同置
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量

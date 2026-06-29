@@ -69,7 +69,7 @@ dep all: a:"nn.x" map b:"nn.y"
     gY->copy_from(wx)
     gY->add_(gB)
     wx->drop()
-    b->set((a->get(): @), 0)                # 传 epoch 触发标量给下游（驱动 y→loss 级联）
+    b->set((a->get(): *), 0)                # 传 epoch 触发标量给下游（驱动 y→loss 级联）
     return false
 
 # 输出层 y → loss：前向 loss = mean((y-t)²)；反向 gGY = (2/N)(y-t)（MSE 导数）。
@@ -85,7 +85,7 @@ dep all: c:"nn.y" map o:"nn.loss"
     gLoss = sq->mean_all()
     d->drop()
     sq->drop()
-    o->set((c->get(): @), 0)                # 传 epoch 触发标量给 loss（back 起点就绪）
+    o->set((c->get(): *), 0)                # 传 epoch 触发标量给 loss（back 起点就绪）
     return false
 
 # ============================================================
@@ -96,7 +96,7 @@ dep all: c:"nn.y" map o:"nn.loss"
 #   用 pulse 而非 set：训练循环每 epoch 喂的触发即便同值也强制重算（拉取/迭代语义）；
 #   触发标量取 epoch 序号，逐轮递增，天然绕过相等抑制。
 fnc forward: f8, ep: i8
-    x->pulse((ep: @), 0)
+    x->pulse((ep: *), 0)
     return gLoss
 
 # 一次反向 + 参数更新（一个梯度下降步）。
@@ -158,9 +158,9 @@ fnc main: i4
     setup()
     # 前向链须 form 激活：未 form 的 token 不就绪、其 set 不传播（见 syntax §21.2）。
     #   自输出 loss 向输入 x 依序灌初值（无 ctx 侧车，张量数据在全局）。
-    form loss, (0: @)
-    form y,    (0: @)
-    form x,    (0: @)
+    form loss, (0: *)
+    form y,    (0: *)
+    form x,    (0: *)
     print "=== 训练（单层线性回归 y=W·x+b，x=[1,2], t=[5,8], lr=", LR, "）==="
     train(40)
 

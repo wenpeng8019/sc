@@ -96,6 +96,7 @@ POSITIVE=(
     tests/cases/bare_at.sc
     tests/cases/list_at.sc
     tests/cases/dict_at.sc
+    tests/cases/thin_at.sc
     tests/cases/ring_at.sc
     tests/cases/bst_at.sc
     tests/cases/heap_at.sc

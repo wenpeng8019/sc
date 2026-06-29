@@ -267,6 +267,12 @@ P0–P4 已覆盖 numpy 常用子集。以下为已知缺口，按需推进：
 | linalg 数值健壮性（已部分完成） | 已提供 `SCC_WITH_LAPACK` opt-in：det/inv/solve/cholesky/qr/eigh/svd 可走 LAPACKE；默认仍保留自研 fallback | 后续按需补齐更多 LAPACK 例程与平台链接模板 |
 | PyTorch nn 常用核心（P5） | 已补 `mse_loss/nll_loss/bce_with_logits/layer_norm/dropout/bmm/addmm/sdpa/conv/pool` | 下一步按模型需求细化（如 group/depthwise conv、mask/flash attention） |
 
+### 5.2 跨模块待办
+
+| 项目 | 现状 | 思路 |
+|------|------|------|
+| list/dict/tok 元素瘦化省内存 | item 用裸 `@`（sc_afat 32B）+ `SC_OWN_RAW`，own 不记账但仍占 8B；曾试标注 `@^` 但 sc_afat 仍 32B、零收益已回退 | 真省内存须单态化：按元素类型生成 24B 专属容器（去 dtor/own），非指针标注可达 |
+
 ---
 
 ## 6. 参考与对照

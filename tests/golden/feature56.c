@@ -2,7 +2,7 @@
 #include "platform.h"
 
 static token *sig = {0};
-static sc_afat __sctok_cd_gauge_combine(__sctok_in *_this);
+static sc_thin __sctok_cd_gauge_combine(__sctok_in *_this);
 static token *gauge = {0};
 static token *hits = {0};
 static token *ghits = {0};
@@ -18,7 +18,7 @@ typedef struct com__project {
 static int __scdep_0_tramp(token **, int, int, void *);
 static int __scdep_1_tramp(token **, int, int, void *);
 
-static sc_afat __sctok_cd_gauge_combine(__sctok_in *_this) {
+static sc_thin __sctok_cd_gauge_combine(__sctok_in *_this) {
     /* line 19 */
     int64_t i = ((int64_t)((_this->input).p));
     /* line 20 */

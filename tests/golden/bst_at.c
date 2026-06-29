@@ -15,7 +15,7 @@ typedef struct acc {
     int32_t cnt;
 } acc;
 
-uint8_t sum_each(const void *key, sc_afat value, void *ctx);
+uint8_t sum_each(const void *key, sc_thin value, void *ctx);
 int32_t dump_keys(bst *t);
 sc_fat make(int32_t x);
 typedef struct com__project {
@@ -49,7 +49,7 @@ void node_drop(node *_this) {
     printf("drop %d\n", _this->v);
 }
 
-uint8_t sum_each(const void *key, sc_afat value, void *ctx) {
+uint8_t sum_each(const void *key, sc_thin value, void *ctx) {
     /* line 26 */
     acc *a = ((acc*)(ctx));
     /* line 27 */
@@ -128,7 +128,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&ha[i], (void (*)(void *))node_drop);
         ha[i] = make(keys[i] * 10);
         /* line 66 */
-        bst_put(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_afat){_ec1.p, _ec1.tar, _ec1.own, (void (*)(void *))node_drop}; }));
+        bst_put(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
         /* line 67 */
         i += 1;
     }
@@ -202,7 +202,7 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[7], (void (*)(void *))node_drop);
     ha[7] = make(999);
     /* line 115 */
-    bst_put(&ta, ((const void*)(&(k40))), ({ sc_fat _ec2 = ha[7]; (sc_afat){_ec2.p, _ec2.tar, _ec2.own, (void (*)(void *))node_drop}; }));
+    bst_put(&ta, ((const void*)(&(k40))), ({ sc_fat _ec2 = ha[7]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
     /* line 116 */
     printf("A put40b=%d len=%llu\n", ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v, bst_len(&ta));
     /* line 119 */
@@ -239,7 +239,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make(101 + i);
         /* line 140 */
-        bst_put(&tb, ((const void*)(&(bk[i]))), ({ sc_fat _ec3 = hb[i]; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))node_drop}; }));
+        bst_put(&tb, ((const void*)(&(bk[i]))), ({ sc_fat _ec3 = hb[i]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
         /* line 141 */
         i += 1;
     }
@@ -280,22 +280,22 @@ int32_t main(void) {
     sc_fat_unbind_d(&hc[0], (void (*)(void *))node_drop);
     hc[0] = make(4);
     /* line 164 */
-    bst_put(&tc, "delta", ({ sc_fat _ec4 = hc[0]; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "delta", ({ sc_fat _ec4 = hc[0]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
     /* line 165 */
     sc_fat_unbind_d(&hc[1], (void (*)(void *))node_drop);
     hc[1] = make(1);
     /* line 166 */
-    bst_put(&tc, "alpha", ({ sc_fat _ec5 = hc[1]; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "alpha", ({ sc_fat _ec5 = hc[1]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
     /* line 167 */
     sc_fat_unbind_d(&hc[2], (void (*)(void *))node_drop);
     hc[2] = make(3);
     /* line 168 */
-    bst_put(&tc, "charlie", ({ sc_fat _ec6 = hc[2]; (sc_afat){_ec6.p, _ec6.tar, _ec6.own, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "charlie", ({ sc_fat _ec6 = hc[2]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
     /* line 169 */
     sc_fat_unbind_d(&hc[3], (void (*)(void *))node_drop);
     hc[3] = make(2);
     /* line 170 */
-    bst_put(&tc, "bravo", ({ sc_fat _ec7 = hc[3]; (sc_afat){_ec7.p, _ec7.tar, _ec7.own, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "bravo", ({ sc_fat _ec7 = hc[3]; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
     /* line 171 */
     printf("C len=%llu inorder:", bst_len(&tc));
     /* line 172 */

@@ -223,7 +223,7 @@ struct CGen {
     // 顶层方法表：所属类型 → 方法名 → Decl（结构内实现或 fnc T::m 声明）
     std::unordered_map<std::string, std::unordered_map<std::string, const Decl*>> methods;
     // 变量的轻量类型信息（类型名 + 指针层数 + 数组维数），用于方法调用识别
-    struct VType { std::string name; int ptr = 0; int arr = 0; bool fat = false; };
+    struct VType { std::string name; int ptr = 0; int arr = 0; bool fat = false; bool thin = false; };
     std::unordered_map<std::string, VType> globalsT, localsT;
     // 自动指针 T@：被构造为胖目标（T()）的类型名集合（决定生成 T__new_ref 带头分配）
     std::set<std::string> fatTypeNames;
@@ -233,7 +233,7 @@ struct CGen {
     //   dtorArg = 目标类型 T 有 drop 时的析构实参串 "(void (*)(void *))T_drop"（无则空），
     //   解绑（in→0）时按目标静态类型调析构清理子成员（见 auto_ptr.md §5）。
     //   bare = 裸 @（类型擦除，sc_afat）：解绑走 sc_afat_unbind（dtor 随句柄）。
-    struct FatRoot { std::string name; std::string dtorArg; bool bare = false; };
+    struct FatRoot { std::string name; std::string dtorArg; bool bare = false; bool thin = false; };
     std::vector<std::vector<FatRoot>> fatScopes;
     // 与 fatScopes 平行：每层本块内声明的 T@ 数组根变量（元素各为一条根边），退块/return 时
     // 逐元素 unbind（覆盖整个引用图，避免泄漏）。局部 T@ 数组（一维/多维）。
@@ -263,7 +263,7 @@ struct CGen {
     // drop（RAII 闭环）。name=变量名，dropFn=drop 方法的 C 名（T_drop）。
     struct DropVar { std::string name; std::string dropFn; };
     std::vector<std::vector<DropVar>> dropScopes;
-    // 半自动指针 T@&（单例指针）：物理普通指针 T* + 退域 RAII。退域/重新赋值覆盖旧值时，
+    // 半自动指针 T@1（单例指针）：物理普通指针 T* + 退域 RAII。退域/重新赋值覆盖旧值时，
     // 若指向对象非 nil 则自动 drop + sc_free 销毁。autoFreeScopes 与 fatScopes 平行逐层登记；
     // autoFreeVars 为本函数内 name→信息映射，供赋值语句拦截（先销毁旧对象再存新指针）。
     struct AutoFreeVar { std::string name; std::string ctype; std::string dropFn; };
@@ -343,10 +343,10 @@ struct CGen {
             return;
         }
         // 胖指针（自动指针 T@）：C 侧统一为 sc_fat（24 字节，首成员 p 即裸指针）。
-        // 裸 @（类型擦除，name 空）：sc_afat（前 24B 同构 + dtor 槽）。
+        // 裸 @（类型擦除，name 空）：sc_afat（前 24B 同构 + dtor 槽）。瘦 @^：sc_thin（24B {p,tar,dtor}）。
         if (f.type.fat) {
             if (asConst) out << "const ";
-            out << (f.type.name.empty() ? "sc_afat " : "sc_fat ")
+            out << (f.type.thin ? "sc_thin " : (f.type.name.empty() ? "sc_afat " : "sc_fat "))
                 << (f.name == "this" ? "_this" : f.name);
             for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
@@ -1224,9 +1224,12 @@ struct CGen {
 
     // 发一条胖指针解绑语句：有 dtorArg 走 sc_fat_unbind_d（带目标类型析构），否则 sc_fat_unbind。
     //   bare = 裸 @（sc_afat）：走 sc_afat_unbind（析构器随句柄，类型擦除）。
-    void emitFatUnbind(const std::string& lvAddr, const std::string& dtorArg, bool bare = false) {
+    //   thin = 瘦 @^（sc_thin）：走 sc_thin_unbind（dtor 随句柄，无 own 记账）。
+    void emitFatUnbind(const std::string& lvAddr, const std::string& dtorArg, bool bare = false,
+                       bool thin = false) {
         indent();
-        if (bare) out << "sc_afat_unbind(&" << lvAddr << ");\n";
+        if (thin) out << "sc_thin_unbind(&" << lvAddr << ");\n";
+        else if (bare) out << "sc_afat_unbind(&" << lvAddr << ");\n";
         else if (dtorArg.empty()) out << "sc_fat_unbind(&" << lvAddr << ");\n";
         else out << "sc_fat_unbind_d(&" << lvAddr << ", " << dtorArg << ");\n";
     }
@@ -1352,6 +1355,7 @@ struct CGen {
                     if (f.name == fn) {
                         vt = {f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
                         vt.fat = f.type.fat;
+                        vt.thin = f.type.thin;
                         return true;
                     }
                 return false;
@@ -2239,6 +2243,47 @@ struct CGen {
                     std::string srcT;
                     bool srcFat = isFatExpr(*e.a, &srcT);
                     int n = fatTmpSeq++;
+                    // —— 瘦指针强转 (e: T*) / (e: *)：sc_thin{p,tar,dtor}（无 own）——
+                    if (e.castThin) {
+                        if (e.op.empty()) {
+                            if (srcFat && srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
+                            if (!srcFat) {
+                                VType svt;
+                                bool isPtr = exprVType(*e.a, svt) && (svt.ptr > 0 || svt.arr > 0);
+                                out << "((sc_thin){" << (isPtr ? "(void *)(" : "(void *)(intptr_t)(");
+                                emitExpr(*e.a, true);
+                                out << "), (int32_t *)0, (void (*)(void *))0})";
+                                break;
+                            }
+                            if (srcFat && srcT != "object" && classNames.count(srcT)) {
+                                out << "({ sc_fat _ec" << n << " = ";
+                                emitExpr(*e.a, true);
+                                out << "; (sc_thin){(void *)((char *)_ec" << n << ".p + offsetof("
+                                    << srcT << ", _class)), _ec" << n
+                                    << ".tar, (void (*)(void *))sc_obj_drop}; })";
+                                break;
+                            }
+                            std::string d = fatDtorArg(srcT);
+                            out << "({ sc_fat _ec" << n << " = ";
+                            emitExpr(*e.a, true);
+                            out << "; (sc_thin){_ec" << n << ".p, _ec" << n << ".tar, "
+                                << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
+                        } else {
+                            // 还原为 T@（sc_fat 视图，own=RAW 借用）
+                            if (classNames.count(e.op)) {
+                                out << "({ sc_thin _rc" << n << " = ";
+                                emitExpr(*e.a, true);
+                                out << "; (sc_fat){ (_rc" << n << ".dtor == (void (*)(void *))sc_obj_drop)"
+                                    << " ? (void *)((char *)_rc" << n << ".p - offsetof(" << e.op
+                                    << ", _class)) : _rc" << n << ".p, _rc" << n << ".tar, SC_OWN_RAW }; })";
+                            } else {
+                                out << "({ sc_thin _rc" << n << " = ";
+                                emitExpr(*e.a, true);
+                                out << "; (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, SC_OWN_RAW}; })";
+                            }
+                        }
+                        break;
+                    }
                     if (e.op.empty()) {
                         // 擦除为裸 @
                         if (srcFat && srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }  // 已是裸 @：恒等
@@ -2587,16 +2632,18 @@ struct CGen {
 
     // 自动指针 T@ 根变量声明：sc_fat 声明 + 按初值形态绑定，并登记进当前作用域。
     //   裸 @：sc_afat 声明（dtor 随句柄），登记 bare 标记供退块 sc_afat_unbind。
+    //   瘦 @^：sc_thin 声明（dtor 随句柄、无 own），登记 thin 标记供退块 sc_thin_unbind。
     void emitFatVarInit(const Field& f, bool asConst, bool isStatic) {
         regVar(f);
         bool bare = f.type.fat && f.type.name.empty();
-        if (!fatScopes.empty()) fatScopes.back().push_back({f.name, fatDtorArg(f.type.name), bare});
+        bool thin = f.type.thin;
+        if (!fatScopes.empty()) fatScopes.back().push_back({f.name, fatDtorArg(f.type.name), bare, thin});
         indent();
         if (isStatic) out << "static ";
         if (asConst) out << "const ";
-        out << (bare ? "sc_afat " : "sc_fat ") << f.name << " = {0};\n";
+        out << (thin ? "sc_thin " : (bare ? "sc_afat " : "sc_fat ")) << f.name << " = {0};\n";
         if (!f.init) return;
-        emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true, f.type.name);
+        emitFatBind(f.name, "SC_OWN_ROOT", *f.init, /*isInit*/ true, f.type.name, thin);
     }
 
     // T(args) 构造：校验实参与 init 形参个数匹配，输出逗号分隔实参列表（无括号，
@@ -2622,11 +2669,65 @@ struct CGen {
     //   nil   → 解绑（清空）
     // isInit=false 时先解绑旧边（§4.1 重新赋值必先拆旧边）。
     //   targetType=左值的目标静态类型 T（拆旧边时按其析构 drop 清理子成员，见 §5）。
+    // 瘦指针 T@^（sc_thin）绑定：只统计目标入边 tar，dtor 随句柄，无 own 记账。
+    //   nil → 仅解绑；T() → 带头堆分配 + sc_thin_bind；胖/瘦左值 → 拷 p/tar 绑新边。
+    //   p/dtor 风味与裸 @ 一致（class → &_class + sc_obj_drop），故与 @ 互转无损。
+    void emitThinBind(const std::string& lv, const Expr& init, bool isInit,
+                      const std::string& tt) {
+        if (init.kind == Expr::Ident && init.text == "nil") {
+            if (!isInit) emitFatUnbind(lv, "", false, /*thin*/ true);
+            return;
+        }
+        if (!isInit) emitFatUnbind(lv, "", false, /*thin*/ true);
+        // T()/T(args) → 带头分配 + 绑定（dtor 取静态类型析构）
+        if (const Decl* td = typeCallee(init)) {
+            std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
+            indent(); out << td->name << " *" << tmp << " = ";
+            if (!init.args.empty()) {
+                out << td->name << "__new_ref_init(";
+                emitCtorInitArgs(td, init);
+                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            } else {
+                out << td->name << "__new_ref(" << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+            }
+            indent();
+            if (classNames.count(td->name)) {
+                out << "sc_thin_bind(&" << lv << ", (void *)&" << tmp << "->_class"
+                    << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR)"
+                    << ", (void (*)(void *))sc_obj_drop);\n";
+            } else {
+                std::string d = fatDtorArg(td->name);
+                out << "sc_thin_bind(&" << lv << ", " << tmp
+                    << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), "
+                    << (d.empty() ? "(void (*)(void *))0" : d) << ");\n";
+            }
+            return;
+        }
+        // 胖/瘦左值 → 拷 p/tar 绑新边（sc_fat/sc_afat/sc_thin 前 16B 同构）
+        std::string st;
+        if (isFatExpr(init, &st)) {
+            std::string rhs = captureExpr(init);
+            std::string d = st.empty() ? ("(" + rhs + ").dtor")
+                          : (classNames.count(st) && st != "object" ? "(void (*)(void *))sc_obj_drop"
+                             : (fatDtorArg(st).empty() ? "(void (*)(void *))0" : fatDtorArg(st)));
+            std::string pexpr = (classNames.count(st) && st != "object")
+                ? "(void *)&((" + st + " *)(" + rhs + ").p)->_class" : "(" + rhs + ").p";
+            indent();
+            out << "sc_thin_bind(&" << lv << ", " << pexpr << ", (sc_ref *)("
+                << rhs << ").tar, " << d << ");\n";
+            return;
+        }
+        indent(); out << lv << " = "; emitExpr(init, true); out << ";\n";
+    }
+
     void emitFatBind(const std::string& lv, const std::string& own,
-                     const Expr& init, bool isInit, const std::string& targetType = "") {
+                     const Expr& init, bool isInit, const std::string& targetType = "",
+                     bool thin = false) {
         // 胖左值类型名为空 ⇔ 裸 @（sc_afat，类型擦除）：解绑/绑定走 sc_afat_*，dtor 随句柄。
         bool bare = targetType.empty();
         std::string dtorArg = fatDtorArg(targetType);
+        // 瘦 @^：sc_thin 路径（只统计 tar，无 own）。dtor 随句柄；nil/T()/胖左值三态。
+        if (thin) { emitThinBind(lv, init, isInit, targetType); return; }
         // nil：仅解绑
         if (init.kind == Expr::Ident && init.text == "nil") {
             if (!isInit) emitFatUnbind(lv, dtorArg, bare);
@@ -2808,7 +2909,7 @@ struct CGen {
         indent(); out << "}\n";
     }
 
-    // 半自动指针 T@&（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free。
+    // 半自动指针 T@1（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free。
     void emitAutoFreeDestroy(const std::string& name, const std::string& dropFn) {
         indent();
         out << "if (" << name << ") { ";
@@ -2816,7 +2917,7 @@ struct CGen {
         out << "sc_free(" << name << "); }\n";
     }
 
-    // 半自动指针 T@& 赋值：先把 RHS 算入临时（避免自指/自销），与旧值不同且旧值非 nil 则
+    // 半自动指针 T@1 赋值：先把 RHS 算入临时（避免自指/自销），与旧值不同且旧值非 nil 则
     // 销毁旧对象（drop + free），再存入新指针。覆盖语义即「设新值自动销毁旧对象」。
     void emitAutoFreeAssign(const AutoFreeVar& v, const Expr& rhs) {
         std::string tmp = "_af" + std::to_string(autoFreeTmpSeq++);
@@ -2838,10 +2939,11 @@ struct CGen {
         if (!fatLhsInfo(lhs, lv, own)) return false;
         std::string tt;                  // 左值目标静态类型（拆旧边时据此调析构）
         isFatExpr(lhs, &tt);
+        VType lvt; bool isThin = exprVType(lhs, lvt) && lvt.thin;
         if (own.empty()) {
             // 裸 base（含 this）胖成员：nil 解绑总是允许（成员自带 own/tar）。
             if (init.kind == Expr::Ident && init.text == "nil") {
-                emitFatUnbind(lv, fatDtorArg(tt));
+                emitFatUnbind(lv, fatDtorArg(tt), false, isThin);
                 return true;
             }
             // 含胖成员类型的 init 体内、经 this 绑新边：own 取隐藏 _self_own，运行时分支。
@@ -2851,7 +2953,7 @@ struct CGen {
             }
             throw CompileError{"禁止经裸指针绑定自动指针 T@ 成员新边（仅 init 内经 this 绑定，或 = nil 解绑）", lhs.line};
         }
-        emitFatBind(lv, own, init, isInit, tt);
+        emitFatBind(lv, own, init, isInit, tt, isThin);
         return true;
     }
 
@@ -2883,7 +2985,7 @@ struct CGen {
     void emitFatScopeCleanup(const std::vector<FatRoot>& scope, const std::string& skip) {
         for (auto it = scope.rbegin(); it != scope.rend(); ++it) {
             if (it->name == skip) continue;
-            emitFatUnbind(it->name, it->dtorArg, it->bare);
+            emitFatUnbind(it->name, it->dtorArg, it->bare, it->thin);
         }
     }
 
@@ -2891,7 +2993,7 @@ struct CGen {
     // 其前另有 phase0：发出本块登记的 final 钩子（LIFO），先于拆边/断言执行。
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
         emitFinalScope(i);                                       // phase0：final 钩子
-        if (i < autoFreeScopes.size())                           // phase0.4：半自动指针 T@& 退域销毁
+        if (i < autoFreeScopes.size())                           // phase0.4：半自动指针 T@1 退域销毁
             for (auto it = autoFreeScopes[i].rbegin(); it != autoFreeScopes[i].rend(); ++it) {
                 if (it->name == skip) continue;                  // 被移动返回的对象跳过
                 emitAutoFreeDestroy(it->name, it->dropFn);
@@ -3171,7 +3273,7 @@ struct CGen {
                 if (dm && !dropScopes.empty())
                     dropScopes.back().push_back({f.name, dm->name});
             }
-            // 半自动指针 T@&（单例指针）：物理普通指针，登记退域销毁（非 nil → drop + free），
+            // 半自动指针 T@1（单例指针）：物理普通指针，登记退域销毁（非 nil → drop + free），
             // 并入 autoFreeVars 供赋值拦截（设新值先销旧）。manualDropVars（move）则交用户接管。
             if (inFunc && !isStatic && !isTls && f.type.autoFree
                 && !manualDropVars.count(f.name)) {
@@ -3225,6 +3327,7 @@ struct CGen {
     void regVar(const Field& f) {
         VType vt{f.type.name, f.type.ptr, (int)f.type.arrayDims.size()};
         vt.fat = f.type.fat;
+        vt.thin = f.type.thin;
         (inFunc ? localsT : globalsT)[f.name] = vt;
         if (!f.type.arrayDims.empty())
             (inFunc ? varDimsL : varDimsG)[f.name] = f.type.arrayDims;
@@ -3989,7 +4092,7 @@ struct CGen {
                     const std::string ent = projEntityOf(s.expr->a->text);
                     if (!ent.empty()) { emitProjectAssign(s.expr->a->text, ent, *s.expr->b); break; }
                 }
-                // 半自动指针 T@& 赋值：先销毁旧对象（非 nil → drop + free）再存新指针
+                // 半自动指针 T@1 赋值：先销毁旧对象（非 nil → drop + free）再存新指针
                 if (s.expr && s.expr->kind == Expr::Binary && s.expr->op == "=" &&
                     s.expr->a && s.expr->a->kind == Expr::Ident) {
                     auto afit = autoFreeVars.find(s.expr->a->text);
@@ -4051,7 +4154,7 @@ struct CGen {
                     // RAII：任意活动作用域登记了栈值对象 → return 前须自动 drop
                     bool anyDrop = false;
                     for (auto& dc : dropScopes) if (!dc.empty()) { anyDrop = true; break; }
-                    // 半自动指针 T@&：任意活动作用域登记了 → return 前须销毁（非 nil → drop + free）
+                    // 半自动指针 @1（单例指针）：任意活动作用域登记了 → return 前须销毁（非 nil → drop + free）
                     bool anyAutoFree = false;
                     for (auto& ac : autoFreeScopes) if (!ac.empty()) { anyAutoFree = true; break; }
                     // return p（p 为胖左值）= 移动：跳过该变量的 unbind，入边随返回值移交
@@ -4446,14 +4549,14 @@ struct CGen {
     }
 
     // back t[, seed]：反向遍历（反向传播骨架）→ token_back(t, seed, 0)。
-    //   有 seed：擦除为 @ 灌入起点；无 seed：传空 @（运行时不灌种子，保留 t 当前值）。
+    //   有 seed：擦除为 *（瘦）灌入起点；无 seed：传空瘦句柄（运行时不灌种子，保留 t 当前值）。
     void emitBackStmt(const Stmt& s) {
         indent();
         out << "token_back(";
         emitExpr(*s.expr, true);     // tok&（句柄指针）
         out << ", ";
-        if (s.forInit) emitExpr(*s.forInit, true);   // @ 梯度种子
-        else           out << "(sc_afat){(void *)0, (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}";  // 空 @：无种子
+        if (s.forInit) emitExpr(*s.forInit, true);   // 瘦句柄梯度种子
+        else           out << "(sc_thin){(void *)0, (int32_t *)0, (void (*)(void *))0}";  // 空瘦：无种子
         out << ", 0);\n";
     }
 
@@ -5109,7 +5212,7 @@ struct CGen {
             return;
         }
         // 返回自动指针：T@ → sc_fat；裸 @（name 空，类型擦除）→ sc_afat（带 dtor 槽）
-        if (rt->fat) { out << (rt->name.empty() ? "sc_afat" : "sc_fat"); return; }
+        if (rt->fat) { out << (rt->thin ? "sc_thin" : (rt->name.empty() ? "sc_afat" : "sc_fat")); return; }
         std::string base; int ptr;
         resolveType(*rt, base, ptr);
         out << base;

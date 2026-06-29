@@ -63,7 +63,7 @@ inc adt.sc
     var i: i4 = 0
     while i < 7
         ha[i] = make(keys[i] * 10)
-        ta.put((&keys[i]: const &), (ha[i]: @))
+        ta.put((&keys[i]: const &), (ha[i]: *))
         i += 1
     printf("A len=%llu\n", ta.len())
     printf("A inorder:")
@@ -112,7 +112,7 @@ inc adt.sc
 
     # 替换 key 40 的 value（release 旧 400、retain 新 999；旧 400 由 ha[4] 持有至退域）
     ha[7] = make(999)
-    ta.put((&k40: const &), (ha[7]: @))
+    ta.put((&k40: const &), (ha[7]: *))
     printf("A put40b=%d len=%llu\n", (ta.get((&k40: const &)): node&)->v, ta.len())
 
     # 删除（触发删除旋转）：删 50（双子根）、20（叶）、70
@@ -137,7 +137,7 @@ inc adt.sc
     while i < 15
         bk[i] = i + 1
         hb[i] = make(101 + i)                        # value 101..115（与 A/C 不冲突）
-        tb.put((&bk[i]: const &), (hb[i]: @))
+        tb.put((&bk[i]: const &), (hb[i]: *))
         i += 1
     printf("B len=%llu\n", tb.len())
     printf("B inorder:")
@@ -161,13 +161,13 @@ inc adt.sc
     tc.init(0, 0 - 1, nil, nil)
     var hc[4]: node@                                 # holder
     hc[0] = make(4)
-    tc.put("delta", (hc[0]: @))
+    tc.put("delta", (hc[0]: *))
     hc[1] = make(1)
-    tc.put("alpha", (hc[1]: @))
+    tc.put("alpha", (hc[1]: *))
     hc[2] = make(3)
-    tc.put("charlie", (hc[2]: @))
+    tc.put("charlie", (hc[2]: *))
     hc[3] = make(2)
-    tc.put("bravo", (hc[3]: @))
+    tc.put("bravo", (hc[3]: *))
     printf("C len=%llu inorder:", tc.len())
     var cc: i8 = tc.first()
     while cc != 0

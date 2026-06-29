@@ -344,7 +344,7 @@ int32_t main(void) {
             /* line 119 */
             last = (d * d);
             /* line 120 */
-            token_back(loss, (sc_afat){(void *)0, (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}, 0);
+            token_back(loss, (sc_thin){(void *)0, (int32_t *)0, (void (*)(void *))0}, 0);
             /* line 121 */
             int32_t t = e + 1;
             /* line 122 */

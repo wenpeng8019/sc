@@ -165,7 +165,7 @@ struct Parser {
     // 判断冒号后是否开始一个类型：命名类型、内联 {}/()、或裸 &/&&（void* 指针）、裸 @（类型擦除）
     bool atTypeStart() const {
         return at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)
-            || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@"));
+            || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@" || cur().text == "*"));
     }
 
     // 解析强转目标类型部分到 Cast 节点：[const|volatile]* name [&|&&]* [restrict]
@@ -179,7 +179,7 @@ struct Parser {
         }
         if (at(Tok::Ident)) c->op = advance().text;   // 命名类型存于 op（转换去向，非被操作主体）
         // 裸 & / &&（无名类型）即 void* / void**：op 留空，由 codegen 输出 void
-        else if (!(atOp("&") || atOp("&&") || atOp("@"))) err("强转期望类型名");
+        else if (!(atOp("&") || atOp("&&") || atOp("@") || atOp("*"))) err("强转期望类型名");
         while (atOp("&") || atOp("&&"))
             c->castPtr += advance().text == "&&" ? 2 : 1;
         // 自动指针强转 (e: T@) / 裸 (e: @)：恒单层，与 & 互斥
@@ -187,6 +187,12 @@ struct Parser {
             advance();
             if (c->castPtr > 0) err("自动指针强转 @ 不能与 & 组合（T@ 恒为单层）");
             c->castFat = true;
+        }
+        // 瘦指针强转 (e: T*) / 裸 (e: *)：恒单层，与 & 互斥；与 @ 同走胖指针路径
+        else if (atOp("*")) {
+            advance();
+            if (c->castPtr > 0) err("瘦指针强转 * 不能与 & 组合（T* 恒为单层）");
+            c->castFat = true; c->castThin = true;
         }
         if (at(Tok::Ident) && cur().text == "restrict") {
             if (c->castPtr == 0) err("restrict 限定符仅对指针强转有意义");
@@ -214,8 +220,8 @@ struct Parser {
 
         // 获取类型名
         if (at(Tok::Ident)) ty.name = foldMacroSpelling(advance().text);  // 宏体内折叠 \ 粘贴（如 Vec_\N& 类型引用）
-        // 对于（无名）裸 & / &&，即 void* 指针；裸 @ 为类型擦除自动指针
-        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@")))
+        // 对于（无名）裸 & / &&，即 void* 指针；裸 @ 为类型擦除自动指针；裸 * 为类型擦除瘦指针
+        else if (!(at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@" || cur().text == "*")))
             err("期望类型名");
 
         // 类型名后可跟 &/&& 表示指针（如 i4& = int32_t*，i4&& = int32_t**）
@@ -223,6 +229,14 @@ struct Parser {
             if (acceptOp("&")) ty.ptr++;
             else if (acceptOp("&&")) ty.ptr += 2;
             else break;
+        }
+
+        // 瘦指针 T*（真瘦自动指针，C 侧 sc_thin 24B {p,tar,dtor}）：只统计 tar 入边、不带 own，
+        // 恒为单层，与 & 互斥。裸 *（无名）：类型擦除瘦指针。dtor 随句柄自析构。
+        if (atOp("*")) {
+            advance();
+            if (ty.ptr > 0) err("瘦指针 * 不能与 & 组合（恒为单层）");
+            ty.fat = true; ty.thin = true;
         }
 
         // 尾置 restrict 限定符（上下文标识符；约束指针无别名，仅对指针有意义）
@@ -233,10 +247,10 @@ struct Parser {
         // 裸 @（无名）：类型擦除自动指针，C 侧 sc_afat（24B 同构 + dtor 槽），供通用容器。
         if (atOp("@")) {
             advance();
-            if (atOp("&")) {          // 半自动指针 T@&（单例指针）：物理普通指针 + 退域 RAII 销毁
+            if (at(Tok::Int) && cur().text == "1") {   // 单例指针 T@1：物理普通指针 + 退域 RAII 销毁
                 advance();
-                if (ty.ptr > 0) err("半自动指针 @& 不能再叠加 &（单层）");
-                if (ty.name.empty()) err("半自动指针 @& 需具名类型");
+                if (ty.ptr > 0) err("单例指针 @1 不能再叠加 &（单层）");
+                if (ty.name.empty()) err("单例指针 @1 需具名类型");
                 ty.ptr = 1;
                 ty.autoFree = true;
             } else {
@@ -977,7 +991,8 @@ struct Parser {
             fn->name = combineFn;
             fn->tokHidden = true;
             fn->structCommon.type = std::make_shared<TypeRef>();
-            fn->structCommon.type->fat = true;           // 返回 @（新值）
+            fn->structCommon.type->fat = true;           // 返回 *（瘦，新值；token 值为 sc_thin）
+            fn->structCommon.type->thin = true;
             Field self;                                  // 单形参 this: __sctok_in&（combine 上下文）
             self.name = "this";
             self.type.name = "__sctok_in";
@@ -1415,7 +1430,7 @@ struct Parser {
                     exprBracket--;
                     return e;
                 }
-                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&") && !atOp("@")) err("强转期望类型名");
+                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&") && !atOp("@") && !atOp("*")) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
                 parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]（类型名可省=void*）

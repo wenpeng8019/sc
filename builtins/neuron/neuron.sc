@@ -164,7 +164,7 @@
         dn->backward(d->toks, d->count - 1)
         return
     dn->forward(d->toks, d->count - 1)
-    down->pulse((0: @), 0)
+    down->pulse((0: *), 0)
     return
 
 # ============================================================

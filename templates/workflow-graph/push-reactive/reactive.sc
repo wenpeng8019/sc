@@ -64,19 +64,19 @@ var warn_n:  cnode
 tok sensor: "px.sensor"     # 纯源（depth 0）：无 combine，set 即原值
 
 tok norm: "px.norm"         # 归一：input / 10
-    return ((this->input: i8) / 10: @)
+    return ((this->input: i8) / 10: *)
 
 tok level: "px.level"       # 饱和：min(input, LCAP)（clamp → 反应式截断的来源）
     var i: i8 = (this->input: i8)
     if i > LCAP
-        return (LCAP: @)
-    return (i: @)
+        return (LCAP: *)
+    return (i: *)
 
 tok warn: "px.warn"         # 报警：input >= ALimit ? 1 : 0
     var i: i8 = (this->input: i8)
     if i >= ALimit
-        return (1: @)
-    return (0: @)
+        return (1: *)
+    return (0: *)
 
 # ============================================================
 # 节点观察钩子（exec）：格值落定后于锁外唤起，累计统计（node = 副作用归节点）。
@@ -124,10 +124,10 @@ fnc report:
 fnc main: i4
     # ---- form 各格：确立就绪起点 + 绑定观察侧车 + 处理钩子（form t,v,&n,exec → t->ctx() / 推送模式唤起 exec）。
     #      sensor 纯源无侧车无钩子；派生格连同 cnode 地址 + observe 绑定。form 期前推皆 0 → 同值抑制，观察静默。----
-    form sensor, (0: @)
-    form norm,  (0: @), &norm_n,  observe
-    form level, (0: @), &level_n, observe
-    form warn,  (0: @), &warn_n,  observe
+    form sensor, (0: *)
+    form norm,  (0: *), &norm_n,  observe
+    form level, (0: *), &level_n, observe
+    form warn,  (0: *), &warn_n,  observe
 
     print "=== push-reactive 反应图自省（编译期烘焙度量）==="
     report()
@@ -138,7 +138,7 @@ fnc main: i4
     var i: i4 = 0
     for i = 0; i < NR; i++
         var reading: i8 = (10: i8) + (i: i8) * (10: i8)   # 10,20,...,80
-        sensor->set((reading: @), 0)
+        sensor->set((reading: *), 0)
 
     # ---- 结果（确定性）：级联随 level 饱和逐级衰减——norm 每次都变（8 次），level 饱和后
     #      截断（5 次），warn 仅在跨阈那一次变更（1 次）。----
@@ -153,11 +153,11 @@ fnc main: i4
 # ------------------------------------------------------------
 # 1) 加一单输入派生格 N（上游 U，公式 f）：
 #      tok N: "px.N"
-#          return (<f(this->input)>: @)        # 公式写在格的 combine（node = 函数）
+#          return (<f(this->input)>: *)        # 公式写在格的 combine（node = 函数）
 #      dep all: s:"px.U" map t:"px.N"          # 边只前推（dep = 路由）
 #          t->set((s->get()), 0)
 #          return false
-#    要观察该格：var N_n: cnode（声明即经 init 自动清零）+ form N, (0:@), &N_n, observe。
+#    要观察该格：var N_n: cnode（声明即经 init 自动清零）+ form N, (0:*), &N_n, observe。
 #    depth/critical/reach 等度量由编译器自动重新烘焙。
 #
 # 2) 扇入格 C（公式依赖多输入 a、b）：公式天然落在 follow（需读全部输入）——
@@ -165,7 +165,7 @@ fnc main: i4
 #      dep all: a:"px.a", b:"px.b" map t:"px.C" # 与门：a、b 皆就绪/变更才重算
 #          var x: i8 = (a->get(): i8)
 #          var y: i8 = (b->get(): i8)
-#          t->set(((x + y): @), 0)              # 多输入公式在边上
+#          t->set(((x + y): *), 0)              # 多输入公式在边上
 #          return false
 #    单输入「格即函数」、多输入「公式在边」——按扇入度自然取舍。
 #

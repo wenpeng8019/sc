@@ -76,7 +76,7 @@ dep all: p:"n.o0" map l:"n.loss"
         return false
     var ln: neuron& = (l->ctx(): neuron&)
     ln->act = mse_loss(on->act, g_target)
-    l->pulse((0: @), 0)
+    l->pulse((0: *), 0)
     return false
 
 # ============================================================
@@ -143,8 +143,8 @@ fnc zero_gw:
 fnc forward: f4, x0: f4, x1: f4
     IN[0].act = x0
     IN[1].act = x1
-    i0->pulse((0: @), 0)          # pulse 而非 set：训练多轮、值不变也强制重算（迭代语义）
-    i1->pulse((0: @), 0)          # 两个输入集齐 → 隐层与门触发 → 逐层级联到 o0/loss
+    i0->pulse((0: *), 0)          # pulse 而非 set：训练多轮、值不变也强制重算（迭代语义）
+    i1->pulse((0: *), 0)          # 两个输入集齐 → 隐层与门触发 → 逐层级联到 o0/loss
     return OUT[0].act
 
 # 优化器一步：对各神经元调 neuron 的 sgd 方法（传入超参）。
@@ -174,14 +174,14 @@ fnc train: i4
 fnc main: i4
     init_net()
     # form（输出→输入）：token 就绪 + 绑定神经元侧车。未 form 的 token 不就绪、pulse 不传播。
-    form loss, (0: @), &LOSS_N
-    form o0,   (0: @), &OUT[0]
-    form h0,   (0: @), &HID[0]
-    form h1,   (0: @), &HID[1]
-    form h2,   (0: @), &HID[2]
-    form h3,   (0: @), &HID[3]
-    form i0,   (0: @), &IN[0]
-    form i1,   (0: @), &IN[1]
+    form loss, (0: *), &LOSS_N
+    form o0,   (0: *), &OUT[0]
+    form h0,   (0: *), &HID[0]
+    form h1,   (0: *), &HID[1]
+    form h2,   (0: *), &HID[2]
+    form h3,   (0: *), &HID[3]
+    form i0,   (0: *), &IN[0]
+    form i1,   (0: *), &IN[1]
 
     print "=== 编译期烘焙的网络结构（lightmap，O(1) 读取）==="
     print "i0    depth=", i0->depth(),   "  fanout=", i0->fanout(), "  reach=", i0->reach()

@@ -148,13 +148,13 @@
     fnc len:: u8                                    # 元素个数
     fnc clear::                                      # 清空并 release 全部元素（保留段容量）
     fnc reserve:: bool, n: u8                       # 预留槽位
-    fnc push:: bool, value: @                         # 尾部追加（retain 元素）
+    fnc push:: bool, value: *                         # 尾部追加（retain 元素）
     fnc pop:: bool                                   # 删除并 release 尾元素（空返回 false）
-    fnc get:: @, index: u8                           # 借用元素句柄（越界返回空句柄；不改计数）
-    fnc set:: bool, index: u8, value: @               # 改写元素（retain 新、release 旧）
-    fnc insert:: bool, index: u8, value: @            # 指定位置插入（retain 元素）
+    fnc get:: *, index: u8                           # 借用元素句柄（越界返回空句柄；不改计数）
+    fnc set:: bool, index: u8, value: *              # 改写元素（retain 新、release 旧）
+    fnc insert:: bool, index: u8, value: *           # 指定位置插入（retain 元素）
     fnc remove_at:: bool, index: u8                  # 删除并 release 该元素（越界返回 false）
-    fnc index_of:: i8, value: @                       # 按 .p 实体基址查找（未找到 -1）
+    fnc index_of:: i8, value: *                      # 按 .p 实体基址查找（未找到 -1）
     fnc reverse::                                    # 原地反转
     fnc clone:: bool, out: list&                    # 逐元素 retain 到 out
     fnc sort:: cmp: list_cmp                         # 按比较回调排序
@@ -171,7 +171,7 @@
 # 取出语义同 list「取用分离」：get 借用（返回句柄不改计数）；remove 删除并 release（返回 bool）。
 # 因 init 带 key_size 参数，不参与「声明即构造」——须显式 d.init(key_size)。
 
-@fnc dict_each_fn: bool, key: const &, value: @, ctx: &  # 遍历回调（返回 false 提前终止）
+@fnc dict_each_fn: bool, key: const &, value: *, ctx: &  # 遍历回调（返回 false 提前终止）
 
 @def dict: {
     ctrl: u1&       # 控制字节数组（空/墓碑/占用）
@@ -186,8 +186,8 @@
     fnc drop::                                       # 释放全部 retain + 回收桶/控制块
     fnc len:: u8                                    # 元素个数
     fnc has:: bool, key: const &                     # 是否含 key
-    fnc get:: @, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
-    fnc put:: bool, key: const &, value: @           # 插入/替换（retain 新、替换 release 旧）
+    fnc get:: *, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
+    fnc put:: bool, key: const &, value: *           # 插入/替换（retain 新、替换 release 旧）
     fnc remove:: bool, key: const &                  # 删除并 release value（未命中返回 false）
     fnc clear::                                      # 清空并 release 全部 value（保留桶容量）
     fnc each:: fn: dict_each_fn, ctx: &              # 无序遍历占用桶（回调返 false 即停）
@@ -199,7 +199,7 @@
     fnc next:: i8, cur: i8                          # cur 之后的占用桶（无则 -1）
     fnc prev:: i8, cur: i8                          # cur 之前的占用桶（无则 -1）
     fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
-    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+    fnc value_at:: *, cur: i8                       # 游标处 value 借用（无效返回空句柄）
 }
 
 # ---------------- bst：AVL/红黑 融合的有序映射 ----------------
@@ -215,7 +215,7 @@
 # 因 init 带参数，不参与「声明即构造」——须显式 t.init(red_depth, key_size, cmp, ctx)。
 
 @fnc bst_cmp_fn: i4, a: const &, b: const &, ctx: &      # 自定义比较器（返回 sign(a-b)；nil=内置）
-@fnc bst_each_fn: bool, key: const &, value: @, ctx: &   # 中序遍历回调（返回 false 提前终止）
+@fnc bst_each_fn: bool, key: const &, value: *, ctx: &   # 中序遍历回调（返回 false 提前终止）
 
 @def bst: {
     root: &          # 根节点（不透明 bst_node*；内部）
@@ -231,8 +231,8 @@
     fnc drop::                                       # 释放全部 retain + 回收全部节点
     fnc len:: u8                                    # 元素个数
     fnc has:: bool, key: const &                     # 是否含 key
-    fnc get:: @, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
-    fnc put:: bool, key: const &, value: @           # 插入/替换（retain 新、替换 release 旧）
+    fnc get:: *, key: const &                        # 借用 value 句柄（未命中返回空句柄；不改计数）
+    fnc put:: bool, key: const &, value: *           # 插入/替换（retain 新、替换 release 旧）
     fnc remove:: bool, key: const &                  # 删除并 release value（未命中返回 false）
     fnc clear::                                      # 清空并 release 全部 value
     fnc each:: fn: bst_each_fn, ctx: &              # 中序（升序）遍历（回调返 false 即停）
@@ -244,7 +244,7 @@
     fnc next:: i8, cur: i8                          # 后继游标（无则 0）
     fnc prev:: i8, cur: i8                          # 前驱游标（无则 0）
     fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
-    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+    fnc value_at:: *, cur: i8                       # 游标处 value 借用（无效返回空句柄）
     fnc index_of:: i8, key: const &                 # key 的 0 基中序序号（未命中 -1）
     fnc at:: i8, index: u8                          # 0 基中序序号处的游标（越界 0）
     fnc most:: i8, key: const &                     # <= key 的最接近项游标（前驱或等于；无 0）
@@ -281,9 +281,9 @@
     fnc is_empty:: bool                             # 是否空
     fnc clear::                                      # 清空并 release 全部 value（保留容量）
     fnc reserve:: bool, n: u8                       # 预留至少 n 槽
-    fnc push:: bool, key: const &, value: @          # 入堆（retain value；上滤）
+    fnc push:: bool, key: const &, value: *          # 入堆（retain value；上滤）
     fnc pop:: bool                                   # 弹出堆顶并 release（空返回 false；下滤）
-    fnc peek:: @                                     # 借用堆顶 value 句柄（空返回空句柄；不改计数）
+    fnc peek:: *                                     # 借用堆顶 value 句柄（空返回空句柄；不改计数）
     fnc peek_key:: const &                           # 借用堆顶 key（空返回 nil）
 }
 
@@ -298,7 +298,7 @@
 # 不提供整数游标——键串须沿路径重建，each/each_prefix 用回调在 DFS 中增量拼键，O(总字符数)。
 # init 无参——参与「声明即构造」：var t: trie 自动 trie_init(&t)。
 
-@fnc trie_each_fn: bool, key: const char&, value: @, ctx: &   # 遍历回调（key 为完整键串；返回 false 提前终止）
+@fnc trie_each_fn: bool, key: const char&, value: *, ctx: &   # 遍历回调（key 为完整键串；返回 false 提前终止）
 
 @def trie: {
     root: &          # 根节点（不透明 trie_node*；空树为 nil）
@@ -308,8 +308,8 @@
     fnc drop::                                       # 释放全部 retain + 回收全部节点
     fnc len:: u8                                    # 键个数
     fnc has:: bool, key: const char&                 # 是否含精确键
-    fnc get:: @, key: const char&                    # 借用键对应 value（未命中空句柄；不改计数）
-    fnc put:: bool, key: const char&, value: @       # 插入/替换（retain 新、替换 release 旧）
+    fnc get:: *, key: const char&                    # 借用键对应 value（未命中空句柄；不改计数）
+    fnc put:: bool, key: const char&, value: *       # 插入/替换（retain 新、替换 release 旧）
     fnc remove:: bool, key: const char&              # 删除并 release（未命中 false；剪枝空节点）
     fnc clear::                                      # 清空并 release 全部 value
     fnc has_prefix:: bool, prefix: const char&       # 是否存在以 prefix 开头的键
@@ -329,7 +329,7 @@
 # 取出语义同 dict「取用分离」：get/peek 借用（返句柄），remove 删除并 release（返 bool）。
 # each 按 MRU→LRU 顺序遍历。因 init 带参，不参与「声明即构造」——须显式 c.init(key_size, cap)。
 
-@fnc lru_each_fn: bool, key: const &, value: @, ctx: &    # 遍历回调（MRU→LRU；返 false 提前终止）
+@fnc lru_each_fn: bool, key: const &, value: *, ctx: &    # 遍历回调（MRU→LRU；返 false 提前终止）
 
 @def lru: {
     map: dict        # 内嵌字典：key → 节点指针（借用句柄、不计数）
@@ -345,9 +345,9 @@
     fnc cap:: u8                                    # 当前容量上限（0 = 无界）
     fnc set_cap:: cap: u8                           # 调整容量（缩容立即淘汰 LRU 至 len<=cap）
     fnc has:: bool, key: const &                     # 是否含键（不触顶）
-    fnc get:: @, key: const &                        # 取值并触顶（移至 MRU；未命中空句柄；借用）
-    fnc peek:: @, key: const &                       # 取值不触顶（未命中空句柄；借用）
-    fnc put:: bool, key: const &, value: @           # 插入/替换 + 触顶（retain 新、替换 release 旧；超容淘汰）
+    fnc get:: *, key: const &                        # 取值并触顶（移至 MRU；未命中空句柄；借用）
+    fnc peek:: *, key: const &                       # 取值不触顶（未命中空句柄；借用）
+    fnc put:: bool, key: const &, value: *           # 插入/替换 + 触顶（retain 新、替换 release 旧；超容淘汰）
     fnc remove:: bool, key: const &                  # 删除并 release（未命中 false）
     fnc clear::                                      # 清空并 release 全部 value（保留容量）
     fnc mru_key:: const &                            # 最近使用键（空返 nil）
@@ -361,7 +361,7 @@
     fnc next:: i8, cur: i8                          # MRU→LRU 后继（无则 0）
     fnc prev:: i8, cur: i8                          # 反向前驱（无则 0）
     fnc key_at:: const &, cur: i8                   # 游标处 key（无效返回 nil）
-    fnc value_at:: @, cur: i8                       # 游标处 value 借用（无效返回空句柄）
+    fnc value_at:: *, cur: i8                       # 游标处 value 借用（无效返回空句柄）
 }
 
 

@@ -1,7 +1,7 @@
 /* tok.h —— 分布式 token（tok / dep / form 机制）的 C ABI 契约
  *           （与 builtins/tok/tok.sc 协议、builtins/tok/tok_impl.c 实现同步维护）
  *
- * tok 是「分布式 token」：跨进程以字符串 id 唯一标识的共享量，值为类型擦除 @（sc_afat）。
+ * tok 是「分布式 token」：跨进程以字符串 id 唯一标识的共享量，值为类型擦除 @（sc_thin）。
  *   · tok t: "id"        声明一个 token 句柄（enforce 纯从）；
  *   · tok t: "id"<换行+缩进体>  声明并挂 combine 回调（form 候选：缩进体即 combine）；
  *   · form t, v          初始化 form token：灌初值并升格为 form 主；
@@ -25,16 +25,16 @@ extern "C" {
 typedef struct token token;
 
 /* combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&。
- *   值均为 @（sc_afat，类型擦除自描述胖指针，体内 (e:T@) 还原典型对象）：
+ *   值均为 @（sc_thin，类型擦除自描述胖指针，体内 (e:T@) 还原典型对象）：
  *     sender —— 发送者（当前由 set 触发时恒为空 @，预留扩展）；
  *     base   —— 当前值（form 主上一轮结果）；
  *     input  —— 本次 set 输入；
  *     tag    —— set 随附的整型标签（t.set(v, tag) 透传，体内分流用）。
  *   combine 返回新值（@）。 */
 typedef struct __sctok_in {
-    sc_afat sender;
-    sc_afat base;
-    sc_afat input;
+    sc_thin sender;
+    sc_thin base;
+    sc_thin input;
     int32_t tag;
 } __sctok_in;
 
@@ -52,7 +52,7 @@ typedef struct __scdep_in {
 } __scdep_in;
 
 /* combine 回调：form 候选据上下文 this（base/input/sender/tag）算出新值（@ 擦除）。 */
-typedef sc_afat (*token_combine)(__sctok_in *self);
+typedef sc_thin (*token_combine)(__sctok_in *self);
 /* follow 回调：依赖项 ts[0..n) 之一就绪/变更时触发；返回下次门逻辑（非 0=与门 all / 0=或门 any）。
  *   ctx=注册时透传的用户上下文。acting=触发动作（对齐 c_prototype.h）：
  *     -2 (ALL_READY)  ：与门首次全部就绪（form 触发）；
@@ -75,11 +75,11 @@ typedef int (*token_follow)(token **ts, int n, int acting, void *ctx);
 typedef int (*token_exec)(token *t, void *ctx);
 
 token      *token_bind(const char *id, token_combine combine);  /* create-or-get：按 id intern 句柄，combine 非空则挂为 form 候选 */
-sc_afat     token_get(token *t);                                /* t.get()：取当前值（@，调用点 (e:T@) 还原） */
-void        token_set(token *t, sc_afat v, int32_t tag);        /* t.set(v, tag)：设值（随附 tag）；唯新值≠原值才落值并触发依赖级联（记忆化/去抖） */
-void        token_pulse(token *t, sc_afat v, int32_t tag);      /* t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也落值并强制传播（拉取流水线/迭代：每次 set 皆事件） */
-sc_afat     tok_modified(void);                                 /* modified 哨兵 @：combine 体内 return tok_modified() → 强制刷新传播（即使值未变） */
-void        token_form(token *t, sc_afat v, int32_t tag, void *ctx, token_exec exec);  /* form t, v[, ctx[, exec]]：灌初值并升格为 form 主；ctx 非空则绑定节点私有上下文（侧车），exec 非空则挂节点处理钩子 */
+sc_thin     token_get(token *t);                                /* t.get()：取当前值（@，调用点 (e:T@) 还原） */
+void        token_set(token *t, sc_thin v, int32_t tag);        /* t.set(v, tag)：设值（随附 tag）；唯新值≠原值才落值并触发依赖级联（记忆化/去抖） */
+void        token_pulse(token *t, sc_thin v, int32_t tag);      /* t.pulse(v, tag)：脉冲设值——绕过相等抑制，即便同值也落值并强制传播（拉取流水线/迭代：每次 set 皆事件） */
+sc_thin     tok_modified(void);                                 /* modified 哨兵 @：combine 体内 return tok_modified() → 强制刷新传播（即使值未变） */
+void        token_form(token *t, sc_thin v, int32_t tag, void *ctx, token_exec exec);  /* form t, v[, ctx[, exec]]：灌初值并升格为 form 主；ctx 非空则绑定节点私有上下文（侧车），exec 非空则挂节点处理钩子 */
 void       *token_ctx(token *t);                                /* t.ctx()：取本 token 的私有上下文（form 绑定的侧车；未绑定=空 &） */
 void        token_depend(token **ts, int n, int all, token_follow follow, void *ctx);  /* dep：注册依赖关系（all=与门/或门） */
 void        token_depend_map(token **ts, int nsrc, int ntgt, int all, token_follow follow, void *ctx);  /* dep…map：源(nsrc)→目标(ntgt) 显式图边；ts=源++目标，仅源触发 */
@@ -99,7 +99,7 @@ int         token_batch_width(token *t);                        /* t.batch_width
 void        token_set_dom(token *t, int checkpoint, int dom_size); /* 烘焙：编译期支配树算好的检查点标志 + 支配子树规模写入句柄 */
 int         token_checkpoint(token *t);                         /* t.checkpoint()：是否为支配咽喉（缓存边界；O(1)） */
 int         token_dom_size(token *t);                           /* t.dom_size()：支配子树规模（缓存可覆盖的下游 token 数） */
-void        token_back(token *t, sc_afat seed, int32_t tag);    /* back t[, seed]：反向遍历（反向传播 / drain 骨架）——自 t 沿反向邻接收上游 dep，按深度降序（反拓扑）以 acting=TOK_BACK 唤起 follow；follow 返回非 0 即提前中止本轮遍历（drain 拉取）；seed 非空先灌入 t */
+void        token_back(token *t, sc_thin seed, int32_t tag);    /* back t[, seed]：反向遍历（反向传播 / drain 骨架）——自 t 沿反向邻接收上游 dep，按深度降序（反拓扑）以 acting=TOK_BACK 唤起 follow；follow 返回非 0 即提前中止本轮遍历（drain 拉取）；seed 非空先灌入 t */
 void        token_depend_loop(token **ts, int nsrc, int ntgt, int all, token_follow follow, void *ctx);  /* dep loop：受控反馈环——源不反挂（不自动级联），登记全局 loop 表，由 token_loop_run 按 SCC 簇驱动 */
 void        token_set_scc(token *t, int scc_id, int scc_size); /* 烘焙：编译期 Tarjan 算好的 SCC 反馈簇划分写入句柄（注册时调用，常量入参） */
 int         token_scc(token *t);                                /* t.scc()：读受控反馈簇编号（O(1)；非反馈/未烘焙=0） */
