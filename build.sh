@@ -9,6 +9,10 @@ EXT_BASE="$HOME/.vscode/extensions"
 # 插件目录:安装名
 EXTS=("vscode-sc:sc-lang-0.1.0" "vscode-sc-ast:sc-ast-view-0.1.0")
 
+# ssh 组件自包含静态库（libssh2 + mbedTLS）—— git 忽略的本地产物
+SSH_LIB="$ROOT/templates/utils/libssh2.a"
+SSH_BUILDER="$ROOT/templates/utils/build_libssh2.sh"
+
 usage() {
     cat <<EOF
 用法: ./build.sh <命令>
@@ -20,8 +24,18 @@ usage() {
              加 --update 重新生成黄金文件：./build.sh test --update
   install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图 + Markdown 预览 sc 高亮）
   uninstall  卸载 scc 与 VSCode 插件
+  ssh        构造 ssh 组件自包含静态库 templates/utils/libssh2.a（libssh2 + mbedTLS，强制重建）
   clean      清理构建产物
 EOF
+}
+
+# 首次自动构造 ssh 组件库：缺失且 vendor 源码就绪时构建一次（git 忽略的本地产物）。
+# 非致命：构建失败仅告警，不中断核心编译器构建（ssh 为可选组件）。
+ensure_libssh2() {
+    [ -f "$SSH_LIB" ] && return 0
+    [ -d "$ROOT/vendor/libssh2" ] && [ -d "$ROOT/vendor/mbedtls" ] || return 0
+    echo "==> 首次构造 ssh 组件库 templates/utils/libssh2.a（libssh2 + mbedTLS）"
+    sh "$SSH_BUILDER" || echo "    告警: ssh 组件库构建失败，inc ssh.sc 前请手动跑 $SSH_BUILDER"
 }
 
 do_build() {
@@ -29,6 +43,16 @@ do_build() {
     cmake -B "$BUILD_DIR" -S "$ROOT/compiler" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$BUILD_DIR"
     echo "==> 完成: $BUILD_DIR/scc"
+    ensure_libssh2
+}
+
+do_ssh() {
+    echo "==> 强制构造 ssh 组件库 $SSH_LIB"
+    [ -d "$ROOT/vendor/libssh2" ] && [ -d "$ROOT/vendor/mbedtls" ] || {
+        echo "错误: 缺少 vendor/libssh2 或 vendor/mbedtls 源码" >&2; exit 1; }
+    rm -f "$SSH_LIB"
+    sh "$SSH_BUILDER"
+    echo "==> 完成: $SSH_LIB"
 }
 
 do_dist() {
@@ -166,6 +190,7 @@ case "${1:-build}" in
     test)      do_test "${2:-}" ;;
     install)   do_install ;;
     uninstall) do_uninstall ;;
+    ssh)       do_ssh ;;
     clean)     do_clean ;;
     -h|--help|help) usage ;;
     *) usage; exit 1 ;;

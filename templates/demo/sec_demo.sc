@@ -4,7 +4,7 @@
 # 「发起方 + 响应方」两个 async rpc，事件循环驱动一次完整闭环：
 #   握手（PSK 或 PSK+X25519 临时）→ 双向加密收发明文 → 篡改帧被拒。
 #
-# 运行：scc templates/utils/sec_demo.sc
+# 运行：scc templates/demo/sec_demo.sc
 #   期望：两种模式各自 srv 收到 "ping from initiator"、cli 收到 "pong from responder"，
 #   且篡改的密文被 SEC_EAUTH 拒绝 → 末行 SELFTEST PASS。
 #
@@ -15,7 +15,7 @@ inc async.sc
 inc io.sc
 inc os.sc
 inc crypto.sc
-inc securechan.sc
+inc ../utils/securechan.sc
 
 var g_srv_msg[64]: u1     # 响应方收到的明文
 var g_srv_n: i4 = -1
