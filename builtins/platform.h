@@ -26,34 +26,77 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 
 /* ---------------- 平台判定 ---------------- */
 
+/* 目标平台选择：默认按 C 编译器为其 target 预定义的宏自动判定
+ * （_WIN32 / __APPLE__ / __linux__ 等）——用合适的交叉工具链（前缀 gcc 或
+ * clang + -target）时这些宏即「目标」宏，平台分支本就面向目标平台。
+ *
+ * 但当 scc 仅按目标档 triple 解析平台行为（线程库/调试打包等）、而 C 编译器
+ * 未带匹配的 target 选项时，预定义宏会回退到「宿主」，使 platform.h 的平台
+ * 分支与 scc 的目标判定相互矛盾。为此 scc 在交叉目标下注入
+ * SC_TARGET_{WIN,DARWIN,LINUX} 之一，令本头以「目标平台」为准；裸机/无 target
+ * 选项的单一 clang 等场景也借此显式定向，不再回退宿主。
+ *   未注入（本机构建/未知目标）→ 保持自动判定，行为完全不变。 */
+#if defined(SC_TARGET_WIN) || defined(SC_TARGET_DARWIN) || defined(SC_TARGET_LINUX)
+#define P_TARGET_EXPLICIT 1
+#else
+#define P_TARGET_EXPLICIT 0
+#endif
+
 /* defined(_WIN32) 也包含 defined(_WIN64) */
-#if defined(_WIN32)
+#if P_TARGET_EXPLICIT
+#   if defined(SC_TARGET_WIN)
+#   define P_WIN 1
+#   else
+#   define P_WIN 0
+#   endif
+#elif defined(_WIN32)
 #define P_WIN 1
 #else
 #define P_WIN 0
 #endif
 
 /* __APPLE__ 说明是 Apple 平台; __MACH__ 说明内核是 Darwin */
-#if defined(__APPLE__) && defined(__MACH__)
+#if P_TARGET_EXPLICIT
+#   if defined(SC_TARGET_DARWIN)
+#   define P_DARWIN 1
+#   else
+#   define P_DARWIN 0
+#   endif
+#elif defined(__APPLE__) && defined(__MACH__)
 #define P_DARWIN 1
 #else
 #define P_DARWIN 0
 #endif
 
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+/* 显式目标只在 WIN/DARWIN/LINUX 三族注入；BSD 仍走自动判定（显式时非 BSD） */
+#if P_TARGET_EXPLICIT
+#define P_BSD 0
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
 #define P_BSD 1
 #else
 #define P_BSD 0
 #endif
 
 /* Unix-like（macOS, BSD 等），__unix 是旧 gcc 兼容 */
-#if defined(__unix__) || defined(__unix)
+#if P_TARGET_EXPLICIT
+#   if defined(SC_TARGET_DARWIN) || defined(SC_TARGET_LINUX)
+#   define P_UNIX 1
+#   else
+#   define P_UNIX 0
+#   endif
+#elif defined(__unix__) || defined(__unix)
 #define P_UNIX 1
 #else
 #define P_UNIX 0
 #endif
 
-#if defined(__linux__) || defined(__linux)
+#if P_TARGET_EXPLICIT
+#   if defined(SC_TARGET_LINUX)
+#   define P_LINUX 1
+#   else
+#   define P_LINUX 0
+#   endif
+#elif defined(__linux__) || defined(__linux)
 #define P_LINUX 1
 #else
 #define P_LINUX 0

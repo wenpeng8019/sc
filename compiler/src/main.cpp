@@ -345,6 +345,18 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     const std::string effective = tc.triple.empty() ? host : tc.triple;
     if (platformFamily(effective) == "bare") tc.freestanding = true;
 
+    // platform.h 目标定向：交叉目标（显式 triple）下按目标族注入 SC_TARGET_<族>，
+    // 令 builtins/platform.h 的平台分支以「目标平台」为准，而非回退到 C 编译器
+    // 默认目标（常为宿主）。本机构建（triple 空）不注入，保持自动判定。
+    // 仅 win/darwin/linux 三族注入（platform.h 仅识别这三者的显式覆盖）；
+    // bsd 归 unknown 不注入，仍由交叉工具链预定义宏自动判定。
+    if (!tc.triple.empty()) {
+        const std::string fam = platformFamily(tc.triple);
+        if      (fam == "windows") tc.machine += " -D SC_TARGET_WIN";
+        else if (fam == "darwin")  tc.machine += " -D SC_TARGET_DARWIN";
+        else if (fam == "linux")   tc.machine += " -D SC_TARGET_LINUX";
+    }
+
     PlatProps pp = externalPlatform(effective);          // 外置表优先
     if (!pp.known) pp = builtinPlatform(effective);      // 内置表兜底
     const std::string thOpt  = configValue("SCC_THREADS", "threads");  // 显式声明最高
