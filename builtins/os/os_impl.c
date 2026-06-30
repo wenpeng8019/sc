@@ -76,4 +76,58 @@ int32_t os_rand(void *buf, uint32_t n) {
     return 0;
 }
 
+/* ---------------- net_connect：对外建立 TCP 连接（阻塞） ----------------
+ * getaddrinfo 解析 host:port（IPv4/IPv6 通吃），逐候选 socket+connect，成功返回已连接
+ * 阻塞 fd（调用方 io.tcp(fd,false,1,1) 包同步 com，或叠 ssl_com 做 TLS 客户端）；全失败 -1。
+ */
+#include <stdio.h>
+#include <string.h>
+#if P_WIN
+int32_t net_connect(const char *host, int32_t port) {
+    WSADATA wsa;
+    static int wsa_inited = 0;
+    if (!wsa_inited) {
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+        wsa_inited = 1;
+    }
+    char portstr[16];
+    snprintf(portstr, sizeof portstr, "%d", (int)port);
+    struct addrinfo hints, *res = NULL, *rp;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, portstr, &hints, &res) != 0) return -1;
+    SOCKET fd = INVALID_SOCKET;
+    for (rp = res; rp; rp = rp->ai_next) {
+        fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (fd == INVALID_SOCKET) continue;
+        if (connect(fd, rp->ai_addr, (int)rp->ai_addrlen) == 0) break;
+        closesocket(fd); fd = INVALID_SOCKET;
+    }
+    freeaddrinfo(res);
+    return (fd == INVALID_SOCKET) ? -1 : (int32_t)fd;
+}
+#else
+#  include <netdb.h>
+#  include <unistd.h>
+int32_t net_connect(const char *host, int32_t port) {
+    char portstr[16];
+    snprintf(portstr, sizeof portstr, "%d", (int)port);
+    struct addrinfo hints, *res = NULL, *rp;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, portstr, &hints, &res) != 0) return -1;
+    int fd = -1;
+    for (rp = res; rp; rp = rp->ai_next) {
+        fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (fd < 0) continue;
+        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) break;
+        close(fd); fd = -1;
+    }
+    freeaddrinfo(res);
+    return fd;
+}
+#endif
+
 /* （待实现：fs_*（文件/目录/路径）/ env_*（环境变量）/ proc_*（进程）等基本操作） */

@@ -514,6 +514,63 @@ static std::string pickCC() {
     return "gcc";
 }
 
+// ---------------- mbedTLS 后端：按目标工具链现场编译 vendor 源码（跨平台正确） ----------------
+// 与 OpenSSL（链系统动态库）不同，mbedTLS 走 vendor 源码 + 静态烘进。为真正跨平台，
+// 不在 host 上预编一个固定 .a，而是用「当前目标」的工具链（pickCC + tc.machine + tc.ar）
+// 现场把 vendor/mbedtls/library/*.c 编成对应目标的静态库，按工具链指纹缓存到
+// ~/.cache/scc/mbedtls-<hash>/libmbedtls_all.a（命中即复用，首次较慢）。返回 .a 路径（失败为空）。
+static std::filesystem::path mbedtlsLibForTarget(const std::filesystem::path& repo,
+                                                 const ToolConfig& tc) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path src = repo / "vendor" / "mbedtls";
+    const fs::path inc = src / "include";
+    const fs::path lib = src / "library";
+    if (!fs::is_directory(lib, ec)) {
+        std::cerr << "错误: 缺少 vendor/mbedtls 源码（" << lib.string()
+                  << "）；mbedtls 后端需先 vendor 源码\n";
+        return {};
+    }
+    // 缓存键：工具链指纹（编译器 + 目标机器选项 + 归档器）→ 不同目标各自缓存，互不串味
+    const std::string fingerprint = pickCC() + "|" + tc.machine + "|" + tc.ar;
+    char hb[24];
+    std::snprintf(hb, sizeof hb, "%016zx", std::hash<std::string>{}(fingerprint));
+    fs::path base;
+    if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".cache" / "scc";
+    else base = fs::temp_directory_path(ec) / "scc-cache";
+    const fs::path cacheDir = base / ("mbedtls-" + std::string(hb));
+    const fs::path outA = cacheDir / "libmbedtls_all.a";
+    if (fs::is_regular_file(outA, ec)) return outA;          // 命中缓存
+
+    fs::create_directories(cacheDir, ec);
+    std::vector<fs::path> srcs;
+    for (auto& e : fs::directory_iterator(lib, ec))
+        if (e.path().extension() == ".c") srcs.push_back(e.path());
+    std::sort(srcs.begin(), srcs.end());
+    std::cerr << "提示: 首次为当前目标编译 vendor mbedTLS（" << srcs.size()
+              << " 个源文件 → " << cacheDir.string() << "），稍候…\n";
+    std::vector<fs::path> objs;
+    for (auto& c : srcs) {
+        const fs::path o = cacheDir / (c.stem().string() + ".o");
+        const std::string cmd = pickCC() + " -O2" + tc.machine
+            + " -I " + inc.string() + " -I " + lib.string()
+            + " -c " + c.string() + " -o " + o.string();
+        if (std::system(cmd.c_str()) != 0) {
+            std::cerr << "错误: 编译 mbedtls 源失败（" << c.filename().string() << "）\n";
+            return {};
+        }
+        objs.push_back(o);
+    }
+    std::string arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + outA.string();
+    for (auto& o : objs) arCmd += " " + o.string();
+    if (std::system(arCmd.c_str()) != 0) {
+        std::cerr << "错误: 归档 libmbedtls_all.a 失败\n";
+        fs::remove(outA, ec);
+        return {};
+    }
+    return outA;
+}
+
 // 把 .o 列表合成最终产物：可执行（链接）/ 静态库（ar rcs）/ 动态库（-shared）/ 裸机镜像（objcopy）
 static int linkOutput(OutKind kind,
                       const std::vector<std::filesystem::path>& objects,
@@ -1508,6 +1565,50 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             if (std::filesystem::exists(uvInc)) unitCFlags += " -I " + uvInc.string();
         }
 #endif
+        // ssl —— TLS 记录层（builtins/ssl）。编译器以 -DSCC_WITH_OPENSSL 构建时（CMake
+        //   SCC_SSL_BACKEND=openssl，find_package 定位系统 OpenSSL），编译 ssl_impl.c 需
+        //   -DSCC_WITH_OPENSSL + OpenSSL 头路径，并向用户程序链接 -lssl -lcrypto（系统库，
+        //   不 vendor）。ssl_impl.c 已经上方拼接逻辑并入 ssl 单元 .c（同 TU）。mbedTLS 后端
+        //   （-DSCC_WITH_MBEDTLS）走 vendor 源码，留待 roadmap step 3。
+        if (hasImpl && scStem == "ssl") {
+#ifdef SCC_WITH_OPENSSL
+            unitCFlags = " -DSCC_WITH_OPENSSL";
+#ifdef SCC_OPENSSL_INC
+            {
+                const std::string sslInc = SCC_OPENSSL_INC;
+                if (!sslInc.empty()) unitCFlags += " -I " + sslInc;
+            }
+#endif
+            if (extraLd) {
+#ifdef SCC_OPENSSL_LIBDIR
+                {
+                    const std::string sslLibDir = SCC_OPENSSL_LIBDIR;
+                    if (!sslLibDir.empty()
+                        && extraLd->find("-L" + sslLibDir) == std::string::npos)
+                        *extraLd += " -L" + sslLibDir;
+                }
+#endif
+                if (extraLd->find("-lssl") == std::string::npos)
+                    *extraLd += " -lssl -lcrypto";
+            }
+#elif defined(SCC_WITH_MBEDTLS)
+            // mbedTLS 后端：vendor 源码内置，用「当前目标」工具链现场编静态库（按 triple 缓存），
+            //   静态烘进用户二进制 —— 区别于 OpenSSL 链系统动态库。真正跨平台。
+            unitCFlags = " -DSCC_WITH_MBEDTLS";
+            {
+                const std::filesystem::path repo = scDir.parent_path().parent_path();
+                const std::filesystem::path mbedInc = repo / "vendor" / "mbedtls" / "include";
+                if (std::filesystem::exists(mbedInc))
+                    unitCFlags += " -I " + mbedInc.string();
+                if (extraLd) {
+                    const std::filesystem::path mbedA = mbedtlsLibForTarget(repo, tc);
+                    if (!mbedA.empty()
+                        && extraLd->find(mbedA.string()) == std::string::npos)
+                        *extraLd += " " + mbedA.string();   // 静态库在用户 .o 之后参与链接
+                }
+            }
+#endif
+        }
         // op —— 默认导入的语言运行时（chain/异步内核）。异步内核基于 pthread，故需链接
         //   线程库（Linux=-lpthread；macOS/Windows/裸机=空）。编译器以 -DSCC_WITH_UV
         //   构建时改用 libuv 后端：op_impl.c 需 -DSCC_WITH_UV + libuv 头，链接 libuv.a
