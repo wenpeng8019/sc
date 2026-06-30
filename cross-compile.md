@@ -40,6 +40,7 @@ scc fw.sc --build -o fw.bin --target examples/targets/cortex-m4.target \
 | `cflags` | `SCC_CFLAGS` | 编译附加选项（如 `-ffreestanding -Os`） |
 | `ldflags` | `SCC_LDFLAGS` | 链接附加选项（如 `-nostartfiles -T linker.ld`） |
 | `triple` | `SCC_TARGET_TRIPLE` | 目标三元组，驱动**平台表**自动推导线程库/调试打包 |
+| `target_suffix` | `SCC_TARGET_SUFFIX` | `add` 预编译库优先匹配 `<名>.<suffix>.<ext>` 变体（空=回退 `triple`） |
 | `threads` | `SCC_THREADS` | 线程库链接选项（`-lpthread` / `none`），显式覆盖平台表 |
 | `debug` | `SCC_DEBUG` | 链接后调试打包（`dsymutil` / `none`），显式覆盖平台表 |
 | `freestanding` | `SCC_FREESTANDING` | `1` 表示裸机目标（无托管运行时） |
@@ -143,4 +144,31 @@ SCC_TARGET_TRIPLE=aarch64-linux-gnu \
 
 # 目标档 + 环境变量临时覆盖某项（环境变量优先）
 SCC_SYSROOT=/other/sysroot scc app.sc --build -o app --target my.target
+```
+
+---
+
+## 9. 另一条路：远程工具链构建
+
+交叉编译要在本机备齐目标平台的 `cc`/sysroot/`ar`/`objcopy`。若手头**正好有一台目标
+平台的主机**（比如要 Linux 产物且有 Linux 机器），可以不装交叉工具链，直接把编译/链接
+放到那台主机上做——见 [compiler.md](compiler.md) §4.4「远程工具链构建」。
+
+要点对比：
+
+| | 交叉编译 | 远程构建 |
+| --- | --- | --- |
+| 本机需求 | 目标 `cc` + sysroot | 仅 sc→C 代码生成 |
+| 适用 | 任意目标（含裸机） | 有可 SSH 登录的目标平台主机 |
+| `add` 原生源码 | 本机交叉编译 | 远端现场重编（跨架构也对） |
+| `add` 预编译库 | 需目标架构版本 | 同架构可用，跨架构需远端自备 |
+| 产物 | 全部类型 | 目前仅可执行 |
+
+> `add` 预编译库的多平台：源码里只写 `add libfoo.a`，再配 `target_suffix`（或留空用 `triple`），
+> scc 会优先链接同目录的 `libfoo.<suffix>.a` 目标变体，找不到才回退 `libfoo.a` —— 本机原生、
+> 交叉编译、远程构建共用同一份 `add` 行。详见 [compiler.md](compiler.md) §4.4。
+
+```sh
+# 不装 Linux 交叉工具链，借一台 Linux 主机产出 Linux 可执行文件
+scc --build -o app-linux --target examples/targets/remote-linux.target app.sc
 ```

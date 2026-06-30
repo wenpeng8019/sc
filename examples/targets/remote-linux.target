@@ -1,0 +1,41 @@
+# 目标档示例：远程工具链构建（remote toolchain build）
+# 在没有本地交叉工具链时，把本机生成的 C 推到一台「目标架构的真实远程主机」，
+# 用其原生 cc 编译，再取回产物（--build）或在远端直接运行（run 模式）。
+#
+# 用法：
+#   scc app.sc        --target examples/targets/remote-linux.target   # 远端编译并运行，输出回传
+#   scc app.sc --build -o app --target examples/targets/remote-linux.target  # 远端编译，产物取回 ./app
+#
+# 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
+# 认证沿用 SSH：build_key 指定私钥，或留空走 ssh-agent / ~/.ssh/id_rsa(.pub)。
+
+# ---- 远程构建主机 ----
+build_host = 192.168.1.20          # 远程主机名/IP（设了即启用远程构建；SCC_BUILD_HOST 覆盖）
+build_user = ci                    # 登录用户（空=当前用户；SCC_BUILD_USER 覆盖）
+build_port = 22                    # SSH 端口（空=22；SCC_BUILD_PORT 覆盖）
+build_dir  = /tmp/scc-remote       # 远端构建根目录（空=/tmp/scc-remote；SCC_BUILD_DIR 覆盖）
+build_key  = ~/.ssh/id_rsa         # 私钥文件（空=agent/默认私钥；SCC_BUILD_KEY 覆盖）
+
+# ---- 远端编译器 ----
+remote_cc  = cc                    # 远端原生 C 编译器名（空=cc；SCC_REMOTE_CC 覆盖）
+
+# ---- add 预编译库的目标变体 ----
+# 设了后，add libfoo.a 会优先找同目录的 libfoo.<suffix>.a（目标架构版），找不到再回退
+# libfoo.a。便于同一份源码在「本机原生」与「远端/交叉目标」间切换而不改 add 行。
+# 取值=任意文本，但须与变体库文件名中间那段逐字符一致；推荐用目标三元组（与 triple 同）。
+# 空=回退 triple（若设了 triple）。SCC_TARGET_SUFFIX 覆盖。
+# target_suffix = aarch64-linux-gnu
+
+# ---- SSH 传输后端 ----
+# libssh2：scc 内置（默认，自带不依赖系统 ssh）；system：调系统 ssh/scp（需 OpenSSH）。
+ssh_backend = libssh2              # libssh2 | system（SCC_SSH_BACKEND 覆盖）
+
+# 说明：
+#  - 远程构建用的是「远端主机自身平台」的原生工具链，本机的 cc/target_flags/sysroot/
+#    triple 等交叉选项不会发往远端（远端原生编译，平台由其预定义宏决定）。
+#  - 链接库仅 -l*（如经 libs 配置）随发到远端按其原生库解析；本机 -L/绝对 .a/.o 路径忽略。
+#  - add 原生依赖已支持：add 的 .c/.cpp 源连同同目录头一并上传、在远端重新编译（跨架构也对）；
+#    add 的预编译 .a/.so/.o 按原样上传链接——仅当远端与本机架构一致时可用，跨架构请改源码 add，
+#    或用 target_suffix 提供目标变体库（add libfoo.a 优先匹配 libfoo.<suffix>.a）。
+#  - 暂仅支持可执行产物（不支持 --build 出 .a/.so/.bin/.hex）。
+#  - 首次连接未知主机走 TOFU：libssh2 后端记入 ~/.ssh/known_hosts；不匹配则报错中止。

@@ -204,6 +204,110 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib SCC_LIBS="mylib m" scc t.sc
 SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 ```
 
+### 4.4 远程工具链构建（remote build）
+
+把"生成 C → 编译 → 链接 → 运行/取回产物"整体放到一台远端主机上完成：本机
+只做 sc → C 代码生成，**不需要本地装目标平台的工具链**。典型用途——在 macOS
+上写代码，直接用一台 Linux 主机编译并运行/产出 Linux 可执行文件。
+
+只要配置了 `build_host`（或环境变量 `SCC_BUILD_HOST`），run 模式与 `--build`
+模式即自动改走远端；其余命令行用法不变。
+
+| 环境变量 | `.sc` 键 | 含义 | 缺省 |
+|---|---|---|---|
+| `SCC_BUILD_HOST` | `build_host` | 远端主机名/IP（**设置即启用远程构建**） | 空（关闭） |
+| `SCC_BUILD_USER` | `build_user` | 登录用户名 | 当前用户 |
+| `SCC_BUILD_PORT` | `build_port` | SSH 端口 | 22 |
+| `SCC_BUILD_DIR`  | `build_dir`  | 远端工作根目录 | `/tmp/scc-remote` |
+| `SCC_BUILD_KEY`  | `build_key`  | 私钥路径（公钥认证） | ssh-agent / `~/.ssh/id_rsa` 等默认密钥 |
+| `SCC_REMOTE_CC`  | `remote_cc`  | 远端编译器名 | `cc` |
+| `SCC_SSH_BACKEND`| `ssh_backend`| SSH 实现：`libssh2` 或 `system` | 编译进 libssh2 时为 `libssh2`，否则 `system` |
+| `SCC_TARGET_SUFFIX` | `target_suffix` | `add` 预编译库的目标变体后缀 | 空时回退 `triple` |
+
+**两种 SSH 后端**
+
+- `libssh2`：内置实现（vendored libssh2 + mbedTLS），**无需系统装 ssh/scp**，
+  自带 known_hosts TOFU 与公钥/ssh-agent 认证。默认后端。
+- `system`：直接调用系统 `ssh`/`scp`。沿用本机 `~/.ssh/config`、known_hosts、
+  ssh-agent；要求该主机已在 known_hosts 中（用了 `BatchMode`，不会交互式询问）。
+
+**工作流程与上传位置**
+
+1. 本机把内联自包含的 `main.c`、`builtins/` 目录、以及 `add` 引入的原生依赖
+   打成 `bundle.tgz`；
+2. 推到远端 `<build_dir>/scc-build-<pid>-<随机>/`（每次构建独立会话目录）；
+3. 远端解包，用 `remote_cc` 重新编译链接为 `main.out`；
+4. run 模式：远端运行并回传标准输出/退出码；`--build`：取回 `main.out` 到 `-o`
+   指定路径并加可执行位；
+5. 构建结束自动 `rm -rf` 该会话目录。
+
+**依赖处理（已支持 `add`）**
+
+- 多模块 `inc`：代码生成阶段已全部内联进单个 `main.c`，天然支持。
+- `add foo.c`（原生源码）：连同其**同目录头文件**一起上传，**在远端重新编译**
+  ——跨架构也正确（源码现场编译）。
+- `add lib.a` / `.so` / `.o`（预编译产物）：按原样上传并参与链接。**仅当远端与
+  本机架构一致时可用**；跨架构会由远端链接器报错（二进制是特定架构的物理限制，
+  此时请改用源码形式的 `add`，或配 `target_suffix` 提供目标变体、或在远端自备同名库）。
+- `libs`/`-l*`：远端用其原生库解析；配置里写的本机 `-L`/绝对 `.a` 路径会被忽略
+  （远端无意义，会有提示）。
+
+**`add` 预编译库的目标变体（`target_suffix`）**
+
+预编译库是特定架构的二进制。为同一 `add lib.a` 同时备多个平台的产物时，可用
+`target_suffix` 让 scc **优先匹配 `<名>.<suffix>.<ext>` 变体，找不到再回退同名文件**：
+
+```sh
+# 目录下同时备： libssh2.a（本机） 与 libssh2.aarch64-linux.a（目标）
+# 源码里只写 `add libssh2.a`；设了 suffix 后远端/交叉构建自动选变体
+SCC_TARGET_SUFFIX=aarch64-linux \
+  scc --build -o app --target examples/targets/remote-linux.target app.sc
+```
+
+*取值约定（标准）*
+
+`target_suffix` 是一段**自由文本**，scc 不解释其语义，只做**逐字符**的文件名匹配：把它原样
+插在库文件最后一个扩展名之前，去找 `<名>.<suffix>.<ext>`。因此唯一硬性要求是——**它必须与
+你给变体库起名时中间那段完全一致（区分大小写，变体须与原库同目录）**。
+
+推荐遵循**目标三元组**约定（也是 `target_suffix` 留空时的默认回退值，与 `triple` 一致），
+即 `<arch>-<os>[-<abi/libc>]`，常见取值：
+
+| 目标平台 | 建议 `target_suffix` | 变体文件名示例 |
+|---|---|---|
+| ARM64 Linux（glibc） | `aarch64-linux-gnu` | `libfoo.aarch64-linux-gnu.a` |
+| ARM64 Linux（musl） | `aarch64-linux-musl` | `libfoo.aarch64-linux-musl.a` |
+| x86-64 Linux | `x86_64-linux-gnu` | `libfoo.x86_64-linux-gnu.a` |
+| ARM64 macOS | `arm64-apple-darwin` | `libfoo.arm64-apple-darwin.a` |
+| 32 位 ARM 裸机 | `arm-none-eabi` | `libfoo.arm-none-eabi.a` |
+
+> 也可用更短的自定标签（如 `linux-arm64`、`m4`），只要**库文件名与 `target_suffix` 一致**即可；
+> 但优先用三元组——这样设了 `triple` 而未设 `target_suffix` 时即自动命中，无需重复配置。
+
+*匹配规则细节*
+
+- 仅作用于预编译 `.a`/`.so`/`.dylib`/`.o`（源码 `add foo.c` 由现场/远端重编，无需变体，后缀对其无效）。
+- 只插一层、只看最后一个扩展名：`libfoo.a` → `libfoo.<suffix>.a`（不处理 `libfoo.so.1` 这类多段后缀）。
+- 不模糊匹配、不向上目录查找：变体必须与原库**同目录**且文件名严格相等。
+- `target_suffix` 留空时回退为 `triple`；二者都空则纯按同名链接（即本机原生行为，不受影响）。
+- 本机交叉编译与远端构建同享此机制。
+
+**限制**
+
+- `--build` 远程模式目前**仅支持可执行产物**（不支持 `.a`/`.so`/`.bin`/`.hex`）。
+- 依赖远端已装好 `tar` 与 `remote_cc` 指定的编译器。
+
+**示例**
+
+```sh
+# 目标档 examples/targets/remote-linux.target 写好 build_host/user/port/key
+scc --target examples/targets/remote-linux.target app.sc            # 远端编译并运行
+scc --build -o app-linux --target examples/targets/remote-linux.target app.sc  # 取回 Linux 产物
+
+# 纯环境变量一次性远程构建
+SCC_BUILD_HOST=build.lan SCC_BUILD_USER=ci SCC_REMOTE_CC=gcc scc app.sc
+```
+
 ## 5. C 代码生成（codegen_c）
 
 ### 5.1 类型映射

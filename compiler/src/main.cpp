@@ -27,6 +27,7 @@
 #include "parser.h"
 #include "semantic.h"
 #include "cheaders.h"
+#include "remote.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -147,10 +148,24 @@ struct ToolConfig {
     std::string objcopy;     // 目标文件转换器（SCC_OBJCOPY/objcopy；产 .bin/.hex）
     std::string runner;      // 运行包装器（SCC_RUN/run；如 "qemu-arm -L <sysroot>"，空=直接执行）
     std::string triple;      // 目标三元组（SCC_TARGET_TRIPLE/triple；空=本机）
+    std::string targetSuffix;// target_suffix：add 预编译库优先匹配 <名>.<suffix>.<ext>（空=回退三元组）
     std::string threadsLib;  // 线程库链接选项（平台表/显式 threads 解析，如 "-lpthread"）
     std::string debugTool;   // 链接后调试打包步骤（"dsymutil" / "none"）
     bool freestanding = false; // 裸机档：目标无托管运行时（SCC_FREESTANDING/freestanding=1）
     bool crossRun = false;   // 目标平台与本机不同族 → 不能直接 exec（须 runner 或 --build）
+
+    // ---- 远程工具链构建（remote toolchain build）----
+    // 设了 buildHost 即启用：本机生成 C，推到远端用其「原生」工具链编译，
+    // 取回产物（--build）或在远端运行并回传输出（run）。详见 remote.h。
+    std::string buildHost;   // build_host：远程构建主机（空=禁用远程构建）
+    std::string buildUser;   // build_user：远程登录用户（空=当前用户/ssh 配置默认）
+    std::string buildDir;    // build_dir：远程构建根目录（空=默认 ~/.cache/scc-remote）
+    std::string buildPort;   // build_port：SSH 端口（空=22）
+    std::string buildKey;    // build_key：私钥文件路径（空=ssh 默认/agent）
+    std::string remoteCC;    // remote_cc：远端编译器名（空=cc；远端原生，不带本机 machine）
+    std::string sshBackend;  // ssh_backend：system（调系统 ssh/scp）| libssh2（内置，默认）
+    std::string builtinsDir; // 本机 builtins 目录（远程构建时整目录推送，重写 -I）
+    bool remoteBuild() const { return !buildHost.empty(); }
 };
 
 // 目标档（--target 文件）键值表：configValue 在环境变量之后、./.sc 配置之前回退到此。
@@ -341,6 +356,9 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
 
     // 平台行为：显式声明 > 外置表 > 内置表
     tc.triple = configValue("SCC_TARGET_TRIPLE", "triple");
+    // add 预编译库的目标变体后缀：显式 target_suffix 优先，否则回退三元组
+    tc.targetSuffix = configValue("SCC_TARGET_SUFFIX", "target_suffix");
+    if (tc.targetSuffix.empty()) tc.targetSuffix = tc.triple;
     const std::string host = hostTriple();
     const std::string effective = tc.triple.empty() ? host : tc.triple;
     if (platformFamily(effective) == "bare") tc.freestanding = true;
@@ -383,8 +401,79 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     // host≠target（平台族不同）：不能在本机直接运行
     tc.crossRun = !tc.triple.empty() &&
                   platformFamily(tc.triple) != platformFamily(host);
+
+    // ---- 远程工具链构建配置 ----
+    tc.buildHost  = configValue("SCC_BUILD_HOST", "build_host");
+    tc.buildUser  = configValue("SCC_BUILD_USER", "build_user");
+    tc.buildDir   = configValue("SCC_BUILD_DIR",  "build_dir");
+    tc.buildPort  = configValue("SCC_BUILD_PORT", "build_port");
+    tc.buildKey   = configValue("SCC_BUILD_KEY",  "build_key");
+    tc.remoteCC   = configValue("SCC_REMOTE_CC",  "remote_cc");
+    tc.sshBackend = configValue("SCC_SSH_BACKEND","ssh_backend");
     return tc;
 }
+
+// add 预编译库/对象的目标匹配：优先 <名>.<suffix>.<ext>（如 libssh2.aarch64-linux.a），
+// 该变体不存在则回退原名。仅作用于 .a/.so/.dylib/.o（源码由现场/远端重编，无需变体）。
+static std::filesystem::path resolveAddArtifact(const std::filesystem::path& p,
+                                                const std::string& suffix) {
+    if (suffix.empty()) return p;
+    const std::string ext = p.extension().string();
+    if (ext != ".a" && ext != ".so" && ext != ".dylib" && ext != ".o") return p;
+    const std::filesystem::path cand =
+        p.parent_path() / (p.stem().string() + "." + suffix + ext);
+    std::error_code ec;
+    if (std::filesystem::exists(cand, ec)) return cand;
+    return p;
+}
+
+// 远程工具链构建分发：把本机生成的 C 推到远端编译。
+//   output 非空 → --build（取回产物到 output）；output 空 → 远端运行（progArgs 透传）。
+//   deps：add 指令引入的原生依赖（源码远端重编 / 预编译产物链接）。
+// 返回进程退出码（run 模式即远端程序退出码）。
+static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
+                          const std::string& output,
+                          const std::vector<std::string>& progArgs,
+                          const std::vector<RemoteDep>& deps = {}) {
+    RemoteJob job;
+    job.target.host    = tc.buildHost;
+    job.target.user    = tc.buildUser;
+    job.target.dir     = tc.buildDir;
+    job.target.port    = tc.buildPort;
+    job.target.key     = tc.buildKey;
+    job.target.backend = tc.sshBackend;
+    job.csrc        = csrc;
+    job.builtinsDir = tc.builtinsDir;
+    job.remoteCC    = tc.remoteCC;
+    job.output      = output;
+    job.progArgs    = progArgs;
+    job.deps        = deps;
+    // 链接库：远端原生解析，仅取 -l* 词元（本机 -L/绝对 .a 路径远端无意义，丢弃）
+    bool droppedLocal = false;
+    for (auto& t : splitBy(tc.ldflags, " ")) {
+        if (t.rfind("-l", 0) == 0) job.ldLibs.push_back(t);
+        else if (t.rfind("-L", 0) == 0 || endsWith(t, ".a") || endsWith(t, ".o"))
+            droppedLocal = true;
+    }
+    if (!tc.threadsLib.empty()) job.ldLibs.push_back(tc.threadsLib);
+    if (droppedLocal)
+        std::cerr << "提示: 远程构建忽略了配置 ldflags 的本机 -L/.a/.o 项"
+                     "（远端用其原生库解析 -l*；add 引入的依赖仍会上传）\n";
+    bool anyLib = false;
+    for (auto& d : deps) if (!d.isSource) anyLib = true;
+    if (anyLib && tc.targetSuffix.empty())
+        std::cerr << "提示: add 的预编译库(.a/.so/.o)按原样上传链接——若远端架构与本机不同将链接失败；"
+                     "可配 target_suffix 提供目标变体 <名>.<suffix>.<ext>，或改用源码 add\n";
+    return runRemoteJob(job);
+}
+
+// 收集模块图中所有 add 指令引入的原生依赖（供远程构建上传）。
+// 失败（图加载错误）返回 false——远程仍可用内联 C 构建，仅缺 add 依赖。
+// 定义见文件后段 loadUnitGraph 之后（此处仅前置声明，供 main() 调用）。
+// targetSuffix：预编译库优先匹配 <名>.<suffix>.<ext> 变体（见 resolveAddArtifact）。
+static bool gatherAddDeps(const std::filesystem::path& rootPath,
+                          const std::string& targetSuffix,
+                          std::vector<RemoteDep>& out);
 
 #ifdef SCC_EMBED_BUILTINS
 // ---------------- 内嵌 builtins（发行版变体）----------------
@@ -467,6 +556,7 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
 
     if (!b.empty()) {
         tc.cflags += " -I " + b.string();
+        tc.builtinsDir = b.string();   // 记录供远程构建整目录推送
         // builtins 根的上级目录：使生成代码中带根名的引用（如
         // #include "builtins/adt/adt.h"）可解析
         const fs::path parent = b.parent_path();
@@ -1739,7 +1829,9 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                 std::error_code ec;
                 const std::filesystem::path canonT =
                     std::filesystem::weakly_canonical(target, ec);
-                const std::filesystem::path resolved = ec ? target : canonT;
+                // 预编译库优先取目标变体 <名>.<suffix>.<ext>，不存在回退原名
+                const std::filesystem::path resolved =
+                    resolveAddArtifact(ec ? target : canonT, tc.targetSuffix);
 
                 if (!std::filesystem::exists(resolved)) {
                     std::cerr << "错误: add 文件不存在: " << d->name
@@ -1776,6 +1868,41 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         }
     }
     return 0;
+}
+
+// 收集模块图中所有 add 指令引入的原生依赖（供远程构建上传）。
+// 失败（图加载错误）返回 false——远程仍可用内联 C 构建，仅缺 add 依赖。
+static bool gatherAddDeps(const std::filesystem::path& rootPath,
+                          const std::string& targetSuffix,
+                          std::vector<RemoteDep>& out) {
+    std::unordered_map<std::string, UnitInfo> units;
+    std::unordered_set<std::string> visiting;
+    std::string err;
+    if (!loadUnitGraph(rootPath, units, visiting, err)) return false;
+    std::unordered_set<std::string> seen;
+    for (auto& kv : units) {
+        const std::filesystem::path srcDir =
+            std::filesystem::path(kv.first).parent_path();
+        for (auto& d : kv.second.prog.decls) {
+            if (d->kind != Decl::AddD) continue;
+            std::filesystem::path target(d->name);
+            if (!target.is_absolute()) target = srcDir / target;
+            std::error_code ec;
+            const std::filesystem::path canonT =
+                std::filesystem::weakly_canonical(target, ec);
+            // 预编译库优先取目标变体 <名>.<suffix>.<ext>，不存在回退原名
+            const std::filesystem::path resolved =
+                resolveAddArtifact(ec ? target : canonT, targetSuffix);
+            if (!std::filesystem::exists(resolved)) continue;
+            if (!seen.insert(resolved.string()).second) continue;
+            const std::string ext = resolved.extension().string();
+            const bool isSrc = (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx");
+            const bool isLib = (ext == ".o" || ext == ".a" || ext == ".so" || ext == ".dylib");
+            if (!isSrc && !isLib) continue;
+            out.push_back({resolved.string(), srcDir.string(), isSrc});
+        }
+    }
+    return true;
 }
 
 // 从项目入口文件加载，编译为目标产物（不执行、产物保留）
@@ -2159,7 +2286,14 @@ int main(int argc, char** argv) {
             
             ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
             addBuiltinsInclude(tc, input);                      // builtins 根级别（platform.h 等）头文件默认可见
-            
+
+            // 远程工具链构建：用已内联自包含的 C 推到远端原生编译并运行（回传输出/退出码）
+            if (tc.remoteBuild()) {
+                std::vector<RemoteDep> deps;          // add 原生依赖（源码重编/库链接）
+                if (input != "-") gatherAddDeps(std::filesystem::path(input), tc.targetSuffix, deps);
+                return remoteDispatch(c, tc, "", progArgs, deps);
+            }
+
             if (input == "-") return compileAndRunSource(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);
         }
@@ -2190,6 +2324,17 @@ int main(int argc, char** argv) {
                     return 1;
                 }
                 out = std::filesystem::path(input).stem().string();  // 默认使用（去除 .sc 后缀的）输入文件名
+            }
+            // 远程工具链构建：内联自包含 C 推到远端原生编译并取回产物（暂仅可执行）
+            if (tc.remoteBuild()) {
+                if (outputKind(out) != OutKind::Exe) {
+                    std::cerr << "错误: 远程工具链构建暂仅支持可执行产物"
+                                 "（不支持 .a/.so/.bin/.hex）\n";
+                    return 1;
+                }
+                std::vector<RemoteDep> deps;          // add 原生依赖（源码重编/库链接）
+                if (input != "-") gatherAddDeps(std::filesystem::path(input), tc.targetSuffix, deps);
+                return remoteDispatch(c, tc, out, {}, deps);
             }
             int rc = input == "-" ? buildSource(c, out, tc)
                                   : buildProject(std::filesystem::path(input), out, tc);

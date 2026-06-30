@@ -14,6 +14,7 @@ add_executable(scc
     src/codegen_sc.cpp
     src/semantic.cpp
     src/cheaders.cpp
+    src/remote.cpp
     # 图算法（builtins/tok/graph）：编译期被 scc 引入，对 tok 依赖图（dep…map）做
     # 环检测/拓扑/深度/逆拓扑预计算，结果烘焙为生成代码常量。graph.h 为编译期生产者
     # 与运行时消费者共享的规范接口（spec interface）。图是 tok 的一部分，故同居 tok 目录。
@@ -65,6 +66,39 @@ elseif(SCC_SSL_BACKEND STREQUAL "mbedtls")
     message(STATUS "ssl 后端=mbedtls（vendor 源码内置，按目标工具链现场编静态库 + 缓存）")
 else()
     message(STATUS "ssl 后端=none（TLS 调用安全失败）")
+endif()
+
+# ------------------------------------------------------------
+# 远程工具链构建的内置 SSH 后端：-DSCC_WITH_LIBSSH2=ON（默认 ON）
+#   ON ：把 vendor/libssh2(+mbedTLS) 源码编进 scc，远程构建无需系统 ssh/scp —— 自带、
+#        跨平台。运行期仍可经 ssh_backend=system 改用系统 ssh/scp。
+#   OFF：scc 不含 libssh2，远程构建仅支持 ssh_backend=system（依赖系统 OpenSSH）。
+# ------------------------------------------------------------
+option(SCC_WITH_LIBSSH2 "远程构建内置 libssh2 后端（默认 ON；OFF 仅留 system ssh/scp）" ON)
+if(SCC_WITH_LIBSSH2)
+    get_filename_component(VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vendor ABSOLUTE)
+    if(EXISTS ${VENDOR_DIR}/libssh2/src AND EXISTS ${VENDOR_DIR}/mbedtls/library)
+        file(GLOB SCC_MBEDTLS_SRC ${VENDOR_DIR}/mbedtls/library/*.c)
+        file(GLOB SCC_LIBSSH2_SRC ${VENDOR_DIR}/libssh2/src/*.c)
+        add_library(scc_mbedtls STATIC ${SCC_MBEDTLS_SRC})
+        target_include_directories(scc_mbedtls PRIVATE
+            ${VENDOR_DIR}/mbedtls/include ${VENDOR_DIR}/mbedtls/library)
+        add_library(scc_libssh2 STATIC ${SCC_LIBSSH2_SRC})
+        target_compile_definitions(scc_libssh2 PRIVATE LIBSSH2_MBEDTLS HAVE_CONFIG_H)
+        target_include_directories(scc_libssh2 PRIVATE
+            ${VENDOR_DIR}/libssh2/src ${VENDOR_DIR}/libssh2/include ${VENDOR_DIR}/mbedtls/include)
+        target_link_libraries(scc PRIVATE scc_libssh2 scc_mbedtls)
+        target_compile_definitions(scc PRIVATE SCC_WITH_LIBSSH2)
+        if(WIN32)
+            target_link_libraries(scc PRIVATE ws2_32 bcrypt advapi32)
+        endif()
+        message(STATUS "远程构建 SSH 后端=libssh2（vendor 源码内置，自带不依赖系统 ssh）")
+    else()
+        message(WARNING "SCC_WITH_LIBSSH2=ON 但缺 vendor/libssh2 或 vendor/mbedtls；"
+                        "回退为仅 system ssh/scp 后端")
+    endif()
+else()
+    message(STATUS "远程构建 SSH 后端=system（仅系统 ssh/scp；未内置 libssh2）")
 endif()
 
 # ------------------------------------------------------------
