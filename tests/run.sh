@@ -185,7 +185,7 @@ RUNTIME_TRAP=(
 # 覆盖 通过 / 软失败（assert 值回显）/ tst.skip 三态与汇总行；退出码=失败用例数。
 TEST_RUN=(
     examples/test_demo.sc
-    tests/cases/codec_test.sc
+    tests/cases/crypto_test.sc
     tests/cases/ws_test.sc
 )
 

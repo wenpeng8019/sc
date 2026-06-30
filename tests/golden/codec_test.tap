@@ -1,5 +1,0 @@
-ok 1 - base64 RFC 4648 向量
-ok 2 - SHA1 FIPS 180-1 向量
-ok 3 - WebSocket accept key（RFC 6455 §1.3）
-1..3
-==> 测试通过 3，失败 0，跳过 0

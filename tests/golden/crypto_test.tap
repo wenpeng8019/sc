@@ -1,0 +1,7 @@
+ok 1 - SHA-256 FIPS 180-4 向量
+ok 2 - HMAC-SHA256 RFC 4231 向量
+ok 3 - HKDF-SHA256 RFC 5869 测试用例 1
+ok 4 - SHA-1 FIPS 180-1 向量（遗留协议互通）
+ok 5 - Base64 RFC 4648 向量
+1..5
+==> 测试通过 5，失败 0，跳过 0

@@ -5,6 +5,17 @@
 
 inc ../../templates/utils/ws.sc
 
+# C 风格 strcmp（相等返回 1）。
+fnc sceq: i4, a: char&, b: char&
+    var i: u4 = 0
+    while a[i] != 0 && b[i] != 0
+        if a[i] != b[i]
+            return 0
+        i = i + 1
+    if a[i] == b[i]
+        return 1
+    return 0
+
 tst "UTF-8 DFA 合法序列（§8.1）"
     # ASCII
     var a[2]: u1
@@ -99,3 +110,11 @@ tst "帧头构造长度与字段（§5.2）"
     assert (hdr[1] & 0x80) == 0x80, "mask bit set"
     assert hdr[2] == 0x11, "maskkey0"
     assert hdr[5] == 0x44, "maskkey3"
+
+tst "握手 accept key（RFC 6455 §1.3）"
+    # key = "dGhlIHNhbXBsZSBub25jZQ==" -> "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    var acc[64]: char
+    var alen: i4 = ws_accept_buf("dGhlIHNhbXBsZSBub25jZQ==", 24, (&acc[0]: char&))
+    acc[alen] = 0
+    assert sceq((&acc[0]: char&), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 1, "ws_accept"
+

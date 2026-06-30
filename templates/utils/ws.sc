@@ -1,10 +1,10 @@
 # ws —— WebSocket 帧/握手层组件（构建在 tcp com 设备 + 异步事件循环之上）
 #
-# 定位：templates 通用 utils 组件。利用 io.sc 的 tcp() com 设备做传输，codec.sc 算
-#   握手 accept key，把 RFC 6455 的握手 + 帧编解码封成可复用的 async rpc。
+# 定位：templates 通用 utils 组件。利用 io.sc 的 tcp() com 设备做传输，crypto.sc 的
+#   SHA-1 + Base64 算握手 accept key，把 RFC 6455 的握手 + 帧编解码封成可复用的 async rpc。
 #   协议完备性移植自 p2p_server/custom_ws.c（回调框架），适配为 sc 的 await/rpc 拉取模型。
 #
-# 依赖：inc io.sc（tcp 设备 + com）/ inc codec.sc（ws_accept_buf）/ inc async.sc（事件循环）
+# 依赖：inc io.sc（tcp 设备 + com）/ inc crypto.sc（crypto_sha1 + crypto_base64）/ inc async.sc（事件循环）
 #   / inc os.sc（os_rand：客户端随机掩码键）。
 #   帧/握手报文统一用定长 char&/u1& 缓冲（调用方提供容量）：帧编解码是字节级热路径，
 #   定长缓冲零堆分配、零 adt 依赖，比堆 string 更契合 codec 场景（非可见性所迫）。
@@ -25,7 +25,7 @@
 #   · 重逻辑（解析/codec/建头/UTF-8/close 码）放 sync fnc；async rpc 只做 io + 调 helper + 赋值。
 
 inc io.sc
-inc codec.sc
+inc crypto.sc
 inc async.sc
 inc os.sc
 
@@ -158,6 +158,24 @@ var g_ws_utf8d[364]: u1 = [
         dst[off + i] = src[i]
         i = i + 1
     return off + i
+
+# 由 key[0..keylen) 计算 Sec-WebSocket-Accept 写入 out（>=32 字节），返回长度。
+# accept = Base64( SHA1( key + WS_GUID ) )，WS_GUID 见 RFC 6455 §1.3。SHA1/Base64 由 crypto 内置提供。
+@fnc ws_accept_buf: i4, key: char&, keylen: u4, out: char&
+    var buf[256]: char
+    var n: u4 = 0
+    while n < keylen
+        buf[n] = key[n]
+        n = n + 1
+    var guid: char& = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+    var g: u4 = 0
+    while guid[g] != 0
+        buf[n] = guid[g]
+        n = n + 1
+        g = g + 1
+    var digest[20]: u1
+    crypto_sha1((&buf[0]: &), (n: u8), (&digest[0]: u1&))
+    return crypto_base64((&digest[0]: &), 20, out)
 
 # 从 HTTP 请求里解析 Sec-WebSocket-Key 的值，拷进 keyout（调用方提供 >=64 字节），返回长度 / -1。
 @fnc ws_parse_key: i4, req: char&, reqlen: u4, keyout: char&
