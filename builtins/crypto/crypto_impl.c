@@ -1958,3 +1958,579 @@ void crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t
     for (off = 0; off + 16 <= len; off += 16)
         aes_decrypt_block(rk, nr, in + off, out + off);
 }
+
+/* ================================================================
+ * 第二期 · 批5：算法簇补全
+ *   哈希(SHA-224/512-256/SHA3-224/384/SM3) / MAC(AES-CMAC) /
+ *   对称(AES-CFB/OFB、SM4) / AEAD(XChaCha20-Poly1305、AES-CCM) /
+ *   编码(Hex、Base64URL、Base64 解码) / 随机与工具 / RSA 代理弱桩。
+ * ================================================================ */
+
+/* ---------------- 哈希补全：复用既有 SHA-256/512/Keccak 核心 ---------------- */
+void crypto_sha224(void *data, uint64_t len, uint8_t *out) {
+    sha256_ctx c;
+    uint8_t full[32];
+    c.h[0] = 0xc1059ed8u; c.h[1] = 0x367cd507u; c.h[2] = 0x3070dd17u; c.h[3] = 0xf70e5939u;
+    c.h[4] = 0xffc00b31u; c.h[5] = 0x68581511u; c.h[6] = 0x64f98fa7u; c.h[7] = 0xbefa4fa4u;
+    c.total = 0; c.n = 0;
+    sha256_update(&c, (const uint8_t *)data, (size_t)len);
+    sha256_final(&c, full);
+    memcpy(out, full, 28);
+}
+void crypto_sha512_256(void *data, uint64_t len, uint8_t *out) {
+    sha512_ctx c;
+    sha512_init(&c, 0);
+    c.h[0] = 0x22312194FC2BF72CULL; c.h[1] = 0x9F555FA3C84C64C2ULL;
+    c.h[2] = 0x2393B86B6F53B151ULL; c.h[3] = 0x963877195940EABDULL;
+    c.h[4] = 0x96283EE2A88EFFE3ULL; c.h[5] = 0xBE5E1E2553863992ULL;
+    c.h[6] = 0x2B0199FC2C85B8AAULL; c.h[7] = 0x0EB72DDC81C52CA2ULL;
+    sha512_update(&c, (const uint8_t *)data, (size_t)len);
+    sha512_final(&c, out, 4);
+}
+void crypto_sha3_224(void *data, uint64_t len, uint8_t *out) {
+    keccak_sponge((const uint8_t *)data, (size_t)len, out, 28, 144, 0x06);
+}
+void crypto_sha3_384(void *data, uint64_t len, uint8_t *out) {
+    keccak_sponge((const uint8_t *)data, (size_t)len, out, 48, 104, 0x06);
+}
+
+/* ---------------- SM3（GM/T 0004-2012 国密哈希）---------------- */
+static uint32_t sm3_rotl(uint32_t x, int n) { n &= 31; return n ? ((x << n) | (x >> (32 - n))) : x; }
+static uint32_t sm3_p0(uint32_t x) { return x ^ SC_ROL32(x, 9) ^ SC_ROL32(x, 17); }
+static uint32_t sm3_p1(uint32_t x) { return x ^ SC_ROL32(x, 15) ^ SC_ROL32(x, 23); }
+
+static void sm3_block(uint32_t v[8], const uint8_t *p) {
+    uint32_t w[68], w1[64], a, b, c, d, e, f, g, h;
+    int j;
+    for (j = 0; j < 16; j++)
+        w[j] = ((uint32_t)p[4*j] << 24) | ((uint32_t)p[4*j+1] << 16)
+             | ((uint32_t)p[4*j+2] << 8) | p[4*j+3];
+    for (j = 16; j < 68; j++)
+        w[j] = sm3_p1(w[j-16] ^ w[j-9] ^ SC_ROL32(w[j-3], 15)) ^ SC_ROL32(w[j-13], 7) ^ w[j-6];
+    for (j = 0; j < 64; j++) w1[j] = w[j] ^ w[j+4];
+    a = v[0]; b = v[1]; c = v[2]; d = v[3]; e = v[4]; f = v[5]; g = v[6]; h = v[7];
+    for (j = 0; j < 64; j++) {
+        uint32_t tj = (j < 16) ? 0x79cc4519u : 0x7a879d8au;
+        uint32_t a12 = SC_ROL32(a, 12);
+        uint32_t ss1 = SC_ROL32(a12 + e + sm3_rotl(tj, j), 7);
+        uint32_t ss2 = ss1 ^ a12;
+        uint32_t tt1, tt2;
+        if (j < 16) {
+            tt1 = (a ^ b ^ c) + d + ss2 + w1[j];
+            tt2 = (e ^ f ^ g) + h + ss1 + w[j];
+        } else {
+            tt1 = ((a & b) | (a & c) | (b & c)) + d + ss2 + w1[j];
+            tt2 = ((e & f) | ((~e) & g)) + h + ss1 + w[j];
+        }
+        d = c; c = SC_ROL32(b, 9); b = a; a = tt1;
+        h = g; g = SC_ROL32(f, 19); f = e; e = sm3_p0(tt2);
+    }
+    v[0] ^= a; v[1] ^= b; v[2] ^= c; v[3] ^= d;
+    v[4] ^= e; v[5] ^= f; v[6] ^= g; v[7] ^= h;
+}
+
+void crypto_sm3(void *data, uint64_t len, uint8_t *out) {
+    uint32_t v[8] = {0x7380166fu, 0x4914b2b9u, 0x172442d7u, 0xda8a0600u,
+                     0xa96f30bcu, 0x163138aau, 0xe38dee4du, 0xb0fb0e4eu};
+    const uint8_t *p = (const uint8_t *)data;
+    uint64_t rem = len, total = len;
+    uint8_t blk[64];
+    int i;
+    while (rem >= 64) { sm3_block(v, p); p += 64; rem -= 64; }
+    memset(blk, 0, 64);
+    memcpy(blk, p, (size_t)rem);
+    blk[rem] = 0x80;
+    if (rem >= 56) { sm3_block(v, blk); memset(blk, 0, 64); }
+    {
+        uint64_t bits = total * 8;
+        for (i = 0; i < 8; i++) blk[56 + i] = (uint8_t)(bits >> (56 - 8*i));
+    }
+    sm3_block(v, blk);
+    for (i = 0; i < 8; i++) {
+        out[4*i]   = (uint8_t)(v[i] >> 24); out[4*i+1] = (uint8_t)(v[i] >> 16);
+        out[4*i+2] = (uint8_t)(v[i] >> 8);  out[4*i+3] = (uint8_t)v[i];
+    }
+}
+
+/* ---------------- AES-CMAC（SP 800-38B / RFC 4493）---------------- */
+static void cmac_dbl(uint8_t b[16]) {
+    int i;
+    uint8_t carry = (uint8_t)(b[0] >> 7);
+    for (i = 0; i < 15; i++) b[i] = (uint8_t)((b[i] << 1) | (b[i+1] >> 7));
+    b[15] = (uint8_t)(b[15] << 1);
+    if (carry) b[15] ^= 0x87;
+}
+void crypto_aes_cmac(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr, j;
+    uint8_t L[16], K1[16], K2[16], X[16], blk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t nblocks, i;
+    aes_expand(key, (int)keybits, rk, &nr);
+    memset(L, 0, 16);
+    aes_encrypt_block(rk, nr, L, L);            /* L = E(0^128) */
+    memcpy(K1, L, 16); cmac_dbl(K1);
+    memcpy(K2, K1, 16); cmac_dbl(K2);
+    memset(X, 0, 16);
+    nblocks = (len == 0) ? 0 : (len + 15) / 16;
+    for (i = 0; i + 1 < nblocks; i++) {         /* 处理除末块外的完整块 */
+        for (j = 0; j < 16; j++) X[j] ^= in[i*16 + j];
+        aes_encrypt_block(rk, nr, X, X);
+    }
+    if (len != 0 && (len % 16) == 0) {          /* 末块为完整块 → 异或 K1 */
+        const uint8_t *lb = in + (nblocks - 1) * 16;
+        for (j = 0; j < 16; j++) blk[j] = (uint8_t)(lb[j] ^ K1[j]);
+    } else {                                     /* 末块不完整（含空消息）→ 填充后异或 K2 */
+        uint64_t off = (len == 0) ? 0 : (nblocks - 1) * 16;
+        size_t r = (size_t)(len - off);
+        memset(blk, 0, 16);
+        memcpy(blk, in + off, r);
+        blk[r] = 0x80;
+        for (j = 0; j < 16; j++) blk[j] ^= K2[j];
+    }
+    for (j = 0; j < 16; j++) X[j] ^= blk[j];
+    aes_encrypt_block(rk, nr, X, out);
+}
+
+/* ---------------- AES-CFB128 / OFB（SP 800-38A）---------------- */
+void crypto_aes_cfb_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr;
+    uint8_t fb[16], o[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    aes_expand(key, (int)keybits, rk, &nr);
+    memcpy(fb, iv, 16);
+    for (off = 0; off < len; off += 16) {
+        size_t take = (size_t)(len - off), j;
+        if (take > 16) take = 16;
+        aes_encrypt_block(rk, nr, fb, o);
+        for (j = 0; j < take; j++) out[off + j] = (uint8_t)(in[off + j] ^ o[j]);
+        if (take == 16) memcpy(fb, out + off, 16);  /* 反馈密文 */
+    }
+}
+void crypto_aes_cfb_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr;
+    uint8_t fb[16], o[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    aes_expand(key, (int)keybits, rk, &nr);
+    memcpy(fb, iv, 16);
+    for (off = 0; off < len; off += 16) {
+        size_t take = (size_t)(len - off), j;
+        if (take > 16) take = 16;
+        aes_encrypt_block(rk, nr, fb, o);
+        if (take == 16) memcpy(fb, in + off, 16);   /* 反馈密文（输入） */
+        for (j = 0; j < take; j++) out[off + j] = (uint8_t)(in[off + j] ^ o[j]);
+    }
+}
+void crypto_aes_ofb(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr;
+    uint8_t fb[16], o[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    aes_expand(key, (int)keybits, rk, &nr);
+    memcpy(fb, iv, 16);
+    for (off = 0; off < len; off += 16) {
+        size_t take = (size_t)(len - off), j;
+        if (take > 16) take = 16;
+        aes_encrypt_block(rk, nr, fb, o);
+        memcpy(fb, o, 16);                            /* 反馈输出块 */
+        for (j = 0; j < take; j++) out[off + j] = (uint8_t)(in[off + j] ^ o[j]);
+    }
+}
+
+/* ---------------- SM4（GM/T 0002-2012 国密分组密码）---------------- */
+static const uint8_t SM4_SBOX[256] = {
+    0xd6,0x90,0xe9,0xfe,0xcc,0xe1,0x3d,0xb7,0x16,0xb6,0x14,0xc2,0x28,0xfb,0x2c,0x05,
+    0x2b,0x67,0x9a,0x76,0x2a,0xbe,0x04,0xc3,0xaa,0x44,0x13,0x26,0x49,0x86,0x06,0x99,
+    0x9c,0x42,0x50,0xf4,0x91,0xef,0x98,0x7a,0x33,0x54,0x0b,0x43,0xed,0xcf,0xac,0x62,
+    0xe4,0xb3,0x1c,0xa9,0xc9,0x08,0xe8,0x95,0x80,0xdf,0x94,0xfa,0x75,0x8f,0x3f,0xa6,
+    0x47,0x07,0xa7,0xfc,0xf3,0x73,0x17,0xba,0x83,0x59,0x3c,0x19,0xe6,0x85,0x4f,0xa8,
+    0x68,0x6b,0x81,0xb2,0x71,0x64,0xda,0x8b,0xf8,0xeb,0x0f,0x4b,0x70,0x56,0x9d,0x35,
+    0x1e,0x24,0x0e,0x5e,0x63,0x58,0xd1,0xa2,0x25,0x22,0x7c,0x3b,0x01,0x21,0x78,0x87,
+    0xd4,0x00,0x46,0x57,0x9f,0xd3,0x27,0x52,0x4c,0x36,0x02,0xe7,0xa0,0xc4,0xc8,0x9e,
+    0xea,0xbf,0x8a,0xd2,0x40,0xc7,0x38,0xb5,0xa3,0xf7,0xf2,0xce,0xf9,0x61,0x15,0xa1,
+    0xe0,0xae,0x5d,0xa4,0x9b,0x34,0x1a,0x55,0xad,0x93,0x32,0x30,0xf5,0x8c,0xb1,0xe3,
+    0x1d,0xf6,0xe2,0x2e,0x82,0x66,0xca,0x60,0xc0,0x29,0x23,0xab,0x0d,0x53,0x4e,0x6f,
+    0xd5,0xdb,0x37,0x45,0xde,0xfd,0x8e,0x2f,0x03,0xff,0x6a,0x72,0x6d,0x6c,0x5b,0x51,
+    0x8d,0x1b,0xaf,0x92,0xbb,0xdd,0xbc,0x7f,0x11,0xd9,0x5c,0x41,0x1f,0x10,0x5a,0xd8,
+    0x0a,0xc1,0x31,0x88,0xa5,0xcd,0x7b,0xbd,0x2d,0x74,0xd0,0x12,0xb8,0xe5,0xb4,0xb0,
+    0x89,0x69,0x97,0x4a,0x0c,0x96,0x77,0x7e,0x65,0xb9,0xf1,0x09,0xc5,0x6e,0xc6,0x84,
+    0x18,0xf0,0x7d,0xec,0x3a,0xdc,0x4d,0x20,0x79,0xee,0x5f,0x3e,0xd7,0xcb,0x39,0x48
+};
+static const uint32_t SM4_FK[4] = {0xa3b1bac6u, 0x56aa3350u, 0x677d9197u, 0xb27022dcu};
+static const uint32_t SM4_CK[32] = {
+    0x00070e15u,0x1c232a31u,0x383f464du,0x545b6269u,0x70777e85u,0x8c939aa1u,0xa8afb6bdu,0xc4cbd2d9u,
+    0xe0e7eef5u,0xfc030a11u,0x181f262du,0x343b4249u,0x50575e65u,0x6c737a81u,0x888f969du,0xa4abb2b9u,
+    0xc0c7ced5u,0xdce3eaf1u,0xf8ff060du,0x141b2229u,0x30373e45u,0x4c535a61u,0x686f767du,0x848b9299u,
+    0xa0a7aeb5u,0xbcc3cad1u,0xd8dfe6edu,0xf4fb0209u,0x10171e25u,0x2c333a41u,0x484f565du,0x646b7279u
+};
+static uint32_t sm4_tau(uint32_t a) {
+    return ((uint32_t)SM4_SBOX[(a >> 24) & 0xff] << 24) | ((uint32_t)SM4_SBOX[(a >> 16) & 0xff] << 16)
+         | ((uint32_t)SM4_SBOX[(a >> 8) & 0xff] << 8) | SM4_SBOX[a & 0xff];
+}
+static uint32_t sm4_t(uint32_t x) {
+    uint32_t b = sm4_tau(x);
+    return b ^ SC_ROL32(b, 2) ^ SC_ROL32(b, 10) ^ SC_ROL32(b, 18) ^ SC_ROL32(b, 24);
+}
+static uint32_t sm4_tk(uint32_t x) {
+    uint32_t b = sm4_tau(x);
+    return b ^ SC_ROL32(b, 13) ^ SC_ROL32(b, 23);
+}
+static void sm4_keyschedule(const uint8_t key[16], uint32_t rk[32]) {
+    uint32_t k[4];
+    int i;
+    for (i = 0; i < 4; i++)
+        k[i] = (((uint32_t)key[4*i] << 24) | ((uint32_t)key[4*i+1] << 16)
+              | ((uint32_t)key[4*i+2] << 8) | key[4*i+3]) ^ SM4_FK[i];
+    for (i = 0; i < 32; i++) {
+        uint32_t t = k[0] ^ sm4_tk(k[1] ^ k[2] ^ k[3] ^ SM4_CK[i]);
+        k[0] = k[1]; k[1] = k[2]; k[2] = k[3]; k[3] = t;
+        rk[i] = t;
+    }
+}
+static void sm4_crypt(const uint32_t rk[32], const uint8_t in[16], uint8_t out[16], int decrypt) {
+    uint32_t x[4];
+    int i;
+    for (i = 0; i < 4; i++)
+        x[i] = ((uint32_t)in[4*i] << 24) | ((uint32_t)in[4*i+1] << 16)
+             | ((uint32_t)in[4*i+2] << 8) | in[4*i+3];
+    for (i = 0; i < 32; i++) {
+        uint32_t k = decrypt ? rk[31 - i] : rk[i];
+        uint32_t t = x[0] ^ sm4_t(x[1] ^ x[2] ^ x[3] ^ k);
+        x[0] = x[1]; x[1] = x[2]; x[2] = x[3]; x[3] = t;
+    }
+    for (i = 0; i < 4; i++) {            /* 反序输出 */
+        uint32_t v = x[3 - i];
+        out[4*i] = (uint8_t)(v >> 24); out[4*i+1] = (uint8_t)(v >> 16);
+        out[4*i+2] = (uint8_t)(v >> 8); out[4*i+3] = (uint8_t)v;
+    }
+}
+void crypto_sm4_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[32];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    sm4_keyschedule(key, rk);
+    for (off = 0; off + 16 <= len; off += 16) sm4_crypt(rk, in + off, out + off, 0);
+}
+void crypto_sm4_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[32];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    sm4_keyschedule(key, rk);
+    for (off = 0; off + 16 <= len; off += 16) sm4_crypt(rk, in + off, out + off, 1);
+}
+void crypto_sm4_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[32];
+    uint8_t prev[16], blk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    int j;
+    sm4_keyschedule(key, rk);
+    memcpy(prev, iv, 16);
+    for (off = 0; off + 16 <= len; off += 16) {
+        for (j = 0; j < 16; j++) blk[j] = (uint8_t)(in[off + j] ^ prev[j]);
+        sm4_crypt(rk, blk, out + off, 0);
+        memcpy(prev, out + off, 16);
+    }
+}
+void crypto_sm4_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[32];
+    uint8_t prev[16], cur[16], dec[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    int j;
+    sm4_keyschedule(key, rk);
+    memcpy(prev, iv, 16);
+    for (off = 0; off + 16 <= len; off += 16) {
+        memcpy(cur, in + off, 16);
+        sm4_crypt(rk, cur, dec, 1);
+        for (j = 0; j < 16; j++) out[off + j] = (uint8_t)(dec[j] ^ prev[j]);
+        memcpy(prev, cur, 16);
+    }
+}
+
+/* ---------------- XChaCha20-Poly1305（draft-irtf-cfrg-xchacha）---------------- */
+static void sc_st32le(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+}
+static void hchacha20(uint8_t out[32], const uint8_t key[32], const uint8_t nonce16[16]) {
+    uint32_t x[16];
+    int i;
+    x[0] = 0x61707865u; x[1] = 0x3320646eu; x[2] = 0x79622d32u; x[3] = 0x6b206574u;
+    for (i = 0; i < 8; i++) x[4 + i] = sc_le32(key + 4*i);
+    for (i = 0; i < 4; i++) x[12 + i] = sc_le32(nonce16 + 4*i);
+    for (i = 0; i < 10; i++) {
+        SC_QR(x[0], x[4], x[8],  x[12]);
+        SC_QR(x[1], x[5], x[9],  x[13]);
+        SC_QR(x[2], x[6], x[10], x[14]);
+        SC_QR(x[3], x[7], x[11], x[15]);
+        SC_QR(x[0], x[5], x[10], x[15]);
+        SC_QR(x[1], x[6], x[11], x[12]);
+        SC_QR(x[2], x[7], x[8],  x[13]);
+        SC_QR(x[3], x[4], x[9],  x[14]);
+    }
+    for (i = 0; i < 4; i++) sc_st32le(out + 4*i, x[i]);
+    for (i = 0; i < 4; i++) sc_st32le(out + 16 + 4*i, x[12 + i]);
+}
+void crypto_xaead_seal(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
+                       void *plain, uint64_t plen, uint8_t *cipher, uint8_t *tag) {
+    uint8_t subkey[32], cn[12];
+    hchacha20(subkey, key, nonce);
+    memset(cn, 0, 4);
+    memcpy(cn + 4, nonce + 16, 8);
+    crypto_aead_seal(subkey, cn, aad, aadlen, plain, plen, cipher, tag);
+}
+int32_t crypto_xaead_open(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
+                          void *cipher, uint64_t clen, uint8_t *tag, uint8_t *plain) {
+    uint8_t subkey[32], cn[12];
+    hchacha20(subkey, key, nonce);
+    memset(cn, 0, 4);
+    memcpy(cn + 4, nonce + 16, 8);
+    return crypto_aead_open(subkey, cn, aad, aadlen, cipher, clen, tag, plain);
+}
+
+/* ---------------- AES-CCM（SP 800-38C / RFC 3610）---------------- */
+static void ccm_ctr_block(uint8_t A[16], const uint8_t *nonce, uint64_t noncelen, uint64_t counter, int L) {
+    int i;
+    memset(A, 0, 16);
+    A[0] = (uint8_t)(L - 1);
+    memcpy(A + 1, nonce, (size_t)noncelen);
+    for (i = 0; i < L; i++) A[15 - i] = (uint8_t)(counter >> (8 * i));
+}
+static void ccm_mac(const uint32_t *rk, int nr, const uint8_t *nonce, uint64_t noncelen, int L,
+                    const uint8_t *aad, uint64_t aadlen, const uint8_t *msg, uint64_t mlen,
+                    uint64_t taglen, uint8_t *tagout) {
+    uint8_t B[16], X[16], A[16], S[16];
+    uint64_t i, off;
+    int j;
+    memset(B, 0, 16);
+    B[0] = (uint8_t)((aadlen > 0 ? 0x40 : 0) | (((taglen - 2) / 2) << 3) | (L - 1));
+    memcpy(B + 1, nonce, (size_t)noncelen);
+    for (j = 0; j < L; j++) B[15 - j] = (uint8_t)(mlen >> (8 * j));
+    aes_encrypt_block(rk, nr, B, X);
+    if (aadlen > 0) {
+        uint8_t hdr[6];
+        size_t hlen;
+        size_t fill;
+        uint64_t take;
+        if (aadlen < 0xFF00ull) {
+            hdr[0] = (uint8_t)(aadlen >> 8); hdr[1] = (uint8_t)aadlen; hlen = 2;
+        } else {
+            hdr[0] = 0xFF; hdr[1] = 0xFE;
+            hdr[2] = (uint8_t)(aadlen >> 24); hdr[3] = (uint8_t)(aadlen >> 16);
+            hdr[4] = (uint8_t)(aadlen >> 8);  hdr[5] = (uint8_t)aadlen; hlen = 6;
+        }
+        for (j = 0; j < (int)hlen; j++) X[j] ^= hdr[j];
+        fill = 16 - hlen;
+        take = (aadlen < fill) ? aadlen : fill;
+        for (i = 0; i < take; i++) X[hlen + i] ^= aad[i];
+        aes_encrypt_block(rk, nr, X, X);
+        off = take;
+        while (off < aadlen) {
+            uint64_t t2 = (aadlen - off < 16) ? (aadlen - off) : 16;
+            for (i = 0; i < t2; i++) X[i] ^= aad[off + i];
+            aes_encrypt_block(rk, nr, X, X);
+            off += t2;
+        }
+    }
+    off = 0;
+    while (off < mlen) {
+        uint64_t t2 = (mlen - off < 16) ? (mlen - off) : 16;
+        for (i = 0; i < t2; i++) X[i] ^= msg[off + i];
+        aes_encrypt_block(rk, nr, X, X);
+        off += t2;
+    }
+    ccm_ctr_block(A, nonce, noncelen, 0, L);
+    aes_encrypt_block(rk, nr, A, S);
+    for (j = 0; j < (int)taglen; j++) tagout[j] = (uint8_t)(X[j] ^ S[j]);
+}
+static void ccm_ctr(const uint32_t *rk, int nr, const uint8_t *nonce, uint64_t noncelen, int L,
+                    const uint8_t *in, uint64_t len, uint8_t *out) {
+    uint8_t A[16], Si[16];
+    uint64_t off = 0, i;
+    uint64_t ctr = 1;
+    while (off < len) {
+        uint64_t take = (len - off < 16) ? (len - off) : 16;
+        ccm_ctr_block(A, nonce, noncelen, ctr, L);
+        aes_encrypt_block(rk, nr, A, Si);
+        for (i = 0; i < take; i++) out[off + i] = (uint8_t)(in[off + i] ^ Si[i]);
+        off += take; ctr++;
+    }
+}
+void crypto_aes_ccm_seal(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
+                         void *aad, uint64_t aadlen, void *plain, uint64_t plen,
+                         uint8_t *cipher, uint8_t *tag, uint64_t taglen) {
+    uint32_t rk[60];
+    int nr, L = 15 - (int)noncelen;
+    aes_expand(key, (int)keybits, rk, &nr);
+    ccm_mac(rk, nr, nonce, noncelen, L, (const uint8_t *)aad, aadlen,
+            (const uint8_t *)plain, plen, taglen, tag);
+    ccm_ctr(rk, nr, nonce, noncelen, L, (const uint8_t *)plain, plen, cipher);
+}
+int32_t crypto_aes_ccm_open(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
+                            void *aad, uint64_t aadlen, void *cipher, uint64_t clen,
+                            uint8_t *tag, uint64_t taglen, uint8_t *plain) {
+    uint32_t rk[60];
+    int nr, L = 15 - (int)noncelen;
+    uint8_t exp[16];
+    aes_expand(key, (int)keybits, rk, &nr);
+    ccm_ctr(rk, nr, nonce, noncelen, L, (const uint8_t *)cipher, clen, plain);
+    ccm_mac(rk, nr, nonce, noncelen, L, (const uint8_t *)aad, aadlen, plain, clen, taglen, exp);
+    if (crypto_verify(tag, exp, taglen) == 0) return 0;
+    memset(plain, 0, (size_t)clen);
+    return -1;
+}
+
+/* ---------------- 编码：Hex / Base64URL / Base64 解码 ---------------- */
+int32_t crypto_hex_encode(void *data, uint64_t len, char *out) {
+    static const char *tab = "0123456789abcdef";
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t i;
+    for (i = 0; i < len; i++) {
+        out[2*i]   = tab[(in[i] >> 4) & 0x0F];
+        out[2*i+1] = tab[in[i] & 0x0F];
+    }
+    return (int32_t)(2 * len);
+}
+static int hexval1(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+int32_t crypto_hex_decode(char *hex, uint64_t len, uint8_t *out) {
+    uint64_t i;
+    if (len & 1) return -1;
+    for (i = 0; i < len; i += 2) {
+        int hi = hexval1((unsigned char)hex[i]);
+        int lo = hexval1((unsigned char)hex[i+1]);
+        if (hi < 0 || lo < 0) return -1;
+        out[i/2] = (uint8_t)((hi << 4) | lo);
+    }
+    return (int32_t)(len / 2);
+}
+int32_t crypto_base64url(void *data, uint64_t len, char *out) {
+    static const char *tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t i = 0;
+    int32_t n = 0;
+    while (i + 3 <= len) {
+        uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8) | in[i+2];
+        out[n++] = tab[(v >> 18) & 63]; out[n++] = tab[(v >> 12) & 63];
+        out[n++] = tab[(v >> 6) & 63];  out[n++] = tab[v & 63];
+        i += 3;
+    }
+    if (len - i == 1) {
+        uint32_t v = (uint32_t)in[i] << 16;
+        out[n++] = tab[(v >> 18) & 63]; out[n++] = tab[(v >> 12) & 63];
+    } else if (len - i == 2) {
+        uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8);
+        out[n++] = tab[(v >> 18) & 63]; out[n++] = tab[(v >> 12) & 63];
+        out[n++] = tab[(v >> 6) & 63];
+    }
+    return n;
+}
+static int b64val(int c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+' || c == '-') return 62;
+    if (c == '/' || c == '_') return 63;
+    return -1;
+}
+int32_t crypto_base64_decode(char *b64, uint64_t len, uint8_t *out) {
+    uint32_t acc = 0;
+    int bits = 0;
+    int32_t n = 0;
+    uint64_t i;
+    for (i = 0; i < len; i++) {
+        int c = (unsigned char)b64[i];
+        int v;
+        if (c == '=' || c == '\n' || c == '\r') continue;
+        v = b64val(c);
+        if (v < 0) return -1;
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[n++] = (uint8_t)((acc >> bits) & 0xFF);
+        }
+    }
+    return n;
+}
+
+/* ---------------- 随机数与工具 ---------------- */
+int32_t crypto_verify(void *a, void *b, uint64_t len) {
+    const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
+    uint64_t i;
+    uint8_t d = 0;
+    for (i = 0; i < len; i++) d |= (uint8_t)(x[i] ^ y[i]);
+    return d == 0 ? 0 : -1;
+}
+int32_t crypto_random(uint8_t *out, uint64_t len) {
+    if (len == 0) return 0;
+#if defined(_WIN32)
+    P_rand_bytes(out, (size_t)len);
+    return 0;
+#else
+    {
+        FILE *fp = fopen("/dev/urandom", "rb");
+        size_t got;
+        if (!fp) return -1;
+        got = fread(out, 1, (size_t)len, fp);
+        fclose(fp);
+        return got == (size_t)len ? 0 : -1;
+    }
+#endif
+}
+
+/* ================================================================
+ * 大类二 · 代理算法（RSA）—— 默认弱桩，安全失败。
+ *   编译进 ssl 后端（OpenSSL/mbedTLS）后由其提供强符号覆盖以下定义。
+ *   未配置后端时：crypto_rsa_backend()==0，其余调用返回 nil / <0。
+ * ================================================================ */
+#if defined(__GNUC__) || defined(__clang__)
+#  define SC_WEAK __attribute__((weak))
+#else
+#  define SC_WEAK
+#endif
+
+SC_WEAK int32_t crypto_rsa_backend(void) { return 0; }
+SC_WEAK void *crypto_rsa_keygen(uint32_t bits, uint32_t pub_e) {
+    (void)bits; (void)pub_e; return NULL;
+}
+SC_WEAK void crypto_rsa_free(void *k) { (void)k; }
+SC_WEAK void *crypto_rsa_import(void *buf, uint64_t len, int32_t is_private, int32_t fmt) {
+    (void)buf; (void)len; (void)is_private; (void)fmt; return NULL;
+}
+SC_WEAK int32_t crypto_rsa_export(void *k, int32_t is_private, int32_t fmt, uint8_t *out, uint64_t cap) {
+    (void)k; (void)is_private; (void)fmt; (void)out; (void)cap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_sign_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)sigcap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_verify_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)siglen; return -1;
+}
+SC_WEAK int32_t crypto_rsa_sign_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)sigcap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_verify_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)siglen; return -1;
+}
+SC_WEAK int32_t crypto_rsa_encrypt_oaep(void *k, int32_t hash_id, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    (void)k; (void)hash_id; (void)plain; (void)plen; (void)out; (void)cap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_decrypt_oaep(void *k, int32_t hash_id, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    (void)k; (void)hash_id; (void)cipher; (void)clen; (void)out; (void)cap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_encrypt_pkcs1(void *k, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    (void)k; (void)plain; (void)plen; (void)out; (void)cap; return -1;
+}
+SC_WEAK int32_t crypto_rsa_decrypt_pkcs1(void *k, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    (void)k; (void)cipher; (void)clen; (void)out; (void)cap; return -1;
+}

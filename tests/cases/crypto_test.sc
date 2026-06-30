@@ -461,4 +461,203 @@ tst "AES-128-ECB（SP 800-38A 向量）+ 解密回环"
     hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
     assert sceq((&hx[0]: char&), "6bc1bee22e409f96e93d7e117393172a") == 1, "aes-ecb 解密回环"
 
+# ===== 第二期 · 批5：算法簇补全 =====
+
+tst "SHA-224 / SHA-512-256 FIPS 180-4 向量"
+    var d[32]: u1
+    var hx[80]: char
+    crypto_sha224("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 28, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7") == 1, "sha224('abc')"
+    crypto_sha512_256("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 32, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23") == 1, "sha512-256('abc')"
+
+tst "SHA3-224 / SHA3-384 FIPS 202 向量"
+    var d[48]: u1
+    var hx[112]: char
+    crypto_sha3_224("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 28, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf") == 1, "sha3-224('abc')"
+    crypto_sha3_384("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 48, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25") == 1, "sha3-384('abc')"
+
+tst "SM3 GM/T 0004-2012 向量"
+    var d[32]: u1
+    var hx[72]: char
+    crypto_sm3("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 32, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0") == 1, "sm3('abc')"
+
+tst "AES-128-CMAC RFC 4493 向量"
+    var key[16]: u1
+    var msg[16]: u1
+    var d[16]: u1
+    var hx[40]: char
+    unhex("2b7e151628aed2a6abf7158809cf4f3c", (&key[0]: u1&))
+    crypto_aes_cmac((&key[0]: u1&), 128, (&msg[0]: u1&), 0, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "bb1d6929e95937287fa37d129b756746") == 1, "cmac 空消息"
+    unhex("6bc1bee22e409f96e93d7e117393172a", (&msg[0]: u1&))
+    crypto_aes_cmac((&key[0]: u1&), 128, (&msg[0]: u1&), 16, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "070a16b46b4d4144f79bdd9dd04a287c") == 1, "cmac 单分组"
+
+tst "AES-128-CFB128 SP 800-38A F.3.13"
+    var key[16]: u1
+    var iv[16]: u1
+    var pt[64]: u1
+    var ct[64]: u1
+    var rt[64]: u1
+    var hx[136]: char
+    unhex("2b7e151628aed2a6abf7158809cf4f3c", (&key[0]: u1&))
+    unhex("000102030405060708090a0b0c0d0e0f", (&iv[0]: u1&))
+    unhex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710", (&pt[0]: u1&))
+    crypto_aes_cfb_encrypt((&key[0]: u1&), 128, (&iv[0]: u1&), (&pt[0]: u1&), 64, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 64, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "3b3fd92eb72dad20333449f8e83cfb4ac8a64537a0b3a93fcde3cdad9f1ce58b26751f67a3cbb140b1808cf187a4f4dfc04b05357c5d1c0eeac4c66f9ff7f2e6") == 1, "cfb 密文"
+    unhex("000102030405060708090a0b0c0d0e0f", (&iv[0]: u1&))
+    crypto_aes_cfb_decrypt((&key[0]: u1&), 128, (&iv[0]: u1&), (&ct[0]: u1&), 64, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 64, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710") == 1, "cfb 解密回环"
+
+tst "AES-128-OFB SP 800-38A F.4.1"
+    var key[16]: u1
+    var iv[16]: u1
+    var pt[64]: u1
+    var ct[64]: u1
+    var hx[136]: char
+    unhex("2b7e151628aed2a6abf7158809cf4f3c", (&key[0]: u1&))
+    unhex("000102030405060708090a0b0c0d0e0f", (&iv[0]: u1&))
+    unhex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710", (&pt[0]: u1&))
+    crypto_aes_ofb((&key[0]: u1&), 128, (&iv[0]: u1&), (&pt[0]: u1&), 64, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 64, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "3b3fd92eb72dad20333449f8e83cfb4a7789508d16918f03f53c52dac54ed8259740051e9c5fecf64344f7a82260edcc304c6528f659c77866a510d9c1d6ae5e") == 1, "ofb 密文"
+
+tst "SM4 GM/T 0002-2012 标准向量 + CBC 回环"
+    var key[16]: u1
+    var pt[16]: u1
+    var ct[16]: u1
+    var rt[16]: u1
+    var iv[16]: u1
+    var hx[40]: char
+    unhex("0123456789abcdeffedcba9876543210", (&key[0]: u1&))
+    unhex("0123456789abcdeffedcba9876543210", (&pt[0]: u1&))
+    crypto_sm4_ecb_encrypt((&key[0]: u1&), (&pt[0]: u1&), 16, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "681edf34d206965e86b3e94f536e4246") == 1, "sm4-ecb 密文"
+    crypto_sm4_ecb_decrypt((&key[0]: u1&), (&ct[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdeffedcba9876543210") == 1, "sm4-ecb 解密回环"
+    unhex("000102030405060708090a0b0c0d0e0f", (&iv[0]: u1&))
+    crypto_sm4_cbc_encrypt((&key[0]: u1&), (&iv[0]: u1&), (&pt[0]: u1&), 16, (&ct[0]: u1&))
+    unhex("000102030405060708090a0b0c0d0e0f", (&iv[0]: u1&))
+    crypto_sm4_cbc_decrypt((&key[0]: u1&), (&iv[0]: u1&), (&ct[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdeffedcba9876543210") == 1, "sm4-cbc 解密回环"
+
+tst "XChaCha20-Poly1305 draft-irtf-cfrg-xchacha A.3.1"
+    var key[32]: u1
+    var nonce[24]: u1
+    var aad[12]: u1
+    var ct[114]: u1
+    var tag[16]: u1
+    var rt[120]: u1
+    var hx[40]: char
+    var rc: i4 = 0
+    unhex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f", (&key[0]: u1&))
+    unhex("404142434445464748494a4b4c4d4e4f5051525354555657", (&nonce[0]: u1&))
+    unhex("50515253c0c1c2c3c4c5c6c7", (&aad[0]: u1&))
+    var pt: char& = "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."
+    crypto_xaead_seal((&key[0]: u1&), (&nonce[0]: u1&), (&aad[0]: u1&), 12, pt, 114, (&ct[0]: u1&), (&tag[0]: u1&))
+    hexn((&tag[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "c0875924c1c7987947deafd8780acf49") == 1, "xchacha tag"
+    rc = crypto_xaead_open((&key[0]: u1&), (&nonce[0]: u1&), (&aad[0]: u1&), 12, (&ct[0]: u1&), 114, (&tag[0]: u1&), (&rt[0]: u1&))
+    rt[114] = 0
+    assert rc == 0, "xchacha open 成功"
+    assert sceq((&rt[0]: char&), pt) == 1, "xchacha 明文还原"
+    tag[0] = tag[0] ^ 0x01
+    rc = crypto_xaead_open((&key[0]: u1&), (&nonce[0]: u1&), (&aad[0]: u1&), 12, (&ct[0]: u1&), 114, (&tag[0]: u1&), (&rt[0]: u1&))
+    assert rc != 0, "xchacha 篡改检测"
+
+tst "AES-128-CCM SP 800-38C + 篡改检测"
+    var key[16]: u1
+    var nonce[12]: u1
+    var aad[16]: u1
+    var pt[24]: u1
+    var ct[24]: u1
+    var tag[16]: u1
+    var rt[24]: u1
+    var hx[56]: char
+    var rc: i4 = 0
+    unhex("404142434445464748494a4b4c4d4e4f", (&key[0]: u1&))
+    unhex("101112131415161718191a1b", (&nonce[0]: u1&))
+    unhex("000102030405060708090a0b0c0d0e0f", (&aad[0]: u1&))
+    unhex("202122232425262728292a2b2c2d2e2f3031323334353637", (&pt[0]: u1&))
+    crypto_aes_ccm_seal((&key[0]: u1&), 128, (&nonce[0]: u1&), 12, (&aad[0]: u1&), 16, (&pt[0]: u1&), 24, (&ct[0]: u1&), (&tag[0]: u1&), 16)
+    hexn((&ct[0]: u1&), 24, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "e3b201a9f5b71a7a9b1ceaeccd97e70b6176aad9a4428aa5") == 1, "ccm 密文"
+    hexn((&tag[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "06b08480f555f86da9d92a10d79f0e68") == 1, "ccm 标签"
+    rc = crypto_aes_ccm_open((&key[0]: u1&), 128, (&nonce[0]: u1&), 12, (&aad[0]: u1&), 16, (&ct[0]: u1&), 24, (&tag[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 24, (&hx[0]: char&))
+    assert rc == 0, "ccm open 成功"
+    assert sceq((&hx[0]: char&), "202122232425262728292a2b2c2d2e2f3031323334353637") == 1, "ccm 明文还原"
+    tag[0] = tag[0] ^ 0x01
+    rc = crypto_aes_ccm_open((&key[0]: u1&), 128, (&nonce[0]: u1&), 12, (&aad[0]: u1&), 16, (&ct[0]: u1&), 24, (&tag[0]: u1&), 16, (&rt[0]: u1&))
+    assert rc != 0, "ccm 篡改检测"
+
+tst "Hex 编解码 + Base64URL + Base64 解码"
+    var buf[64]: char
+    var out[32]: u1
+    var hx[40]: char
+    var n: i4 = 0
+    n = crypto_hex_encode("abc", 3, (&buf[0]: char&))
+    buf[n] = 0
+    assert n == 6, "hex_encode 长度"
+    assert sceq((&buf[0]: char&), "616263") == 1, "hex_encode('abc')"
+    n = crypto_hex_decode("616263", 6, (&out[0]: u1&))
+    out[n] = 0
+    assert n == 3, "hex_decode 长度"
+    assert sceq((&out[0]: char&), "abc") == 1, "hex_decode 回环"
+    assert crypto_hex_decode("6q", 2, (&out[0]: u1&)) == 0 - 1, "hex_decode 非法返回 -1"
+    var src[3]: u1 = [0xfb, 0x00, 0x00]
+    n = crypto_base64url((&src[0]: u1&), 3, (&buf[0]: char&))
+    buf[n] = 0
+    assert sceq((&buf[0]: char&), "-wAA") == 1, "base64url('-wAA')"
+    n = crypto_base64_decode("-wAA", 4, (&out[0]: u1&))
+    hexn((&out[0]: u1&), 3, (&hx[0]: char&))
+    assert n == 3, "base64_decode 长度"
+    assert sceq((&hx[0]: char&), "fb0000") == 1, "base64_decode 回环"
+    n = crypto_base64_decode("Zm9vYmFy", 8, (&out[0]: u1&))
+    out[n] = 0
+    assert sceq((&out[0]: char&), "foobar") == 1, "base64_decode('foobar')"
+
+tst "crypto_random + crypto_verify"
+    var a[32]: u1
+    var b[32]: u1
+    var i: u4 = 0
+    var nz: i4 = 0
+    assert crypto_random((&a[0]: u1&), 32) == 0, "random 返回 0"
+    while i < 32
+        if a[i] != 0
+            nz = 1
+        i = i + 1
+    assert nz == 1, "random 非全零"
+    assert crypto_random((&b[0]: u1&), 32) == 0, "random 第二次"
+    assert crypto_verify((&a[0]: u1&), (&a[0]: u1&), 32) == 0, "verify 相等"
+    assert crypto_verify((&a[0]: u1&), (&b[0]: u1&), 32) != 0, "verify 不等"
+
+tst "RSA 代理弱桩：无后端安全失败"
+    var k: & = nil
+    var digest[32]: u1
+    var sig[256]: u1
+    assert crypto_rsa_backend() == 0, "无后端 backend==0"
+    k = crypto_rsa_keygen(2048, 65537)
+    assert k == nil, "无后端 keygen 返回 nil"
+    assert crypto_rsa_sign_pkcs1(nil, 4, (&digest[0]: u1&), 32, (&sig[0]: u1&), 256) < 0, "无后端 sign 失败"
+    assert crypto_rsa_verify_pkcs1(nil, 4, (&digest[0]: u1&), 32, (&sig[0]: u1&), 256) < 0, "无后端 verify 失败"
+    assert crypto_rsa_encrypt_oaep(nil, 4, (&digest[0]: u1&), 32, (&sig[0]: u1&), 256) < 0, "无后端 oaep 失败"
+
 
