@@ -1,0 +1,42 @@
+codec_test.sc:725:15: warning: integer literal is too large to be represented in a signed integer type, interpreting as unsigned [-Wimplicitly-unsigned-literal]
+  725 |     vals[5] = 18446744073709551615;
+      |               ^
+codec_test.sc:736:31: warning: integer literal is too large to be represented in a signed integer type, interpreting as unsigned [-Wimplicitly-unsigned-literal]
+  736 |     if (!(codec_varint_encode(18446744073709551615, ((uint8_t*)(&(buf[0])))) == 10)) {
+      |                               ^
+2 warnings generated.
+ok 1 - CRC-32 IEEE 802.3 标准检验值
+ok 2 - CRC-32 流式分块与一次性一致
+ok 3 - Adler-32 RFC 1950 向量
+ok 4 - Adler-32 流式分块与一次性一致
+ok 5 - PackBits RLE round-trip（含重复块与字面块）
+ok 6 - PackBits cap 不足返回 -1
+ok 7 - zlib 解封装（动态 Huffman + Adler-32 校验，原文 307 字节）
+ok 8 - gzip 解封装（CRC-32 / ISIZE 校验，原文 307 字节）
+ok 9 - zlib 小数据解码并逐字节比对
+ok 10 - raw DEFLATE inflate（跳过 zlib 头尾，直接解原始码流）
+ok 11 - deflate(level 1) → inflate round-trip（高重复数据应压缩）
+ok 12 - deflate(level 0, stored) → inflate round-trip
+ok 13 - zlib encode → zlib decode round-trip（校验 Adler-32）
+ok 14 - gzip encode → gzip decode round-trip（校验 CRC-32/ISIZE）
+ok 15 - Huffman 建树：频率越高码越短，且满足 Kraft 完备
+ok 16 - Huffman 建树：单符号退化为码长 1
+ok 17 - Huffman order-0 编码 → 解码 round-trip（偏斜文本）
+ok 18 - Huffman order-0：全相同字节 + 空输入边界
+ok 19 - deflate(level 2, 动态 Huffman) → inflate round-trip（偏斜分布）
+ok 20 - deflate(level 2) 动态优于固定，且 zlib/gzip 封装可还原
+ok 21 - deflate(level 2) 边界：全字面无匹配 + 空输入 + 单字节
+ok 22 - rANS 频率归一：和恰为 2^tablelog，出现符号 >=1
+ok 23 - rANS order-0 编码 → 解码 round-trip（偏斜文本）
+ok 24 - rANS 边界：全相同字节 + 空输入 + 全字节谱
+ok 25 - 区间编码 order-0 编码 → 解码 round-trip（偏斜文本）
+ok 26 - 区间编码 边界：全相同字节 + 空输入 + 全字节谱
+ok 27 - LZW 字典编码 → 解码 round-trip（重复文本可压缩）
+ok 28 - LZW 大输入：字典增长 + 满表 CLEAR 复位（伪随机）
+ok 29 - LZW 边界：空输入 + 单字节 + 全相同
+ok 30 - 裸 LZW（TIFF/MSB-first）解码真实 libtiff 子流 ← 地面真值互通
+ok 31 - 裸 LZW round-trip：MSB(TIFF) 与 LSB 两种字节序，含码宽增长 + 满表 CLEAR
+ok 32 - 裸 LZW 边界：空输入 + 单字节（两种字节序）
+ok 33 - varint（LEB128）+ ZigZag 编解码
+1..33
+==> 测试通过 33，失败 0，跳过 0

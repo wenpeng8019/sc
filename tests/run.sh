@@ -186,6 +186,8 @@ RUNTIME_TRAP=(
 TEST_RUN=(
     examples/test_demo.sc
     tests/cases/crypto_test.sc
+    tests/cases/codec_test.sc
+    tests/cases/img_test.sc
     tests/cases/rsa_proxy_test.sc
     tests/cases/ssl_test.sc
     tests/cases/ws_test.sc
