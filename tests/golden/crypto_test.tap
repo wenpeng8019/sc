@@ -19,5 +19,12 @@ ok 18 - AES-128-CBC SP 800-38A F.2.1 + 解密还原
 ok 19 - AES-128-GCM（McGrew TC4，含 AAD）+ 篡改检测
 ok 20 - Ed25519 RFC 8032 Test 1（空消息）
 ok 21 - Ed25519 RFC 8032 Test 2 + 篡改检测
-1..21
-==> 测试通过 21，失败 0，跳过 0
+ok 22 - MD5 RFC 1321（abc / 空串）
+ok 23 - RIPEMD-160（abc / 空串）
+ok 24 - DES-ECB 经典向量 + 解密回环
+ok 25 - DES-CBC 加解密回环（2 分组）
+ok 26 - 3DES-ECB：单密钥退化 + 三密钥向量 + 解密回环
+ok 27 - 3DES-CBC 加解密回环（2 分组）
+ok 28 - AES-128-ECB（SP 800-38A 向量）+ 解密回环
+1..28
+==> 测试通过 28，失败 0，跳过 0

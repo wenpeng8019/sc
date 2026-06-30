@@ -1535,3 +1535,426 @@ int32_t crypto_ed25519_verify(uint8_t *sig, void *msg, uint64_t mlen, uint8_t *p
     if (ct_verify32(sig, t)) return -1;
     return 0;
 }
+
+/* ================================================================
+ * 第二期 · 批4：遗留 / 弱算法（MD5/RIPEMD-160/DES/3DES/AES-ECB）
+ *   仅供与遗留系统互通；⚠ 勿用于新的安全设计。
+ * ================================================================ */
+
+/* ---------------- MD5（RFC 1321）---------------- */
+typedef struct {
+    uint32_t a, b, c, d;
+    uint64_t bits;
+    uint8_t  buf[64];
+    size_t   n;
+} md5_ctx;
+
+static const uint32_t MD5_K[64] = {
+    0xd76aa478u,0xe8c7b756u,0x242070dbu,0xc1bdceeeu,0xf57c0fafu,0x4787c62au,
+    0xa8304613u,0xfd469501u,0x698098d8u,0x8b44f7afu,0xffff5bb1u,0x895cd7beu,
+    0x6b901122u,0xfd987193u,0xa679438eu,0x49b40821u,0xf61e2562u,0xc040b340u,
+    0x265e5a51u,0xe9b6c7aau,0xd62f105du,0x02441453u,0xd8a1e681u,0xe7d3fbc8u,
+    0x21e1cde6u,0xc33707d6u,0xf4d50d87u,0x455a14edu,0xa9e3e905u,0xfcefa3f8u,
+    0x676f02d9u,0x8d2a4c8au,0xfffa3942u,0x8771f681u,0x6d9d6122u,0xfde5380cu,
+    0xa4beea44u,0x4bdecfa9u,0xf6bb4b60u,0xbebfbc70u,0x289b7ec6u,0xeaa127fau,
+    0xd4ef3085u,0x04881d05u,0xd9d4d039u,0xe6db99e5u,0x1fa27cf8u,0xc4ac5665u,
+    0xf4292244u,0x432aff97u,0xab9423a7u,0xfc93a039u,0x655b59c3u,0x8f0ccc92u,
+    0xffeff47du,0x85845dd1u,0x6fa87e4fu,0xfe2ce6e0u,0xa3014314u,0x4e0811a1u,
+    0xf7537e82u,0xbd3af235u,0x2ad7d2bbu,0xeb86d391u
+};
+static const uint8_t MD5_S[64] = {
+    7,12,17,22, 7,12,17,22, 7,12,17,22, 7,12,17,22,
+    5, 9,14,20, 5, 9,14,20, 5, 9,14,20, 5, 9,14,20,
+    4,11,16,23, 4,11,16,23, 4,11,16,23, 4,11,16,23,
+    6,10,15,21, 6,10,15,21, 6,10,15,21, 6,10,15,21
+};
+
+static uint32_t md5_rotl(uint32_t x, int c) { return (x << c) | (x >> (32 - c)); }
+
+static void md5_block(md5_ctx *m, const uint8_t *p) {
+    uint32_t w[16], a = m->a, b = m->b, c = m->c, d = m->d, f, g, t;
+    int i;
+    for (i = 0; i < 16; i++)
+        w[i] = (uint32_t)p[4*i] | ((uint32_t)p[4*i+1] << 8)
+             | ((uint32_t)p[4*i+2] << 16) | ((uint32_t)p[4*i+3] << 24);
+    for (i = 0; i < 64; i++) {
+        if (i < 16)      { f = (b & c) | (~b & d);        g = i; }
+        else if (i < 32) { f = (d & b) | (~d & c);        g = (5*i + 1) & 15; }
+        else if (i < 48) { f = b ^ c ^ d;                 g = (3*i + 5) & 15; }
+        else             { f = c ^ (b | ~d);              g = (7*i) & 15; }
+        t = d; d = c; c = b;
+        b = b + md5_rotl(a + f + MD5_K[i] + w[g], MD5_S[i]);
+        a = t;
+    }
+    m->a += a; m->b += b; m->c += c; m->d += d;
+}
+
+static void md5_init(md5_ctx *m) {
+    m->a = 0x67452301u; m->b = 0xefcdab89u;
+    m->c = 0x98badcfeu; m->d = 0x10325476u;
+    m->bits = 0; m->n = 0;
+}
+static void md5_update(md5_ctx *m, const uint8_t *p, size_t len) {
+    m->bits += (uint64_t)len * 8;
+    while (len) {
+        size_t take = 64 - m->n;
+        if (take > len) take = len;
+        memcpy(m->buf + m->n, p, take);
+        m->n += take; p += take; len -= take;
+        if (m->n == 64) { md5_block(m, m->buf); m->n = 0; }
+    }
+}
+static void md5_final(md5_ctx *m, uint8_t out[16]) {
+    uint8_t pad = 0x80;
+    uint64_t bits = m->bits;
+    uint8_t lenb[8];
+    int i;
+    md5_update(m, &pad, 1);
+    {
+        uint8_t z = 0;
+        while (m->n != 56) md5_update(m, &z, 1);
+    }
+    for (i = 0; i < 8; i++) lenb[i] = (uint8_t)(bits >> (8*i));
+    md5_update(m, lenb, 8);
+    for (i = 0; i < 4; i++) out[i]      = (uint8_t)(m->a >> (8*i));
+    for (i = 0; i < 4; i++) out[4+i]    = (uint8_t)(m->b >> (8*i));
+    for (i = 0; i < 4; i++) out[8+i]    = (uint8_t)(m->c >> (8*i));
+    for (i = 0; i < 4; i++) out[12+i]   = (uint8_t)(m->d >> (8*i));
+}
+
+void crypto_md5(void *data, uint64_t len, uint8_t *out) {
+    md5_ctx m;
+    md5_init(&m);
+    md5_update(&m, (const uint8_t *)data, (size_t)len);
+    md5_final(&m, out);
+}
+
+/* ---------------- RIPEMD-160 ---------------- */
+static uint32_t rmd_rotl(uint32_t x, int c) { return (x << c) | (x >> (32 - c)); }
+
+static void rmd160_block(uint32_t h[5], const uint8_t *p) {
+    /* 消息字索引（左/右行） */
+    static const uint8_t rl[80] = {
+        0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+        7,4,13,1,10,6,15,3,12,0,9,5,2,14,11,8,
+        3,10,14,4,9,15,8,1,2,7,0,6,13,11,5,12,
+        1,9,11,10,0,8,12,4,13,3,7,15,14,5,6,2,
+        4,0,5,9,7,12,2,10,14,1,3,8,11,6,15,13 };
+    static const uint8_t rr[80] = {
+        5,14,7,0,9,2,11,4,13,6,15,8,1,10,3,12,
+        6,11,3,7,0,13,5,10,14,15,8,12,4,9,1,2,
+        15,5,1,3,7,14,6,9,11,8,12,2,10,0,4,13,
+        8,6,4,1,3,11,15,0,5,12,2,13,9,7,10,14,
+        12,15,10,4,1,5,8,7,6,2,13,14,0,3,9,11 };
+    static const uint8_t sl[80] = {
+        11,14,15,12,5,8,7,9,11,13,14,15,6,7,9,8,
+        7,6,8,13,11,9,7,15,7,12,15,9,11,7,13,12,
+        11,13,6,7,14,9,13,15,14,8,13,6,5,12,7,5,
+        11,12,14,15,14,15,9,8,9,14,5,6,8,6,5,12,
+        9,15,5,11,6,8,13,12,5,12,13,14,11,8,5,6 };
+    static const uint8_t sr[80] = {
+        8,9,9,11,13,15,15,5,7,7,8,11,14,14,12,6,
+        9,13,15,7,12,8,9,11,7,7,12,7,6,15,13,11,
+        9,7,15,11,8,6,6,14,12,13,5,14,13,13,7,5,
+        15,5,8,11,14,14,6,14,6,9,12,9,12,5,15,8,
+        8,5,12,9,12,5,14,6,8,13,6,5,15,13,11,11 };
+    static const uint32_t kl[5] = {0x00000000u,0x5a827999u,0x6ed9eba1u,0x8f1bbcdcu,0xa953fd4eu};
+    static const uint32_t kr[5] = {0x50a28be6u,0x5c4dd124u,0x6d703ef3u,0x7a6d76e9u,0x00000000u};
+    uint32_t x[16], al, bl, cl, dl, el, ar, br, cr, dr, er, t, f;
+    int j;
+    for (j = 0; j < 16; j++)
+        x[j] = (uint32_t)p[4*j] | ((uint32_t)p[4*j+1] << 8)
+             | ((uint32_t)p[4*j+2] << 16) | ((uint32_t)p[4*j+3] << 24);
+    al = ar = h[0]; bl = br = h[1]; cl = cr = h[2]; dl = dr = h[3]; el = er = h[4];
+    for (j = 0; j < 80; j++) {
+        int r = j / 16;
+        /* 左行 */
+        if (r == 0)      f = bl ^ cl ^ dl;
+        else if (r == 1) f = (bl & cl) | (~bl & dl);
+        else if (r == 2) f = (bl | ~cl) ^ dl;
+        else if (r == 3) f = (bl & dl) | (cl & ~dl);
+        else             f = bl ^ (cl | ~dl);
+        t = rmd_rotl(al + f + x[rl[j]] + kl[r], sl[j]) + el;
+        al = el; el = dl; dl = rmd_rotl(cl, 10); cl = bl; bl = t;
+        /* 右行 */
+        if (r == 0)      f = br ^ (cr | ~dr);
+        else if (r == 1) f = (br & dr) | (cr & ~dr);
+        else if (r == 2) f = (br | ~cr) ^ dr;
+        else if (r == 3) f = (br & cr) | (~br & dr);
+        else             f = br ^ cr ^ dr;
+        t = rmd_rotl(ar + f + x[rr[j]] + kr[r], sr[j]) + er;
+        ar = er; er = dr; dr = rmd_rotl(cr, 10); cr = br; br = t;
+    }
+    t = h[1] + cl + dr;
+    h[1] = h[2] + dl + er;
+    h[2] = h[3] + el + ar;
+    h[3] = h[4] + al + br;
+    h[4] = h[0] + bl + cr;
+    h[0] = t;
+}
+
+void crypto_ripemd160(void *data, uint64_t len, uint8_t *out) {
+    uint32_t h[5] = {0x67452301u,0xefcdab89u,0x98badcfeu,0x10325476u,0xc3d2e1f0u};
+    const uint8_t *p = (const uint8_t *)data;
+    uint64_t rem = len, total = len;
+    uint8_t blk[64];
+    int i;
+    while (rem >= 64) { rmd160_block(h, p); p += 64; rem -= 64; }
+    memset(blk, 0, 64);
+    memcpy(blk, p, (size_t)rem);
+    blk[rem] = 0x80;
+    if (rem >= 56) { rmd160_block(h, blk); memset(blk, 0, 64); }
+    {
+        uint64_t bits = total * 8;
+        for (i = 0; i < 8; i++) blk[56 + i] = (uint8_t)(bits >> (8*i));
+    }
+    rmd160_block(h, blk);
+    for (i = 0; i < 5; i++) {
+        out[4*i]   = (uint8_t)(h[i]);
+        out[4*i+1] = (uint8_t)(h[i] >> 8);
+        out[4*i+2] = (uint8_t)(h[i] >> 16);
+        out[4*i+3] = (uint8_t)(h[i] >> 24);
+    }
+}
+
+/* ---------------- DES（FIPS 46-3）---------------- */
+static const uint8_t DES_IP[64] = {
+    58,50,42,34,26,18,10,2,60,52,44,36,28,20,12,4,
+    62,54,46,38,30,22,14,6,64,56,48,40,32,24,16,8,
+    57,49,41,33,25,17,9,1,59,51,43,35,27,19,11,3,
+    61,53,45,37,29,21,13,5,63,55,47,39,31,23,15,7 };
+static const uint8_t DES_FP[64] = {
+    40,8,48,16,56,24,64,32,39,7,47,15,55,23,63,31,
+    38,6,46,14,54,22,62,30,37,5,45,13,53,21,61,29,
+    36,4,44,12,52,20,60,28,35,3,43,11,51,19,59,27,
+    34,2,42,10,50,18,58,26,33,1,41,9,49,17,57,25 };
+static const uint8_t DES_E[48] = {
+    32,1,2,3,4,5,4,5,6,7,8,9,8,9,10,11,12,13,12,13,14,15,16,17,
+    16,17,18,19,20,21,20,21,22,23,24,25,24,25,26,27,28,29,28,29,30,31,32,1 };
+static const uint8_t DES_P[32] = {
+    16,7,20,21,29,12,28,17,1,15,23,26,5,18,31,10,
+    2,8,24,14,32,27,3,9,19,13,30,6,22,11,4,25 };
+static const uint8_t DES_PC1[56] = {
+    57,49,41,33,25,17,9,1,58,50,42,34,26,18,
+    10,2,59,51,43,35,27,19,11,3,60,52,44,36,
+    63,55,47,39,31,23,15,7,62,54,46,38,30,22,
+    14,6,61,53,45,37,29,21,13,5,28,20,12,4 };
+static const uint8_t DES_PC2[48] = {
+    14,17,11,24,1,5,3,28,15,6,21,10,23,19,12,4,
+    26,8,16,7,27,20,13,2,41,52,31,37,47,55,30,40,
+    51,45,33,48,44,49,39,56,34,53,46,42,50,36,29,32 };
+static const uint8_t DES_SHIFTS[16] = {1,1,2,2,2,2,2,2,1,2,2,2,2,2,2,1};
+static const uint8_t DES_SBOX[8][64] = {
+    {14,4,13,1,2,15,11,8,3,10,6,12,5,9,0,7,
+     0,15,7,4,14,2,13,1,10,6,12,11,9,5,3,8,
+     4,1,14,8,13,6,2,11,15,12,9,7,3,10,5,0,
+     15,12,8,2,4,9,1,7,5,11,3,14,10,0,6,13},
+    {15,1,8,14,6,11,3,4,9,7,2,13,12,0,5,10,
+     3,13,4,7,15,2,8,14,12,0,1,10,6,9,11,5,
+     0,14,7,11,10,4,13,1,5,8,12,6,9,3,2,15,
+     13,8,10,1,3,15,4,2,11,6,7,12,0,5,14,9},
+    {10,0,9,14,6,3,15,5,1,13,12,7,11,4,2,8,
+     13,7,0,9,3,4,6,10,2,8,5,14,12,11,15,1,
+     13,6,4,9,8,15,3,0,11,1,2,12,5,10,14,7,
+     1,10,13,0,6,9,8,7,4,15,14,3,11,5,2,12},
+    {7,13,14,3,0,6,9,10,1,2,8,5,11,12,4,15,
+     13,8,11,5,6,15,0,3,4,7,2,12,1,10,14,9,
+     10,6,9,0,12,11,7,13,15,1,3,14,5,2,8,4,
+     3,15,0,6,10,1,13,8,9,4,5,11,12,7,2,14},
+    {2,12,4,1,7,10,11,6,8,5,3,15,13,0,14,9,
+     14,11,2,12,4,7,13,1,5,0,15,10,3,9,8,6,
+     4,2,1,11,10,13,7,8,15,9,12,5,6,3,0,14,
+     11,8,12,7,1,14,2,13,6,15,0,9,10,4,5,3},
+    {12,1,10,15,9,2,6,8,0,13,3,4,14,7,5,11,
+     10,15,4,2,7,12,9,5,6,1,13,14,0,11,3,8,
+     9,14,15,5,2,8,12,3,7,0,4,10,1,13,11,6,
+     4,3,2,12,9,5,15,10,11,14,1,7,6,0,8,13},
+    {4,11,2,14,15,0,8,13,3,12,9,7,5,10,6,1,
+     13,0,11,7,4,9,1,10,14,3,5,12,2,15,8,6,
+     1,4,11,13,12,3,7,14,10,15,6,8,0,5,9,2,
+     6,11,13,8,1,4,10,7,9,5,0,15,14,2,3,12},
+    {13,2,8,4,6,15,11,1,10,9,3,14,5,0,12,7,
+     1,15,13,8,10,3,7,4,12,5,6,11,0,14,9,2,
+     7,11,4,1,9,12,14,2,0,6,10,13,15,3,5,8,
+     2,1,14,7,4,10,8,13,15,12,9,0,3,5,6,11}
+};
+
+static uint64_t des_permute(uint64_t in, const uint8_t *table, int n, int inbits) {
+    uint64_t out = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        out <<= 1;
+        out |= (in >> (inbits - table[i])) & 1ull;
+    }
+    return out;
+}
+
+static uint64_t des_b2u(const uint8_t *b) {
+    uint64_t x = 0;
+    int i;
+    for (i = 0; i < 8; i++) x = (x << 8) | b[i];
+    return x;
+}
+static void des_u2b(uint64_t x, uint8_t *b) {
+    int i;
+    for (i = 7; i >= 0; i--) { b[i] = (uint8_t)(x & 0xFF); x >>= 8; }
+}
+
+static void des_keyschedule(const uint8_t key[8], uint64_t subkeys[16]) {
+    uint64_t k = des_b2u(key);
+    uint64_t pc1 = des_permute(k, DES_PC1, 56, 64);
+    uint32_t C = (uint32_t)((pc1 >> 28) & 0x0FFFFFFFu);
+    uint32_t D = (uint32_t)(pc1 & 0x0FFFFFFFu);
+    int i;
+    for (i = 0; i < 16; i++) {
+        int s = DES_SHIFTS[i];
+        C = ((C << s) | (C >> (28 - s))) & 0x0FFFFFFFu;
+        D = ((D << s) | (D >> (28 - s))) & 0x0FFFFFFFu;
+        {
+            uint64_t cd = ((uint64_t)C << 28) | D;
+            subkeys[i] = des_permute(cd, DES_PC2, 48, 56);
+        }
+    }
+}
+
+static uint32_t des_f(uint32_t r, uint64_t subkey) {
+    uint64_t er = des_permute((uint64_t)r, DES_E, 48, 32) ^ subkey;
+    uint32_t out = 0;
+    int i;
+    for (i = 0; i < 8; i++) {
+        uint8_t six = (uint8_t)((er >> (42 - 6*i)) & 0x3F);
+        int row = ((six & 0x20) >> 4) | (six & 1);
+        int col = (six >> 1) & 0x0F;
+        out = (out << 4) | DES_SBOX[i][row*16 + col];
+    }
+    return (uint32_t)des_permute((uint64_t)out, DES_P, 32, 32);
+}
+
+static uint64_t des_block_op(uint64_t block, const uint64_t subkeys[16], int decrypt) {
+    uint64_t ip = des_permute(block, DES_IP, 64, 64);
+    uint32_t L = (uint32_t)(ip >> 32);
+    uint32_t R = (uint32_t)(ip & 0xFFFFFFFFu);
+    int i;
+    for (i = 0; i < 16; i++) {
+        uint64_t sk = decrypt ? subkeys[15 - i] : subkeys[i];
+        uint32_t tmp = R;
+        R = L ^ des_f(R, sk);
+        L = tmp;
+    }
+    {
+        uint64_t pre = ((uint64_t)R << 32) | L; /* 末轮交换 */
+        return des_permute(pre, DES_FP, 64, 64);
+    }
+}
+
+void crypto_des_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint64_t sk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    des_keyschedule(key, sk);
+    for (off = 0; off + 8 <= len; off += 8)
+        des_u2b(des_block_op(des_b2u(in + off), sk, 0), out + off);
+}
+void crypto_des_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint64_t sk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    des_keyschedule(key, sk);
+    for (off = 0; off + 8 <= len; off += 8)
+        des_u2b(des_block_op(des_b2u(in + off), sk, 1), out + off);
+}
+void crypto_des_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint64_t sk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t prev = des_b2u(iv), off;
+    des_keyschedule(key, sk);
+    for (off = 0; off + 8 <= len; off += 8) {
+        uint64_t c = des_block_op(des_b2u(in + off) ^ prev, sk, 0);
+        des_u2b(c, out + off);
+        prev = c;
+    }
+}
+void crypto_des_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint64_t sk[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t prev = des_b2u(iv), off;
+    des_keyschedule(key, sk);
+    for (off = 0; off + 8 <= len; off += 8) {
+        uint64_t cblk = des_b2u(in + off);
+        des_u2b(des_block_op(cblk, sk, 1) ^ prev, out + off);
+        prev = cblk;
+    }
+}
+
+/* ---------------- 3DES / Triple-DES（EDE 三密钥）---------------- */
+static uint64_t des3_enc(uint64_t b, const uint64_t k1[16], const uint64_t k2[16], const uint64_t k3[16]) {
+    b = des_block_op(b, k1, 0);
+    b = des_block_op(b, k2, 1);
+    b = des_block_op(b, k3, 0);
+    return b;
+}
+static uint64_t des3_dec(uint64_t b, const uint64_t k1[16], const uint64_t k2[16], const uint64_t k3[16]) {
+    b = des_block_op(b, k3, 1);
+    b = des_block_op(b, k2, 0);
+    b = des_block_op(b, k1, 1);
+    return b;
+}
+
+void crypto_des3_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint64_t k1[16], k2[16], k3[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    des_keyschedule(key, k1); des_keyschedule(key + 8, k2); des_keyschedule(key + 16, k3);
+    for (off = 0; off + 8 <= len; off += 8)
+        des_u2b(des3_enc(des_b2u(in + off), k1, k2, k3), out + off);
+}
+void crypto_des3_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+    uint64_t k1[16], k2[16], k3[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    des_keyschedule(key, k1); des_keyschedule(key + 8, k2); des_keyschedule(key + 16, k3);
+    for (off = 0; off + 8 <= len; off += 8)
+        des_u2b(des3_dec(des_b2u(in + off), k1, k2, k3), out + off);
+}
+void crypto_des3_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint64_t k1[16], k2[16], k3[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t prev = des_b2u(iv), off;
+    des_keyschedule(key, k1); des_keyschedule(key + 8, k2); des_keyschedule(key + 16, k3);
+    for (off = 0; off + 8 <= len; off += 8) {
+        uint64_t c = des3_enc(des_b2u(in + off) ^ prev, k1, k2, k3);
+        des_u2b(c, out + off);
+        prev = c;
+    }
+}
+void crypto_des3_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+    uint64_t k1[16], k2[16], k3[16];
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t prev = des_b2u(iv), off;
+    des_keyschedule(key, k1); des_keyschedule(key + 8, k2); des_keyschedule(key + 16, k3);
+    for (off = 0; off + 8 <= len; off += 8) {
+        uint64_t cblk = des_b2u(in + off);
+        des_u2b(des3_dec(cblk, k1, k2, k3) ^ prev, out + off);
+        prev = cblk;
+    }
+}
+
+/* ---------------- AES-ECB（裸分组，复用 AES 核心）---------------- */
+void crypto_aes_ecb_encrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr;
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    aes_expand(key, (int)keybits, rk, &nr);
+    for (off = 0; off + 16 <= len; off += 16)
+        aes_encrypt_block(rk, nr, in + off, out + off);
+}
+void crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+    uint32_t rk[60];
+    int nr;
+    const uint8_t *in = (const uint8_t *)data;
+    uint64_t off;
+    aes_expand(key, (int)keybits, rk, &nr);
+    for (off = 0; off + 16 <= len; off += 16)
+        aes_decrypt_block(rk, nr, in + off, out + off);
+}

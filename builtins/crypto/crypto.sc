@@ -117,3 +117,41 @@
 @fnc crypto_ed25519_sign:: sig: u1&, msg: &, mlen: u8, seed: u1&, pub: u1&
 # 验签：返回 0=有效，-1=无效。
 @fnc crypto_ed25519_verify:: i4, sig: u1&, msg: &, mlen: u8, pub: u1&
+
+# ================================================================
+# 第二期 · 批4：遗留 / 弱算法（MD5/RIPEMD-160/DES/3DES/AES-ECB）
+#   仅供与遗留系统互通；⚠ 勿用于新的安全设计。全部自实现 + 权威 KAT 验证。
+# ================================================================
+
+# ---------------- MD5（RFC 1321，16 字节摘要）----------------
+# 一次性摘要：data[0..len) -> out[0..16)。out 须 >= 16 字节。
+# ⚠ 已被实用碰撞攻破，绝不可用于签名/防篡改；仅作遗留校验和/协议互通。
+@fnc crypto_md5:: data: &, len: u8, out: u1&
+
+# ---------------- RIPEMD-160（20 字节摘要）----------------
+# 一次性摘要：data[0..len) -> out[0..20)。out 须 >= 20 字节。
+# 主要见于比特币地址等既有体系；新设计优先 SHA-256/SHA-3。
+@fnc crypto_ripemd160:: data: &, len: u8, out: u1&
+
+# ---------------- DES（FIPS 46-3，分组/密钥均 8 字节）----------------
+# ⚠ 56 位有效密钥已可被暴力破解，绝不可用于新安全用途；仅遗留互通。
+# ECB：len 须为 8 的倍数（填充由调用方负责）；加/解密分开。
+@fnc crypto_des_ecb_encrypt:: key: u1&, data: &, len: u8, out: u1&
+@fnc crypto_des_ecb_decrypt:: key: u1&, data: &, len: u8, out: u1&
+# CBC：iv 为 8 字节初始向量；len 须为 8 的倍数。
+@fnc crypto_des_cbc_encrypt:: key: u1&, iv: u1&, data: &, len: u8, out: u1&
+@fnc crypto_des_cbc_decrypt:: key: u1&, iv: u1&, data: &, len: u8, out: u1&
+
+# ---------------- 3DES / Triple-DES（EDE 三密钥，密钥束 24 字节）----------------
+# 加密 = E_K3(D_K2(E_K1(分组)))（解密反向）；K1=K2=K3 时退化为单 DES。
+# ⚠ 安全裕度有限（NIST 已弃用），仅遗留互通；新设计请用 AES。
+@fnc crypto_des3_ecb_encrypt:: key: u1&, data: &, len: u8, out: u1&
+@fnc crypto_des3_ecb_decrypt:: key: u1&, data: &, len: u8, out: u1&
+@fnc crypto_des3_cbc_encrypt:: key: u1&, iv: u1&, data: &, len: u8, out: u1&
+@fnc crypto_des3_cbc_decrypt:: key: u1&, iv: u1&, data: &, len: u8, out: u1&
+
+# ---------------- AES-ECB（SP 800-38A，裸分组）----------------
+# keybits 取 128 或 256；len 须为 16 的倍数。各分组独立加/解密、互不串链。
+# ⚠ ECB 会暴露明文分组模式（相同明文块→相同密文块），除非确知用途否则用 CTR/CBC/GCM。
+@fnc crypto_aes_ecb_encrypt:: key: u1&, keybits: u4, data: &, len: u8, out: u1&
+@fnc crypto_aes_ecb_decrypt:: key: u1&, keybits: u4, data: &, len: u8, out: u1&

@@ -137,4 +137,32 @@ void crypto_ed25519_sign(uint8_t *sig, void *msg, uint64_t mlen,
                          uint8_t *seed, uint8_t *pub);
 int32_t crypto_ed25519_verify(uint8_t *sig, void *msg, uint64_t mlen, uint8_t *pub);
 
+/* ===== 第二期 · 批4：遗留 / 弱算法（仅遗留互通；勿用于新安全设计） ===== */
+#define SC_MD5_LEN        16u  /* MD5 摘要字节数 */
+#define SC_RIPEMD160_LEN  20u  /* RIPEMD-160 摘要字节数 */
+#define SC_DES_BLOCK       8u  /* DES 分组字节数 */
+#define SC_DES_KEY         8u  /* DES 密钥字节数 */
+#define SC_DES3_KEY       24u  /* 3DES 密钥束字节数（K1||K2||K3） */
+
+/* MD5（RFC 1321）：out 须 >= 16 字节。⚠ 已被碰撞攻破，仅遗留校验。 */
+void crypto_md5(void *data, uint64_t len, uint8_t *out);
+/* RIPEMD-160：out 须 >= 20 字节。 */
+void crypto_ripemd160(void *data, uint64_t len, uint8_t *out);
+
+/* DES（FIPS 46-3）：key 8 字节；len 须为 8 倍数。⚠ 弱密钥，仅遗留互通。 */
+void crypto_des_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out);
+void crypto_des_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out);
+void crypto_des_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out);
+void crypto_des_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out);
+
+/* 3DES EDE（密钥束 24 字节）：加密 = E_K3(D_K2(E_K1(块)))。 */
+void crypto_des3_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out);
+void crypto_des3_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out);
+void crypto_des3_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out);
+void crypto_des3_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out);
+
+/* AES-ECB（SP 800-38A）：keybits=128/256；len 须为 16 倍数。⚠ 暴露分组模式。 */
+void crypto_aes_ecb_encrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out);
+void crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out);
+
 #endif /* SC_CRYPTO_H */

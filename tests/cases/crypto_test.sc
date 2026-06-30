@@ -355,4 +355,110 @@ tst "Ed25519 RFC 8032 Test 2 + 篡改检测"
     ok = crypto_ed25519_verify((&sig[0]: u1&), "r", 1, (&pub[0]: u1&))
     assert ok == -1, "ed25519 篡改被拒"
 
+# ===== 第二期 · 批4：遗留 / 弱算法 KAT（值经 openssl 交叉验证）=====
+
+tst "MD5 RFC 1321（abc / 空串）"
+    var d[16]: u1
+    var hx[40]: char
+    crypto_md5("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "900150983cd24fb0d6963f7d28e17f72") == 1, "md5 abc"
+    crypto_md5("", 0, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "d41d8cd98f00b204e9800998ecf8427e") == 1, "md5 空串"
+
+tst "RIPEMD-160（abc / 空串）"
+    var d[20]: u1
+    var hx[48]: char
+    crypto_ripemd160("abc", 3, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 20, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "8eb208f7e05d987a9b044a8e98c6b087f15a0bfc") == 1, "ripemd160 abc"
+    crypto_ripemd160("", 0, (&d[0]: u1&))
+    hexn((&d[0]: u1&), 20, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "9c1185a5c5e9fc54612808977ee8f548b2258d31") == 1, "ripemd160 空串"
+
+tst "DES-ECB 经典向量 + 解密回环"
+    var key[8]: u1
+    var pt[8]: u1
+    var ct[8]: u1
+    var rt[8]: u1
+    var hx[24]: char
+    unhex("133457799bbcdff1", (&key[0]: u1&))
+    unhex("0123456789abcdef", (&pt[0]: u1&))
+    crypto_des_ecb_encrypt((&key[0]: u1&), (&pt[0]: u1&), 8, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 8, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "85e813540f0ab405") == 1, "des-ecb 密文"
+    crypto_des_ecb_decrypt((&key[0]: u1&), (&ct[0]: u1&), 8, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 8, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdef") == 1, "des-ecb 解密回环"
+
+tst "DES-CBC 加解密回环（2 分组）"
+    var key[8]: u1
+    var iv[8]: u1
+    var pt[16]: u1
+    var ct[16]: u1
+    var rt[16]: u1
+    var hx[40]: char
+    unhex("133457799bbcdff1", (&key[0]: u1&))
+    unhex("0011223344556677", (&iv[0]: u1&))
+    unhex("0123456789abcdeffedcba9876543210", (&pt[0]: u1&))
+    crypto_des_cbc_encrypt((&key[0]: u1&), (&iv[0]: u1&), (&pt[0]: u1&), 16, (&ct[0]: u1&))
+    crypto_des_cbc_decrypt((&key[0]: u1&), (&iv[0]: u1&), (&ct[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdeffedcba9876543210") == 1, "des-cbc 回环"
+
+tst "3DES-ECB：单密钥退化 + 三密钥向量 + 解密回环"
+    var k1[24]: u1
+    var k3[24]: u1
+    var pt[8]: u1
+    var pt3[8]: u1
+    var ct[8]: u1
+    var rt[8]: u1
+    var hx[24]: char
+    # K1=K2=K3 时应退化为单 DES（与上面 des-ecb 同向量）
+    unhex("133457799bbcdff1133457799bbcdff1133457799bbcdff1", (&k1[0]: u1&))
+    unhex("0123456789abcdef", (&pt[0]: u1&))
+    crypto_des3_ecb_encrypt((&k1[0]: u1&), (&pt[0]: u1&), 8, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 8, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "85e813540f0ab405") == 1, "3des 退化单 DES"
+    # 真三密钥向量
+    unhex("0123456789abcdef23456789abcdef01456789abcdef0123", (&k3[0]: u1&))
+    unhex("0123456789abcdef", (&pt3[0]: u1&))
+    crypto_des3_ecb_encrypt((&k3[0]: u1&), (&pt3[0]: u1&), 8, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 8, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "f2afd84ee809e2b5") == 1, "3des 三密钥密文"
+    crypto_des3_ecb_decrypt((&k3[0]: u1&), (&ct[0]: u1&), 8, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 8, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdef") == 1, "3des 解密回环"
+
+tst "3DES-CBC 加解密回环（2 分组）"
+    var key[24]: u1
+    var iv[8]: u1
+    var pt[16]: u1
+    var ct[16]: u1
+    var rt[16]: u1
+    var hx[40]: char
+    unhex("0123456789abcdef23456789abcdef01456789abcdef0123", (&key[0]: u1&))
+    unhex("8899aabbccddeeff", (&iv[0]: u1&))
+    unhex("0123456789abcdeffedcba9876543210", (&pt[0]: u1&))
+    crypto_des3_cbc_encrypt((&key[0]: u1&), (&iv[0]: u1&), (&pt[0]: u1&), 16, (&ct[0]: u1&))
+    crypto_des3_cbc_decrypt((&key[0]: u1&), (&iv[0]: u1&), (&ct[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "0123456789abcdeffedcba9876543210") == 1, "3des-cbc 回环"
+
+tst "AES-128-ECB（SP 800-38A 向量）+ 解密回环"
+    var key[16]: u1
+    var pt[16]: u1
+    var ct[16]: u1
+    var rt[16]: u1
+    var hx[40]: char
+    unhex("2b7e151628aed2a6abf7158809cf4f3c", (&key[0]: u1&))
+    unhex("6bc1bee22e409f96e93d7e117393172a", (&pt[0]: u1&))
+    crypto_aes_ecb_encrypt((&key[0]: u1&), 128, (&pt[0]: u1&), 16, (&ct[0]: u1&))
+    hexn((&ct[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "3ad77bb40d7a3660a89ecaf32466ef97") == 1, "aes-ecb 密文"
+    crypto_aes_ecb_decrypt((&key[0]: u1&), 128, (&ct[0]: u1&), 16, (&rt[0]: u1&))
+    hexn((&rt[0]: u1&), 16, (&hx[0]: char&))
+    assert sceq((&hx[0]: char&), "6bc1bee22e409f96e93d7e117393172a") == 1, "aes-ecb 解密回环"
+
 
