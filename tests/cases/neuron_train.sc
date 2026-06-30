@@ -45,7 +45,7 @@ dep all: p:"g.o0" map l:"g.loss"
         return false
     var ln: neuron& = (l->ctx(): neuron&)
     ln->act = mse_loss(on->act, g_target)
-    l->pulse((0: @), 0)
+    l->pulse((0: *), 0)
     return false
 
 var IN[2]:  neuron
@@ -96,19 +96,19 @@ fnc zero_gw:
 fnc forward: f4
     IN[0].act = 1.0f
     IN[1].act = 2.0f
-    i0->pulse((0: @), 0)
-    i1->pulse((0: @), 0)
+    i0->pulse((0: *), 0)
+    i1->pulse((0: *), 0)
     return OUT[0].act
 
 fnc main: i4
     init_net()
-    form loss, (0: @), &LOSS_N
-    form o0, (0: @), &OUT[0]
-    form h0, (0: @), &HID[0]
-    form h1, (0: @), &HID[1]
-    form h2, (0: @), &HID[2]
-    form i0, (0: @), &IN[0]
-    form i1, (0: @), &IN[1]
+    form loss, (0: *), &LOSS_N
+    form o0, (0: *), &OUT[0]
+    form h0, (0: *), &HID[0]
+    form h1, (0: *), &HID[1]
+    form h2, (0: *), &HID[2]
+    form i0, (0: *), &IN[0]
+    form i1, (0: *), &IN[1]
 
     var last: f4 = 0.0f
     for e in EPOCHS

@@ -23,36 +23,36 @@ tok gy: "nn.gy"         # y 的梯度
 dep any: a:"nn.x" map b:"nn.y"
     if this->active == 0 - 4         # TOK_BACK：反向计算
         var g: i8 = (gy->get(): i8)
-        gx->set(((g * 2): @), 0)
+        gx->set(((g * 2): *), 0)
         return false
     var v: i8 = (a->get(): i8)       # 前向：y = 2x
-    b->set(((v * 2): @), 0)
+    b->set(((v * 2): *), 0)
     return false
 
 # 源 y → 目标 loss：前向 loss=y+5；反向 gy = gloss * dloss/dy = loss(种子) * 1。
 dep any: c:"nn.y" map o:"nn.loss"
     if this->active == 0 - 4         # TOK_BACK：反向计算
         var gloss: i8 = (o->get(): i8)   # loss 此刻持梯度种子
-        gy->set((gloss: @), 0)
+        gy->set((gloss: *), 0)
         return false
     var v: i8 = (c->get(): i8)       # 前向：loss = y + 5
-    o->set(((v + 5): @), 0)
+    o->set(((v + 5): *), 0)
     return false
 
 fnc main: i4
     # 本模块为各量之主：前向链与梯度量均须 form 激活（自输出向输入 form，初值灌定）
-    form gx,   (0: @)
-    form gy,   (0: @)
-    form loss, (0: @)
-    form y,    (0: @)
-    form x,    (0: @)
+    form gx,   (0: *)
+    form gy,   (0: *)
+    form loss, (0: *)
+    form y,    (0: *)
+    form x,    (0: *)
 
     # 前向：x=4 → y=8 → loss=13
-    x->set((4: @), 0)
+    x->set((4: *), 0)
     printf("forward: x=%lld y=%lld loss=%lld\n", (x->get(): i8), (y->get(): i8), (loss->get(): i8))
 
     # 反向：以 seed=1 自 loss 反传，按反拓扑序求各级梯度（链式法则）
-    back loss, (1: @)
+    back loss, (1: *)
     printf("backward(seed=1): gy=%lld gx=%lld\n", (gy->get(): i8), (gx->get(): i8))
 
     return 0

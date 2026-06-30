@@ -19,21 +19,21 @@ tok b: "fp.b"          # 中间量 N/a（反馈簇成员）
 dep all: x:"fp.a" loop y:"fp.b"
     var av: i8 = (x->get(): i8)
     if av != 0
-        y->set(((100 / av): @), 0)
+        y->set(((100 / av): *), 0)
     return false
 
 # b → a：a = (a + b) / 2  （受控反馈边 loop；闭合环 a→b→a 的后半）
 dep all: p:"fp.b" loop q:"fp.a"
     var bv: i8 = (p->get(): i8)
     var av: i8 = (q->get(): i8)
-    q->set((((av + bv) / 2): @), 0)
+    q->set((((av + bv) / 2): *), 0)
     return false
 
 fnc main: i4
-    form b, (0: @)             # 反馈簇两成员均为本模块所主，须 form 激活方可 set/get
-    form a, (0: @)
+    form b, (0: *)             # 反馈簇两成员均为本模块所主，须 form 激活方可 set/get
+    form a, (0: *)
 
-    a->set((100: @), 0)        # 初值 a=100（loop 源不级联，仅置初值，不触发反馈）
+    a->set((100: *), 0)        # 初值 a=100（loop 源不级联，仅置初值，不触发反馈）
     printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
 
     # 显式驱动反馈簇迭代至多 10 轮（Newton 整数 sqrt 收敛到不动点）

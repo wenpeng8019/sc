@@ -20,12 +20,12 @@ inc adt.sc
     return p
 
 # 按 MRU→LRU 打印键（字符串）与值
-@fnc dump_str: bool, key: const &, value: @, ctx: &
+@fnc dump_str: bool, key: const &, value: *, ctx: &
     printf(" %s=%d", (key: char&), (value: node&)->v)
     return true
 
 # 按 MRU→LRU 打印键（i4）与值
-@fnc dump_int: bool, key: const &, value: @, ctx: &
+@fnc dump_int: bool, key: const &, value: *, ctx: &
     var kp: i4& = (key: i4&)
     printf(" %d=%d", kp[0], (value: node&)->v)
     return true
@@ -36,11 +36,11 @@ inc adt.sc
     ca.init(0 - 1, 3)                                # key_size=-1 拷贝字符串，cap=3
     var ha[5]: node@                                 # holder：持 value root 至退域
     ha[0] = make(1)
-    ca.put("a", (ha[0]: @))                          # MRU: a
+    ca.put("a", (ha[0]: *))                          # MRU: a
     ha[1] = make(2)
-    ca.put("b", (ha[1]: @))                          # MRU: b a
+    ca.put("b", (ha[1]: *))                          # MRU: b a
     ha[2] = make(3)
-    ca.put("c", (ha[2]: @))                          # MRU: c b a
+    ca.put("c", (ha[2]: *))                          # MRU: c b a
     printf("A len=%llu cap=%llu mru=%s lru=%s\n",
            ca.len(), ca.cap(), (ca.mru_key(): char&), (ca.lru_key(): char&))
 
@@ -52,7 +52,7 @@ inc adt.sc
 
     # put 新键 d 超容（>3）→ 淘汰队尾 b
     ha[3] = make(4)
-    ca.put("d", (ha[3]: @))                          # MRU: d a c（淘汰 b）
+    ca.put("d", (ha[3]: *))                          # MRU: d a c（淘汰 b）
     printf("A after_put_d: has_b=%d has_d=%d len=%llu\n",
            ca.has("b"), ca.has("d"), ca.len())
     printf("A each:")
@@ -61,7 +61,7 @@ inc adt.sc
 
     # replace：put 已存在键 a 改挂新 value 99（容器 release 旧 1、retain 新；len 不变 + 触顶）
     ha[4] = make(99)
-    ca.put("a", (ha[4]: @))                          # MRU: a d c
+    ca.put("a", (ha[4]: *))                          # MRU: a d c
     printf("A replace_a=%d len=%llu\n", (ca.get("a"): node&)->v, ca.len())
     printf("A each2:")
     ca.each(dump_str, nil)                           # a=99 d=4 c=3
@@ -80,7 +80,7 @@ inc adt.sc
     var i: i4 = 0
     while i < 4
         hb[i] = make((keys[i] + 1) * 10)             # 110 210 310 410
-        cb.put((&keys[i]: const &), (hb[i]: @))
+        cb.put((&keys[i]: const &), (hb[i]: *))
         i += 1
     # MRU→LRU: 40 30 20 10
     var mk: i4& = (cb.mru_key(): i4&)

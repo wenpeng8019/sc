@@ -10,8 +10,8 @@ typedef struct node {
 
 void node_drop(node *_this);
 sc_fat make(int32_t x);
-uint8_t dump_str(const void *key, sc_afat value, void *ctx);
-uint8_t dump_int(const void *key, sc_afat value, void *ctx);
+uint8_t dump_str(const void *key, sc_thin value, void *ctx);
+uint8_t dump_int(const void *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -57,14 +57,14 @@ sc_fat make(int32_t x) {
     }
 }
 
-uint8_t dump_str(const void *key, sc_afat value, void *ctx) {
+uint8_t dump_str(const void *key, sc_thin value, void *ctx) {
     /* line 24 */
     printf(" %s=%d", ((char*)(key)), ((node*)((value).p))->v);
     /* line 25 */
     return true;
 }
 
-uint8_t dump_int(const void *key, sc_afat value, void *ctx) {
+uint8_t dump_int(const void *key, sc_thin value, void *ctx) {
     /* line 29 */
     int32_t *kp = ((int32_t*)(key));
     /* line 30 */
@@ -85,17 +85,17 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[0], (void (*)(void *))node_drop);
     ha[0] = make(1);
     /* line 39 */
-    lru_put(&ca, "a", ({ sc_fat _ec1 = ha[0]; (sc_afat){_ec1.p, _ec1.tar, _ec1.own, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "a", ({ sc_fat _ec1 = ha[0]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
     /* line 40 */
     sc_fat_unbind_d(&ha[1], (void (*)(void *))node_drop);
     ha[1] = make(2);
     /* line 41 */
-    lru_put(&ca, "b", ({ sc_fat _ec2 = ha[1]; (sc_afat){_ec2.p, _ec2.tar, _ec2.own, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "b", ({ sc_fat _ec2 = ha[1]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
     /* line 42 */
     sc_fat_unbind_d(&ha[2], (void (*)(void *))node_drop);
     ha[2] = make(3);
     /* line 43 */
-    lru_put(&ca, "c", ({ sc_fat _ec3 = ha[2]; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "c", ({ sc_fat _ec3 = ha[2]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
     /* line 44 */
     printf("A len=%llu cap=%llu mru=%s lru=%s\n", lru_len(&ca), lru_cap(&ca), ((char*)(lru_mru_key(&ca))), ((char*)(lru_lru_key(&ca))));
     /* line 48 */
@@ -106,7 +106,7 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[3], (void (*)(void *))node_drop);
     ha[3] = make(4);
     /* line 55 */
-    lru_put(&ca, "d", ({ sc_fat _ec4 = ha[3]; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "d", ({ sc_fat _ec4 = ha[3]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
     /* line 56 */
     printf("A after_put_d: has_b=%d has_d=%d len=%llu\n", lru_has(&ca, "b"), lru_has(&ca, "d"), lru_len(&ca));
     /* line 58 */
@@ -119,7 +119,7 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[4], (void (*)(void *))node_drop);
     ha[4] = make(99);
     /* line 64 */
-    lru_put(&ca, "a", ({ sc_fat _ec5 = ha[4]; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "a", ({ sc_fat _ec5 = ha[4]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
     /* line 65 */
     printf("A replace_a=%d len=%llu\n", ((node*)((lru_get(&ca, "a")).p))->v, lru_len(&ca));
     /* line 66 */
@@ -154,7 +154,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make((keys[i] + 1) * 10);
         /* line 83 */
-        lru_put(&cb, ((const void*)(&(keys[i]))), ({ sc_fat _ec6 = hb[i]; (sc_afat){_ec6.p, _ec6.tar, _ec6.own, (void (*)(void *))node_drop}; }));
+        lru_put(&cb, ((const void*)(&(keys[i]))), ({ sc_fat _ec6 = hb[i]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
         /* line 84 */
         i += 1;
     }

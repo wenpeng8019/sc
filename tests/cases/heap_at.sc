@@ -47,7 +47,7 @@ inc adt.sc
     var i: i4 = 0
     while i < 7
         ha[i] = make(keys[i] * 10)
-        ta.push((&keys[i]: const &), (ha[i]: @))
+        ta.push((&keys[i]: const &), (ha[i]: *))
         i += 1
     printf("A len=%llu empty=%d\n", ta.len(), ta.is_empty())
 
@@ -67,7 +67,7 @@ inc adt.sc
     i = 0
     while i < 7
         hb[i] = make(keys[i] * 10)
-        tb.push((&keys[i]: const &), (hb[i]: @))
+        tb.push((&keys[i]: const &), (hb[i]: *))
         i += 1
     # 堆顶为最大键 80
     var tbk: i4& = (tb.peek_key(): i4&)
@@ -82,13 +82,13 @@ inc adt.sc
     tc.init(1, 0 - 1, nil, nil)
     var hc[4]: node@
     hc[0] = make(4)
-    tc.push("delta", (hc[0]: @))
+    tc.push("delta", (hc[0]: *))
     hc[1] = make(1)
-    tc.push("alpha", (hc[1]: @))
+    tc.push("alpha", (hc[1]: *))
     hc[2] = make(3)
-    tc.push("charlie", (hc[2]: @))
+    tc.push("charlie", (hc[2]: *))
     hc[3] = make(2)
-    tc.push("bravo", (hc[3]: @))
+    tc.push("bravo", (hc[3]: *))
     printf("C len=%llu top_key=%s\n", tc.len(), (tc.peek_key(): char&))  # alpha
     # 弹出两个最小：alpha bravo
     printf("C pop:")

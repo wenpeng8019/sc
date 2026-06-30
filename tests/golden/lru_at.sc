@@ -13,11 +13,11 @@ inc adt.sc
     p->v = x
     return p
 
-@fnc dump_str: bool, key: const &, value:@, ctx: &
+@fnc dump_str: bool, key: const &, value:*, ctx: &
     printf(" %s=%d", (key: char&), (value: node&)->v)
     return true
 
-@fnc dump_int: bool, key: const &, value:@, ctx: &
+@fnc dump_int: bool, key: const &, value:*, ctx: &
     var kp: i4& = (key: i4&)
     printf(" %d=%d", kp[0], (value: node&)->v)
     return true

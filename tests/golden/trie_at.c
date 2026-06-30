@@ -10,8 +10,8 @@ typedef struct node {
 
 void node_drop(node *_this);
 sc_fat make(int32_t x);
-uint8_t print_key(const char *key, sc_afat value, void *ctx);
-uint8_t dump_kv(const char *key, sc_afat value, void *ctx);
+uint8_t print_key(const char *key, sc_thin value, void *ctx);
+uint8_t dump_kv(const char *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -57,14 +57,14 @@ sc_fat make(int32_t x) {
     }
 }
 
-uint8_t print_key(const char *key, sc_afat value, void *ctx) {
+uint8_t print_key(const char *key, sc_thin value, void *ctx) {
     /* line 24 */
     printf(" %s", key);
     /* line 25 */
     return true;
 }
 
-uint8_t dump_kv(const char *key, sc_afat value, void *ctx) {
+uint8_t dump_kv(const char *key, sc_thin value, void *ctx) {
     /* line 29 */
     int64_t *cnt = ((int64_t*)(ctx));
     /* line 30 */
@@ -86,32 +86,32 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[0], (void (*)(void *))node_drop);
     ha[0] = make(10);
     /* line 40 */
-    trie_put(&tt, "cat", ({ sc_fat _ec1 = ha[0]; (sc_afat){_ec1.p, _ec1.tar, _ec1.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "cat", ({ sc_fat _ec1 = ha[0]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
     /* line 41 */
     sc_fat_unbind_d(&ha[1], (void (*)(void *))node_drop);
     ha[1] = make(20);
     /* line 42 */
-    trie_put(&tt, "car", ({ sc_fat _ec2 = ha[1]; (sc_afat){_ec2.p, _ec2.tar, _ec2.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "car", ({ sc_fat _ec2 = ha[1]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
     /* line 43 */
     sc_fat_unbind_d(&ha[2], (void (*)(void *))node_drop);
     ha[2] = make(30);
     /* line 44 */
-    trie_put(&tt, "card", ({ sc_fat _ec3 = ha[2]; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "card", ({ sc_fat _ec3 = ha[2]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
     /* line 45 */
     sc_fat_unbind_d(&ha[3], (void (*)(void *))node_drop);
     ha[3] = make(40);
     /* line 46 */
-    trie_put(&tt, "dog", ({ sc_fat _ec4 = ha[3]; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "dog", ({ sc_fat _ec4 = ha[3]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
     /* line 47 */
     sc_fat_unbind_d(&ha[4], (void (*)(void *))node_drop);
     ha[4] = make(50);
     /* line 48 */
-    trie_put(&tt, "do", ({ sc_fat _ec5 = ha[4]; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "do", ({ sc_fat _ec5 = ha[4]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
     /* line 49 */
     sc_fat_unbind_d(&ha[5], (void (*)(void *))node_drop);
     ha[5] = make(60);
     /* line 50 */
-    trie_put(&tt, "cart", ({ sc_fat _ec6 = ha[5]; (sc_afat){_ec6.p, _ec6.tar, _ec6.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "cart", ({ sc_fat _ec6 = ha[5]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
     /* line 51 */
     printf("A len=%llu\n", trie_len(&tt));
     /* line 52 */
@@ -122,7 +122,7 @@ int32_t main(void) {
     sc_fat hrep = {0};
     hrep = make(99);
     /* line 58 */
-    trie_put(&tt, "car", ({ sc_fat _ec7 = hrep; (sc_afat){_ec7.p, _ec7.tar, _ec7.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "car", ({ sc_fat _ec7 = hrep; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
     /* line 59 */
     printf("A replace car=%d len=%llu\n", ((node*)((trie_get(&tt, "car")).p))->v, trie_len(&tt));
     /* line 62 */
@@ -155,7 +155,7 @@ int32_t main(void) {
     sc_fat hempty = {0};
     hempty = make(70);
     /* line 82 */
-    trie_put(&tt, "", ({ sc_fat _ec8 = hempty; (sc_afat){_ec8.p, _ec8.tar, _ec8.own, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "", ({ sc_fat _ec8 = hempty; (sc_thin){_ec8.p, _ec8.tar, (void (*)(void *))node_drop}; }));
     /* line 83 */
     printf("C empty: has=%d get=%d all=%llu lp_zzz=%lld\n", trie_has(&tt, ""), ((node*)((trie_get(&tt, "")).p))->v, trie_count_prefix(&tt, ""), trie_longest_prefix(&tt, "zzz"));
     /* line 87 */

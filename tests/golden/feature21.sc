@@ -78,7 +78,7 @@ rpc greet_body: i4, n: i4, body: com[16, nil]
     printf("\n")
     return 0
 
-rpc session: ret, c: com&
+rpc serve: ret, c: com&
     c << greet(7, 9)
     c >> greet
     var msg[8]: char
@@ -107,7 +107,7 @@ fnc main: i4
     c.free = mb_free
     c.readable = mb_readable
     c.dev = &mb
-    var f: future& = async session(&c)
+    var f: future& = async serve(&c)
     async_loop(nil)
     printf("done\n")
     async_final()

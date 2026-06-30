@@ -117,7 +117,7 @@ static uint8_t __scdep_4_follow(__scdep_in *_this) {
     /* line 47 */
     ln->act = mse_loss(on->act, g_target);
     /* line 48 */
-    token_pulse(l, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_pulse(l, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 49 */
     return false;
 }
@@ -247,9 +247,9 @@ static float forward(void) {
     /* line 98 */
     IN[1].act = 2.0f;
     /* line 99 */
-    token_pulse(i0, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_pulse(i0, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 100 */
-    token_pulse(i1, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_pulse(i1, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 101 */
     return OUT[0].act;
 }
@@ -311,19 +311,19 @@ int32_t main(void) {
     /* line 104 */
     init_net();
     /* line 105 */
-    token_form(loss, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(LOSS_N), (token_exec)0);
+    token_form(loss, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(LOSS_N), (token_exec)0);
     /* line 106 */
-    token_form(o0, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(OUT[0]), (token_exec)0);
+    token_form(o0, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(OUT[0]), (token_exec)0);
     /* line 107 */
-    token_form(h0, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(HID[0]), (token_exec)0);
+    token_form(h0, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(HID[0]), (token_exec)0);
     /* line 108 */
-    token_form(h1, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(HID[1]), (token_exec)0);
+    token_form(h1, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(HID[1]), (token_exec)0);
     /* line 109 */
-    token_form(h2, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(HID[2]), (token_exec)0);
+    token_form(h2, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(HID[2]), (token_exec)0);
     /* line 110 */
-    token_form(i0, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(IN[0]), (token_exec)0);
+    token_form(i0, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(IN[0]), (token_exec)0);
     /* line 111 */
-    token_form(i1, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)&(IN[1]), (token_exec)0);
+    token_form(i1, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)&(IN[1]), (token_exec)0);
     /* line 113 */
     float last = 0.0f;
     /* line 114 */

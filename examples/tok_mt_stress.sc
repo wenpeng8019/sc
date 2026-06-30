@@ -17,7 +17,7 @@ tok counter: "/mt.counter"
     var m: i8 = b
     if i > b
         m = i
-    return (m: @)
+    return (m: *)
 
 # ---- enforce 从：峰值镜像 ----
 tok peak: "/mt.peak"
@@ -25,7 +25,7 @@ tok peak: "/mt.peak"
 # ---- 依赖：counter 任一变更 → 把当前值搬到 peak（follow 锁外运行，跨 token 副作用）----
 dep any: c:"/mt.counter"
     var v: i8 = (c->get(): i8)
-    peak->set((v: @), 0)
+    peak->set((v: *), 0)
     return false
 
 # 线程体：直接以标量参数传基数/轮数（对齐 feature9 的 rpc 形参约定），
@@ -34,14 +34,14 @@ rpc hammer: base: i4, rounds: i4
     var i: i4 = 0
     for i = 0; i < rounds; i++
         var v: i8 = (base: i8) + (i: i8)
-        counter->set((v: @), 0)
+        counter->set((v: *), 0)
         var seen: i8 = (counter->get(): i8)     # 读路径并发参与（seqlock 无锁读）
         if seen < v
             printf("BUG: counter regressed seen=%lld < v=%lld\n", seen, v)
 
 fnc main: i4
-    form counter, (0: @)            # 初始化 form 主
-    form peak, (0: @)               # 峰值镜像亦须 form 激活，否则 follow 内 set 仅入挂起
+    form counter, (0: *)            # 初始化 form 主
+    form peak, (0: *)               # 峰值镜像亦须 form 激活，否则 follow 内 set 仅入挂起
 
     var T: i4 = 8                   # 线程数
     var R: i4 = 20000              # 每线程轮数

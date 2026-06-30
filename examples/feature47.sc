@@ -22,7 +22,7 @@ tok level: "sensor.level"
     var m: i8 = b                        # 取较大者
     if i > b
         m = i
-    return (m: @)                        # 装箱回 @
+    return (m: *)                        # 装箱回 @
 
 # ---- 告警标志：无 combine 体（直赋型）；须由本模块 form 激活后方可 set/get ----
 tok alert: "sensor.alert"
@@ -31,24 +31,24 @@ tok alert: "sensor.alert"
 dep any: l:"sensor.level"
     var v: i8 = (l->get(): i8)
     if v > 100
-        alert->set((1: @), 0)
+        alert->set((1: *), 0)
     return false                         # 维持 or 门
 
 fnc main: i4
-    form level, (0: @)                   # 初始化主，初值 0（峰值保持 combine）
-    form alert, (0: @)                   # 直赋型亦须 form 激活，否则 set 仅入挂起、get 读不到
+    form level, (0: *)                   # 初始化主，初值 0（峰值保持 combine）
+    form alert, (0: *)                   # 直赋型亦须 form 激活，否则 set 仅入挂起、get 读不到
 
-    level->set((50: @), 0)               # 50 → 不超阈值
+    level->set((50: *), 0)               # 50 → 不超阈值
     var lv: i8 = (level->get(): i8)
     var al: i8 = (alert->get(): i8)
     printf("after 50:  level=%lld alert=%lld\n", lv, al)
 
-    level->set((150: @), 0)              # 150 → 超阈值，触发 alert
+    level->set((150: *), 0)              # 150 → 超阈值，触发 alert
     lv = (level->get(): i8)
     al = (alert->get(): i8)
     printf("after 150: level=%lld alert=%lld\n", lv, al)
 
-    level->set((30: @), 0)               # 30 < 当前峰值 150：combine 取较大者 → 仍 150
+    level->set((30: *), 0)               # 30 < 当前峰值 150：combine 取较大者 → 仍 150
     lv = (level->get(): i8)
     printf("after 30:  level=%lld\n", lv)
 

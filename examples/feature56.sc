@@ -21,8 +21,8 @@ tok gauge: "cd.gauge"
         return tok_modified()                # 强制刷新：值视为已变更，即便合成不变也传播
     var b: i8 = (this->base: i8)
     if i > b
-        return (i: @)                        # 取较大者
-    return (b: @)                            # 不大于当前峰值 → 合成不变 → 触发变更检测抑制
+        return (i: *)                        # 取较大者
+    return (b: *)                            # 不大于当前峰值 → 合成不变 → 触发变更检测抑制
 
 # ---- 计数 token（直赋型）：被各 follow 自增，度量传播次数 ----
 tok hits: "cd.hits"
@@ -32,41 +32,41 @@ tok ghits: "cd.ghits"
 dep any: s:"cd.sig"
     if this->active >= 0
         var h: i8 = (hits->get(): i8)
-        hits->set(((h + 1): @), 0)
+        hits->set(((h + 1): *), 0)
     return false
 
 # ---- gauge 变更 → ghits 自增 ----
 dep any: g:"cd.gauge"
     if this->active >= 0
         var c: i8 = (ghits->get(): i8)
-        ghits->set(((c + 1): @), 0)
+        ghits->set(((c + 1): *), 0)
     return false
 
 fnc main: i4
-    form sig, (0: @)
-    form gauge, (0: @)
-    form hits, (0: @)
-    form ghits, (0: @)
+    form sig, (0: *)
+    form gauge, (0: *)
+    form hits, (0: *)
+    form ghits, (0: *)
 
     # ---- 直赋型变更检测：相同值连发只传播一次 ----
-    sig->set((5: @), 0)                      # 0→5 变更 → hits=1
-    sig->set((5: @), 0)                      # 5→5 不变 → 抑制 → hits=1
-    sig->set((5: @), 0)                      # 5→5 不变 → 抑制 → hits=1
+    sig->set((5: *), 0)                      # 0→5 变更 → hits=1
+    sig->set((5: *), 0)                      # 5→5 不变 → 抑制 → hits=1
+    sig->set((5: *), 0)                      # 5→5 不变 → 抑制 → hits=1
     var h1: i8 = (hits->get(): i8)
     printf("直赋 set(5) x3:   hits=%lld (期望 1)\n", h1)
 
-    sig->set((7: @), 0)                      # 5→7 变更 → hits=2
+    sig->set((7: *), 0)                      # 5→7 变更 → hits=2
     var h2: i8 = (hits->get(): i8)
     printf("直赋 set(7):      hits=%lld (期望 2)\n", h2)
 
     # ---- combine 变更检测：取峰，较小值合成不变 → 抑制 ----
-    gauge->set((10: @), 0)                   # max(0,10)=10 变更 → ghits=1
-    gauge->set((3: @), 0)                    # max(10,3)=10 不变 → 抑制 → ghits=1
+    gauge->set((10: *), 0)                   # max(0,10)=10 变更 → ghits=1
+    gauge->set((3: *), 0)                    # max(10,3)=10 不变 → 抑制 → ghits=1
     var g1: i8 = (ghits->get(): i8)
     printf("combine 取峰抑制:  ghits=%lld (期望 1)\n", g1)
 
     # ---- modified 强制刷新：合成「不变」也传播 ----
-    gauge->set((0: @), 0)                    # input==0 → combine 返回 modified → 强制传播 → ghits=2
+    gauge->set((0: *), 0)                    # input==0 → combine 返回 modified → 强制传播 → ghits=2
     var g2: i8 = (ghits->get(): i8)
     printf("modified 强制刷新: ghits=%lld (期望 2)\n", g2)
 

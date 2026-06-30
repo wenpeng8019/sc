@@ -25,7 +25,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     /* line 21 */
     if (av != 0) {
         /* line 22 */
-        token_set(y, ((sc_afat){(void *)(intptr_t)(100 / av), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+        token_set(y, ((sc_thin){(void *)(intptr_t)(100 / av), (int32_t *)0, (void (*)(void *))0}), 0);
     }
     /* line 23 */
     return false;
@@ -41,7 +41,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
     /* line 28 */
     int64_t av = ((int64_t)((token_get(q)).p));
     /* line 29 */
-    token_set(q, ((sc_afat){(void *)(intptr_t)((av + bv) / 2), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_set(q, ((sc_thin){(void *)(intptr_t)((av + bv) / 2), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 30 */
     return false;
 }
@@ -54,11 +54,11 @@ int32_t main(void) {
     { token *_deps0[] = { a, b }; token_depend_loop(_deps0, 1, 1, 1, __scdep_0_tramp, NULL); }
     { token *_deps1[] = { b, a }; token_depend_loop(_deps1, 1, 1, 1, __scdep_1_tramp, NULL); }
     /* line 33 */
-    token_form(b, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    token_form(b, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 34 */
-    token_form(a, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    token_form(a, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 36 */
-    token_set(a, ((sc_afat){(void *)(intptr_t)(100), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_set(a, ((sc_thin){(void *)(intptr_t)(100), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 37 */
     printf("init: a=%lld  scc=%d size=%d\n", ((int64_t)((token_get(a)).p)), token_scc(a), token_scc_size(a));
     /* line 40 */

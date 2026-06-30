@@ -49,9 +49,9 @@ fnc main: i4
     c2->add(10)
     var c3: counter@ = counter()
     c3->add(20)
-    l.push((c1: @))                         # T@ 擦除为裸 @ 入列，list 取一份 retain
-    l.push((c2: @))
-    l.push((c3: @))
+    l.push((c1: *))                         # T@ 擦除为瘦指针 * 入列，list 取一份 retain
+    l.push((c2: *))
+    l.push((c3: *))
     l.sort(cnt_cmp)                         # 按 n 升序
     var i: u8 = 0
     for i = 0; i < l.len(); i++

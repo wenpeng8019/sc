@@ -96,7 +96,8 @@ rpc greet_body: i4, n: i4, body: com[16, nil]
     return 0
 
 #-- 异步会话 rpc：含 com >> / << ⇒ 自动状态机（标量 / 数组 / 句柄三类序列化）------
-rpc session: ret, c: com&
+# 注：rpc 名避开 op.h 内置 `session`（rpc 延迟应答会话句柄），故用 serve。
+rpc serve: ret, c: com&
     # 【F】标量：发参数 → 收并触发（每字段一个 await 让出点）
     c << greet(7, 9)
     c >> greet                          #   标量 rpc: a=7 b=9
@@ -134,7 +135,7 @@ fnc main: i4
     c.readable = mb_readable
     c.dev      = &mb
 
-    var f: future& = async session(&c)  # 挂起式启动 rpc，立即返回 future
+    var f: future& = async serve(&c)  # 挂起式启动 rpc，立即返回 future
     async_loop(nil)                     # 驱动事件循环，推进状态机直到完成
 
     printf("done\n")

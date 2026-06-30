@@ -26,28 +26,28 @@ dep any:
     var v: i8 = (r->get(): i8)
     if v < 0
         v = 0
-    c->set((v: @), 0)
+    c->set((v: *), 0)
     return false
 
 # 源 clean → 目标 report：翻倍。行内 map 写法。
 dep any: c:"wf.clean" map o:"wf.report"
     var v: i8 = (c->get(): i8)
-    o->set(((v * 2): @), 0)
+    o->set(((v * 2): *), 0)
     return false
 
 fnc main: i4
     # 本模块为三量之主：各须 form 激活方可 set/get 与级联（自下游向上游 form，初值灌定）
-    form report, (0: @)
-    form clean,  (0: @)
-    form raw,    (0: @)
+    form report, (0: *)
+    form clean,  (0: *)
+    form raw,    (0: *)
 
     # 深度分层（编译期烘焙的常量，O(1) 查表）：raw=0 → clean=1 → report=2
     printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
 
-    raw->set(((0 - 5): @), 0)            # -5 → clean 归零 0 → report 0
+    raw->set(((0 - 5): *), 0)            # -5 → clean 归零 0 → report 0
     printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
 
-    raw->set((21: @), 0)                 # 21 → clean 21 → report 42
+    raw->set((21: *), 0)                 # 21 → clean 21 → report 42
     printf("raw=21: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
 
     return 0

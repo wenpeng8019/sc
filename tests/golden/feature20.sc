@@ -2,14 +2,14 @@
 
 inc async.sc
 
-def session: {
+def sess: {
     name: char&
     seq: i4
 }
 
 fnc async_proc: i4, id: future_id, f: future&
     var v: i4 = (f->get(): i4)
-    var s: session& = (f->ctx(): session&)
+    var s: sess& = (f->ctx(): sess&)
     case id:
         conn:
             printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v)
@@ -22,8 +22,8 @@ fnc async_proc: i4, id: future_id, f: future&
 
 fnc main: i4
     async_init()
-    var s1: session = {"alpha", 1}
-    var s2: session = {"beta", 2}
+    var s1: sess = {"alpha", 1}
+    var s2: sess = {"beta", 2}
     var c: future& = future<conn>(&s1)
     done c, 7
     var d1: future& = future<data>(&s2)

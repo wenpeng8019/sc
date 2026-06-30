@@ -3570,7 +3570,9 @@ struct CGen {
             const Decl* mLen = findMethod(ct.name, "len");
             const Decl* mGet = idxGetterOf(ct.name);
             const TypeRef* grt = mGet->structCommon.type.get();
-            const bool getFat = grt && grt->fat;              // get 返回 @（如 list）→ 借用胖句柄
+            const bool getFat = grt && grt->fat;              // get 返回 @/*（如 list）→ 借用句柄
+            const bool getThin = grt && grt->thin;            // get 返回 （瘦指针）→ sc_thin（否则 sc_afat）
+            const char* getHTy = getThin ? "sc_thin" : "sc_afat";
             std::string elemBase = grt ? grt->name : "";
             int elemPtr = grt ? grt->ptr : 1;
             std::string recvTy = cTypeOf(ct.name, 1);
@@ -3593,7 +3595,7 @@ struct CGen {
             std::string declTy;
             if (cast) { declTy = cTypeOf(vBase, vPtr); vFat = false; }
             else {
-                declTy = getFat ? "sc_afat" : cTypeOf(elemBase, elemPtr);
+                declTy = getFat ? getHTy : cTypeOf(elemBase, elemPtr);
                 vBase = elemBase; vPtr = getFat ? 0 : elemPtr; vFat = getFat;
             }
             indent(); out << declTy << " " << s.forVar << " = ";
@@ -3629,8 +3631,11 @@ struct CGen {
             indent(); out << "for (int64_t " << FI << " = " << mFirst->name << "(" << FR << "); ; "
                           << FI << " = " << mAdv->name << "(" << FR << ", " << FI << "), " << FC << "++) {\n";
             depth++;
-            // value 变量（forIdxVars[0]）：借用 @（sc_afat），空句柄即终止；不参与作用域回收。
-            indent(); out << "sc_afat " << s.forIdxVars[0] << " = " << mVal->name
+            // value 变量（forIdxVars[0]）：借用句柄（value_at 返回瘦指针则 sc_thin，否则 sc_afat），
+            // 空句柄即终止；不参与作用域回收。
+            const TypeRef* vrt = mVal->structCommon.type.get();
+            const char* valHTy = (vrt && vrt->thin) ? "sc_thin" : "sc_afat";
+            indent(); out << valHTy << " " << s.forIdxVars[0] << " = " << mVal->name
                           << "(" << FR << ", " << FI << ");\n";
             indent(); out << "if (" << s.forIdxVars[0] << ".p == (void *)0) break;\n";
             if (hasNum) { indent(); out << "if (" << FC << " >= "; emitOpt(s.forNumE, "0"); out << ") break;\n"; }

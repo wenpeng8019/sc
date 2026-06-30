@@ -119,11 +119,11 @@ int32_t main(void) {
     /* line 51 */
     counter_add(((counter *)(c3).p), 20);
     /* line 52 */
-    list_push(&l, ({ sc_fat _ec3 = c1; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))0}; }));
+    list_push(&l, ({ sc_fat _ec3 = c1; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))0}; }));
     /* line 53 */
-    list_push(&l, ({ sc_fat _ec4 = c2; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))0}; }));
+    list_push(&l, ({ sc_fat _ec4 = c2; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))0}; }));
     /* line 54 */
-    list_push(&l, ({ sc_fat _ec5 = c3; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))0}; }));
+    list_push(&l, ({ sc_fat _ec5 = c3; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))0}; }));
     /* line 55 */
     list_sort(&l, cnt_cmp);
     /* line 56 */

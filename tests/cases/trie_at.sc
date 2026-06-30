@@ -20,12 +20,12 @@ inc adt.sc
     return p
 
 # 遍历回调：按字典序打印键
-@fnc print_key: bool, key: const char&, value: @, ctx: &
+@fnc print_key: bool, key: const char&, value: *, ctx: &
     printf(" %s", key)
     return true
 
 # 遍历回调：打印 key=val，并经 ctx(i8&) 累加键数
-@fnc dump_kv: bool, key: const char&, value: @, ctx: &
+@fnc dump_kv: bool, key: const char&, value: *, ctx: &
     var cnt: i8& = (ctx: i8&)
     cnt[0] += 1
     printf(" %s=%d", key, (value: node&)->v)
@@ -37,17 +37,17 @@ inc adt.sc
     # ---------- A：基本 put/has/get/len + replace ----------
     var ha[6]: node@                                 # holder：持有 value root 引用至退域
     ha[0] = make(10)
-    tt.put("cat", (ha[0]: @))
+    tt.put("cat", (ha[0]: *))
     ha[1] = make(20)
-    tt.put("car", (ha[1]: @))
+    tt.put("car", (ha[1]: *))
     ha[2] = make(30)
-    tt.put("card", (ha[2]: @))
+    tt.put("card", (ha[2]: *))
     ha[3] = make(40)
-    tt.put("dog", (ha[3]: @))
+    tt.put("dog", (ha[3]: *))
     ha[4] = make(50)
-    tt.put("do", (ha[4]: @))
+    tt.put("do", (ha[4]: *))
     ha[5] = make(60)
-    tt.put("cart", (ha[5]: @))
+    tt.put("cart", (ha[5]: *))
     printf("A len=%llu\n", tt.len())
     printf("A has: car=%d ca=%d dog=%d xyz=%d\n",
            tt.has("car"), tt.has("ca"), tt.has("dog"), tt.has("xyz"))
@@ -55,7 +55,7 @@ inc adt.sc
 
     # replace：car 改挂新 value 99（容器 release 旧 20、retain 新；len 不变）
     var hrep: node@ = make(99)
-    tt.put("car", (hrep: @))
+    tt.put("car", (hrep: *))
     printf("A replace car=%d len=%llu\n", (tt.get("car"): node&)->v, tt.len())
 
     # ---------- B：前缀查询 / 字典序遍历 / 最长前缀 ----------
@@ -79,7 +79,7 @@ inc adt.sc
 
     # ---------- C：空串键 / remove 剪枝 / clear / drop ----------
     var hempty: node@ = make(70)
-    tt.put("", (hempty: @))                          # 空串键：任意串的前缀
+    tt.put("", (hempty: *))                          # 空串键：任意串的前缀
     printf("C empty: has=%d get=%d all=%llu lp_zzz=%lld\n",
            tt.has(""), (tt.get(""): node&)->v, tt.count_prefix(""), tt.longest_prefix("zzz"))
 

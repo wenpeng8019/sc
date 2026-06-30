@@ -27,7 +27,7 @@ static sc_thin __sctok_sensor_level_combine(__sctok_in *_this) {
         m = i;
     }
     /* line 25 */
-    return ((sc_afat){(void *)(intptr_t)(m), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0});
+    return ((sc_thin){(void *)(intptr_t)(m), (int32_t *)0, (void (*)(void *))0});
 }
 
 static uint8_t __scdep_0_follow(__scdep_in *_this) {
@@ -38,7 +38,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     /* line 33 */
     if (v > 100) {
         /* line 34 */
-        token_set(alert, ((sc_afat){(void *)(intptr_t)(1), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+        token_set(alert, ((sc_thin){(void *)(intptr_t)(1), (int32_t *)0, (void (*)(void *))0}), 0);
     }
     /* line 35 */
     return false;
@@ -49,11 +49,11 @@ int32_t main(void) {
     alert = token_bind("sensor.alert", NULL);
     { token *_deps0[] = { level }; token_depend(_deps0, 1, 0, __scdep_0_tramp, NULL); }
     /* line 38 */
-    token_form(level, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    token_form(level, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 39 */
-    token_form(alert, ((sc_afat){(void *)(intptr_t)(0), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
+    token_form(alert, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 41 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(50), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_set(level, ((sc_thin){(void *)(intptr_t)(50), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 42 */
     int64_t lv = ((int64_t)((token_get(level)).p));
     /* line 43 */
@@ -61,7 +61,7 @@ int32_t main(void) {
     /* line 44 */
     printf("after 50:  level=%lld alert=%lld\n", lv, al);
     /* line 46 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(150), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_set(level, ((sc_thin){(void *)(intptr_t)(150), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 47 */
     lv = ((int64_t)((token_get(level)).p));
     /* line 48 */
@@ -69,7 +69,7 @@ int32_t main(void) {
     /* line 49 */
     printf("after 150: level=%lld alert=%lld\n", lv, al);
     /* line 51 */
-    token_set(level, ((sc_afat){(void *)(intptr_t)(30), (int32_t *)0, SC_OWN_RAW, (void (*)(void *))0}), 0);
+    token_set(level, ((sc_thin){(void *)(intptr_t)(30), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 52 */
     lv = ((int64_t)((token_get(level)).p));
     /* line 53 */

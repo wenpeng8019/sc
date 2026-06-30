@@ -128,7 +128,7 @@
 
 
 # ---------------- list：段式裸 @ 自动指针容器 ----------------
-# 元素为裸自动指针 @（sc_afat），list 拥有元素（每元素一份 retain）。
+# 元素为瘦自动指针 *（sc_thin），list 拥有元素（每元素一份 retain）。
 # 段式存储：元素 i 住第 i/LIST_SEG 段的第 i%LIST_SEG 槽；段索引表与各段内存均来自 mem
 #   chunk（不受全局 -DSC_POOL 影响）。核心接口与 array 一致，区别仅在元素是 ref 句柄而非值块。
 # 取出语义「取用分离」：get 借用（返回句柄、不改计数）；pop/remove_at 仅删除并 release（返回

@@ -110,7 +110,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&ha[i], (void (*)(void *))node_drop);
         ha[i] = make(keys[i] * 10);
         /* line 50 */
-        heap_push(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_afat){_ec1.p, _ec1.tar, _ec1.own, (void (*)(void *))node_drop}; }));
+        heap_push(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
         /* line 51 */
         i += 1;
     }
@@ -140,7 +140,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make(keys[i] * 10);
         /* line 70 */
-        heap_push(&tb, ((const void*)(&(keys[i]))), ({ sc_fat _ec2 = hb[i]; (sc_afat){_ec2.p, _ec2.tar, _ec2.own, (void (*)(void *))node_drop}; }));
+        heap_push(&tb, ((const void*)(&(keys[i]))), ({ sc_fat _ec2 = hb[i]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
         /* line 71 */
         i += 1;
     }
@@ -164,22 +164,22 @@ int32_t main(void) {
     sc_fat_unbind_d(&hc[0], (void (*)(void *))node_drop);
     hc[0] = make(4);
     /* line 85 */
-    heap_push(&tc, "delta", ({ sc_fat _ec3 = hc[0]; (sc_afat){_ec3.p, _ec3.tar, _ec3.own, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "delta", ({ sc_fat _ec3 = hc[0]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
     /* line 86 */
     sc_fat_unbind_d(&hc[1], (void (*)(void *))node_drop);
     hc[1] = make(1);
     /* line 87 */
-    heap_push(&tc, "alpha", ({ sc_fat _ec4 = hc[1]; (sc_afat){_ec4.p, _ec4.tar, _ec4.own, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "alpha", ({ sc_fat _ec4 = hc[1]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
     /* line 88 */
     sc_fat_unbind_d(&hc[2], (void (*)(void *))node_drop);
     hc[2] = make(3);
     /* line 89 */
-    heap_push(&tc, "charlie", ({ sc_fat _ec5 = hc[2]; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "charlie", ({ sc_fat _ec5 = hc[2]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
     /* line 90 */
     sc_fat_unbind_d(&hc[3], (void (*)(void *))node_drop);
     hc[3] = make(2);
     /* line 91 */
-    heap_push(&tc, "bravo", ({ sc_fat _ec6 = hc[3]; (sc_afat){_ec6.p, _ec6.tar, _ec6.own, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "bravo", ({ sc_fat _ec6 = hc[3]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
     /* line 92 */
     printf("C len=%llu top_key=%s\n", heap_len(&tc), ((char*)(heap_peek_key(&tc))));
     /* line 94 */

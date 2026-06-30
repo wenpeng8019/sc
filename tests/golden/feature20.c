@@ -2,7 +2,7 @@
 #include "platform.h"
 #include "builtins/async/async.h"
 
-typedef struct session session;
+typedef struct sess sess;
 
 typedef enum { /* base: int32_t */
     conn,
@@ -10,10 +10,10 @@ typedef enum { /* base: int32_t */
     term
 } future_id;
 
-typedef struct session {
+typedef struct sess {
     char *name;
     int32_t seq;
-} session;
+} sess;
 
 static int32_t async_proc(future_id id, future *f);
 typedef struct com__project {
@@ -41,66 +41,66 @@ static inline future *future__new_tagged(int _id, void *_ctx) {
 }
 
 static int32_t async_proc(future_id id, future *f) {
-    /* line 41 */
-    int32_t v = ((int32_t)(future_get(f)));
     /* line 42 */
-    session *s = ((session*)(future_ctx(f)));
+    int32_t v = ((int32_t)(future_get(f)));
     /* line 43 */
+    sess *s = ((sess*)(future_ctx(f)));
+    /* line 44 */
     switch (id) {
         case conn:
         {
-            /* line 45 */
+            /* line 46 */
             printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
         case data:
         {
-            /* line 47 */
+            /* line 48 */
             printf("派发 data[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
         case term:
         {
-            /* line 49 */
-            printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v);
             /* line 50 */
+            printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v);
+            /* line 51 */
             return -(1);
             break;
         }
     }
-    /* line 51 */
+    /* line 52 */
     return 0;
 }
 
 int32_t main(void) {
     sc_mod_async_init();
-    /* line 54 */
+    /* line 55 */
     async_init();
-    /* line 57 */
-    session s1 = {"alpha", 1};
     /* line 58 */
-    session s2 = {"beta", 2};
-    /* line 62 */
-    future *c = future__new_tagged(conn, &(s1));
+    sess s1 = {"alpha", 1};
+    /* line 59 */
+    sess s2 = {"beta", 2};
     /* line 63 */
-    future_done(c, (void *)(intptr_t)(7));
+    future *c = future__new_tagged(conn, &(s1));
     /* line 64 */
-    future *d1 = future__new_tagged(data, &(s2));
+    future_done(c, (void *)(intptr_t)(7));
     /* line 65 */
-    future_done(d1, (void *)(intptr_t)(42));
+    future *d1 = future__new_tagged(data, &(s2));
     /* line 66 */
-    future *d2 = future__new_tagged(data, &(s1));
+    future_done(d1, (void *)(intptr_t)(42));
     /* line 67 */
-    future_done(d2, (void *)(intptr_t)(43));
+    future *d2 = future__new_tagged(data, &(s1));
     /* line 68 */
-    future *x = future__new_tagged(term, &(s2));
+    future_done(d2, (void *)(intptr_t)(43));
     /* line 69 */
+    future *x = future__new_tagged(term, &(s2));
+    /* line 70 */
     future_done(x, (void *)(intptr_t)(0));
-    /* line 72 */
+    /* line 73 */
     async_loop(async_proc);
-    /* line 74 */
-    async_final();
     /* line 75 */
+    async_final();
+    /* line 76 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

@@ -69,7 +69,7 @@ static inline int32_t greet_body(int32_t n, struct com__project body) {
     return _p._;
 }
 
-struct session {
+struct serve {
     int32_t _;
     future *_ret;
     int _state;
@@ -84,8 +84,8 @@ struct session {
     struct greet_buf *_crpc3;
     struct greet_body *_crpc4;
 };
-static void session_rpc(struct session *_p);
-static future *session__async(com *c);
+static void serve_rpc(struct serve *_p);
+static future *serve__async(com *c);
 
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
@@ -219,16 +219,16 @@ static void greet_body_rpc(struct greet_body *_p) {
     _p->_ = 0; return;
 }
 
-static future *session__async(com *c) {
-    struct session *_p = (struct session *)calloc(1, sizeof(struct session));
+static future *serve__async(com *c) {
+    struct serve *_p = (struct serve *)calloc(1, sizeof(struct serve));
     _p->_state = 0;
     _p->_ret = future_new();
     _p->c = c;
-    session_rpc(_p);
+    serve_rpc(_p);
     return _p->_ret;
 }
 
-static void session_rpc(struct session *_p) {
+static void serve_rpc(struct serve *_p) {
     switch (_p->_state) {
         case 0: goto _s0;
         case 1: goto _s1;
@@ -249,21 +249,21 @@ static void session_rpc(struct session *_p) {
     _p->_crpc0->a = 7;
     _p->_crpc0->b = 9;
     _p->_fut = com_write_async(_p->c, (void *)&(_p->_crpc0->a), sizeof(_p->_crpc0->a));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s1;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s1;
     _p->_state = 1; return;
     _s1: ;
     _p->_fut = com_write_async(_p->c, (void *)&(_p->_crpc0->b), sizeof(_p->_crpc0->b));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s2;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s2;
     _p->_state = 2; return;
     _s2: ;
     free(_p->_crpc0);
     _p->_crpc1 = (struct greet *)calloc(1, sizeof(struct greet));
     _p->_fut = com_read_async(_p->c, (void *)&(_p->_crpc1->a), sizeof(_p->_crpc1->a));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s3;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s3;
     _p->_state = 3; return;
     _s3: ;
     _p->_fut = com_read_async(_p->c, (void *)&(_p->_crpc1->b), sizeof(_p->_crpc1->b));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s4;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s4;
     _p->_state = 4; return;
     _s4: ;
     greet_rpc(_p->_crpc1);
@@ -276,11 +276,11 @@ static void session_rpc(struct session *_p) {
     _p->_crpc2->buf = _p->msg;
     _p->_crpc2->buf_size = sizeof(char[8]);
     _p->_fut = com_write_async(_p->c, (void *)&(_p->_crpc2->tag), sizeof(_p->_crpc2->tag));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s5;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s5;
     _p->_state = 5; return;
     _s5: ;
     _p->_fut = com_write_async(_p->c, (void *)(_p->_crpc2->buf), (uint32_t)_p->_crpc2->buf_size);
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s6;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s6;
     _p->_state = 6; return;
     _s6: ;
     free(_p->_crpc2);
@@ -288,11 +288,11 @@ static void session_rpc(struct session *_p) {
     _p->_crpc3->buf = calloc(1, sizeof(char[8]));
     _p->_crpc3->buf_size = sizeof(char[8]);
     _p->_fut = com_read_async(_p->c, (void *)&(_p->_crpc3->tag), sizeof(_p->_crpc3->tag));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s7;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s7;
     _p->_state = 7; return;
     _s7: ;
     _p->_fut = com_read_async(_p->c, (void *)(_p->_crpc3->buf), (uint32_t)_p->_crpc3->buf_size);
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s8;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s8;
     _p->_state = 8; return;
     _s8: ;
     greet_buf_rpc(_p->_crpc3);
@@ -301,24 +301,24 @@ static void session_rpc(struct session *_p) {
     _p->n5 = 5;
     fill_raw(&(_p->raw[0]));
     _p->_fut = com_write_async(_p->c, (void *)&(_p->n5), sizeof(_p->n5));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s9;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s9;
     _p->_state = 9; return;
     _s9: ;
     _p->_fut = com_write_async(_p->c, (void *)&(_p->raw), sizeof(_p->raw));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s10;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s10;
     _p->_state = 10; return;
     _s10: ;
     _p->_crpc4 = (struct greet_body *)calloc(1, sizeof(struct greet_body));
     _p->_crpc4->body.size = 16;
     _p->_crpc4->body.ending = NULL;
     _p->_fut = com_read_async(_p->c, (void *)&(_p->_crpc4->n), sizeof(_p->_crpc4->n));
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s11;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s11;
     _p->_state = 11; return;
     _s11: ;
     _p->_crpc4->body._ = _p->c->alloc(_p->c, _p->_crpc4->body.size, _p->_crpc4->body.ending);
     _p->_crpc4->body._->_self = _p->c;
     _p->_fut = com_limit_read_async(_p->c, _p->_crpc4->body._);
-    if (future_await(_p->_fut, _p, (void (*)(void *))session_rpc)) goto _s12;
+    if (future_await(_p->_fut, _p, (void (*)(void *))serve_rpc)) goto _s12;
     _p->_state = 12; return;
     _s12: ;
     greet_body_rpc(_p->_crpc4);
@@ -329,37 +329,37 @@ static void session_rpc(struct session *_p) {
 
 int32_t main(void) {
     sc_mod_async_init();
-    /* line 123 */
+    /* line 124 */
     async_init();
-    /* line 125 */
-    membuf mb = {0};
     /* line 126 */
-    mb.wpos = 0;
+    membuf mb = {0};
     /* line 127 */
+    mb.wpos = 0;
+    /* line 128 */
     mb.rpos = 0;
-    /* line 129 */
-    com c = {0};
     /* line 130 */
-    c.read = mb_read;
+    com c = {0};
     /* line 131 */
-    c.write = mb_write;
+    c.read = mb_read;
     /* line 132 */
-    c.alloc = mb_alloc;
+    c.write = mb_write;
     /* line 133 */
-    c.free = mb_free;
+    c.alloc = mb_alloc;
     /* line 134 */
-    c.readable = mb_readable;
+    c.free = mb_free;
     /* line 135 */
+    c.readable = mb_readable;
+    /* line 136 */
     c.dev = &(mb);
-    /* line 137 */
-    future *f = session__async(&(c));
     /* line 138 */
+    future *f = serve__async(&(c));
+    /* line 139 */
     async_loop(NULL);
-    /* line 140 */
-    printf("done\n");
     /* line 141 */
-    async_final();
+    printf("done\n");
     /* line 142 */
+    async_final();
+    /* line 143 */
     {
         int32_t _ret = 0;
         sc_mod_async_drop();

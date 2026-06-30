@@ -29,7 +29,8 @@
 inc async.sc                 # 触发链接 libuv 运行时（future/async_* 默认实现）
 
 # 会话上下文：发起异步操作时确定（哪条连接），派发完成时据此归属
-def session: {
+# 注：类型名避开 op.h 内置 `session`（rpc 延迟应答会话），故用 sess。
+def sess: {
     name: char&              # 连接/会话名
     seq:  i4                 # 序号
 }
@@ -39,7 +40,7 @@ def session: {
 # 返回 <0 请求 looper 停循环（如收到终止事件 term）。
 fnc async_proc: i4, id: future_id, f: future&
     var v: i4 = f->get(): i4               # 完成载荷（done 时写入，: i4 还原擦除标量）
-    var s: session& = f->ctx(): session&   # 发起时上下文（future<ID>(&s) 挂载）
+    var s: sess& = f->ctx(): sess&   # 发起时上下文（future<ID>(&s) 挂载）
     case id:
         conn:
             printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v)
@@ -54,8 +55,8 @@ fnc main: i4
     async_init()                            # 建立当前线程事件循环
 
     # 两条会话作为上下文宿主（发起时确定归属）
-    var s1: session = {"alpha", 1}
-    var s2: session = {"beta", 2}
+    var s1: sess = {"alpha", 1}
+    var s2: sess = {"beta", 2}
 
     # 生产者：造带 id+ctx 的 future（消息）并兑现。done 可发生在任意线程；此处同步
     # 兑现仅为演示确定的 FIFO 派发顺序。三种 id 复用 data（聚合后枚举仅一项 data）。
