@@ -2,6 +2,7 @@
 compiler/build/
 compiler/build-uv/
 compiler/build-dist/
+compiler/build-ssl/
 *.o
 *.out
 *.exe

@@ -318,6 +318,214 @@ int32_t ssl_write(void *sv, void *buf, uint32_t len) {
     return SSL_ERR;
 }
 
+/* ===================== RSA 代理实现（覆盖 crypto 弱桩） =====================
+ * crypto 模块声明 crypto_rsa_*（见 builtins/crypto/crypto.sc），自身只给
+ * __attribute__((weak)) 安全失败桩。本文件在编译进 OpenSSL 后端时提供同名
+ * 强符号，链接期覆盖弱桩；故仅当工程同时 inc crypto.sc + inc ssl.sc 且 scc
+ * 以 -DSCC_SSL_BACKEND=openssl 构建时，RSA 才真正可用。
+ * 不透明句柄 = EVP_PKEY*；fmt：0=DER 1=PEM；hash_id 见 crypto.h SC_HASH_*。 */
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
+#include <openssl/bn.h>
+#include <openssl/buffer.h>
+#include <openssl/x509.h>
+
+static const EVP_MD *sc_rsa_md(int32_t hash_id) {
+    switch (hash_id) {
+        case 1: return EVP_sha1();
+        case 3: return EVP_sha224();
+        case 4: return EVP_sha256();
+        case 5: return EVP_sha384();
+        case 6: return EVP_sha512();
+        default: return NULL;
+    }
+}
+
+int32_t crypto_rsa_backend(void) { return SSL_BACKEND_OPENSSL; }
+
+void *crypto_rsa_keygen(uint32_t bits, uint32_t pub_e) {
+    EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    EVP_PKEY *pkey = NULL;
+    BIGNUM *e = NULL;
+    if (!ctx) return NULL;
+    if (EVP_PKEY_keygen_init(ctx) <= 0) goto done;
+    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, (int)bits) <= 0) goto done;
+    e = BN_new();
+    if (!e || !BN_set_word(e, pub_e ? pub_e : 65537)) goto done;
+    if (EVP_PKEY_CTX_set1_rsa_keygen_pubexp(ctx, e) <= 0) goto done;  /* set1：内部复制 e */
+    EVP_PKEY_keygen(ctx, &pkey);
+done:
+    if (e) BN_free(e);
+    EVP_PKEY_CTX_free(ctx);
+    return pkey;
+}
+
+void crypto_rsa_free(void *k) { if (k) EVP_PKEY_free((EVP_PKEY *)k); }
+
+void *crypto_rsa_import(void *buf, uint64_t len, int32_t is_private, int32_t fmt) {
+    EVP_PKEY *pkey = NULL;
+    BIO *bio = BIO_new_mem_buf(buf, (int)len);
+    if (!bio) return NULL;
+    if (fmt == 1) {   /* PEM */
+        if (is_private) pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+        else            pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    } else {          /* DER */
+        if (is_private) pkey = d2i_PrivateKey_bio(bio, NULL);
+        else            pkey = d2i_PUBKEY_bio(bio, NULL);
+    }
+    BIO_free(bio);
+    return pkey;
+}
+
+int32_t crypto_rsa_export(void *k, int32_t is_private, int32_t fmt, uint8_t *out, uint64_t cap) {
+    EVP_PKEY *pkey = (EVP_PKEY *)k;
+    BIO *bio;
+    int ok = 0, n = -1;
+    if (!pkey) return -1;
+    bio = BIO_new(BIO_s_mem());
+    if (!bio) return -1;
+    if (fmt == 1) {   /* PEM */
+        if (is_private) ok = PEM_write_bio_PrivateKey(bio, pkey, NULL, NULL, 0, NULL, NULL);
+        else            ok = PEM_write_bio_PUBKEY(bio, pkey);
+    } else {          /* DER */
+        if (is_private) ok = i2d_PrivateKey_bio(bio, pkey);
+        else            ok = i2d_PUBKEY_bio(bio, pkey);
+    }
+    if (ok) {
+        BUF_MEM *mem = NULL;
+        BIO_get_mem_ptr(bio, &mem);
+        if (mem && (uint64_t)mem->length <= cap) {
+            memcpy(out, mem->data, mem->length);
+            n = (int)mem->length;
+        }
+    }
+    BIO_free(bio);
+    return n;
+}
+
+/* 通用签名：padding=RSA_PKCS1_PADDING（PKCS1v1.5）或 RSA_PKCS1_PSS_PADDING（PSS）。 */
+static int32_t sc_rsa_sign(EVP_PKEY *pkey, int32_t hash_id, const void *digest, uint64_t dlen,
+                           uint8_t *sig, uint64_t sigcap, int padding) {
+    const EVP_MD *md = sc_rsa_md(hash_id);
+    EVP_PKEY_CTX *ctx;
+    size_t siglen = (size_t)sigcap;
+    int rc = -1;
+    if (!pkey || !md) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_sign_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, padding) > 0 &&
+        EVP_PKEY_CTX_set_signature_md(ctx, md) > 0 &&
+        (padding != RSA_PKCS1_PSS_PADDING ||
+         EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx, RSA_PSS_SALTLEN_DIGEST) > 0) &&
+        EVP_PKEY_sign(ctx, sig, &siglen, (const unsigned char *)digest, (size_t)dlen) > 0)
+        rc = (int32_t)siglen;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+
+static int32_t sc_rsa_verify(EVP_PKEY *pkey, int32_t hash_id, const void *digest, uint64_t dlen,
+                             const void *sig, uint64_t siglen, int padding) {
+    const EVP_MD *md = sc_rsa_md(hash_id);
+    EVP_PKEY_CTX *ctx;
+    int rc = -1;
+    if (!pkey || !md) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_verify_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, padding) > 0 &&
+        EVP_PKEY_CTX_set_signature_md(ctx, md) > 0 &&
+        (padding != RSA_PKCS1_PSS_PADDING ||
+         EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx, RSA_PSS_SALTLEN_DIGEST) > 0) &&
+        EVP_PKEY_verify(ctx, (const unsigned char *)sig, (size_t)siglen,
+                        (const unsigned char *)digest, (size_t)dlen) == 1)
+        rc = 0;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+
+int32_t crypto_rsa_sign_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    return sc_rsa_sign((EVP_PKEY *)k, hash_id, digest, dlen, sig, sigcap, RSA_PKCS1_PADDING);
+}
+int32_t crypto_rsa_verify_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    return sc_rsa_verify((EVP_PKEY *)k, hash_id, digest, dlen, sig, siglen, RSA_PKCS1_PADDING);
+}
+int32_t crypto_rsa_sign_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    return sc_rsa_sign((EVP_PKEY *)k, hash_id, digest, dlen, sig, sigcap, RSA_PKCS1_PSS_PADDING);
+}
+int32_t crypto_rsa_verify_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    return sc_rsa_verify((EVP_PKEY *)k, hash_id, digest, dlen, sig, siglen, RSA_PKCS1_PSS_PADDING);
+}
+
+int32_t crypto_rsa_encrypt_oaep(void *k, int32_t hash_id, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    EVP_PKEY *pkey = (EVP_PKEY *)k;
+    const EVP_MD *md = sc_rsa_md(hash_id);
+    EVP_PKEY_CTX *ctx;
+    size_t outlen = (size_t)cap;
+    int rc = -1;
+    if (!pkey || !md) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_encrypt_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) > 0 &&
+        EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) > 0 &&
+        EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) > 0 &&
+        EVP_PKEY_encrypt(ctx, out, &outlen, (const unsigned char *)plain, (size_t)plen) > 0)
+        rc = (int32_t)outlen;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+int32_t crypto_rsa_decrypt_oaep(void *k, int32_t hash_id, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    EVP_PKEY *pkey = (EVP_PKEY *)k;
+    const EVP_MD *md = sc_rsa_md(hash_id);
+    EVP_PKEY_CTX *ctx;
+    size_t outlen = (size_t)cap;
+    int rc = -1;
+    if (!pkey || !md) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_decrypt_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) > 0 &&
+        EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) > 0 &&
+        EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) > 0 &&
+        EVP_PKEY_decrypt(ctx, out, &outlen, (const unsigned char *)cipher, (size_t)clen) > 0)
+        rc = (int32_t)outlen;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+
+int32_t crypto_rsa_encrypt_pkcs1(void *k, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    EVP_PKEY *pkey = (EVP_PKEY *)k;
+    EVP_PKEY_CTX *ctx;
+    size_t outlen = (size_t)cap;
+    int rc = -1;
+    if (!pkey) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_encrypt_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) > 0 &&
+        EVP_PKEY_encrypt(ctx, out, &outlen, (const unsigned char *)plain, (size_t)plen) > 0)
+        rc = (int32_t)outlen;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+int32_t crypto_rsa_decrypt_pkcs1(void *k, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    EVP_PKEY *pkey = (EVP_PKEY *)k;
+    EVP_PKEY_CTX *ctx;
+    size_t outlen = (size_t)cap;
+    int rc = -1;
+    if (!pkey) return -1;
+    ctx = EVP_PKEY_CTX_new(pkey, NULL);
+    if (!ctx) return -1;
+    if (EVP_PKEY_decrypt_init(ctx) > 0 &&
+        EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) > 0 &&
+        EVP_PKEY_decrypt(ctx, out, &outlen, (const unsigned char *)cipher, (size_t)clen) > 0)
+        rc = (int32_t)outlen;
+    EVP_PKEY_CTX_free(ctx);
+    return rc;
+}
+
 #else
 /* ===================== none 后端（未配置 TLS：所有调用安全失败） ===================== */
 
