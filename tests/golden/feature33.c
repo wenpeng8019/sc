@@ -53,7 +53,10 @@ int32_t main(void) {
     /* line 49 */
     Vec_int_push(&(vi), 30);
     /* line 50 */
-    printf("Vec_int: %d %d %d\n", Vec_int_get(&(vi), 0), Vec_int_get(&(vi), 1), Vec_int_get(&(vi), 2));
+    int32_t _sq0 = Vec_int_get(&(vi), 0);
+    int32_t _sq1 = Vec_int_get(&(vi), 1);
+    int32_t _sq2 = Vec_int_get(&(vi), 2);
+    printf("Vec_int: %d %d %d\n", _sq0, _sq1, _sq2);
     /* line 52 */
     Vec_dbl vd = {0};
     /* line 53 */
@@ -63,7 +66,9 @@ int32_t main(void) {
     /* line 55 */
     Vec_dbl_push(&(vd), 2.5);
     /* line 56 */
-    printf("Vec_dbl: %g %g\n", Vec_dbl_get(&(vd), 0), Vec_dbl_get(&(vd), 1));
+    double _sq3 = Vec_dbl_get(&(vd), 0);
+    double _sq4 = Vec_dbl_get(&(vd), 1);
+    printf("Vec_dbl: %g %g\n", _sq3, _sq4);
     /* line 58 */
     Vec_pt vp = {0};
     /* line 59 */
@@ -77,7 +82,9 @@ int32_t main(void) {
     /* line 63 */
     printf("Vec_pt[0]: (%d, %d)\n", got.x, got.y);
     /* line 65 */
-    printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5));
+    int32_t _sq5 = max_i(3, 7);
+    double _sq6 = max_d(1.5, 0.5);
+    printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", _sq5, _sq6);
     /* line 66 */
     return 0;
 }

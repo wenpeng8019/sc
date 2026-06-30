@@ -1,0 +1,43 @@
+# 目标档示例：Windows x64 / MSVC（cl.exe）远程工具链构建
+# 本机（macOS/Linux）生成 C，经 SSH 推到一台 Windows 主机，用其原生 MSVC cl.exe 编译，
+# 再取回产物（--build）或在远端直接运行（run 模式）。无需本地装 MinGW/clang。
+#
+# 用法：
+#   scc app.sc        --target examples/targets/windows-x64.target          # 远端编译并运行
+#   scc app.sc --build -o app.exe --target examples/targets/windows-x64.target  # 远端编译，取回 app.exe
+#
+# 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
+# 认证沿用 SSH：build_key 指定私钥，或留空走 ssh-agent / ~/.ssh/id_rsa。
+
+# ---- 目标平台（用于 platform.h 平台定向 + 远端 OS 判定）----
+# windows 族三元组：令生成 C 走 Windows 分支，并自动判定远端为 cmd.exe + MSVC。
+triple = x86_64-pc-windows-msvc
+
+# ---- 远程构建主机（Windows）----
+build_host = 10.2.101.38            # Windows 主机名/IP（设了即启用远程构建；SCC_BUILD_HOST 覆盖）
+build_user = wenp                   # 登录用户（空=当前用户；SCC_BUILD_USER 覆盖）
+build_port = 2222                   # SSH 端口（空=22；SCC_BUILD_PORT 覆盖）
+build_dir  =                        # 远端构建根目录（空=%USERPROFILE% 下 scc-remote；SCC_BUILD_DIR 覆盖）
+build_key  =                        # 私钥文件（空=agent/默认私钥；SCC_BUILD_KEY 覆盖）
+
+# ---- 远端编译器（MSVC）----
+remote_cc = cl                      # 远端 C 编译器（cl=MSVC；SCC_REMOTE_CC 覆盖）
+remote_os = windows                 # 远端 OS：windows → cmd.exe shell（SCC_REMOTE_OS 覆盖）
+cc_style  = msvc                    # 编译器风味：msvc=cl.exe 选项风格（/I /c /Fo…；SCC_CC_STYLE 覆盖）
+
+# vcvars：MSVC 环境脚本（cl 前 call，置 INCLUDE/LIB/PATH）。按你机器的 VS 版本/路径调整。
+# 空则要求 cl 已在远端默认 PATH/环境（一般需此项）。SCC_VCVARS 覆盖。
+vcvars = C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat
+
+# ---- SSH 传输后端 ----
+# system：调系统 ssh/scp（推荐，已用密钥免密验证过）；libssh2：scc 内置。
+ssh_backend = system                # libssh2 | system（SCC_SSH_BACKEND 覆盖）
+
+# 说明：
+#  - cl.exe 仅在 Windows 运行，故「Windows 目标」即在该远端主机上编译（远端构建路径）。
+#  - 远端编译配方：cl /nologo /utf-8 /std:c17 /experimental:c11atomics /I builtins /I . /c …
+#    /utf-8 消除非 ASCII 注释的 C4819；/experimental:c11atomics 启用 <stdatomic.h>/_Atomic。
+#  - 链接库 -l<name> 自动转 <name>.lib；本机 -L/绝对 .a/.o 路径忽略（远端原生解析）。
+#  - 暂未支持 MSVC 下的 sync<q>（队列定向同步调用）与 forin 显式 step N——二者仍发出 GNU
+#    语句表达式 ({...})，cl 不支持；如需可改用普通 sync/默认步长（其余语言机制均已可移植）。
+#  - 首次连接未知主机：system 后端沿用系统 ssh 的 known_hosts 策略。

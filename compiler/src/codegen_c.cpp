@@ -151,6 +151,15 @@ struct CGen {
     const Program& prog;
     std::ostringstream out;     // 输出流
     int depth = 0;              // 当前缩进深度（每级4空格）
+
+    // ---- 实参求值顺序化（消除 C 实参/操作数求值顺序未定义的跨平台歧义）----
+    // 当一个调用含 ≥2 个「有副作用」的实参时，把这些实参按从左到右顺序抽取为
+    // 有序临时变量声明，再以临时引用改写调用，从而保证求值次序确定（左→右）。
+    struct SeqHoist { const Expr* e; std::string name; std::string ctype; };
+    std::vector<SeqHoist> seqList;                                   // 待发射的前置临时（求值顺序）
+    std::unordered_map<const Expr*, std::string> seqSubMap;          // 子表达式 → 临时名
+    const std::unordered_map<const Expr*, std::string>* curSeqSub = nullptr;  // 当前活动替换表
+    int seqTmpSeq = 0;          // 顺序化临时计数（全 TU 单调，避免同作用域重名）
     std::string structOwnerTag; // 正在 emit 字段的属主聚合标签（如 "struct com"）：
                                 //   供 MethodPtr 字段前置隐式接收者 T* 之用
     std::string srcFile;        // 非空时输出 #line 指令，调试器映射回 .sc 源码
@@ -1488,6 +1497,149 @@ struct CGen {
         return false;
     }
 
+    // ---------------- 实参求值顺序化 ----------------
+    // 表达式是否含「可观测副作用」：调用、赋值/复合赋值、自增自减。
+    bool seqHasSideEffect(const Expr& e) const {
+        switch (e.kind) {
+            case Expr::Call: case Expr::Sync: case Expr::Async: case Expr::Await:
+                return true;
+            case Expr::PostUnary:
+                return true;                                  // i++ / i--
+            case Expr::Unary:
+                if (e.op == "++" || e.op == "--") return true;
+                return e.a && seqHasSideEffect(*e.a);
+            case Expr::Binary:
+                if (!e.op.empty() && e.op.back() == '=' &&
+                    e.op != "==" && e.op != "!=" && e.op != "<=" && e.op != ">=")
+                    return true;                              // 赋值 / 复合赋值
+                return (e.a && seqHasSideEffect(*e.a)) || (e.b && seqHasSideEffect(*e.b));
+            case Expr::Ternary:
+                return (e.a && seqHasSideEffect(*e.a)) || (e.b && seqHasSideEffect(*e.b))
+                    || (e.c && seqHasSideEffect(*e.c));
+            case Expr::Index:
+                return (e.a && seqHasSideEffect(*e.a)) || (e.b && seqHasSideEffect(*e.b));
+            case Expr::Member: case Expr::Cast: case Expr::Sizeof:
+                return e.a && seqHasSideEffect(*e.a);
+            default: return false;
+        }
+    }
+
+    // 求一个「有副作用」实参表达式的 C 类型，用于顺序化临时声明。
+    // 仅当能可靠定型、且非胖指针/非数组/非 void 时返回 true（否则保守放弃该调用顺序化）。
+    bool seqArgCType(const Expr& e, std::string& ctype) const {
+        if (isFatExpr(e)) return false;          // 胖指针含移动/借用簿记，保守不顺序化
+        VType vt;
+        bool ok = exprVType(e, vt);
+        if (!ok && e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
+            // 普通函数 / rpc 调用：exprVType 仅对胖返回定型，这里直接取签名返回类型
+            const std::string& fn = e.a->text;
+            const Decl* sig = nullptr;
+            auto fit = funcs.find(fn);
+            if (fit != funcs.end()) {
+                sig = fit->second;
+                if (!sig->funcTypeName.empty()) {
+                    auto ft = funcTypes.find(sig->funcTypeName);
+                    if (ft != funcTypes.end()) sig = ft->second;
+                }
+            } else {
+                auto rit = rpcs.find(fn);
+                if (rit != rpcs.end()) sig = rit->second;
+            }
+            if (sig) {
+                const auto& rt = sig->structCommon.type;
+                if (rt && !rt->fat && !(rt->name.empty() && rt->ptr == 0)
+                    && rt->arrayDims.empty()) {
+                    vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                    ok = true;
+                }
+            }
+        }
+        if (!ok || vt.fat || vt.arr > 0) return false;
+        if (vt.name.empty() && vt.ptr == 0) return false;     // void / 无类型
+        ctype = cTypeOf(vt.name, vt.ptr);
+        return !ctype.empty() && ctype != "void";
+    }
+
+    // 规划一个语句级表达式的顺序化：递归找出「实参含 ≥2 个有副作用项且全部可定型」
+    // 的调用，把这些有副作用的实参登记为有序临时（seqList 按求值顺序，sub 为替换表）。
+    // live=false 表示处于短路/三元分支等条件求值区域 —— 不可外提（会改变求值次数/语义）。
+    void planSeq(const Expr& e, bool live,
+                 std::vector<SeqHoist>& list,
+                 std::unordered_map<const Expr*, std::string>& sub) {
+        switch (e.kind) {
+            case Expr::Call: {
+                if (e.a) planSeq(*e.a, live, list, sub);     // 被调对象（o.m 的 o 等）
+                int seCount = 0;
+                for (auto& a : e.args) if (a && seqHasSideEffect(*a)) seCount++;
+                bool doSeq = live && seCount >= 2;
+                if (doSeq)
+                    for (auto& a : e.args)
+                        if (a && seqHasSideEffect(*a)) {
+                            std::string ct;
+                            if (!seqArgCType(*a, ct)) { doSeq = false; break; }
+                        }
+                for (auto& a : e.args)                        // 实参均为无条件求值
+                    if (a) planSeq(*a, live, list, sub);
+                if (doSeq)
+                    for (auto& a : e.args) {                  // 左→右登记有副作用实参
+                        if (!a || !seqHasSideEffect(*a)) continue;
+                        std::string ct;
+                        if (!seqArgCType(*a, ct)) continue;
+                        std::string nm = "_sq" + std::to_string(seqTmpSeq++);
+                        list.push_back({a.get(), nm, ct});
+                        sub[a.get()] = nm;
+                    }
+                break;
+            }
+            case Expr::Binary:
+                // && / || 右操作数短路求值：不可外提
+                if (e.a) planSeq(*e.a, live, list, sub);
+                if (e.b) planSeq(*e.b, live && e.op != "&&" && e.op != "||", list, sub);
+                break;
+            case Expr::Ternary:
+                if (e.a) planSeq(*e.a, live, list, sub);
+                if (e.b) planSeq(*e.b, false, list, sub);     // 分支条件求值
+                if (e.c) planSeq(*e.c, false, list, sub);
+                break;
+            case Expr::Unary: case Expr::PostUnary: case Expr::Cast: case Expr::Sizeof:
+                if (e.a) planSeq(*e.a, live, list, sub);
+                break;
+            case Expr::Index: case Expr::Member:
+                if (e.a) planSeq(*e.a, live, list, sub);
+                if (e.b) planSeq(*e.b, live, list, sub);
+                break;
+            default: break;
+        }
+    }
+
+    // 为语句级表达式 e 发射前置顺序化临时，并设置 curSeqSub 使后续 emitExpr 替换。
+    // 返回 true 表示已发射临时（调用方在发射主表达式后须调用 seqHoistEnd）。
+    bool seqHoistBegin(const Expr& e) {
+        if (curSeqSub) return false;                          // 嵌套上下文保守跳过
+        if (inMacro) return false;                            // def 宏体须保持单逻辑行，不外提
+        std::vector<SeqHoist> list;
+        std::unordered_map<const Expr*, std::string> sub;
+        planSeq(e, true, list, sub);
+        if (list.empty()) return false;
+        seqList = std::move(list);
+        seqSubMap = std::move(sub);
+        curSeqSub = &seqSubMap;
+        for (auto& h : seqList) {
+            indent();
+            out << h.ctype;
+            if (!h.ctype.empty() && h.ctype.back() != '*') out << ' ';
+            out << h.name << " = ";
+            auto it = seqSubMap.find(h.e);                    // 发射本临时值时不自替换
+            std::string nm = it->second;
+            seqSubMap.erase(it);
+            emitExpr(*h.e, true);
+            seqSubMap[h.e] = nm;                              // 复原供外层最终表达式替换
+            out << ";\n";
+        }
+        return true;
+    }
+    void seqHoistEnd() { curSeqSub = nullptr; seqSubMap.clear(); seqList.clear(); }
+
     // 取址 &access 的「最近胖 hop」：从 access 的 base 链向内 walk，首个胖子表达式
     // 即该子成员所住堆对象的 hop（其 tar 即子成员共享的 in 计数）。无胖 base 返回 nullptr。
     const Expr* fatHopOf(const Expr& access) const {
@@ -1663,6 +1815,11 @@ struct CGen {
 
     // ---------------- 表达式 ----------------
     void emitExpr(const Expr& e, bool top = false) {
+        // 顺序化替换：被外提为有序临时的子表达式，原位以临时名引用（值已先行算好）
+        if (curSeqSub) {
+            auto it = curSeqSub->find(&e);
+            if (it != curSeqSub->end()) { out << it->second; return; }
+        }
         switch (e.kind) {
             case Expr::IntLit: {
                 // b/w 为 sc 扩展后缀（单/双字节），C 不识别，仅从后缀区剥离；保留 u/l。
@@ -2262,7 +2419,6 @@ struct CGen {
                 if (e.castFat) {
                     std::string srcT;
                     bool srcFat = isFatExpr(*e.a, &srcT);
-                    int n = fatTmpSeq++;
                     // —— 瘦指针强转 (e: T*) / (e: *)：sc_thin{p,tar,dtor}（无 own）——
                     if (e.castThin) {
                         if (e.op.empty()) {
@@ -2276,30 +2432,27 @@ struct CGen {
                                 break;
                             }
                             if (srcFat && srcT != "object" && classNames.count(srcT)) {
-                                out << "({ sc_fat _ec" << n << " = ";
+                                out << "sc_fat_as_thin_addoff(";
                                 emitExpr(*e.a, true);
-                                out << "; (sc_thin){(void *)((char *)_ec" << n << ".p + offsetof("
-                                    << srcT << ", _class)), _ec" << n
-                                    << ".tar, (void (*)(void *))sc_obj_drop}; })";
+                                out << ", offsetof(" << srcT
+                                    << ", _class), (void (*)(void *))sc_obj_drop)";
                                 break;
                             }
                             std::string d = fatDtorArg(srcT);
-                            out << "({ sc_fat _ec" << n << " = ";
+                            out << "sc_fat_as_thin(";
                             emitExpr(*e.a, true);
-                            out << "; (sc_thin){_ec" << n << ".p, _ec" << n << ".tar, "
-                                << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
+                            out << ", " << (d.empty() ? "(void (*)(void *))0" : d) << ")";
                         } else {
                             // 还原为 T@（sc_fat 视图，own=RAW 借用）
                             if (classNames.count(e.op)) {
-                                out << "({ sc_thin _rc" << n << " = ";
+                                out << "sc_thin_as_fat_suboff(";
                                 emitExpr(*e.a, true);
-                                out << "; (sc_fat){ (_rc" << n << ".dtor == (void (*)(void *))sc_obj_drop)"
-                                    << " ? (void *)((char *)_rc" << n << ".p - offsetof(" << e.op
-                                    << ", _class)) : _rc" << n << ".p, _rc" << n << ".tar, SC_OWN_RAW }; })";
+                                out << ", offsetof(" << e.op
+                                    << ", _class), (void (*)(void *))sc_obj_drop)";
                             } else {
-                                out << "({ sc_thin _rc" << n << " = ";
+                                out << "sc_thin_as_fat(";
                                 emitExpr(*e.a, true);
-                                out << "; (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, SC_OWN_RAW}; })";
+                                out << ")";
                             }
                         }
                         break;
@@ -2323,20 +2476,18 @@ struct CGen {
                         // 携带派发能力，四向过桥对称：T@→@→object@ 亦无损（还原 object@ 直取 &_class）。
                         // object@ 源已是该形态（.p=&_class、dtor=sc_obj_drop），落入下方通用分支直透。
                         if (srcFat && srcT != "object" && classNames.count(srcT)) {
-                            out << "({ sc_fat _ec" << n << " = ";
+                            out << "sc_fat_as_afat_addoff(";
                             emitExpr(*e.a, true);
-                            out << "; (sc_afat){(void *)((char *)_ec" << n << ".p + offsetof("
-                                << srcT << ", _class)), _ec" << n << ".tar, _ec" << n
-                                << ".own, (void (*)(void *))sc_obj_drop}; })";
+                            out << ", offsetof(" << srcT
+                                << ", _class), (void (*)(void *))sc_obj_drop)";
                             break;
                         }
                         // object@ 源（已 object 风味）/ 非 class 类型（concrete 风味）：.p 原样，
                         // dtor 取静态析构（object→sc_obj_drop；普通 struct→T_drop/NULL）。
                         std::string d = fatDtorArg(srcT);
-                        out << "({ sc_fat _ec" << n << " = ";
+                        out << "sc_fat_as_afat(";
                         emitExpr(*e.a, true);
-                        out << "; (sc_afat){_ec" << n << ".p, _ec" << n << ".tar, _ec" << n
-                            << ".own, " << (d.empty() ? "(void (*)(void *))0" : d) << "}; })";
+                        out << ", " << (d.empty() ? "(void (*)(void *))0" : d) << ")";
                     } else {
                         // 恢复为 T@（sc_fat 视图）。按源风味分流：
                         //   · 源为命名 object@ → 具体类 T@：.p 是擦除的 _class 槽，container_of
@@ -2347,11 +2498,9 @@ struct CGen {
                         //       offsetof(T,_class)、object@ 还原直取；
                         //       concrete 风味（.p=实体基址，仅非 class struct）→ 直接取。
                         if (srcFat && srcT == "object" && classNames.count(e.op)) {
-                            out << "({ sc_fat _oc" << n << " = ";
+                            out << "sc_fat_suboff(";
                             emitExpr(*e.a, true);
-                            out << "; (sc_fat){(void *)((char *)_oc" << n << ".p - offsetof("
-                                << e.op << ", _class)), _oc" << n << ".tar, _oc" << n
-                                << ".own}; })";
+                            out << ", offsetof(" << e.op << ", _class))";
                             break;
                         }
                         if (srcFat && !srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
@@ -2361,32 +2510,25 @@ struct CGen {
                             // dtor=sc_obj_drop）。凡 class 类型擦除均属此，故 class 源恒可还原。
                             // --check=ref：断言 dtor==sc_obj_drop，捕获「非 class struct 擦除的裸 @
                             // 误还原 object@」（concrete 风味无 _class 派发槽，object@ 无意义）。
-                            out << "({ sc_afat _rc" << n << " = ";
+                            out << "sc_afat_as_fat(";
+                            if (g_refCheck) out << "__sc_afat_objck(";
                             emitExpr(*e.a, true);
-                            out << ";";
-                            if (g_refCheck)
-                                out << " if (_rc" << n << ".dtor != (void (*)(void *))sc_obj_drop) "
-                                    << "{ fprintf(stderr, \"sc: 裸 @ 还原 object@ 失败：源非 class 类型"
-                                    << "（无 _class 派发槽，object@ 无意义）\\n\"); abort(); }";
-                            out << " (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, _rc" << n
-                                << ".own}; })";
+                            if (g_refCheck) out << ", (void (*)(void *))sc_obj_drop)";
+                            out << ")";
                             break;
                         }
                         if (classNames.count(e.op)) {
                             // 还原为具体类 T@：运行时按风味补偏移（object 风味 .p=&_class 须减偏移）。
-                            out << "({ sc_afat _rc" << n << " = ";
+                            out << "sc_afat_as_fat_suboff(";
                             emitExpr(*e.a, true);
-                            out << "; (sc_fat){ (_rc" << n << ".dtor == (void (*)(void *))sc_obj_drop)"
-                                << " ? (void *)((char *)_rc" << n << ".p - offsetof(" << e.op
-                                << ", _class)) : _rc" << n << ".p, _rc" << n << ".tar, _rc" << n
-                                << ".own }; })";
+                            out << ", offsetof(" << e.op
+                                << ", _class), (void (*)(void *))sc_obj_drop)";
                             break;
                         }
                         // 还原为非类具体类型（普通 struct）：不可能是 object 风味，直接取 .p。
-                        out << "({ sc_afat _rc" << n << " = ";
+                        out << "sc_afat_as_fat(";
                         emitExpr(*e.a, true);
-                        out << "; (sc_fat){_rc" << n << ".p, _rc" << n << ".tar, _rc" << n
-                            << ".own}; })";
+                        out << ")";
                     }
                     break;
                 }
@@ -2478,23 +2620,29 @@ struct CGen {
                         throw CompileError{"async<q> 的目标须为 queue 端点", e.line};
                     checkRpcOptKeys(e, false);   // <prio:N, delay:ms>（async 不支持 timeout）
                     const bool isPtr = qvt.ptr >= 1;
-                    out << "({ struct " << r->name << " _ap = {0}; ";
-                    for (size_t i = 0; i < call.args.size(); i++) {
-                        const Field& f = r->structCommon.fields[i];
-                        out << "_ap." << f.name << " = ";
-                        emitExpr(*call.args[i], true); out << "; ";
-                        if (!f.type.arrayDims.empty()) {   // 数组实参：额外装填 size（字节数）
-                            out << "_ap." << rpcArraySizeName(f) << " = ";
-                            emitRpcArraySizeof(f); out << "; ";
-                        }
-                    }
+                    // 参数缓冲由 promise 堆拥有（async 内部 memcpy sizeof 字节）；复合字面量
+                    // 地址生命期至本表达式所在块，调用期间有效（替代原 GNU 语句表达式）。
                     emitComBasePtr(*e.b, isPtr);
                     out << "->async(";
                     emitComBasePtr(*e.b, isPtr);
-                    out << ", (void (*)(void *))" << r->name << "_rpc, &_ap, sizeof(_ap), ";
+                    out << ", (void (*)(void *))" << r->name << "_rpc, &(struct " << r->name << "){";
+                    bool firstInit = true;
+                    for (size_t i = 0; i < call.args.size(); i++) {
+                        const Field& f = r->structCommon.fields[i];
+                        if (!firstInit) out << ", ";
+                        firstInit = false;
+                        out << "." << f.name << " = ";
+                        emitExpr(*call.args[i], true);
+                        if (!f.type.arrayDims.empty()) {   // 数组实参：额外装填 size（字节数）
+                            out << ", ." << rpcArraySizeName(f) << " = ";
+                            emitRpcArraySizeof(f);
+                        }
+                    }
+                    if (firstInit) out << "0";   // 无实参：避免空初始化列表（C 不允许 {}）
+                    out << "}, sizeof(struct " << r->name << "), ";
                     emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
                     emitOptOr0(e.syncOpts, "delay", "int64_t");
-                    out << "); })";
+                    out << ")";
                     break;
                 }
                 if (!e.syncOpts.empty())
@@ -4145,9 +4293,13 @@ struct CGen {
                         out << "; sc_fat_unbind_d(&" << tmp << ", " << dtorArg << "); }\n";
                     break;
                 }
-                indent();
-                emitExpr(*s.expr, true);
-                out << ";\n";
+                {
+                    bool seq = seqHoistBegin(*s.expr);
+                    indent();
+                    emitExpr(*s.expr, true);
+                    out << ";\n";
+                    if (seq) seqHoistEnd();
+                }
                 break;
             case Stmt::VarS: emitVarDecls(s.decls, false, inMacro && !s.exported, false, inMacro && s.exported); break;
             case Stmt::LetS: emitVarDecls(s.decls, true, inMacro && !s.exported, false, inMacro && s.exported); break;
@@ -4198,10 +4350,12 @@ struct CGen {
                     if (!anyFat && !anyFatArr && !anyFinal && !anyCanary && !anyDrop
                         && !anyAutoFree
                         && !(inMainFunc && (mainHasTeardown || hasGcanaryHook() || hasGfatHook()))) {
+                        bool seq = s.expr ? seqHoistBegin(*s.expr) : false;
                         indent();
                         out << "return";
                         if (s.expr) { out << " "; emitExpr(*s.expr, true); }
                         out << ";\n";
+                        if (seq) seqHoistEnd();
                         break;
                     }
                     // 有清理：先把返回值算入临时（braced 块隔离 _ret），清理后再返回，
@@ -4209,11 +4363,13 @@ struct CGen {
                     indent(); out << "{\n";
                     depth++;
                     if (s.expr) {
+                        bool seq = seqHoistBegin(*s.expr);
                         indent();
                         if (curFnSig) emitRetType(*curFnSig); else out << "intptr_t";
                         out << " _ret = ";
                         emitExpr(*s.expr, true);
                         out << ";\n";
+                        if (seq) seqHoistEnd();
                         emitFatReturnCleanup(skip);
                         indent(); out << "return _ret;\n";
                     } else {
@@ -4527,7 +4683,7 @@ struct CGen {
             // 有结果：按 result 静态类型存临时再 respond，宽度 = sizeof(返回类型)
             VType rv;
             bool ok = exprVType(*s.forInit, rv);
-            out << "({ ";
+            out << "{ ";
             if (ok) {
                 out << cTypeOf(rv.name, rv.ptr) << " _dv = (";
             } else {
@@ -4536,7 +4692,7 @@ struct CGen {
             emitExpr(*s.forInit, true);
             out << "); (";
             emitExpr(*s.expr, true); out << ")->respond(";
-            emitExpr(*s.expr, true); out << ", &_dv, sizeof(_dv)); });\n";
+            emitExpr(*s.expr, true); out << ", &_dv, sizeof(_dv)); }\n";
             return;
         }
         indent();

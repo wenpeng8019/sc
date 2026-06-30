@@ -87,6 +87,45 @@ void sc_ref_check(sc_ref *r, const char *who);
 void sc_fat_on_zero(sc_fat *f);
 void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *));
 
+/* ---------------- 自动指针风味互转（sc_fat / sc_afat / sc_thin） ----------------
+ * 替代 codegen 旧用的 GNU 语句表达式 ({ T _t = e; (R){...}; })，使生成代码在 MSVC 等
+ * 不支持 ({...}) 扩展的编译器上同样可编译。操作数 e 经实参一次求值（与语句表达式
+ * 「临时绑定后取字段」语义等同）。含 off 的变体按运行时 dtor 是否等于 objdrop
+ * （object 风味判定）补/减 _class 偏移；objdrop 为各单元静态 sc_obj_drop（按实参传入，
+ * 避免本头依赖该 per-unit 静态符号）。 */
+static inline sc_thin sc_fat_as_thin(sc_fat e, void (*d)(void *)) {
+    sc_thin r; r.p = e.p; r.tar = e.tar; r.dtor = d; return r;
+}
+static inline sc_thin sc_fat_as_thin_addoff(sc_fat e, size_t off, void (*d)(void *)) {
+    sc_thin r; r.p = (void *)((char *)e.p + off); r.tar = e.tar; r.dtor = d; return r;
+}
+static inline sc_fat sc_thin_as_fat(sc_thin t) {
+    sc_fat r; r.p = t.p; r.tar = t.tar; r.own = SC_OWN_RAW; return r;
+}
+static inline sc_fat sc_thin_as_fat_suboff(sc_thin t, size_t off, void (*objdrop)(void *)) {
+    sc_fat r; r.p = (t.dtor == objdrop) ? (void *)((char *)t.p - off) : t.p;
+    r.tar = t.tar; r.own = SC_OWN_RAW; return r;
+}
+static inline sc_afat sc_fat_as_afat(sc_fat e, void (*d)(void *)) {
+    sc_afat r; r.p = e.p; r.tar = e.tar; r.own = e.own; r.dtor = d; return r;
+}
+static inline sc_afat sc_fat_as_afat_addoff(sc_fat e, size_t off, void (*d)(void *)) {
+    sc_afat r; r.p = (void *)((char *)e.p + off); r.tar = e.tar; r.own = e.own; r.dtor = d; return r;
+}
+static inline sc_fat sc_fat_suboff(sc_fat e, size_t off) {
+    sc_fat r; r.p = (void *)((char *)e.p - off); r.tar = e.tar; r.own = e.own; return r;
+}
+static inline sc_fat sc_afat_as_fat(sc_afat a) {
+    sc_fat r; r.p = a.p; r.tar = a.tar; r.own = a.own; return r;
+}
+static inline sc_fat sc_afat_as_fat_suboff(sc_afat a, size_t off, void (*objdrop)(void *)) {
+    sc_fat r; r.p = (a.dtor == objdrop) ? (void *)((char *)a.p - off) : a.p;
+    r.tar = a.tar; r.own = a.own; return r;
+}
+/* 裸 @ 还原 object@ 的 --check=ref 守卫：源非 object 风味（dtor!=objdrop）则报错退出，
+ * 否则原样返回（供 sc_afat_as_fat 取字段）。实现见 op_impl.c。 */
+sc_afat __sc_afat_objck(sc_afat a, void (*objdrop)(void *));
+
 /* ---------------- 分配间接层 sc_alloc / sc_realloc / sc_free ----------------
  * 语言内核生成的堆对象（T() / T@ / 堆专属 NAME&）与 adt 缓冲（string/list）的
  * 分配·重分配·释放统一经此三件套，便于整体切换分配器。

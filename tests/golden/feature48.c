@@ -77,15 +77,22 @@ int32_t main(void) {
     /* line 42 */
     token_form(raw, ((sc_thin){(void *)(intptr_t)(0), (int32_t *)0, (void (*)(void *))0}), 0, (void*)0, (token_exec)0);
     /* line 45 */
-    printf("depth: raw=%d clean=%d report=%d\n", token_depth(raw), token_depth(clean), token_depth(report));
+    int32_t _sq0 = token_depth(raw);
+    int32_t _sq1 = token_depth(clean);
+    int32_t _sq2 = token_depth(report);
+    printf("depth: raw=%d clean=%d report=%d\n", _sq0, _sq1, _sq2);
     /* line 47 */
     token_set(raw, ((sc_thin){(void *)(intptr_t)(0 - 5), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 48 */
-    printf("raw=-5: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    int64_t _sq3 = ((int64_t)((token_get(clean)).p));
+    int64_t _sq4 = ((int64_t)((token_get(report)).p));
+    printf("raw=-5: clean=%lld report=%lld\n", _sq3, _sq4);
     /* line 50 */
     token_set(raw, ((sc_thin){(void *)(intptr_t)(21), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 51 */
-    printf("raw=21: clean=%lld report=%lld\n", ((int64_t)((token_get(clean)).p)), ((int64_t)((token_get(report)).p)));
+    int64_t _sq5 = ((int64_t)((token_get(clean)).p));
+    int64_t _sq6 = ((int64_t)((token_get(report)).p));
+    printf("raw=21: clean=%lld report=%lld\n", _sq5, _sq6);
     /* line 53 */
     return 0;
 }

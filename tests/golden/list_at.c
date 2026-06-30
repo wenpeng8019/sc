@@ -70,22 +70,24 @@ int32_t main(void) {
     /* line 27 */
     ((node *)(c).p)->v = 20;
     /* line 29 */
-    list_push(&l, ({ sc_fat _ec3 = a; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+    list_push(&l, sc_fat_as_thin(a, (void (*)(void *))node_drop));
     /* line 30 */
-    list_push(&l, ({ sc_fat _ec4 = b; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    list_push(&l, sc_fat_as_thin(b, (void (*)(void *))node_drop));
     /* line 31 */
-    list_push(&l, ({ sc_fat _ec5 = c; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    list_push(&l, sc_fat_as_thin(c, (void (*)(void *))node_drop));
     /* line 32 */
     printf("len=%llu\n", list_len(&l));
     /* line 35 */
     sc_thin g = {0};
-    sc_thin_bind(&g, (({ sc_thin _rc6 = list_get(&l, 1); (sc_fat){_rc6.p, _rc6.tar, SC_OWN_RAW}; })).p, (sc_ref *)(({ sc_thin _rc6 = list_get(&l, 1); (sc_fat){_rc6.p, _rc6.tar, SC_OWN_RAW}; })).tar, (void (*)(void *))node_drop);
+    sc_thin_bind(&g, (sc_thin_as_fat(list_get(&l, 1))).p, (sc_ref *)(sc_thin_as_fat(list_get(&l, 1))).tar, (void (*)(void *))node_drop);
     /* line 36 */
     printf("get1=%d\n", ((node *)(g).p)->v);
     /* line 37 */
     printf("get2_raw=%d\n", ((node*)((list_get(&l, 2)).p))->v);
     /* line 40 */
-    printf("idx_b=%lld idx_a=%lld\n", list_index_of(&l, ({ sc_fat _ec7 = b; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; })), list_index_of(&l, ({ sc_fat _ec8 = a; (sc_thin){_ec8.p, _ec8.tar, (void (*)(void *))node_drop}; })));
+    int64_t _sq0 = list_index_of(&l, sc_fat_as_thin(b, (void (*)(void *))node_drop));
+    int64_t _sq1 = list_index_of(&l, sc_fat_as_thin(a, (void (*)(void *))node_drop));
+    printf("idx_b=%lld idx_a=%lld\n", _sq0, _sq1);
     /* line 43 */
     list_sort(&l, node_cmp);
     /* line 44 */
@@ -98,23 +100,27 @@ int32_t main(void) {
     /* line 49 */
     list_reverse(&l);
     /* line 50 */
-    printf("rev0=%d rev2=%d\n", ((node*)((list_get(&l, 0)).p))->v, ((node*)((list_get(&l, 2)).p))->v);
+    int32_t _sq2 = ((node*)((list_get(&l, 0)).p))->v;
+    int32_t _sq3 = ((node*)((list_get(&l, 2)).p))->v;
+    printf("rev0=%d rev2=%d\n", _sq2, _sq3);
     /* line 53 */
     sc_fat d = {0};
-    node *_fat9 = node__new_ref(0);
-    sc_fat_bind(&d, _fat9, (sc_ref *)((char *)_fat9 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat3 = node__new_ref(0);
+    sc_fat_bind(&d, _fat3, (sc_ref *)((char *)_fat3 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 54 */
     ((node *)(d).p)->v = 99;
     /* line 55 */
-    list_insert(&l, 0, ({ sc_fat _ec10 = d; (sc_thin){_ec10.p, _ec10.tar, (void (*)(void *))node_drop}; }));
+    list_insert(&l, 0, sc_fat_as_thin(d, (void (*)(void *))node_drop));
     /* line 56 */
-    printf("after_insert len=%llu head=%d\n", list_len(&l), ((node*)((list_get(&l, 0)).p))->v);
+    uint64_t _sq4 = list_len(&l);
+    int32_t _sq5 = ((node*)((list_get(&l, 0)).p))->v;
+    printf("after_insert len=%llu head=%d\n", _sq4, _sq5);
     /* line 57 */
     list_remove_at(&l, list_len(&l) - 1);
     /* line 58 */
     printf("after_remove len=%llu\n", list_len(&l));
     /* line 61 */
-    list_set(&l, 1, ({ sc_fat _ec11 = a; (sc_thin){_ec11.p, _ec11.tar, (void (*)(void *))node_drop}; }));
+    list_set(&l, 1, sc_fat_as_thin(a, (void (*)(void *))node_drop));
     /* line 62 */
     printf("set1=%d\n", ((node*)((list_get(&l, 1)).p))->v);
     /* line 65 */

@@ -51,7 +51,9 @@ int32_t main(void) {
     /* line 27 */
     y.pa = &(x);
     /* line 28 */
-    printf("even(10)=%d odd(7)=%d\n", is_even(10), is_odd(7));
+    uint8_t _sq0 = is_even(10);
+    uint8_t _sq1 = is_odd(7);
+    printf("even(10)=%d odd(7)=%d\n", _sq0, _sq1);
     /* line 29 */
     return 0;
 }

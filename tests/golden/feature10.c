@@ -84,9 +84,13 @@ int32_t main(void) {
     /* line 34 */
     string_append(s, ", sc!");
     /* line 35 */
-    printf("s=%s len=%llu\n", string_cstr(s), string_len(s));
+    char *_sq0 = string_cstr(s);
+    uint64_t _sq1 = string_len(s);
+    printf("s=%s len=%llu\n", _sq0, _sq1);
     /* line 36 */
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", string_find(s, "sc", 0), string_starts_with(s, "Hello"));
+    int64_t _sq2 = string_find(s, "sc", 0);
+    uint8_t _sq3 = string_starts_with(s, "Hello");
+    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", _sq2, _sq3);
     /* line 38 */
     string *part = string__new();
     /* line 39 */
@@ -119,11 +123,11 @@ int32_t main(void) {
     /* line 51 */
     counter_add(((counter *)(c3).p), 20);
     /* line 52 */
-    list_push(&l, ({ sc_fat _ec3 = c1; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))0}; }));
+    list_push(&l, sc_fat_as_thin(c1, (void (*)(void *))0));
     /* line 53 */
-    list_push(&l, ({ sc_fat _ec4 = c2; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))0}; }));
+    list_push(&l, sc_fat_as_thin(c2, (void (*)(void *))0));
     /* line 54 */
-    list_push(&l, ({ sc_fat _ec5 = c3; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))0}; }));
+    list_push(&l, sc_fat_as_thin(c3, (void (*)(void *))0));
     /* line 55 */
     list_sort(&l, cnt_cmp);
     /* line 56 */

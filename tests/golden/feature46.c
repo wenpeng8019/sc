@@ -23,7 +23,9 @@ int32_t main(void) {
     /* line 28 */
     logger_m_emit(&logger, "world");
     /* line 29 */
-    printf("config.level = %d, logger.count = %d\n", config_m_level(&config), logger_m_count(&logger));
+    int32_t _sq0 = config_m_level(&config);
+    int32_t _sq1 = logger_m_count(&logger);
+    printf("config.level = %d, logger.count = %d\n", _sq0, _sq1);
     /* line 31 */
     {
         int32_t _ret = 0;

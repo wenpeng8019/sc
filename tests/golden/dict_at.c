@@ -89,15 +89,17 @@ int32_t main(void) {
     /* line 41 */
     int32_t k3 = 33;
     /* line 42 */
-    dict_put(&da, ((const void*)(&(k1))), ({ sc_fat _ec3 = a1; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k1))), sc_fat_as_thin(a1, (void (*)(void *))node_drop));
     /* line 43 */
-    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec4 = a2; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k2))), sc_fat_as_thin(a2, (void (*)(void *))node_drop));
     /* line 44 */
-    dict_put(&da, ((const void*)(&(k3))), ({ sc_fat _ec5 = a3; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k3))), sc_fat_as_thin(a3, (void (*)(void *))node_drop));
     /* line 45 */
     printf("A len=%llu\n", dict_len(&da));
     /* line 46 */
-    printf("A has22=%d has99=%d\n", dict_has(&da, ((const void*)(&(k2)))), dict_has(&da, ((const void*)(&(k3)))));
+    uint8_t _sq0 = dict_has(&da, ((const void*)(&(k2))));
+    uint8_t _sq1 = dict_has(&da, ((const void*)(&(k3))));
+    printf("A has22=%d has99=%d\n", _sq0, _sq1);
     /* line 47 */
     int32_t kx = 99;
     /* line 48 */
@@ -106,14 +108,16 @@ int32_t main(void) {
     printf("A get33=%d\n", ((node*)((dict_get(&da, ((const void*)(&(k3))))).p))->v);
     /* line 52 */
     sc_fat a2b = {0};
-    node *_fat6 = node__new_ref(0);
-    sc_fat_bind(&a2b, _fat6, (sc_ref *)((char *)_fat6 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat3 = node__new_ref(0);
+    sc_fat_bind(&a2b, _fat3, (sc_ref *)((char *)_fat3 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 53 */
     ((node *)(a2b).p)->v = 250;
     /* line 54 */
-    dict_put(&da, ((const void*)(&(k2))), ({ sc_fat _ec7 = a2b; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&da, ((const void*)(&(k2))), sc_fat_as_thin(a2b, (void (*)(void *))node_drop));
     /* line 55 */
-    printf("A put22b=%d len=%llu\n", ((node*)((dict_get(&da, ((const void*)(&(k2))))).p))->v, dict_len(&da));
+    int32_t _sq2 = ((node*)((dict_get(&da, ((const void*)(&(k2))))).p))->v;
+    uint64_t _sq3 = dict_len(&da);
+    printf("A put22b=%d len=%llu\n", _sq2, _sq3);
     /* line 58 */
     acc sa = {0};
     /* line 59 */
@@ -157,7 +161,10 @@ int32_t main(void) {
     /* line 79 */
     printf("A fwd sum=%d cnt=%d  bwd sum=%d cnt=%d\n", fs, fc, bs, bc);
     /* line 82 */
-    printf("A rm11=%d rm99=%d len=%llu\n", dict_remove(&da, ((const void*)(&(k1)))), dict_remove(&da, ((const void*)(&(kx)))), dict_len(&da));
+    uint8_t _sq4 = dict_remove(&da, ((const void*)(&(k1))));
+    uint8_t _sq5 = dict_remove(&da, ((const void*)(&(kx))));
+    uint64_t _sq6 = dict_len(&da);
+    printf("A rm11=%d rm99=%d len=%llu\n", _sq4, _sq5, _sq6);
     /* line 85 */
     dict_drop(&da);
     /* line 86 */
@@ -168,22 +175,26 @@ int32_t main(void) {
     dict_init(&db, 0);
     /* line 91 */
     sc_fat b1 = {0};
-    node *_fat8 = node__new_ref(0);
-    sc_fat_bind(&b1, _fat8, (sc_ref *)((char *)_fat8 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat4 = node__new_ref(0);
+    sc_fat_bind(&b1, _fat4, (sc_ref *)((char *)_fat4 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 92 */
     ((node *)(b1).p)->v = 10;
     /* line 93 */
     sc_fat b2 = {0};
-    node *_fat9 = node__new_ref(0);
-    sc_fat_bind(&b2, _fat9, (sc_ref *)((char *)_fat9 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat5 = node__new_ref(0);
+    sc_fat_bind(&b2, _fat5, (sc_ref *)((char *)_fat5 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 94 */
     ((node *)(b2).p)->v = 20;
     /* line 95 */
-    dict_put(&db, "alpha", ({ sc_fat _ec10 = b1; (sc_thin){_ec10.p, _ec10.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&db, "alpha", sc_fat_as_thin(b1, (void (*)(void *))node_drop));
     /* line 96 */
-    dict_put(&db, "beta", ({ sc_fat _ec11 = b2; (sc_thin){_ec11.p, _ec11.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&db, "beta", sc_fat_as_thin(b2, (void (*)(void *))node_drop));
     /* line 97 */
-    printf("B len=%llu get_beta=%d has_alpha=%d has_x=%d\n", dict_len(&db), ((node*)((dict_get(&db, "beta")).p))->v, dict_has(&db, "alpha"), dict_has(&db, "zzz"));
+    uint64_t _sq7 = dict_len(&db);
+    int32_t _sq8 = ((node*)((dict_get(&db, "beta")).p))->v;
+    uint8_t _sq9 = dict_has(&db, "alpha");
+    uint8_t _sq10 = dict_has(&db, "zzz");
+    printf("B len=%llu get_beta=%d has_alpha=%d has_x=%d\n", _sq7, _sq8, _sq9, _sq10);
     /* line 99 */
     dict_remove(&db, "alpha");
     /* line 100 */
@@ -196,8 +207,8 @@ int32_t main(void) {
     dict_init(&dc, 0 - 1);
     /* line 106 */
     sc_fat c1 = {0};
-    node *_fat12 = node__new_ref(0);
-    sc_fat_bind(&c1, _fat12, (sc_ref *)((char *)_fat12 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat6 = node__new_ref(0);
+    sc_fat_bind(&c1, _fat6, (sc_ref *)((char *)_fat6 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 107 */
     ((node *)(c1).p)->v = 70;
     /* line 108 */
@@ -211,11 +222,13 @@ int32_t main(void) {
     /* line 112 */
     buf[3] = 0;
     /* line 113 */
-    dict_put(&dc, ((const void*)(&(buf[0]))), ({ sc_fat _ec13 = c1; (sc_thin){_ec13.p, _ec13.tar, (void (*)(void *))node_drop}; }));
+    dict_put(&dc, ((const void*)(&(buf[0]))), sc_fat_as_thin(c1, (void (*)(void *))node_drop));
     /* line 114 */
     buf[0] = 'X';
     /* line 115 */
-    printf("C has_key=%d get_key=%d\n", dict_has(&dc, ((const void*)(&(buf[0])))), dict_has(&dc, ((const void*)("key"))));
+    uint8_t _sq11 = dict_has(&dc, ((const void*)(&(buf[0]))));
+    uint8_t _sq12 = dict_has(&dc, ((const void*)("key")));
+    printf("C has_key=%d get_key=%d\n", _sq11, _sq12);
     /* line 117 */
     printf("C lookup=%d\n", ((node*)((dict_get(&dc, ((const void*)("key")))).p))->v);
     /* line 118 */

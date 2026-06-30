@@ -124,15 +124,25 @@ int32_t main(void) {
     /* line 32 */
     printf("node     fanin fanout\n");
     /* line 33 */
-    printf("config   %5d %6d\n", token_fanin(config), token_fanout(config));
+    int32_t _sq0 = token_fanin(config);
+    int32_t _sq1 = token_fanout(config);
+    printf("config   %5d %6d\n", _sq0, _sq1);
     /* line 34 */
-    printf("a        %5d %6d\n", token_fanin(a), token_fanout(a));
+    int32_t _sq2 = token_fanin(a);
+    int32_t _sq3 = token_fanout(a);
+    printf("a        %5d %6d\n", _sq2, _sq3);
     /* line 35 */
-    printf("b        %5d %6d\n", token_fanin(b), token_fanout(b));
+    int32_t _sq4 = token_fanin(b);
+    int32_t _sq5 = token_fanout(b);
+    printf("b        %5d %6d\n", _sq4, _sq5);
     /* line 36 */
-    printf("c        %5d %6d\n", token_fanin(c), token_fanout(c));
+    int32_t _sq6 = token_fanin(c);
+    int32_t _sq7 = token_fanout(c);
+    printf("c        %5d %6d\n", _sq6, _sq7);
     /* line 37 */
-    printf("sink     %5d %6d\n", token_fanin(sink), token_fanout(sink));
+    int32_t _sq8 = token_fanin(sink);
+    int32_t _sq9 = token_fanout(sink);
+    printf("sink     %5d %6d\n", _sq8, _sq9);
     /* line 38 */
     return 0;
 }

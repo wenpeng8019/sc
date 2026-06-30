@@ -135,7 +135,7 @@ int32_t main(void) {
     printf("node legs=%d\n", nk);
     /* line 44 */
     sc_fat bk = {0};
-    sc_fat_bind(&bk, (({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).p, (sc_ref *)(({ sc_fat _oc2 = ok; (sc_fat){(void *)((char *)_oc2.p - offsetof(Node, _class)), _oc2.tar, _oc2.own}; })).tar, SC_OWN_ROOT);
+    sc_fat_bind(&bk, (sc_fat_suboff(ok, offsetof(Node, _class))).p, (sc_ref *)(sc_fat_suboff(ok, offsetof(Node, _class))).tar, SC_OWN_ROOT);
     /* line 45 */
     printf("back age=%d\n", ((Node *)(bk).p)->age);
     /* line 50 */
@@ -143,19 +143,19 @@ int32_t main(void) {
     sc_afat_bind(&be, (ok).p, (sc_ref *)(ok).tar, SC_OWN_ROOT, (void (*)(void *))sc_obj_drop);
     /* line 51 */
     sc_fat back2 = {0};
-    sc_fat_bind(&back2, (({ sc_afat _rc3 = be; (sc_fat){ (_rc3.dtor == (void (*)(void *))sc_obj_drop) ? (void *)((char *)_rc3.p - offsetof(Node, _class)) : _rc3.p, _rc3.tar, _rc3.own }; })).p, (sc_ref *)(({ sc_afat _rc3 = be; (sc_fat){ (_rc3.dtor == (void (*)(void *))sc_obj_drop) ? (void *)((char *)_rc3.p - offsetof(Node, _class)) : _rc3.p, _rc3.tar, _rc3.own }; })).tar, SC_OWN_ROOT);
+    sc_fat_bind(&back2, (sc_afat_as_fat_suboff(be, offsetof(Node, _class), (void (*)(void *))sc_obj_drop)).p, (sc_ref *)(sc_afat_as_fat_suboff(be, offsetof(Node, _class), (void (*)(void *))sc_obj_drop)).tar, SC_OWN_ROOT);
     /* line 52 */
     printf("back2 age=%d\n", ((Node *)(back2).p)->age);
     /* line 56 */
     sc_fat d2 = {0};
-    Dog *_fat4 = Dog__new_ref(0);
-    sc_fat_bind(&d2, _fat4, (sc_ref *)((char *)_fat4 - SC_REF_HDR), SC_OWN_ROOT);
+    Dog *_fat2 = Dog__new_ref(0);
+    sc_fat_bind(&d2, _fat2, (sc_ref *)((char *)_fat2 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 57 */
     sc_afat bd = {0};
     sc_afat_bind(&bd, (void *)&((Dog *)(d2).p)->_class, (sc_ref *)(d2).tar, SC_OWN_ROOT, (void (*)(void *))sc_obj_drop);
     /* line 58 */
     sc_fat od2 = {0};
-    sc_fat_bind(&od2, (({ sc_afat _rc5 = bd; (sc_fat){_rc5.p, _rc5.tar, _rc5.own}; })).p, (sc_ref *)(({ sc_afat _rc5 = bd; (sc_fat){_rc5.p, _rc5.tar, _rc5.own}; })).tar, SC_OWN_ROOT);
+    sc_fat_bind(&od2, (sc_afat_as_fat(bd)).p, (sc_ref *)(sc_afat_as_fat(bd)).tar, SC_OWN_ROOT);
     /* line 59 */
     int32_t nd2;
     /* line 60 */

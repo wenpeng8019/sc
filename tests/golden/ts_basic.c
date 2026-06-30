@@ -30,7 +30,11 @@ int32_t main(void) {
     /* line 21 */
     tensor *b2 = tensor_reshape(b, 2, shp);
     /* line 22 */
-    printf("b2 dim0=%d dim1=%d at5=%g dtype=%d contig=%d\n", tensor_dim(b2, 0), tensor_dim(b2, 1), tensor_at(b2, 5), b2->dtype, ((int32_t)(tensor_is_contiguous(b2))));
+    int32_t _sq0 = tensor_dim(b2, 0);
+    int32_t _sq1 = tensor_dim(b2, 1);
+    double _sq2 = tensor_at(b2, 5);
+    int32_t _sq3 = ((int32_t)(tensor_is_contiguous(b2)));
+    printf("b2 dim0=%d dim1=%d at5=%g dtype=%d contig=%d\n", _sq0, _sq1, _sq2, b2->dtype, _sq3);
     /* line 25 */
     tensor *c = tensor_add(a, b2);
     /* line 26 */
@@ -46,7 +50,9 @@ int32_t main(void) {
     /* line 33 */
     tensor *bc = tensor_add(b2, row);
     /* line 34 */
-    printf("bc at0=%g at5=%g\n", tensor_at(bc, 0), tensor_at(bc, 5));
+    double _sq4 = tensor_at(bc, 0);
+    double _sq5 = tensor_at(bc, 5);
+    printf("bc at0=%g at5=%g\n", _sq4, _sq5);
     /* line 37 */
     int32_t sh32[2];
     /* line 38 */
@@ -58,15 +64,24 @@ int32_t main(void) {
     /* line 41 */
     tensor *mm = tensor_matmul(b2, d);
     /* line 42 */
-    printf("mm shape=%dx%d at0=%g at3=%g\n", tensor_dim(mm, 0), tensor_dim(mm, 1), tensor_at(mm, 0), tensor_at(mm, 3));
+    int32_t _sq6 = tensor_dim(mm, 0);
+    int32_t _sq7 = tensor_dim(mm, 1);
+    double _sq8 = tensor_at(mm, 0);
+    double _sq9 = tensor_at(mm, 3);
+    printf("mm shape=%dx%d at0=%g at3=%g\n", _sq6, _sq7, _sq8, _sq9);
     /* line 45 */
     tensor *sm = tensor_sum(b2, 1, false);
     /* line 46 */
-    printf("rowsum0=%g rowsum1=%g ndim=%d\n", tensor_at(sm, 0), tensor_at(sm, 1), sm->ndim);
+    double _sq10 = tensor_at(sm, 0);
+    double _sq11 = tensor_at(sm, 1);
+    printf("rowsum0=%g rowsum1=%g ndim=%d\n", _sq10, _sq11, sm->ndim);
     /* line 49 */
     tensor *mn = tensor_mean(b2, 1, true);
     /* line 50 */
-    printf("mean ndim=%d dim1=%d at0=%g at1=%g\n", mn->ndim, tensor_dim(mn, 1), tensor_at(mn, 0), tensor_at(mn, 1));
+    int32_t _sq12 = tensor_dim(mn, 1);
+    double _sq13 = tensor_at(mn, 0);
+    double _sq14 = tensor_at(mn, 1);
+    printf("mean ndim=%d dim1=%d at0=%g at1=%g\n", mn->ndim, _sq12, _sq13, _sq14);
     /* line 53 */
     tensor *am = tensor_argmax(b, -(1), false);
     /* line 54 */
@@ -80,15 +95,24 @@ int32_t main(void) {
     /* line 62 */
     tensor *t = tensor_transpose(b2);
     /* line 63 */
-    printf("t shape=%dx%d at0=%g at5=%g contig=%d\n", tensor_dim(t, 0), tensor_dim(t, 1), tensor_at(t, 0), tensor_at(t, 5), ((int32_t)(tensor_is_contiguous(t))));
+    int32_t _sq15 = tensor_dim(t, 0);
+    int32_t _sq16 = tensor_dim(t, 1);
+    double _sq17 = tensor_at(t, 0);
+    double _sq18 = tensor_at(t, 5);
+    int32_t _sq19 = ((int32_t)(tensor_is_contiguous(t)));
+    printf("t shape=%dx%d at0=%g at5=%g contig=%d\n", _sq15, _sq16, _sq17, _sq18, _sq19);
     /* line 64 */
     tensor *tc = tensor_contiguous(t);
     /* line 65 */
-    printf("tc contig=%d at1=%g\n", ((int32_t)(tensor_is_contiguous(tc))), tensor_at(tc, 1));
+    int32_t _sq20 = ((int32_t)(tensor_is_contiguous(tc)));
+    double _sq21 = tensor_at(tc, 1);
+    printf("tc contig=%d at1=%g\n", _sq20, _sq21);
     /* line 68 */
     tensor *ey = eye(3, DT_F4);
     /* line 69 */
-    printf("eye sum=%g diag4=%g\n", tensor_sum_all(ey), tensor_at(ey, 4));
+    double _sq22 = tensor_sum_all(ey);
+    double _sq23 = tensor_at(ey, 4);
+    printf("eye sum=%g diag4=%g\n", _sq22, _sq23);
     /* line 72 */
     tensor *ls = linspace(0.0 - 2.0, 2.0, 5, DT_F8);
     /* line 73 */
@@ -96,7 +120,12 @@ int32_t main(void) {
     /* line 74 */
     tensor *cl = tensor_clip(ls, 0.0 - 1.0, 1.0);
     /* line 75 */
-    printf("ls at0=%g at4=%g abs at0=%g clip at0=%g at4=%g\n", tensor_at(ls, 0), tensor_at(ls, 4), tensor_at(ab, 0), tensor_at(cl, 0), tensor_at(cl, 4));
+    double _sq24 = tensor_at(ls, 0);
+    double _sq25 = tensor_at(ls, 4);
+    double _sq26 = tensor_at(ab, 0);
+    double _sq27 = tensor_at(cl, 0);
+    double _sq28 = tensor_at(cl, 4);
+    printf("ls at0=%g at4=%g abs at0=%g clip at0=%g at4=%g\n", _sq24, _sq25, _sq26, _sq27, _sq28);
     /* line 78 */
     tensor *gt = tensor_gt(b2, a);
     /* line 79 */
@@ -104,29 +133,42 @@ int32_t main(void) {
     /* line 80 */
     tensor *wh = where(gt, b2, a);
     /* line 81 */
-    printf("where at0=%g at5=%g\n", tensor_at(wh, 0), tensor_at(wh, 5));
+    double _sq29 = tensor_at(wh, 0);
+    double _sq30 = tensor_at(wh, 5);
+    printf("where at0=%g at5=%g\n", _sq29, _sq30);
     /* line 84 */
     tensor *sl = tensor_slice(b, 0, 1, 5, 2);
     /* line 85 */
-    printf("slice numel=%lld at0=%g at1=%g\n", sl->numel, tensor_at(sl, 0), tensor_at(sl, 1));
+    double _sq31 = tensor_at(sl, 0);
+    double _sq32 = tensor_at(sl, 1);
+    printf("slice numel=%lld at0=%g at1=%g\n", sl->numel, _sq31, _sq32);
     /* line 88 */
     tensor *r0 = tensor_select(b2, 0, 0);
     /* line 89 */
-    printf("select ndim=%d at0=%g at2=%g\n", r0->ndim, tensor_at(r0, 0), tensor_at(r0, 2));
+    double _sq33 = tensor_at(r0, 0);
+    double _sq34 = tensor_at(r0, 2);
+    printf("select ndim=%d at0=%g at2=%g\n", r0->ndim, _sq33, _sq34);
     /* line 92 */
     tensor *fl = tensor_flip(b, 0);
     /* line 93 */
-    printf("flip at0=%g at5=%g\n", tensor_at(fl, 0), tensor_at(fl, 5));
+    double _sq35 = tensor_at(fl, 0);
+    double _sq36 = tensor_at(fl, 5);
+    printf("flip at0=%g at5=%g\n", _sq35, _sq36);
     /* line 96 */
     tensor *cs = tensor_cumsum(b, 0);
     /* line 97 */
-    printf("cumsum at0=%g at5=%g\n", tensor_at(cs, 0), tensor_at(cs, 5));
+    double _sq37 = tensor_at(cs, 0);
+    double _sq38 = tensor_at(cs, 5);
+    printf("cumsum at0=%g at5=%g\n", _sq37, _sq38);
     /* line 100 */
     double dp = tensor_dot(b, b);
     /* line 101 */
     tensor *ou = tensor_outer(sm, sm);
     /* line 102 */
-    printf("dot=%g outer dim0=%d dim1=%d at0=%g\n", dp, tensor_dim(ou, 0), tensor_dim(ou, 1), tensor_at(ou, 0));
+    int32_t _sq39 = tensor_dim(ou, 0);
+    int32_t _sq40 = tensor_dim(ou, 1);
+    double _sq41 = tensor_at(ou, 0);
+    printf("dot=%g outer dim0=%d dim1=%d at0=%g\n", dp, _sq39, _sq40, _sq41);
     /* line 105 */
     void *pair[2];
     /* line 106 */
@@ -136,11 +178,15 @@ int32_t main(void) {
     /* line 108 */
     tensor *cat = concat(((void*)(pair)), 2, 0);
     /* line 109 */
-    printf("concat dim0=%d dim1=%d numel=%lld\n", tensor_dim(cat, 0), tensor_dim(cat, 1), cat->numel);
+    int32_t _sq42 = tensor_dim(cat, 0);
+    int32_t _sq43 = tensor_dim(cat, 1);
+    printf("concat dim0=%d dim1=%d numel=%lld\n", _sq42, _sq43, cat->numel);
     /* line 112 */
     tensor *nz = tensor_nonzero(b2);
     /* line 113 */
-    printf("nonzero dim0=%d dim1=%d dtype=%d\n", tensor_dim(nz, 0), tensor_dim(nz, 1), nz->dtype);
+    int32_t _sq44 = tensor_dim(nz, 0);
+    int32_t _sq45 = tensor_dim(nz, 1);
+    printf("nonzero dim0=%d dim1=%d dtype=%d\n", _sq44, _sq45, nz->dtype);
     /* line 116 */
     int32_t gidx[2];
     /* line 117 */
@@ -160,7 +206,11 @@ int32_t main(void) {
     /* line 124 */
     tensor *go = tensor_gather(b2, 1, gi);
     /* line 125 */
-    printf("gather at0=%g at1=%g at2=%g at3=%g\n", tensor_at(go, 0), tensor_at(go, 1), tensor_at(go, 2), tensor_at(go, 3));
+    double _sq46 = tensor_at(go, 0);
+    double _sq47 = tensor_at(go, 1);
+    double _sq48 = tensor_at(go, 2);
+    double _sq49 = tensor_at(go, 3);
+    printf("gather at0=%g at1=%g at2=%g at3=%g\n", _sq46, _sq47, _sq48, _sq49);
     /* line 128 */
     tensor *sc0 = zeros(2, shp, DT_F8);
     /* line 129 */
@@ -168,7 +218,9 @@ int32_t main(void) {
     /* line 130 */
     uint8_t sc0r = tensor_scatter_(sc0, 1, gi, ssrc);
     /* line 131 */
-    printf("scatter_ ok=%d at0=%g at2=%g\n", ((int32_t)(sc0r)), tensor_at(sc0, 0), tensor_at(sc0, 2));
+    double _sq50 = tensor_at(sc0, 0);
+    double _sq51 = tensor_at(sc0, 2);
+    printf("scatter_ ok=%d at0=%g at2=%g\n", ((int32_t)(sc0r)), _sq50, _sq51);
     /* line 134 */
     int32_t pds[4];
     /* line 135 */
@@ -182,11 +234,16 @@ int32_t main(void) {
     /* line 139 */
     tensor *pd = tensor_pad(b2, pds, 0.0 - 1.0);
     /* line 140 */
-    printf("pad dim0=%d dim1=%d at0=%g\n", tensor_dim(pd, 0), tensor_dim(pd, 1), tensor_at(pd, 0));
+    int32_t _sq52 = tensor_dim(pd, 0);
+    int32_t _sq53 = tensor_dim(pd, 1);
+    double _sq54 = tensor_at(pd, 0);
+    printf("pad dim0=%d dim1=%d at0=%g\n", _sq52, _sq53, _sq54);
     /* line 143 */
     tensor *ro = tensor_roll(b, 1, 0);
     /* line 144 */
-    printf("roll at0=%g at5=%g\n", tensor_at(ro, 0), tensor_at(ro, 5));
+    double _sq55 = tensor_at(ro, 0);
+    double _sq56 = tensor_at(ro, 5);
+    printf("roll at0=%g at5=%g\n", _sq55, _sq56);
     /* line 147 */
     tensor *lsm = tensor_log_softmax(b2, 1);
     /* line 148 */
@@ -196,7 +253,9 @@ int32_t main(void) {
     /* line 152 */
     tensor *gl = tensor_gelu(b);
     /* line 153 */
-    printf("leaky at0=%g gelu at5=%g\n", tensor_at(lr, 0), tensor_at(gl, 5));
+    double _sq57 = tensor_at(lr, 0);
+    double _sq58 = tensor_at(gl, 5);
+    printf("leaky at0=%g gelu at5=%g\n", _sq57, _sq58);
     /* line 156 */
     tensor *tgt = zeros(1, shp, DT_I8);
     /* line 157 */
@@ -234,25 +293,37 @@ int32_t main(void) {
     /* line 177 */
     tensor *dr_eval = tensor_dropout(b2, 0.5, false);
     /* line 178 */
-    printf("layer_norm at2=%.4f at5=%.4f dropout sum=%.4f eval_eq=%d\n", tensor_at(ln, 2), tensor_at(ln, 5), tensor_sum_all(dr), ((int32_t)(tensor_allclose(dr_eval, b2, 0.000001, 0.000001))));
+    double _sq59 = tensor_at(ln, 2);
+    double _sq60 = tensor_at(ln, 5);
+    double _sq61 = tensor_sum_all(dr);
+    int32_t _sq62 = ((int32_t)(tensor_allclose(dr_eval, b2, 0.000001, 0.000001)));
+    printf("layer_norm at2=%.4f at5=%.4f dropout sum=%.4f eval_eq=%d\n", _sq59, _sq60, _sq61, _sq62);
     /* line 181 */
     tensor *sn = tensor_sin(b);
     /* line 182 */
     tensor *cn = tensor_cos(b);
     /* line 183 */
-    printf("sin at1=%.4f cos at0=%.4f\n", tensor_at(sn, 1), tensor_at(cn, 0));
+    double _sq63 = tensor_at(sn, 1);
+    double _sq64 = tensor_at(cn, 0);
+    printf("sin at1=%.4f cos at0=%.4f\n", _sq63, _sq64);
     /* line 186 */
     tensor *a2 = tensor_atan2(b2, a);
     /* line 187 */
     printf("atan2 at0=%.4f\n", tensor_at(a2, 0));
     /* line 190 */
-    printf("median_all=%g pct50=%g\n", tensor_median_all(b), tensor_percentile_all(b, 50.0));
+    double _sq65 = tensor_median_all(b);
+    double _sq66 = tensor_percentile_all(b, 50.0);
+    printf("median_all=%g pct50=%g\n", _sq65, _sq66);
     /* line 193 */
     tensor *tu = tensor_triu(b2, 0);
     /* line 194 */
     tensor *tl = tensor_tril(b2, 0);
     /* line 195 */
-    printf("triu at1=%g at3=%g tril at1=%g at3=%g\n", tensor_at(tu, 1), tensor_at(tu, 3), tensor_at(tl, 1), tensor_at(tl, 3));
+    double _sq67 = tensor_at(tu, 1);
+    double _sq68 = tensor_at(tu, 3);
+    double _sq69 = tensor_at(tl, 1);
+    double _sq70 = tensor_at(tl, 3);
+    printf("triu at1=%g at3=%g tril at1=%g at3=%g\n", _sq67, _sq68, _sq69, _sq70);
     /* line 198 */
     int32_t s22[2];
     /* line 199 */
@@ -270,11 +341,15 @@ int32_t main(void) {
     /* line 205 */
     tensor_set_at(M, 3, 3.0);
     /* line 206 */
-    printf("det=%.4f norm=%.4f\n", tensor_det(M), tensor_norm(M, 2.0));
+    double _sq71 = tensor_det(M);
+    double _sq72 = tensor_norm(M, 2.0);
+    printf("det=%.4f norm=%.4f\n", _sq71, _sq72);
     /* line 209 */
     tensor *Mi = tensor_inv(M);
     /* line 210 */
-    printf("inv at0=%.4f at3=%.4f\n", tensor_at(Mi, 0), tensor_at(Mi, 3));
+    double _sq73 = tensor_at(Mi, 0);
+    double _sq74 = tensor_at(Mi, 3);
+    printf("inv at0=%.4f at3=%.4f\n", _sq73, _sq74);
     /* line 213 */
     tensor *bb = zeros(1, s22, DT_F8);
     /* line 214 */
@@ -284,11 +359,16 @@ int32_t main(void) {
     /* line 216 */
     tensor *xx = tensor_solve(M, bb);
     /* line 217 */
-    printf("solve at0=%.4f at1=%.4f\n", tensor_at(xx, 0), tensor_at(xx, 1));
+    double _sq75 = tensor_at(xx, 0);
+    double _sq76 = tensor_at(xx, 1);
+    printf("solve at0=%.4f at1=%.4f\n", _sq75, _sq76);
     /* line 220 */
     tensor *Lc = tensor_cholesky(M);
     /* line 221 */
-    printf("chol at0=%.4f at2=%.4f at3=%.4f\n", tensor_at(Lc, 0), tensor_at(Lc, 2), tensor_at(Lc, 3));
+    double _sq77 = tensor_at(Lc, 0);
+    double _sq78 = tensor_at(Lc, 2);
+    double _sq79 = tensor_at(Lc, 3);
+    printf("chol at0=%.4f at2=%.4f at3=%.4f\n", _sq77, _sq78, _sq79);
     /* line 224 */
     void *eout[2];
     /* line 225 */
@@ -298,7 +378,9 @@ int32_t main(void) {
     /* line 227 */
     tensor *evecs = ((tensor*)(eout[1]));
     /* line 228 */
-    printf("eigh ok=%d lo=%.4f hi=%.4f\n", ((int32_t)(eok)), tensor_at(evals, 0), tensor_at(evals, 1));
+    double _sq80 = tensor_at(evals, 0);
+    double _sq81 = tensor_at(evals, 1);
+    printf("eigh ok=%d lo=%.4f hi=%.4f\n", ((int32_t)(eok)), _sq80, _sq81);
     /* line 231 */
     void *qout[2];
     /* line 232 */
@@ -308,7 +390,9 @@ int32_t main(void) {
     /* line 234 */
     tensor *Rm = ((tensor*)(qout[1]));
     /* line 235 */
-    printf("qr ok=%d R00=%.4f R11=%.4f\n", ((int32_t)(qok)), tensor_at(Rm, 0), tensor_at(Rm, 3));
+    double _sq82 = tensor_at(Rm, 0);
+    double _sq83 = tensor_at(Rm, 3);
+    printf("qr ok=%d R00=%.4f R11=%.4f\n", ((int32_t)(qok)), _sq82, _sq83);
     /* line 238 */
     tensor *bu = tensor_unsqueeze(b2, 0);
     /* line 239 */
@@ -316,13 +400,20 @@ int32_t main(void) {
     /* line 240 */
     tensor *bm = tensor_bmm(bu, du);
     /* line 241 */
-    printf("bmm dim0=%d dim1=%d dim2=%d at3=%g\n", tensor_dim(bm, 0), tensor_dim(bm, 1), tensor_dim(bm, 2), tensor_at(bm, 3));
+    int32_t _sq84 = tensor_dim(bm, 0);
+    int32_t _sq85 = tensor_dim(bm, 1);
+    int32_t _sq86 = tensor_dim(bm, 2);
+    double _sq87 = tensor_at(bm, 3);
+    printf("bmm dim0=%d dim1=%d dim2=%d at3=%g\n", _sq84, _sq85, _sq86, _sq87);
     /* line 243 */
     tensor *ones22 = ones(2, s22, DT_F8);
     /* line 244 */
     tensor *adm = tensor_addmm(ones22, M, Mi, 1.0, 1.0);
     /* line 245 */
-    printf("addmm at0=%.4f at1=%.4f at3=%.4f\n", tensor_at(adm, 0), tensor_at(adm, 1), tensor_at(adm, 3));
+    double _sq88 = tensor_at(adm, 0);
+    double _sq89 = tensor_at(adm, 1);
+    double _sq90 = tensor_at(adm, 3);
+    printf("addmm at0=%.4f at1=%.4f at3=%.4f\n", _sq88, _sq89, _sq90);
     /* line 247 */
     int32_t s12[3];
     /* line 248 */
@@ -354,7 +445,11 @@ int32_t main(void) {
     /* line 261 */
     tensor *sdc = tensor_sdpa(q3, k3, v3, true);
     /* line 262 */
-    printf("sdpa at0=%.4f at1=%.4f causal at0=%.4f at1=%.4f\n", tensor_at(sd, 0), tensor_at(sd, 1), tensor_at(sdc, 0), tensor_at(sdc, 1));
+    double _sq91 = tensor_at(sd, 0);
+    double _sq92 = tensor_at(sd, 1);
+    double _sq93 = tensor_at(sdc, 0);
+    double _sq94 = tensor_at(sdc, 1);
+    printf("sdpa at0=%.4f at1=%.4f causal at0=%.4f at1=%.4f\n", _sq91, _sq92, _sq93, _sq94);
     /* line 265 */
     int32_t x1sh[3];
     /* line 266 */
@@ -390,7 +485,11 @@ int32_t main(void) {
     /* line 281 */
     tensor *p1a = tensor_avg_pool1d(x1d, 2, 2, 0);
     /* line 282 */
-    printf("conv1d at0=%g at3=%g pool1d max2=%g avg2=%.4f\n", tensor_at(c1d, 0), tensor_at(c1d, 3), tensor_at(p1m, 2), tensor_at(p1a, 2));
+    double _sq95 = tensor_at(c1d, 0);
+    double _sq96 = tensor_at(c1d, 3);
+    double _sq97 = tensor_at(p1m, 2);
+    double _sq98 = tensor_at(p1a, 2);
+    printf("conv1d at0=%g at3=%g pool1d max2=%g avg2=%.4f\n", _sq95, _sq96, _sq97, _sq98);
     /* line 284 */
     int32_t x2sh[4];
     /* line 285 */
@@ -426,11 +525,20 @@ int32_t main(void) {
     /* line 300 */
     tensor *p2a = tensor_avg_pool2d(x2d, 2, 2, 1, 1, 0, 0);
     /* line 301 */
-    printf("conv2d at0=%g at3=%g pool2d max0=%g max3=%g avg0=%.4f avg3=%.4f\n", tensor_at(c2d, 0), tensor_at(c2d, 3), tensor_at(p2m, 0), tensor_at(p2m, 3), tensor_at(p2a, 0), tensor_at(p2a, 3));
+    double _sq99 = tensor_at(c2d, 0);
+    double _sq100 = tensor_at(c2d, 3);
+    double _sq101 = tensor_at(p2m, 0);
+    double _sq102 = tensor_at(p2m, 3);
+    double _sq103 = tensor_at(p2a, 0);
+    double _sq104 = tensor_at(p2a, 3);
+    printf("conv2d at0=%g at3=%g pool2d max0=%g max3=%g avg0=%.4f avg3=%.4f\n", _sq99, _sq100, _sq101, _sq102, _sq103, _sq104);
     /* line 304 */
     tensor *trm = tri(3, 3, 0, DT_F8);
     /* line 305 */
-    printf("tri sum=%g at0=%g at1=%g\n", tensor_sum_all(trm), tensor_at(trm, 0), tensor_at(trm, 1));
+    double _sq105 = tensor_sum_all(trm);
+    double _sq106 = tensor_at(trm, 0);
+    double _sq107 = tensor_at(trm, 1);
+    printf("tri sum=%g at0=%g at1=%g\n", _sq105, _sq106, _sq107);
     /* line 308 */
     tensor *xa = arange(0.0, 3.0, 1.0, DT_F8);
     /* line 309 */
@@ -450,7 +558,13 @@ int32_t main(void) {
     /* line 316 */
     tensor *gy = ((tensor*)(mout[1]));
     /* line 317 */
-    printf("meshgrid ok=%d gx d0=%d d1=%d at0=%g at5=%g gy at0=%g at5=%g\n", ((int32_t)(mgok)), tensor_dim(gx, 0), tensor_dim(gx, 1), tensor_at(gx, 0), tensor_at(gx, 5), tensor_at(gy, 0), tensor_at(gy, 5));
+    int32_t _sq108 = tensor_dim(gx, 0);
+    int32_t _sq109 = tensor_dim(gx, 1);
+    double _sq110 = tensor_at(gx, 0);
+    double _sq111 = tensor_at(gx, 5);
+    double _sq112 = tensor_at(gy, 0);
+    double _sq113 = tensor_at(gy, 5);
+    printf("meshgrid ok=%d gx d0=%d d1=%d at0=%g at5=%g gy at0=%g at5=%g\n", ((int32_t)(mgok)), _sq108, _sq109, _sq110, _sq111, _sq112, _sq113);
     /* line 320 */
     rand_seed(42);
     /* line 321 */
@@ -476,7 +590,10 @@ int32_t main(void) {
     /* line 335 */
     tensor *ld = ts_load("/tmp/ts_basic.npy");
     /* line 336 */
-    printf("save ok=%d load dim0=%d dim1=%d at5=%g\n", ((int32_t)(svok)), tensor_dim(ld, 0), tensor_dim(ld, 1), tensor_at(ld, 5));
+    int32_t _sq114 = tensor_dim(ld, 0);
+    int32_t _sq115 = tensor_dim(ld, 1);
+    double _sq116 = tensor_at(ld, 5);
+    printf("save ok=%d load dim0=%d dim1=%d at5=%g\n", ((int32_t)(svok)), _sq114, _sq115, _sq116);
     /* line 338 */
     {
         int32_t _ret = 0;

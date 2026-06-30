@@ -112,15 +112,30 @@ int32_t main(void) {
     /* line 32 */
     printf("stage     depth crit slack\n");
     /* line 33 */
-    printf("fetch     %5d %4d %5d\n", token_depth(fetch), token_critical(fetch), token_slack(fetch));
+    int32_t _sq0 = token_depth(fetch);
+    int32_t _sq1 = token_critical(fetch);
+    int32_t _sq2 = token_slack(fetch);
+    printf("fetch     %5d %4d %5d\n", _sq0, _sq1, _sq2);
     /* line 34 */
-    printf("decode    %5d %4d %5d\n", token_depth(decode), token_critical(decode), token_slack(decode));
+    int32_t _sq3 = token_depth(decode);
+    int32_t _sq4 = token_critical(decode);
+    int32_t _sq5 = token_slack(decode);
+    printf("decode    %5d %4d %5d\n", _sq3, _sq4, _sq5);
     /* line 35 */
-    printf("render    %5d %4d %5d\n", token_depth(render), token_critical(render), token_slack(render));
+    int32_t _sq6 = token_depth(render);
+    int32_t _sq7 = token_critical(render);
+    int32_t _sq8 = token_slack(render);
+    printf("render    %5d %4d %5d\n", _sq6, _sq7, _sq8);
     /* line 36 */
-    printf("audio     %5d %4d %5d\n", token_depth(audio), token_critical(audio), token_slack(audio));
+    int32_t _sq9 = token_depth(audio);
+    int32_t _sq10 = token_critical(audio);
+    int32_t _sq11 = token_slack(audio);
+    printf("audio     %5d %4d %5d\n", _sq9, _sq10, _sq11);
     /* line 37 */
-    printf("output    %5d %4d %5d\n", token_depth(output), token_critical(output), token_slack(output));
+    int32_t _sq12 = token_depth(output);
+    int32_t _sq13 = token_critical(output);
+    int32_t _sq14 = token_slack(output);
+    printf("output    %5d %4d %5d\n", _sq12, _sq13, _sq14);
     /* line 38 */
     return 0;
 }

@@ -20,7 +20,10 @@ static int32_t bump_b(void);
 
 int32_t main(void) {
     /* line 16 */
-    printf("%d %d %d\n", bump_a(), bump_a(), bump_b());
+    int32_t _sq0 = bump_a();
+    int32_t _sq1 = bump_a();
+    int32_t _sq2 = bump_b();
+    printf("%d %d %d\n", _sq0, _sq1, _sq2);
     /* line 17 */
     return 0;
 }

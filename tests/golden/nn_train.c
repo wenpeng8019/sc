@@ -96,7 +96,9 @@ int32_t main(void) {
     /* line 49 */
     tensor *yv = val_value(y2);
     /* line 50 */
-    printf("y0_close=%d y1_close=%d\n", ((int32_t)(tensor_at(yv, 0) > 4.0)), ((int32_t)(tensor_at(yv, 1) > 7.0)));
+    int32_t _sq0 = ((int32_t)(tensor_at(yv, 0) > 4.0));
+    int32_t _sq1 = ((int32_t)(tensor_at(yv, 1) > 7.0));
+    printf("y0_close=%d y1_close=%d\n", _sq0, _sq1);
     /* line 51 */
     nn_tape_clear();
     /* line 53 */

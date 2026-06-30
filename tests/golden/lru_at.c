@@ -85,30 +85,42 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[0], (void (*)(void *))node_drop);
     ha[0] = make(1);
     /* line 39 */
-    lru_put(&ca, "a", ({ sc_fat _ec1 = ha[0]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "a", sc_fat_as_thin(ha[0], (void (*)(void *))node_drop));
     /* line 40 */
     sc_fat_unbind_d(&ha[1], (void (*)(void *))node_drop);
     ha[1] = make(2);
     /* line 41 */
-    lru_put(&ca, "b", ({ sc_fat _ec2 = ha[1]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "b", sc_fat_as_thin(ha[1], (void (*)(void *))node_drop));
     /* line 42 */
     sc_fat_unbind_d(&ha[2], (void (*)(void *))node_drop);
     ha[2] = make(3);
     /* line 43 */
-    lru_put(&ca, "c", ({ sc_fat _ec3 = ha[2]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "c", sc_fat_as_thin(ha[2], (void (*)(void *))node_drop));
     /* line 44 */
-    printf("A len=%llu cap=%llu mru=%s lru=%s\n", lru_len(&ca), lru_cap(&ca), ((char*)(lru_mru_key(&ca))), ((char*)(lru_lru_key(&ca))));
+    uint64_t _sq0 = lru_len(&ca);
+    uint64_t _sq1 = lru_cap(&ca);
+    char *_sq2 = ((char*)(lru_mru_key(&ca)));
+    char *_sq3 = ((char*)(lru_lru_key(&ca)));
+    printf("A len=%llu cap=%llu mru=%s lru=%s\n", _sq0, _sq1, _sq2, _sq3);
     /* line 48 */
-    printf("A peek_a=%d lru_still=%s\n", ((node*)((lru_peek(&ca, "a")).p))->v, ((char*)(lru_lru_key(&ca))));
+    int32_t _sq4 = ((node*)((lru_peek(&ca, "a")).p))->v;
+    char *_sq5 = ((char*)(lru_lru_key(&ca)));
+    printf("A peek_a=%d lru_still=%s\n", _sq4, _sq5);
     /* line 50 */
-    printf("A get_a=%d mru=%s lru=%s\n", ((node*)((lru_get(&ca, "a")).p))->v, ((char*)(lru_mru_key(&ca))), ((char*)(lru_lru_key(&ca))));
+    int32_t _sq6 = ((node*)((lru_get(&ca, "a")).p))->v;
+    char *_sq7 = ((char*)(lru_mru_key(&ca)));
+    char *_sq8 = ((char*)(lru_lru_key(&ca)));
+    printf("A get_a=%d mru=%s lru=%s\n", _sq6, _sq7, _sq8);
     /* line 54 */
     sc_fat_unbind_d(&ha[3], (void (*)(void *))node_drop);
     ha[3] = make(4);
     /* line 55 */
-    lru_put(&ca, "d", ({ sc_fat _ec4 = ha[3]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "d", sc_fat_as_thin(ha[3], (void (*)(void *))node_drop));
     /* line 56 */
-    printf("A after_put_d: has_b=%d has_d=%d len=%llu\n", lru_has(&ca, "b"), lru_has(&ca, "d"), lru_len(&ca));
+    uint8_t _sq9 = lru_has(&ca, "b");
+    uint8_t _sq10 = lru_has(&ca, "d");
+    uint64_t _sq11 = lru_len(&ca);
+    printf("A after_put_d: has_b=%d has_d=%d len=%llu\n", _sq9, _sq10, _sq11);
     /* line 58 */
     printf("A each:");
     /* line 59 */
@@ -119,9 +131,11 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[4], (void (*)(void *))node_drop);
     ha[4] = make(99);
     /* line 64 */
-    lru_put(&ca, "a", ({ sc_fat _ec5 = ha[4]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    lru_put(&ca, "a", sc_fat_as_thin(ha[4], (void (*)(void *))node_drop));
     /* line 65 */
-    printf("A replace_a=%d len=%llu\n", ((node*)((lru_get(&ca, "a")).p))->v, lru_len(&ca));
+    int32_t _sq12 = ((node*)((lru_get(&ca, "a")).p))->v;
+    uint64_t _sq13 = lru_len(&ca);
+    printf("A replace_a=%d len=%llu\n", _sq12, _sq13);
     /* line 66 */
     printf("A each2:");
     /* line 67 */
@@ -154,7 +168,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make((keys[i] + 1) * 10);
         /* line 83 */
-        lru_put(&cb, ((const void*)(&(keys[i]))), ({ sc_fat _ec6 = hb[i]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
+        lru_put(&cb, ((const void*)(&(keys[i]))), sc_fat_as_thin(hb[i], (void (*)(void *))node_drop));
         /* line 84 */
         i += 1;
     }
@@ -163,15 +177,25 @@ int32_t main(void) {
     /* line 87 */
     int32_t *lk = ((int32_t*)(lru_lru_key(&cb)));
     /* line 88 */
-    printf("B len=%llu cap=%llu mru=%d lru=%d empty=%d\n", lru_len(&cb), lru_cap(&cb), mk[0], lk[0], lru_is_empty(&cb));
+    uint64_t _sq14 = lru_len(&cb);
+    uint64_t _sq15 = lru_cap(&cb);
+    uint8_t _sq16 = lru_is_empty(&cb);
+    printf("B len=%llu cap=%llu mru=%d lru=%d empty=%d\n", _sq14, _sq15, mk[0], lk[0], _sq16);
     /* line 92 */
-    printf("B remove20=%d miss=%d has20=%d len=%llu\n", lru_remove(&cb, ((const void*)(&(keys[1])))), lru_remove(&cb, ((const void*)(&(keys[1])))), lru_has(&cb, ((const void*)(&(keys[1])))), lru_len(&cb));
+    uint8_t _sq17 = lru_remove(&cb, ((const void*)(&(keys[1]))));
+    uint8_t _sq18 = lru_remove(&cb, ((const void*)(&(keys[1]))));
+    uint8_t _sq19 = lru_has(&cb, ((const void*)(&(keys[1]))));
+    uint64_t _sq20 = lru_len(&cb);
+    printf("B remove20=%d miss=%d has20=%d len=%llu\n", _sq17, _sq18, _sq19, _sq20);
     /* line 97 */
     lru_set_cap(&cb, 2);
     /* line 98 */
     int32_t *lk2 = ((int32_t*)(lru_lru_key(&cb)));
     /* line 99 */
-    printf("B after_set_cap2: cap=%llu len=%llu has10=%d lru=%d\n", lru_cap(&cb), lru_len(&cb), lru_has(&cb, ((const void*)(&(keys[0])))), lk2[0]);
+    uint64_t _sq21 = lru_cap(&cb);
+    uint64_t _sq22 = lru_len(&cb);
+    uint8_t _sq23 = lru_has(&cb, ((const void*)(&(keys[0]))));
+    printf("B after_set_cap2: cap=%llu len=%llu has10=%d lru=%d\n", _sq21, _sq22, _sq23, lk2[0]);
     /* line 101 */
     printf("B each:");
     /* line 102 */

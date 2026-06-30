@@ -86,49 +86,61 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[0], (void (*)(void *))node_drop);
     ha[0] = make(10);
     /* line 40 */
-    trie_put(&tt, "cat", ({ sc_fat _ec1 = ha[0]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "cat", sc_fat_as_thin(ha[0], (void (*)(void *))node_drop));
     /* line 41 */
     sc_fat_unbind_d(&ha[1], (void (*)(void *))node_drop);
     ha[1] = make(20);
     /* line 42 */
-    trie_put(&tt, "car", ({ sc_fat _ec2 = ha[1]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "car", sc_fat_as_thin(ha[1], (void (*)(void *))node_drop));
     /* line 43 */
     sc_fat_unbind_d(&ha[2], (void (*)(void *))node_drop);
     ha[2] = make(30);
     /* line 44 */
-    trie_put(&tt, "card", ({ sc_fat _ec3 = ha[2]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "card", sc_fat_as_thin(ha[2], (void (*)(void *))node_drop));
     /* line 45 */
     sc_fat_unbind_d(&ha[3], (void (*)(void *))node_drop);
     ha[3] = make(40);
     /* line 46 */
-    trie_put(&tt, "dog", ({ sc_fat _ec4 = ha[3]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "dog", sc_fat_as_thin(ha[3], (void (*)(void *))node_drop));
     /* line 47 */
     sc_fat_unbind_d(&ha[4], (void (*)(void *))node_drop);
     ha[4] = make(50);
     /* line 48 */
-    trie_put(&tt, "do", ({ sc_fat _ec5 = ha[4]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "do", sc_fat_as_thin(ha[4], (void (*)(void *))node_drop));
     /* line 49 */
     sc_fat_unbind_d(&ha[5], (void (*)(void *))node_drop);
     ha[5] = make(60);
     /* line 50 */
-    trie_put(&tt, "cart", ({ sc_fat _ec6 = ha[5]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "cart", sc_fat_as_thin(ha[5], (void (*)(void *))node_drop));
     /* line 51 */
     printf("A len=%llu\n", trie_len(&tt));
     /* line 52 */
-    printf("A has: car=%d ca=%d dog=%d xyz=%d\n", trie_has(&tt, "car"), trie_has(&tt, "ca"), trie_has(&tt, "dog"), trie_has(&tt, "xyz"));
+    uint8_t _sq0 = trie_has(&tt, "car");
+    uint8_t _sq1 = trie_has(&tt, "ca");
+    uint8_t _sq2 = trie_has(&tt, "dog");
+    uint8_t _sq3 = trie_has(&tt, "xyz");
+    printf("A has: car=%d ca=%d dog=%d xyz=%d\n", _sq0, _sq1, _sq2, _sq3);
     /* line 54 */
     printf("A get card=%d\n", ((node*)((trie_get(&tt, "card")).p))->v);
     /* line 57 */
     sc_fat hrep = {0};
     hrep = make(99);
     /* line 58 */
-    trie_put(&tt, "car", ({ sc_fat _ec7 = hrep; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "car", sc_fat_as_thin(hrep, (void (*)(void *))node_drop));
     /* line 59 */
-    printf("A replace car=%d len=%llu\n", ((node*)((trie_get(&tt, "car")).p))->v, trie_len(&tt));
+    int32_t _sq4 = ((node*)((trie_get(&tt, "car")).p))->v;
+    uint64_t _sq5 = trie_len(&tt);
+    printf("A replace car=%d len=%llu\n", _sq4, _sq5);
     /* line 62 */
-    printf("B has_prefix: ca=%d car=%d xy=%d\n", trie_has_prefix(&tt, "ca"), trie_has_prefix(&tt, "car"), trie_has_prefix(&tt, "xy"));
+    uint8_t _sq6 = trie_has_prefix(&tt, "ca");
+    uint8_t _sq7 = trie_has_prefix(&tt, "car");
+    uint8_t _sq8 = trie_has_prefix(&tt, "xy");
+    printf("B has_prefix: ca=%d car=%d xy=%d\n", _sq6, _sq7, _sq8);
     /* line 64 */
-    printf("B count: ca=%llu car=%llu all=%llu\n", trie_count_prefix(&tt, "ca"), trie_count_prefix(&tt, "car"), trie_count_prefix(&tt, ""));
+    uint64_t _sq9 = trie_count_prefix(&tt, "ca");
+    uint64_t _sq10 = trie_count_prefix(&tt, "car");
+    uint64_t _sq11 = trie_count_prefix(&tt, "");
+    printf("B count: ca=%llu car=%llu all=%llu\n", _sq9, _sq10, _sq11);
     /* line 66 */
     printf("B each_ca:");
     /* line 67 */
@@ -150,22 +162,40 @@ int32_t main(void) {
     /* line 75 */
     printf(" (n=%lld)\n", total);
     /* line 76 */
-    printf("B longest: cartoon=%lld dog=%lld do=%lld xyz=%lld\n", trie_longest_prefix(&tt, "cartoon"), trie_longest_prefix(&tt, "dog"), trie_longest_prefix(&tt, "do"), trie_longest_prefix(&tt, "xyz"));
+    int64_t _sq12 = trie_longest_prefix(&tt, "cartoon");
+    int64_t _sq13 = trie_longest_prefix(&tt, "dog");
+    int64_t _sq14 = trie_longest_prefix(&tt, "do");
+    int64_t _sq15 = trie_longest_prefix(&tt, "xyz");
+    printf("B longest: cartoon=%lld dog=%lld do=%lld xyz=%lld\n", _sq12, _sq13, _sq14, _sq15);
     /* line 81 */
     sc_fat hempty = {0};
     hempty = make(70);
     /* line 82 */
-    trie_put(&tt, "", ({ sc_fat _ec8 = hempty; (sc_thin){_ec8.p, _ec8.tar, (void (*)(void *))node_drop}; }));
+    trie_put(&tt, "", sc_fat_as_thin(hempty, (void (*)(void *))node_drop));
     /* line 83 */
-    printf("C empty: has=%d get=%d all=%llu lp_zzz=%lld\n", trie_has(&tt, ""), ((node*)((trie_get(&tt, "")).p))->v, trie_count_prefix(&tt, ""), trie_longest_prefix(&tt, "zzz"));
+    uint8_t _sq16 = trie_has(&tt, "");
+    int32_t _sq17 = ((node*)((trie_get(&tt, "")).p))->v;
+    uint64_t _sq18 = trie_count_prefix(&tt, "");
+    int64_t _sq19 = trie_longest_prefix(&tt, "zzz");
+    printf("C empty: has=%d get=%d all=%llu lp_zzz=%lld\n", _sq16, _sq17, _sq18, _sq19);
     /* line 87 */
-    printf("C remove card=%d again=%d miss=%d\n", trie_remove(&tt, "card"), trie_remove(&tt, "card"), trie_remove(&tt, "nope"));
+    uint8_t _sq20 = trie_remove(&tt, "card");
+    uint8_t _sq21 = trie_remove(&tt, "card");
+    uint8_t _sq22 = trie_remove(&tt, "nope");
+    printf("C remove card=%d again=%d miss=%d\n", _sq20, _sq21, _sq22);
     /* line 89 */
-    printf("C after_remove: has_card=%d has_car=%d has_cart=%d count_car=%llu len=%llu\n", trie_has(&tt, "card"), trie_has(&tt, "car"), trie_has(&tt, "cart"), trie_count_prefix(&tt, "car"), trie_len(&tt));
+    uint8_t _sq23 = trie_has(&tt, "card");
+    uint8_t _sq24 = trie_has(&tt, "car");
+    uint8_t _sq25 = trie_has(&tt, "cart");
+    uint64_t _sq26 = trie_count_prefix(&tt, "car");
+    uint64_t _sq27 = trie_len(&tt);
+    printf("C after_remove: has_card=%d has_car=%d has_cart=%d count_car=%llu len=%llu\n", _sq23, _sq24, _sq25, _sq26, _sq27);
     /* line 92 */
     trie_clear(&tt);
     /* line 93 */
-    printf("C after_clear len=%llu has_car=%d\n", trie_len(&tt), trie_has(&tt, "car"));
+    uint64_t _sq28 = trie_len(&tt);
+    uint8_t _sq29 = trie_has(&tt, "car");
+    printf("C after_clear len=%llu has_car=%d\n", _sq28, _sq29);
     /* line 94 */
     trie_drop(&tt);
     /* line 97 */

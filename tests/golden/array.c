@@ -71,7 +71,9 @@ int32_t main(void) {
     /* line 36 */
     key = 10;
     /* line 37 */
-    printf("find(10)=%lld rfind(10)=%lld\n", array_find(&a, &(key), 0, int_cmp), array_rfind(&a, &(key), int_cmp));
+    int64_t _sq0 = array_find(&a, &(key), 0, int_cmp);
+    int64_t _sq1 = array_rfind(&a, &(key), int_cmp);
+    printf("find(10)=%lld rfind(10)=%lld\n", _sq0, _sq1);
     /* line 39 */
     array b = {0};
     /* line 40 */

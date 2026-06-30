@@ -22,6 +22,16 @@ void sc_ref_check(sc_ref *r, const char *who) {
         fprintf(stderr, "sc: 未清理：%s 释放时仍持有 %d 个出向引用\n", who ? who : "对象", r->out);
 }
 
+/* 裸 @ 还原 object@（--check=ref）：源 afat 须由 class 析构槽产出（dtor==objdrop），
+ * 否则源非 class 类型，无 _class 派发槽，还原 object@ 无意义——中止以暴露误用。 */
+sc_afat __sc_afat_objck(sc_afat a, void (*objdrop)(void *)) {
+    if (a.dtor != objdrop) {
+        fprintf(stderr, "sc: 裸 @ 还原 object@ 失败：源非 class 类型（无 _class 派发槽，object@ 无意义）\n");
+        abort();
+    }
+    return a;
+}
+
 void sc_fat_on_zero(sc_fat *f) { sc_fat_on_zero_d(f, (void (*)(void *))0); }
 
 /* 入边归零（in→0）：堆对象先调目标类型析构 dtor（清子成员 → out 递减），再判 out。

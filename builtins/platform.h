@@ -123,6 +123,12 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 /* ---------------- 平台基础头 ---------------- */
 
 #if P_WIN
+/* WIN32_LEAN_AND_MEAN：令 <windows.h> 不拉入旧版 <winsock.h>（winsock1），
+ * 以免与后续 <winsock2.h>（op/os/ssl 的异步内核与套接字）重复定义 sockaddr/select 等冲突。
+ * 须在 <windows.h> 之前定义。 */
+#   ifndef WIN32_LEAN_AND_MEAN
+#       define WIN32_LEAN_AND_MEAN
+#   endif
 #   include <windows.h>
 #endif
 #if !P_WIN || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__MINGW64__)

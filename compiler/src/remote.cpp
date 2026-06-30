@@ -41,9 +41,42 @@ static std::string shq(const std::string& s) {
     return out;
 }
 
-// 解析远端基础目录：空 → /tmp/scc-remote（不依赖 ~ 展开，跨后端一致）
+// ---------------- 跨 shell 命令辅助（POSIX sh / Windows cmd.exe）----------------
+// cmd.exe 参数加双引号（路径含空格如 "Program Files"、反斜杠分隔符）
+static std::string cmdq(const std::string& s) { return "\"" + s + "\""; }
+
+// 会话路径正规化为正斜杠（canonical；scp/sftp 接受正斜杠+盘符 C:/...）
+static std::string toFwd(std::string s) {
+    for (char& c : s) if (c == '\\') c = '/';
+    return s;
+}
+
+// 正斜杠路径 → 平台原生分隔符（cmd.exe 命令用反斜杠）
+static std::string natPath(const std::string& s, bool win) {
+    if (!win) return s;
+    std::string o = s;
+    for (char& c : o) if (c == '/') c = '\\';
+    return o;
+}
+
+// 建目录命令（含父级；已存在不报错）
+static std::string mkdirCmd(const std::string& dir, bool win) {
+    if (win) { const std::string p = cmdq(natPath(dir, true));
+               return "if not exist " + p + " mkdir " + p; }
+    return "mkdir -p " + shq(dir);
+}
+
+// 在会话目录内执行一段命令（cmd.exe 用 cd /d + 括号块）
+static std::string runInDir(const std::string& dir, const std::string& cmd, bool win) {
+    if (win) return "cd /d " + cmdq(natPath(dir, true)) + " && ( " + cmd + " )";
+    return "cd " + shq(dir) + " && ( " + cmd + " )";
+}
+
+// 解析远端基础目录：空 → 默认（POSIX /tmp/scc-remote；Windows 相对 scc-remote，
+// 落在 ssh 登录起始的 %USERPROFILE% 下，与 sftp 默认目录一致）
 static std::string baseDir(const RemoteTarget& t) {
-    return t.dir.empty() ? std::string("/tmp/scc-remote") : t.dir;
+    if (!t.dir.empty()) return toFwd(t.dir);
+    return t.windows ? std::string("scc-remote") : std::string("/tmp/scc-remote");
 }
 
 // fork+exec 运行 argv，继承 stdio（流式输出）；返回退出码，启动失败返回 -1
@@ -73,7 +106,7 @@ public:
 
     bool connect(std::string& err) override {
         // 远端建会话目录（首次 ssh 即验证连通性）
-        if (rawExec("mkdir -p " + shq(session_)) != 0) {
+        if (rawExec(mkdirCmd(session_, target_.windows)) != 0) {
             err = "无法连接远端或创建会话目录 " + session_;
             return false;
         }
@@ -87,7 +120,7 @@ public:
             if (slash != std::string::npos)
                 rdir = session_ + "/" + f.remoteRel.substr(0, slash);
             if (slash != std::string::npos &&
-                rawExec("mkdir -p " + shq(rdir)) != 0) {
+                rawExec(mkdirCmd(rdir, target_.windows)) != 0) {
                 err = "无法创建远端目录 " + rdir; return false;
             }
             std::vector<std::string> argv = {"scp"};
@@ -102,7 +135,7 @@ public:
     }
 
     int exec(const std::string& cmd, std::string& err) override {
-        int rc = rawExec("cd " + shq(session_) + " && ( " + cmd + " )");
+        int rc = rawExec(runInDir(session_, cmd, target_.windows));
         if (rc < 0) err = "ssh 执行失败";
         return rc;
     }
@@ -175,7 +208,7 @@ public:
         if (!authenticate(err)) return false;
         // 建会话目录
         std::string e2;
-        if (rawExec("mkdir -p " + shq(session_), e2) != 0) {
+        if (rawExec(mkdirCmd(session_, target_.windows), e2) != 0) {
             err = "无法创建远端会话目录 " + session_; return false;
         }
         return true;
@@ -192,7 +225,7 @@ public:
             if (slash != std::string::npos) {
                 rdir = session_ + "/" + f.remoteRel.substr(0, slash);
                 std::string e2;
-                if (rawExec("mkdir -p " + shq(rdir), e2) != 0) {
+                if (rawExec(mkdirCmd(rdir, target_.windows), e2) != 0) {
                     err = "无法创建远端目录 " + rdir; return false;
                 }
             }
@@ -216,7 +249,7 @@ public:
     }
 
     int exec(const std::string& cmd, std::string& err) override {
-        return rawExec("cd " + shq(session_) + " && ( " + cmd + " )", err);
+        return rawExec(runInDir(session_, cmd, target_.windows), err);
     }
 
     bool pull(const std::string& remoteRel, const std::string& localPath,
@@ -434,7 +467,14 @@ static bool makeBundle(const RemoteJob& job, const fs::path& tgz,
     char* d = mkdtemp(tmpl);
     if (!d) { err = "无法创建打包临时目录"; return false; }
     fs::path stage(d);
-    {
+    // 多单元模式：所有单元 .c + 共享头随 unitsDir 整目录入包到 stage/units/，
+    //   单 TU main.c 不再使用。否则（stdin 回退）写单个 main.c。
+    if (!job.units.empty() && !job.unitsDir.empty()) {
+        fs::copy(job.unitsDir, stage / "units",
+                 fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
+        if (ec) { err = "复制 units 失败: " + ec.message();
+                  fs::remove_all(stage, ec); return false; }
+    } else {
         std::ofstream out(stage / "main.c", std::ios::binary);
         out.write(job.csrc.data(), (std::streamsize)job.csrc.size());
     }
@@ -499,7 +539,15 @@ int runRemoteJob(const RemoteJob& job) {
     auto cleanup = [&](int rc) {
         fs::remove(tgz, ec);
         std::string e2;
-        rb->exec("cd / && rm -rf " + shq(rb->sessionDir()), e2);  // 清理远端会话目录
+        const std::string& sd = rb->sessionDir();
+        if (job.target.windows) {
+            // exec 已 cd 进会话目录；退到父级按叶名删除（相对/绝对路径均稳）
+            auto slash = sd.find_last_of('/');
+            std::string leaf = slash == std::string::npos ? sd : sd.substr(slash + 1);
+            rb->exec("cd .. && rd /s /q " + cmdq(leaf), e2);
+        } else {
+            rb->exec("cd / && rm -rf " + shq(sd), e2);  // 清理远端会话目录
+        }
         return rc;
     };
 
@@ -510,24 +558,127 @@ int runRemoteJob(const RemoteJob& job) {
         std::fprintf(stderr, "错误: %s\n", err.c_str()); return cleanup(1);
     }
 
-    // 远端解包并用原生工具链编译（不带本机 machine/交叉选项）
-    std::string cc = job.remoteCC.empty() ? "cc" : job.remoteCC;
     std::string libs;
     for (auto& l : job.ldLibs) libs += " " + l;
 
-    // main.c + 各 add 源各自编 .o，再统一链接（含 add 预编译库）
-    std::string compile = "tar xzf bundle.tgz && rm -f bundle.tgz && " +
-        cc + " -O2 -g -I builtins -I . -c main.c -o main.o";
-    std::string objs = "main.o";
-    int oi = 0;
-    for (auto& s : plan.sources) {
-        std::string obj = "dep" + std::to_string(oi++) + ".o";
-        compile += " && " + cc + " -O2 -g -I builtins -I . -I " + shq(s.second) +
-                   " -c " + shq(s.first) + " -o " + obj;
-        objs += " " + obj;
+    const bool multi = !job.units.empty();   // 多单元模式（每单元一 .c，含库模块生命周期）
+    // 串联编译命令（首条无前缀，其余以 && 连接）
+    auto joinCmds = [](const std::vector<std::string>& cs) {
+        std::string r;
+        for (size_t i = 0; i < cs.size(); ++i) r += (i ? " && " : "") + cs[i];
+        return r;
+    };
+
+    std::string compile, artifact, runCmd;
+    if (job.target.windows) {
+        // ---- Windows/MSVC（cl.exe）：cmd.exe + vcvars，写临时 .obj 再链接 ----
+        // cl 不读 stdin、用 /I /c /Fo 风格、需 vcvars 置 INCLUDE/LIB；产物 main.exe。
+        std::string cl = job.remoteCC.empty() ? "cl" : job.remoteCC;
+        std::string fl = std::string("/nologo /utf-8 /std:c17 /experimental:c11atomics")
+                       + (multi ? " /I units" : "") + " /I builtins /I .";
+        // 单元级编译选项 gcc→MSVC：仅取 -D*（vendor 本机 -I 远端无效，丢弃）
+        auto msvcCflags = [](const std::string& cf) {
+            std::string r; std::istringstream is(cf); std::string t;
+            while (is >> t) if (t.rfind("-D", 0) == 0) r += " /D" + t.substr(2);
+            return r;
+        };
+        std::vector<std::string> cmds;
+        if (!job.vcvars.empty()) cmds.push_back("call " + cmdq(job.vcvars) + " >NUL 2>&1");
+        cmds.push_back("tar xzf bundle.tgz");
+        cmds.push_back("del /q bundle.tgz");
+        std::string objs;
+        if (multi) {
+            int ui = 0;
+            for (auto& u : job.units) {
+                std::string obj = "u" + std::to_string(ui++) + ".obj";
+                std::string inc = u.srcDir.empty() ? std::string()
+                                : " /I " + cmdq(natPath(u.srcDir, true));
+                cmds.push_back(cl + " " + fl + inc + msvcCflags(u.cflags) +
+                               " /c " + cmdq(natPath(u.cRel, true)) + " /Fo" + obj);
+                objs += " " + obj;
+            }
+        } else {
+            cmds.push_back(cl + " " + fl + " /c main.c /Fomain.obj");
+            objs = " main.obj";
+            int ri = 0;
+            for (auto& imp : job.runtimeImpls) {
+                std::string obj = "rt" + std::to_string(ri++) + ".obj";
+                std::string inc = imp.second.empty() ? std::string()
+                                : " /I " + cmdq(natPath("builtins/" + imp.second, true));
+                cmds.push_back(cl + " " + fl + inc + " /c " +
+                               cmdq(natPath("builtins/" + imp.first, true)) + " /Fo" + obj);
+                objs += " " + obj;
+            }
+        }
+        int oi = 0;
+        for (auto& s : plan.sources) {
+            std::string obj = "dep" + std::to_string(oi++) + ".obj";
+            cmds.push_back(cl + " " + fl + " /I " + cmdq(natPath(s.second, true)) +
+                           " /c " + cmdq(natPath(s.first, true)) + " /Fo" + obj);
+            objs += " " + obj;
+        }
+        for (auto& l : plan.libs) objs += " " + cmdq(natPath(l, true));
+        // 链接：cl 驱动 link.exe；-lX → X.lib
+        std::string libArgs;
+        for (auto& l : job.ldLibs) {
+            std::string lib = (l.rfind("-l", 0) == 0) ? l.substr(2) + ".lib" : l;
+            libArgs += " " + lib;
+        }
+        // op_impl/os_impl 异步内核引用 winsock（select/__WSAFDIsSet/IOCP）——补系统库。
+        // 多单元恒含 op；未引用时链接器忽略，无害。
+        if (multi || !job.runtimeImpls.empty())
+            libArgs += " ws2_32.lib mswsock.lib";
+        cmds.push_back(cl + " /nologo /Fe:main.exe" + objs + libArgs);
+        compile = joinCmds(cmds);
+        artifact = "main.exe";
+        runCmd   = ".\\main.exe";
+    } else {
+        // ---- POSIX：原生 cc，gcc 风格，stdin 不可用故用 .c 文件；产物 main.out ----
+        std::string cc = job.remoteCC.empty() ? "cc" : job.remoteCC;
+        std::string fl = std::string("-O2 -g") + (multi ? " -I units" : "") + " -I builtins -I .";
+        std::vector<std::string> cmds;
+        cmds.push_back("tar xzf bundle.tgz");
+        cmds.push_back("rm -f bundle.tgz");
+        std::string objs;
+        if (multi) {
+            int ui = 0;
+            for (auto& u : job.units) {
+                std::string obj = "u" + std::to_string(ui++) + ".o";
+                std::string inc = u.srcDir.empty() ? std::string() : " -I " + shq(u.srcDir);
+                cmds.push_back(cc + " " + fl + inc + (u.cflags.empty() ? "" : " " + u.cflags) +
+                               " -c " + shq(u.cRel) + " -o " + obj);
+                objs += " " + obj;
+            }
+        } else {
+            cmds.push_back(cc + " " + fl + " -c main.c -o main.o");
+            objs = " main.o";
+            int ri = 0;
+            for (auto& imp : job.runtimeImpls) {
+                std::string obj = "rt" + std::to_string(ri++) + ".o";
+                std::string inc = imp.second.empty() ? std::string()
+                                : " -I " + shq("builtins/" + imp.second);
+                cmds.push_back(cc + " -O2 -g -I builtins -I ." + inc +
+                               " -c " + shq("builtins/" + imp.first) + " -o " + obj);
+                objs += " " + obj;
+            }
+        }
+        int oi = 0;
+        for (auto& s : plan.sources) {
+            std::string obj = "dep" + std::to_string(oi++) + ".o";
+            cmds.push_back(cc + " -O2 -g -I builtins -I . -I " + shq(s.second) +
+                           " -c " + shq(s.first) + " -o " + obj);
+            objs += " " + obj;
+        }
+        for (auto& l : plan.libs) objs += " " + shq(l);
+        cmds.push_back(cc + " -g" + objs + " -o main.out" + libs);
+        compile = joinCmds(cmds);
+        artifact = "main.out";
+        runCmd   = "./main.out";
     }
-    for (auto& l : plan.libs) objs += " " + shq(l);
-    compile += " && " + cc + " -g " + objs + " -o main.out" + libs;
+
+    // 编译链 stdout → stderr：MSVC cl 即便 /nologo 仍逐文件 echo 源名，会污染程序
+    // stdout 流（run 阶段单独 exec，输出干净）；错误信息走 stderr 不受影响，退出码不变。
+    compile = "( " + compile + " ) 1>&2";
 
     int crc = rb->exec(compile, err);
     if (crc != 0) {
@@ -537,7 +688,7 @@ int runRemoteJob(const RemoteJob& job) {
 
     if (!job.output.empty()) {
         // --build：取回产物
-        if (!rb->pull("main.out", job.output, err)) {
+        if (!rb->pull(artifact, job.output, err)) {
             std::fprintf(stderr, "错误: %s\n", err.c_str()); return cleanup(1);
         }
         fs::permissions(job.output,
@@ -547,8 +698,7 @@ int runRemoteJob(const RemoteJob& job) {
     }
 
     // run：远端运行，透传参数，回传退出码
-    std::string runCmd = "./main.out";
-    for (auto& a : job.progArgs) runCmd += " " + shq(a);
+    for (auto& a : job.progArgs) runCmd += " " + (job.target.windows ? cmdq(a) : shq(a));
     int rrc = rb->exec(runCmd, err);
     return cleanup(rrc < 0 ? 1 : rrc);
 }

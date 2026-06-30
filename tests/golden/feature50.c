@@ -60,11 +60,16 @@ int32_t main(void) {
     /* line 36 */
     token_set(a, ((sc_thin){(void *)(intptr_t)(100), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 37 */
-    printf("init: a=%lld  scc=%d size=%d\n", ((int64_t)((token_get(a)).p)), token_scc(a), token_scc_size(a));
+    int64_t _sq0 = ((int64_t)((token_get(a)).p));
+    int32_t _sq1 = token_scc(a);
+    int32_t _sq2 = token_scc_size(a);
+    printf("init: a=%lld  scc=%d size=%d\n", _sq0, _sq1, _sq2);
     /* line 40 */
     int32_t rounds = token_loop_run(a, 10);
     /* line 41 */
-    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, ((int64_t)((token_get(a)).p)), ((int64_t)((token_get(b)).p)));
+    int64_t _sq3 = ((int64_t)((token_get(a)).p));
+    int64_t _sq4 = ((int64_t)((token_get(b)).p));
+    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, _sq3, _sq4);
     /* line 43 */
     return 0;
 }

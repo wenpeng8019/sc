@@ -112,15 +112,25 @@ int32_t main(void) {
     /* line 35 */
     printf("node     checkpoint dom_size\n");
     /* line 36 */
-    printf("in       %10d %8d\n", token_checkpoint(tin), token_dom_size(tin));
+    int32_t _sq0 = token_checkpoint(tin);
+    int32_t _sq1 = token_dom_size(tin);
+    printf("in       %10d %8d\n", _sq0, _sq1);
     /* line 37 */
-    printf("l        %10d %8d\n", token_checkpoint(l), token_dom_size(l));
+    int32_t _sq2 = token_checkpoint(l);
+    int32_t _sq3 = token_dom_size(l);
+    printf("l        %10d %8d\n", _sq2, _sq3);
     /* line 38 */
-    printf("r        %10d %8d\n", token_checkpoint(r), token_dom_size(r));
+    int32_t _sq4 = token_checkpoint(r);
+    int32_t _sq5 = token_dom_size(r);
+    printf("r        %10d %8d\n", _sq4, _sq5);
     /* line 39 */
-    printf("mid      %10d %8d\n", token_checkpoint(mid), token_dom_size(mid));
+    int32_t _sq6 = token_checkpoint(mid);
+    int32_t _sq7 = token_dom_size(mid);
+    printf("mid      %10d %8d\n", _sq6, _sq7);
     /* line 40 */
-    printf("out      %10d %8d\n", token_checkpoint(tout), token_dom_size(tout));
+    int32_t _sq8 = token_checkpoint(tout);
+    int32_t _sq9 = token_dom_size(tout);
+    printf("out      %10d %8d\n", _sq8, _sq9);
     /* line 41 */
     return 0;
 }

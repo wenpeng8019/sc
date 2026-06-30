@@ -100,11 +100,16 @@ int32_t main(void) {
     /* line 51 */
     token_set(x, ((sc_thin){(void *)(intptr_t)(4), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 52 */
-    printf("forward: x=%lld y=%lld loss=%lld\n", ((int64_t)((token_get(x)).p)), ((int64_t)((token_get(y)).p)), ((int64_t)((token_get(loss)).p)));
+    int64_t _sq0 = ((int64_t)((token_get(x)).p));
+    int64_t _sq1 = ((int64_t)((token_get(y)).p));
+    int64_t _sq2 = ((int64_t)((token_get(loss)).p));
+    printf("forward: x=%lld y=%lld loss=%lld\n", _sq0, _sq1, _sq2);
     /* line 55 */
     token_back(loss, ((sc_thin){(void *)(intptr_t)(1), (int32_t *)0, (void (*)(void *))0}), 0);
     /* line 56 */
-    printf("backward(seed=1): gy=%lld gx=%lld\n", ((int64_t)((token_get(gy)).p)), ((int64_t)((token_get(gx)).p)));
+    int64_t _sq3 = ((int64_t)((token_get(gy)).p));
+    int64_t _sq4 = ((int64_t)((token_get(gx)).p));
+    printf("backward(seed=1): gy=%lld gx=%lld\n", _sq3, _sq4);
     /* line 58 */
     return 0;
 }

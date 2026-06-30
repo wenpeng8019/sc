@@ -124,15 +124,25 @@ int32_t main(void) {
     /* line 33 */
     printf("node     batch width\n");
     /* line 34 */
-    printf("s        %5d %5d\n", token_batch(s), token_batch_width(s));
+    int32_t _sq0 = token_batch(s);
+    int32_t _sq1 = token_batch_width(s);
+    printf("s        %5d %5d\n", _sq0, _sq1);
     /* line 35 */
-    printf("a        %5d %5d\n", token_batch(a), token_batch_width(a));
+    int32_t _sq2 = token_batch(a);
+    int32_t _sq3 = token_batch_width(a);
+    printf("a        %5d %5d\n", _sq2, _sq3);
     /* line 36 */
-    printf("b        %5d %5d\n", token_batch(b), token_batch_width(b));
+    int32_t _sq4 = token_batch(b);
+    int32_t _sq5 = token_batch_width(b);
+    printf("b        %5d %5d\n", _sq4, _sq5);
     /* line 37 */
-    printf("c        %5d %5d\n", token_batch(c), token_batch_width(c));
+    int32_t _sq6 = token_batch(c);
+    int32_t _sq7 = token_batch_width(c);
+    printf("c        %5d %5d\n", _sq6, _sq7);
     /* line 38 */
-    printf("t        %5d %5d\n", token_batch(t), token_batch_width(t));
+    int32_t _sq8 = token_batch(t);
+    int32_t _sq9 = token_batch_width(t);
+    printf("t        %5d %5d\n", _sq8, _sq9);
     /* line 39 */
     return 0;
 }

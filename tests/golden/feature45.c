@@ -50,7 +50,7 @@ static void server_rpc(struct server *_p) {
     /* line 22 */
     _p->qq->pull(_p->qq, -(1));
     /* line 23 */
-    ({ int32_t _dv = (g_arg * 10); (g_sess)->respond(g_sess, &_dv, sizeof(_dv)); });
+    { int32_t _dv = (g_arg * 10); (g_sess)->respond(g_sess, &_dv, sizeof(_dv)); }
 }
 
 int32_t main(void) {

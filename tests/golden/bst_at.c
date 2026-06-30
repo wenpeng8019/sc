@@ -128,7 +128,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&ha[i], (void (*)(void *))node_drop);
         ha[i] = make(keys[i] * 10);
         /* line 66 */
-        bst_put(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
+        bst_put(&ta, ((const void*)(&(keys[i]))), sc_fat_as_thin(ha[i], (void (*)(void *))node_drop));
         /* line 67 */
         i += 1;
     }
@@ -143,7 +143,10 @@ int32_t main(void) {
     /* line 74 */
     int32_t k99 = 99;
     /* line 75 */
-    printf("A has40=%d miss99=%d get40=%d\n", bst_has(&ta, ((const void*)(&(k40)))), bst_has(&ta, ((const void*)(&(k99)))), ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v);
+    uint8_t _sq0 = bst_has(&ta, ((const void*)(&(k40))));
+    uint8_t _sq1 = bst_has(&ta, ((const void*)(&(k99))));
+    int32_t _sq2 = ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v;
+    printf("A has40=%d miss99=%d get40=%d\n", _sq0, _sq1, _sq2);
     /* line 80 */
     acc sa = {0};
     /* line 81 */
@@ -202,9 +205,11 @@ int32_t main(void) {
     sc_fat_unbind_d(&ha[7], (void (*)(void *))node_drop);
     ha[7] = make(999);
     /* line 115 */
-    bst_put(&ta, ((const void*)(&(k40))), ({ sc_fat _ec2 = ha[7]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
+    bst_put(&ta, ((const void*)(&(k40))), sc_fat_as_thin(ha[7], (void (*)(void *))node_drop));
     /* line 116 */
-    printf("A put40b=%d len=%llu\n", ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v, bst_len(&ta));
+    int32_t _sq3 = ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v;
+    uint64_t _sq4 = bst_len(&ta);
+    printf("A put40b=%d len=%llu\n", _sq3, _sq4);
     /* line 119 */
     int32_t k50 = 50;
     /* line 120 */
@@ -212,7 +217,12 @@ int32_t main(void) {
     /* line 121 */
     int32_t k70 = 70;
     /* line 122 */
-    printf("A rm50=%d rm20=%d rm70=%d rmmiss=%d len=%llu\n", bst_remove(&ta, ((const void*)(&(k50)))), bst_remove(&ta, ((const void*)(&(k20)))), bst_remove(&ta, ((const void*)(&(k70)))), bst_remove(&ta, ((const void*)(&(k99)))), bst_len(&ta));
+    uint8_t _sq5 = bst_remove(&ta, ((const void*)(&(k50))));
+    uint8_t _sq6 = bst_remove(&ta, ((const void*)(&(k20))));
+    uint8_t _sq7 = bst_remove(&ta, ((const void*)(&(k70))));
+    uint8_t _sq8 = bst_remove(&ta, ((const void*)(&(k99))));
+    uint64_t _sq9 = bst_len(&ta);
+    printf("A rm50=%d rm20=%d rm70=%d rmmiss=%d len=%llu\n", _sq5, _sq6, _sq7, _sq8, _sq9);
     /* line 125 */
     printf("A inorder2:");
     /* line 126 */
@@ -239,7 +249,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make(101 + i);
         /* line 140 */
-        bst_put(&tb, ((const void*)(&(bk[i]))), ({ sc_fat _ec3 = hb[i]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+        bst_put(&tb, ((const void*)(&(bk[i]))), sc_fat_as_thin(hb[i], (void (*)(void *))node_drop));
         /* line 141 */
         i += 1;
     }
@@ -280,22 +290,22 @@ int32_t main(void) {
     sc_fat_unbind_d(&hc[0], (void (*)(void *))node_drop);
     hc[0] = make(4);
     /* line 164 */
-    bst_put(&tc, "delta", ({ sc_fat _ec4 = hc[0]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "delta", sc_fat_as_thin(hc[0], (void (*)(void *))node_drop));
     /* line 165 */
     sc_fat_unbind_d(&hc[1], (void (*)(void *))node_drop);
     hc[1] = make(1);
     /* line 166 */
-    bst_put(&tc, "alpha", ({ sc_fat _ec5 = hc[1]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "alpha", sc_fat_as_thin(hc[1], (void (*)(void *))node_drop));
     /* line 167 */
     sc_fat_unbind_d(&hc[2], (void (*)(void *))node_drop);
     hc[2] = make(3);
     /* line 168 */
-    bst_put(&tc, "charlie", ({ sc_fat _ec6 = hc[2]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "charlie", sc_fat_as_thin(hc[2], (void (*)(void *))node_drop));
     /* line 169 */
     sc_fat_unbind_d(&hc[3], (void (*)(void *))node_drop);
     hc[3] = make(2);
     /* line 170 */
-    bst_put(&tc, "bravo", ({ sc_fat _ec7 = hc[3]; (sc_thin){_ec7.p, _ec7.tar, (void (*)(void *))node_drop}; }));
+    bst_put(&tc, "bravo", sc_fat_as_thin(hc[3], (void (*)(void *))node_drop));
     /* line 171 */
     printf("C len=%llu inorder:", bst_len(&tc));
     /* line 172 */
@@ -303,14 +313,18 @@ int32_t main(void) {
     /* line 173 */
     while (cc != 0) {
         /* line 174 */
-        printf(" %s=%d", ((char*)(bst_key_at(&tc, cc))), ((node*)((bst_value_at(&tc, cc)).p))->v);
+        char *_sq10 = ((char*)(bst_key_at(&tc, cc)));
+        int32_t _sq11 = ((node*)((bst_value_at(&tc, cc)).p))->v;
+        printf(" %s=%d", _sq10, _sq11);
         /* line 175 */
         cc = bst_next(&tc, cc);
     }
     /* line 176 */
     printf("\n");
     /* line 177 */
-    printf("C get_charlie=%d has_x=%d\n", ((node*)((bst_get(&tc, ((const void*)("charlie")))).p))->v, bst_has(&tc, ((const void*)("zzz"))));
+    int32_t _sq12 = ((node*)((bst_get(&tc, ((const void*)("charlie")))).p))->v;
+    uint8_t _sq13 = bst_has(&tc, ((const void*)("zzz")));
+    printf("C get_charlie=%d has_x=%d\n", _sq12, _sq13);
     /* line 179 */
     bst_remove(&tc, ((const void*)("alpha")));
     /* line 180 */

@@ -110,12 +110,14 @@ int32_t main(void) {
         sc_fat_unbind_d(&ha[i], (void (*)(void *))node_drop);
         ha[i] = make(keys[i] * 10);
         /* line 50 */
-        heap_push(&ta, ((const void*)(&(keys[i]))), ({ sc_fat _ec1 = ha[i]; (sc_thin){_ec1.p, _ec1.tar, (void (*)(void *))node_drop}; }));
+        heap_push(&ta, ((const void*)(&(keys[i]))), sc_fat_as_thin(ha[i], (void (*)(void *))node_drop));
         /* line 51 */
         i += 1;
     }
     /* line 52 */
-    printf("A len=%llu empty=%d\n", heap_len(&ta), heap_is_empty(&ta));
+    uint64_t _sq0 = heap_len(&ta);
+    uint8_t _sq1 = heap_is_empty(&ta);
+    printf("A len=%llu empty=%d\n", _sq0, _sq1);
     /* line 55 */
     int32_t *topk = ((int32_t*)(heap_peek_key(&ta)));
     /* line 56 */
@@ -140,7 +142,7 @@ int32_t main(void) {
         sc_fat_unbind_d(&hb[i], (void (*)(void *))node_drop);
         hb[i] = make(keys[i] * 10);
         /* line 70 */
-        heap_push(&tb, ((const void*)(&(keys[i]))), ({ sc_fat _ec2 = hb[i]; (sc_thin){_ec2.p, _ec2.tar, (void (*)(void *))node_drop}; }));
+        heap_push(&tb, ((const void*)(&(keys[i]))), sc_fat_as_thin(hb[i], (void (*)(void *))node_drop));
         /* line 71 */
         i += 1;
     }
@@ -164,24 +166,26 @@ int32_t main(void) {
     sc_fat_unbind_d(&hc[0], (void (*)(void *))node_drop);
     hc[0] = make(4);
     /* line 85 */
-    heap_push(&tc, "delta", ({ sc_fat _ec3 = hc[0]; (sc_thin){_ec3.p, _ec3.tar, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "delta", sc_fat_as_thin(hc[0], (void (*)(void *))node_drop));
     /* line 86 */
     sc_fat_unbind_d(&hc[1], (void (*)(void *))node_drop);
     hc[1] = make(1);
     /* line 87 */
-    heap_push(&tc, "alpha", ({ sc_fat _ec4 = hc[1]; (sc_thin){_ec4.p, _ec4.tar, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "alpha", sc_fat_as_thin(hc[1], (void (*)(void *))node_drop));
     /* line 88 */
     sc_fat_unbind_d(&hc[2], (void (*)(void *))node_drop);
     hc[2] = make(3);
     /* line 89 */
-    heap_push(&tc, "charlie", ({ sc_fat _ec5 = hc[2]; (sc_thin){_ec5.p, _ec5.tar, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "charlie", sc_fat_as_thin(hc[2], (void (*)(void *))node_drop));
     /* line 90 */
     sc_fat_unbind_d(&hc[3], (void (*)(void *))node_drop);
     hc[3] = make(2);
     /* line 91 */
-    heap_push(&tc, "bravo", ({ sc_fat _ec6 = hc[3]; (sc_thin){_ec6.p, _ec6.tar, (void (*)(void *))node_drop}; }));
+    heap_push(&tc, "bravo", sc_fat_as_thin(hc[3], (void (*)(void *))node_drop));
     /* line 92 */
-    printf("C len=%llu top_key=%s\n", heap_len(&tc), ((char*)(heap_peek_key(&tc))));
+    uint64_t _sq2 = heap_len(&tc);
+    char *_sq3 = ((char*)(heap_peek_key(&tc)));
+    printf("C len=%llu top_key=%s\n", _sq2, _sq3);
     /* line 94 */
     printf("C pop:");
     /* line 95 */
@@ -201,7 +205,9 @@ int32_t main(void) {
     /* line 102 */
     heap_clear(&tc);
     /* line 103 */
-    printf("C after_clear len=%llu empty=%d\n", heap_len(&tc), heap_is_empty(&tc));
+    uint64_t _sq4 = heap_len(&tc);
+    uint8_t _sq5 = heap_is_empty(&tc);
+    printf("C after_clear len=%llu empty=%d\n", _sq4, _sq5);
     /* line 104 */
     heap_drop(&tc);
     /* line 107 */

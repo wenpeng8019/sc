@@ -163,6 +163,9 @@ struct ToolConfig {
     std::string buildPort;   // build_port：SSH 端口（空=22）
     std::string buildKey;    // build_key：私钥文件路径（空=ssh 默认/agent）
     std::string remoteCC;    // remote_cc：远端编译器名（空=cc；远端原生，不带本机 machine）
+    std::string remoteOS;    // remote_os：windows（远端 cmd.exe）| 空=posix
+    std::string ccStyle;     // cc_style：msvc（cl.exe 风格）| 空=gcc 风格
+    std::string vcvars;      // vcvars：MSVC vcvars64.bat 路径（远端 cl 前 call，置 INCLUDE/LIB）
     std::string sshBackend;  // ssh_backend：system（调系统 ssh/scp）| libssh2（内置，默认）
     std::string builtinsDir; // 本机 builtins 目录（远程构建时整目录推送，重写 -I）
     bool remoteBuild() const { return !buildHost.empty(); }
@@ -174,6 +177,16 @@ static std::map<std::string, std::string> g_profile;
 
 // --builtins 指定的目标适配 builtins 目录（最高优先级；空=按默认搜索）
 static std::filesystem::path g_builtinsOverride;
+
+// 去掉值尾部的行内注释（' #' 或 '\t#' 起，至行尾）：令目标档/.sc 配置可在值后写注释，
+// 如 `build_host = 1.2.3.4   # 远端`。不影响行首整行注释。仅识别空白后的 #，故不误伤
+// 值内紧贴的 #（罕见，如颜色 #fff）。
+static std::string stripInlineComment(const std::string& v) {
+    for (size_t i = 0; i + 1 < v.size(); ++i)
+        if ((v[i] == ' ' || v[i] == '\t') && v[i + 1] == '#')
+            return v.substr(0, i);
+    return v;
+}
 
 // 读取当前目录下的 .sc 配置文件，返回指定 key 的值（未配置返回空串）
 // 格式：每行 key = value，'#' 开头为注释，键值两侧空白忽略
@@ -193,7 +206,7 @@ static std::string readConfig(const std::string& key) {
         if (l.empty() || l[0] == '#') continue;
         size_t eq = l.find('=');
         if (eq == std::string::npos) continue;
-        if (trim(l.substr(0, eq)) == key) return trim(l.substr(eq + 1));
+        if (trim(l.substr(0, eq)) == key) return trim(stripInlineComment(l.substr(eq + 1)));
     }
     return "";
 }
@@ -226,7 +239,7 @@ static void loadProfile(const std::string& path) {
         if (l.empty() || l[0] == '#') continue;
         size_t eq = l.find('=');
         if (eq == std::string::npos) continue;
-        g_profile[trim(l.substr(0, eq))] = trim(l.substr(eq + 1));
+        g_profile[trim(l.substr(0, eq))] = trim(stripInlineComment(l.substr(eq + 1)));
     }
 }
 
@@ -409,6 +422,9 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     tc.buildPort  = configValue("SCC_BUILD_PORT", "build_port");
     tc.buildKey   = configValue("SCC_BUILD_KEY",  "build_key");
     tc.remoteCC   = configValue("SCC_REMOTE_CC",  "remote_cc");
+    tc.remoteOS   = configValue("SCC_REMOTE_OS",  "remote_os");
+    tc.ccStyle    = configValue("SCC_CC_STYLE",   "cc_style");
+    tc.vcvars     = configValue("SCC_VCVARS",     "vcvars");
     tc.sshBackend = configValue("SCC_SSH_BACKEND","ssh_backend");
     return tc;
 }
@@ -431,10 +447,15 @@ static std::filesystem::path resolveAddArtifact(const std::filesystem::path& p,
 //   output 非空 → --build（取回产物到 output）；output 空 → 远端运行（progArgs 透传）。
 //   deps：add 指令引入的原生依赖（源码远端重编 / 预编译产物链接）。
 // 返回进程退出码（run 模式即远端程序退出码）。
+// 前置声明：远程多单元准备——加载单元图、生成全部单元 .c/.h 到临时目录，填充 job
+// （unitsDir/units/ldLibs）。失败置 err 返回 false。定义见 buildProject 之后。
+static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
+                               const ToolConfig& tc, RemoteJob& job, std::string& err);
 static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
                           const std::string& output,
                           const std::vector<std::string>& progArgs,
-                          const std::vector<RemoteDep>& deps = {}) {
+                          const std::vector<RemoteDep>& deps = {},
+                          const std::string& rootPath = "") {
     RemoteJob job;
     job.target.host    = tc.buildHost;
     job.target.user    = tc.buildUser;
@@ -442,12 +463,30 @@ static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
     job.target.port    = tc.buildPort;
     job.target.key     = tc.buildKey;
     job.target.backend = tc.sshBackend;
+    // 远端 OS：显式 remote_os=windows，或目标三元组为 windows 族（msvc/mingw/win）
+    job.target.windows = (tc.remoteOS == "windows") ||
+                         (platformFamily(tc.triple) == "windows");
     job.csrc        = csrc;
     job.builtinsDir = tc.builtinsDir;
     job.remoteCC    = tc.remoteCC;
+    // 编译器风味：显式 cc_style 优先，否则 windows 或 remote_cc=cl 默认 msvc
+    job.ccStyle     = !tc.ccStyle.empty() ? tc.ccStyle
+                    : ((job.target.windows || tc.remoteCC == "cl") ? std::string("msvc")
+                                                                   : std::string());
+    job.vcvars      = tc.vcvars;
     job.output      = output;
     job.progArgs    = progArgs;
     job.deps        = deps;
+    // 多单元构建：文件输入走完整单元图——为每个单元（含库模块 adt 等）生成 .c（含
+    //   sc_mod_*_init/drop 定义、拼入 <stem>_impl.c），全部上传远端编译链接，根治自包含
+    //   单 TU 漏掉库模块生命周期定义的链接错误。stdin（无文件图）回退单 TU csrc。
+    if (!rootPath.empty() && rootPath != "-") {
+        std::string perr;
+        if (!prepareRemoteUnits(std::filesystem::path(rootPath), tc, job, perr)) {
+            std::cerr << "错误: 远程多单元准备失败: " << perr << "\n";
+            return 1;
+        }
+    }
     // 链接库：远端原生解析，仅取 -l* 词元（本机 -L/绝对 .a 路径远端无意义，丢弃）
     bool droppedLocal = false;
     for (auto& t : splitBy(tc.ldflags, " ")) {
@@ -464,7 +503,12 @@ static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
     if (anyLib && tc.targetSuffix.empty())
         std::cerr << "提示: add 的预编译库(.a/.so/.o)按原样上传链接——若远端架构与本机不同将链接失败；"
                      "可配 target_suffix 提供目标变体 <名>.<suffix>.<ext>，或改用源码 add\n";
-    return runRemoteJob(job);
+    int rc = runRemoteJob(job);
+    if (!job.unitsDir.empty()) {       // 清理本机多单元临时目录
+        std::error_code ec;
+        std::filesystem::remove_all(job.unitsDir, ec);
+    }
+    return rc;
 }
 
 // 收集模块图中所有 add 指令引入的原生依赖（供远程构建上传）。
@@ -1554,6 +1598,17 @@ static std::string spliceImpl(const std::string& csrc,
 // 把模块图中所有单元生成 .c/.h 并编译为 .o
 // + extraCFlags 用于追加单元级编译选项（如动态库的 -fPIC）；成功返回 0
 //   extraLd 返回子项目需要的额外链接选项（如 Linux 上 m 的 -lpthread）
+// 单元生成产物：cpath/hpath/opath + 源目录 + 二进制实现 + 单元级编译选项。
+//   提到文件作用域，供远程多单元构建（只生成 .c/.h 上传，远端编译）复用。
+struct UnitArtifact {
+    std::filesystem::path cpath;
+    std::filesystem::path hpath;
+    std::filesystem::path opath;
+    std::filesystem::path srcDir;  // 源 .sc 所在目录（解析 inc "local.h"）
+    std::filesystem::path linkImpl;  // 二进制实现（.o/.a）直接参与链接；空=无（源实现已拼接）
+    std::string unitCFlags;          // 本单元额外编译选项（如 async 的 libuv）
+};
+
 static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& units,
                                  const ToolConfig& tc,
                                  const std::string& extraCFlags,
@@ -1563,15 +1618,8 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                                  const std::string& rootKey = "",
                                  const std::string& rootPreludeHeader = "",
                                  const std::unordered_set<std::string>* preludeSkip = nullptr,
-                                 const std::string& testKey = "") {
-    struct UnitArtifact {
-        std::filesystem::path cpath;
-        std::filesystem::path hpath;
-        std::filesystem::path opath;
-        std::filesystem::path srcDir;  // 源 .sc 所在目录（解析 inc "local.h"）
-        std::filesystem::path linkImpl;  // 二进制实现（.o/.a）直接参与链接；空=无（源实现已拼接）
-        std::string unitCFlags;          // 本单元额外编译选项（如 async 的 libuv）
-    };
+                                 const std::string& testKey = "",
+                                 std::vector<UnitArtifact>* genOnlyOut = nullptr) {
     std::vector<UnitArtifact> arts;
 
     // op.sc 统一进单元图：op.sc 为默认导入的语言运行时模块（chain/异步内核等机制）。
@@ -1785,6 +1833,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (!gh.empty() && !writeTextFile(tmpDir / "generic.h", gh)) return 1;
     }
 
+    // 远程多单元构建：生成阶段到此为止——所有单元 .c/.h 与共享头已落 tmpDir，
+    //   交回产物清单（含 srcDir/linkImpl/unitCFlags），由远端编译链接，跳过本机编译。
+    if (genOnlyOut) { *genOnlyOut = std::move(arts); return 0; }
+
     // 第二阶段：统一编译所有 .c -> .o（含已拼接进 .c 的源实现 <stem>_impl.c）
     for (auto& a : arts) {
         // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到；
@@ -1977,6 +2029,84 @@ static int buildProject(const std::filesystem::path& rootPath,
     // 5. 清理临时产物
     std::filesystem::remove_all(tmpDir);
     return rc;
+}
+
+// 远程多单元准备：加载单元图、为每个单元生成 .c/.h（含库模块 sc_mod_*_init/drop 定义、
+//   拼入 <stem>_impl.c）与共享头到临时目录，填充 job.unitsDir/units/ldLibs。
+//   设置基本同 buildProject（恒按 EXE 语义，启用根导出注入）；区别是只生成不本机编译。
+//   临时目录由调用方（remoteDispatch）在 runRemoteJob 后清理。失败置 err 返回 false。
+static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
+                               const ToolConfig& tc, RemoteJob& job, std::string& err) {
+    // 根模块导出注入（恒 EXE）
+    const std::filesystem::path rootModule = findRootModule(unitDirOf(rootPath));
+    const bool enableRP = !rootModule.empty();
+    const std::string rootKey = rootModule.string();
+    std::unordered_set<std::string> preludeSkip;
+    if (enableRP) collectExportedIncClosure(rootModule, preludeSkip);
+
+    std::unordered_map<std::string, UnitInfo> units;
+    std::unordered_set<std::string> visiting;
+    if (!loadUnitGraph(rootPath, units, visiting, err, {},
+                       enableRP ? rootModule : std::filesystem::path{},
+                       enableRP ? &preludeSkip : nullptr))
+        return false;
+    if (enableRP && units.find(rootKey) == units.end()
+        && !loadUnitGraph(rootModule, units, visiting, err, {}, rootModule, &preludeSkip))
+        return false;
+
+    char tmpTemplate[] = "/tmp/scc_runits_XXXXXX";
+    char* dirC = mkdtemp(tmpTemplate);
+    if (!dirC) { err = "无法创建临时目录"; return false; }
+    const std::filesystem::path tmpDir(dirC);
+    job.unitsDir = tmpDir.string();
+
+    std::string rootPreludeHeader;
+    if (enableRP) {
+        auto it = units.find(rootKey);
+        if (it != units.end() && programHasExports(it->second.prog))
+            rootPreludeHeader = moduleFileToken(rootKey) + ".h";
+    }
+
+    // 只生成 .c/.h（genOnlyOut），不本机编译
+    std::vector<std::filesystem::path> dummyObjects;
+    std::string extraLd;
+    std::vector<UnitArtifact> arts;
+    int rc = compileUnitsToObjects(units, tc, "", tmpDir, dummyObjects, &extraLd,
+                                   rootKey, rootPreludeHeader,
+                                   enableRP ? &preludeSkip : nullptr, "", &arts);
+    if (rc != 0) { err = "单元 C 生成失败"; return false; }
+
+    // builtins 根（算各单元 srcDir 的 bundle 内相对路径）
+    std::error_code ec;
+    const std::filesystem::path broot = tc.builtinsDir.empty()
+        ? std::filesystem::path{}
+        : std::filesystem::weakly_canonical(std::filesystem::path(tc.builtinsDir), ec);
+
+    for (auto& a : arts) {
+        RemoteUnit u;
+        u.cRel = "units/" + a.cpath.filename().string();
+        u.cflags = a.unitCFlags;
+        // srcDir → bundle 相对：builtins 单元映射到已入包的 builtins/<子目录>；
+        //   用户单元的同目录本地头暂不上传（测试集无），srcDir 留空。
+        if (!broot.empty() && !a.srcDir.empty()) {
+            const std::filesystem::path sd = std::filesystem::weakly_canonical(a.srcDir, ec);
+            const std::filesystem::path rel = sd.lexically_relative(broot);
+            if (!rel.empty() && rel.native().rfind("..", 0) != 0)
+                u.srcDir = rel == "." ? "builtins" : "builtins/" + rel.generic_string();
+        }
+        // 二进制实现（.o/.a）远端暂不支持（需架构匹配）——告警，链接将缺符号。
+        if (!a.linkImpl.empty())
+            std::cerr << "提示: 远程多单元暂不支持二进制实现 " << a.linkImpl.string()
+                      << "（仅源码 <stem>_impl.c 拼接）\n";
+        job.units.push_back(std::move(u));
+    }
+
+    // 额外链接选项：仅取 -l*（线程库等；vendor 绝对路径 .a 远端无意义，丢弃）
+    for (auto& t : splitBy(extraLd, " "))
+        if (t.rfind("-l", 0) == 0 &&
+            std::find(job.ldLibs.begin(), job.ldLibs.end(), t) == job.ldLibs.end())
+            job.ldLibs.push_back(t);
+    return true;
 }
 
 // 从项目入口文件加载，编译为（临时）可执行文件并运行；程序参数透传，运行结束产物删除
@@ -2291,7 +2421,7 @@ int main(int argc, char** argv) {
             if (tc.remoteBuild()) {
                 std::vector<RemoteDep> deps;          // add 原生依赖（源码重编/库链接）
                 if (input != "-") gatherAddDeps(std::filesystem::path(input), tc.targetSuffix, deps);
-                return remoteDispatch(c, tc, "", progArgs, deps);
+                return remoteDispatch(c, tc, "", progArgs, deps, input);
             }
 
             if (input == "-") return compileAndRunSource(c, progArgs, tc);
@@ -2334,7 +2464,7 @@ int main(int argc, char** argv) {
                 }
                 std::vector<RemoteDep> deps;          // add 原生依赖（源码重编/库链接）
                 if (input != "-") gatherAddDeps(std::filesystem::path(input), tc.targetSuffix, deps);
-                return remoteDispatch(c, tc, out, {}, deps);
+                return remoteDispatch(c, tc, out, {}, deps, input);
             }
             int rc = input == "-" ? buildSource(c, out, tc)
                                   : buildProject(std::filesystem::path(input), out, tc);

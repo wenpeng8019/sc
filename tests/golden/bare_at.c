@@ -46,38 +46,38 @@ void node_drop(node *_this) {
 
 int32_t take(sc_afat p) {
     /* line 19 */
-    node_bump(((node *)(({ sc_afat _rc0 = p; (sc_fat){_rc0.p, _rc0.tar, _rc0.own}; })).p));
+    node_bump(((node *)(sc_afat_as_fat(p)).p));
     /* line 20 */
-    return ((node *)(({ sc_afat _rc1 = p; (sc_fat){_rc1.p, _rc1.tar, _rc1.own}; })).p)->v;
+    return ((node *)(sc_afat_as_fat(p)).p)->v;
 }
 
 int32_t main(void) {
     /* line 23 */
     sc_afat d = {0};
-    node *_fat2 = node__new_ref(0);
-    sc_afat_bind(&d, _fat2, (sc_ref *)((char *)_fat2 - SC_REF_HDR), SC_OWN_ROOT, (void (*)(void *))node_drop);
+    node *_fat0 = node__new_ref(0);
+    sc_afat_bind(&d, _fat0, (sc_ref *)((char *)_fat0 - SC_REF_HDR), SC_OWN_ROOT, (void (*)(void *))node_drop);
     /* line 24 */
-    ((node *)(({ sc_afat _rc3 = d; (sc_fat){_rc3.p, _rc3.tar, _rc3.own}; })).p)->v = 7;
+    ((node *)(sc_afat_as_fat(d)).p)->v = 7;
     /* line 26 */
     sc_fat t = {0};
-    node *_fat4 = node__new_ref(0);
-    sc_fat_bind(&t, _fat4, (sc_ref *)((char *)_fat4 - SC_REF_HDR), SC_OWN_ROOT);
+    node *_fat1 = node__new_ref(0);
+    sc_fat_bind(&t, _fat1, (sc_ref *)((char *)_fat1 - SC_REF_HDR), SC_OWN_ROOT);
     /* line 27 */
     ((node *)(t).p)->v = 40;
     /* line 28 */
     sc_afat e = {0};
     sc_afat_bind(&e, (t).p, (sc_ref *)(t).tar, SC_OWN_ROOT, (void (*)(void *))node_drop);
     /* line 29 */
-    int32_t r = take(({ sc_fat _ec5 = t; (sc_afat){_ec5.p, _ec5.tar, _ec5.own, (void (*)(void *))node_drop}; }));
+    int32_t r = take(sc_fat_as_afat(t, (void (*)(void *))node_drop));
     /* line 30 */
-    printf("d=%d e=%d r=%d\n", ((node *)(({ sc_afat _rc6 = d; (sc_fat){_rc6.p, _rc6.tar, _rc6.own}; })).p)->v, ((node *)(({ sc_afat _rc7 = e; (sc_fat){_rc7.p, _rc7.tar, _rc7.own}; })).p)->v, r);
+    printf("d=%d e=%d r=%d\n", ((node *)(sc_afat_as_fat(d)).p)->v, ((node *)(sc_afat_as_fat(e)).p)->v, r);
     /* line 32 */
     sc_afat f = {0};
     /* line 33 */
     sc_afat_unbind(&f);
     sc_afat_bind(&f, (d).p, (sc_ref *)(d).tar, SC_OWN_ROOT, (d).dtor);
     /* line 34 */
-    printf("f=%d\n", ((node *)(({ sc_afat _rc8 = f; (sc_fat){_rc8.p, _rc8.tar, _rc8.own}; })).p)->v);
+    printf("f=%d\n", ((node *)(sc_afat_as_fat(f)).p)->v);
     /* line 35 */
     {
         int32_t _ret = 0;
