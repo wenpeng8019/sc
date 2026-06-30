@@ -2489,9 +2489,22 @@ int32_t crypto_random(uint8_t *out, uint64_t len) {
 }
 
 /* ================================================================
- * 大类二 · 代理算法（RSA）—— 默认弱桩，安全失败。
- *   编译进 ssl 后端（OpenSSL/mbedTLS）后由其提供强符号覆盖以下定义。
- *   未配置后端时：crypto_rsa_backend()==0，其余调用返回 nil / <0。
+ * 大类二 · 代理算法（RSA）—— ⚠ 以下全是「弱桩」(weak stub)，并非真实实现。
+ *
+ *   为什么是空的：RSA 需要大整数运算，自己手写既臃肿又易出安全漏洞，故 crypto
+ *   保持零依赖、自包含，只声明 @fnc 接口（见 crypto.sc）并在此给出 __attribute__
+ *   ((weak)) 的安全失败桩——未配置后端时 backend()==0、keygen()→nil、其余返回 <0。
+ *
+ *   真实实现在哪：在 ssl 模块的后端里 —— builtins/ssl/ssl_impl.c
+ *     · OpenSSL 分支（#ifdef SCC_WITH_OPENSSL）：EVP_PKEY_* 实现，已完成；
+ *     · mbedTLS 分支（#ifdef SCC_WITH_MBEDTLS）：mbedtls_rsa_* 实现，已完成。
+ *   它们导出同名「强符号」，链接期覆盖本文件的弱桩（crypto 与 ssl 属不同翻译单元，
+ *   弱+强分处不同 TU，无重定义冲突）。
+ *
+ *   如何启用真实 RSA：工程需同时 `inc crypto.sc` + `inc ssl.sc`，且 scc 以
+ *     -DSCC_SSL_BACKEND=openssl   （或 =mbedtls）
+ *   构建。此时 crypto_rsa_backend() 返回非 0，全部 RSA 调用走真实后端。
+ *   端到端用例见 tests/cases/rsa_proxy_test.sc（按 backend() 分支自动切换）。
  * ================================================================ */
 #if defined(__GNUC__) || defined(__clang__)
 #  define SC_WEAK __attribute__((weak))

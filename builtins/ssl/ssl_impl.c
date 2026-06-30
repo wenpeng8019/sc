@@ -159,6 +159,229 @@ int32_t ssl_write(void *sv, void *buf, uint32_t len) {
     return SSL_ERR;
 }
 
+/* ===================== RSA 代理实现（覆盖 crypto 弱桩） =====================
+ * 同 OpenSSL 分支：提供 crypto_rsa_* 强符号，链接期覆盖 crypto 的弱桩。
+ * 不透明句柄 = mbedtls_pk_context*（内含 RSA）；fmt：0=DER 1=PEM；hash_id 见
+ * crypto.h SC_HASH_*。私钥运算/keygen 需 RNG —— 懒初始化一个进程级 ctr_drbg。 */
+#include <mbedtls/rsa.h>
+#include <mbedtls/pk.h>
+#include <mbedtls/md.h>
+
+static mbedtls_ctr_drbg_context sc_rsa_drbg;
+static mbedtls_entropy_context  sc_rsa_entropy;
+static int sc_rsa_rng_ready = 0;
+
+static int sc_rsa_rng_init(void) {
+    const char *pers = "sc-rsa-proxy";
+    if (sc_rsa_rng_ready) return 0;
+    mbedtls_ctr_drbg_init(&sc_rsa_drbg);
+    mbedtls_entropy_init(&sc_rsa_entropy);
+    if (mbedtls_ctr_drbg_seed(&sc_rsa_drbg, mbedtls_entropy_func, &sc_rsa_entropy,
+                              (const unsigned char *)pers, strlen(pers)) != 0)
+        return -1;
+    sc_rsa_rng_ready = 1;
+    return 0;
+}
+
+static mbedtls_md_type_t sc_rsa_mdtype(int32_t hash_id) {
+    switch (hash_id) {
+        case 1: return MBEDTLS_MD_SHA1;
+        case 3: return MBEDTLS_MD_SHA224;
+        case 4: return MBEDTLS_MD_SHA256;
+        case 5: return MBEDTLS_MD_SHA384;
+        case 6: return MBEDTLS_MD_SHA512;
+        default: return MBEDTLS_MD_NONE;
+    }
+}
+
+int32_t crypto_rsa_backend(void) { return SSL_BACKEND_MBEDTLS; }
+
+void *crypto_rsa_keygen(uint32_t bits, uint32_t pub_e) {
+    mbedtls_pk_context *pk;
+    if (sc_rsa_rng_init() != 0) return NULL;
+    pk = (mbedtls_pk_context *)calloc(1, sizeof *pk);
+    if (!pk) return NULL;
+    mbedtls_pk_init(pk);
+    if (mbedtls_pk_setup(pk, mbedtls_pk_info_from_type(MBEDTLS_PK_RSA)) != 0 ||
+        mbedtls_rsa_gen_key(mbedtls_pk_rsa(*pk), mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                            (unsigned)bits, (int)(pub_e ? pub_e : 65537)) != 0) {
+        mbedtls_pk_free(pk);
+        free(pk);
+        return NULL;
+    }
+    return pk;
+}
+
+void crypto_rsa_free(void *k) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    if (!pk) return;
+    mbedtls_pk_free(pk);
+    free(pk);
+}
+
+void *crypto_rsa_import(void *buf, uint64_t len, int32_t is_private, int32_t fmt) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)calloc(1, sizeof *pk);
+    unsigned char *tmp = NULL;
+    const unsigned char *key = (const unsigned char *)buf;
+    size_t klen = (size_t)len;
+    int rc;
+    if (!pk) return NULL;
+    mbedtls_pk_init(pk);
+    if (fmt == 1) {   /* PEM：mbedTLS 要求含结尾 NUL，长度计入 NUL */
+        tmp = (unsigned char *)malloc((size_t)len + 1);
+        if (!tmp) { free(pk); return NULL; }
+        memcpy(tmp, buf, (size_t)len);
+        tmp[len] = 0;
+        key = tmp;
+        klen = (size_t)len + 1;
+    }
+    if (is_private) {
+        if (sc_rsa_rng_init() != 0) { free(tmp); mbedtls_pk_free(pk); free(pk); return NULL; }
+        rc = mbedtls_pk_parse_key(pk, key, klen, NULL, 0,
+                                  mbedtls_ctr_drbg_random, &sc_rsa_drbg);
+    } else {
+        rc = mbedtls_pk_parse_public_key(pk, key, klen);
+    }
+    free(tmp);
+    if (rc != 0) { mbedtls_pk_free(pk); free(pk); return NULL; }
+    return pk;
+}
+
+int32_t crypto_rsa_export(void *k, int32_t is_private, int32_t fmt, uint8_t *out, uint64_t cap) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    int n;
+    if (!pk) return -1;
+    if (fmt == 1) {   /* PEM：写入 NUL 结尾字符串，返回成功=0 */
+        n = is_private ? mbedtls_pk_write_key_pem(pk, out, (size_t)cap)
+                       : mbedtls_pk_write_pubkey_pem(pk, out, (size_t)cap);
+        if (n != 0) return -1;
+        return (int32_t)strlen((char *)out);
+    }
+    /* DER：写在缓冲末尾，返回长度，需前移到首部 */
+    n = is_private ? mbedtls_pk_write_key_der(pk, out, (size_t)cap)
+                   : mbedtls_pk_write_pubkey_der(pk, out, (size_t)cap);
+    if (n < 0) return -1;
+    memmove(out, out + (size_t)cap - n, (size_t)n);
+    return n;
+}
+
+static int32_t sc_rsa_do_sign(mbedtls_pk_context *pk, int32_t hash_id, const void *digest,
+                              uint64_t dlen, uint8_t *sig, uint64_t sigcap, int pss) {
+    mbedtls_rsa_context *rsa;
+    mbedtls_md_type_t md = sc_rsa_mdtype(hash_id);
+    size_t klen;
+    int rc;
+    if (!pk || md == MBEDTLS_MD_NONE) return -1;
+    if (sc_rsa_rng_init() != 0) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    klen = mbedtls_rsa_get_len(rsa);
+    if (klen > sigcap) return -1;
+    if (pss) {
+        mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md);
+        rc = mbedtls_rsa_rsassa_pss_sign(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                         md, (unsigned)dlen, (const unsigned char *)digest, sig);
+    } else {
+        mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V15, MBEDTLS_MD_NONE);
+        rc = mbedtls_rsa_rsassa_pkcs1_v15_sign(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                               md, (unsigned)dlen, (const unsigned char *)digest, sig);
+    }
+    return rc == 0 ? (int32_t)klen : -1;
+}
+
+static int32_t sc_rsa_do_verify(mbedtls_pk_context *pk, int32_t hash_id, const void *digest,
+                                uint64_t dlen, const void *sig, int pss) {
+    mbedtls_rsa_context *rsa;
+    mbedtls_md_type_t md = sc_rsa_mdtype(hash_id);
+    int rc;
+    if (!pk || md == MBEDTLS_MD_NONE) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    if (pss) {
+        mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md);
+        rc = mbedtls_rsa_rsassa_pss_verify(rsa, md, (unsigned)dlen,
+                                           (const unsigned char *)digest, (const unsigned char *)sig);
+    } else {
+        mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V15, MBEDTLS_MD_NONE);
+        rc = mbedtls_rsa_rsassa_pkcs1_v15_verify(rsa, md, (unsigned)dlen,
+                                                 (const unsigned char *)digest, (const unsigned char *)sig);
+    }
+    return rc == 0 ? 0 : -1;
+}
+
+int32_t crypto_rsa_sign_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    return sc_rsa_do_sign((mbedtls_pk_context *)k, hash_id, digest, dlen, sig, sigcap, 0);
+}
+int32_t crypto_rsa_verify_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    (void)siglen;
+    return sc_rsa_do_verify((mbedtls_pk_context *)k, hash_id, digest, dlen, sig, 0);
+}
+int32_t crypto_rsa_sign_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+    return sc_rsa_do_sign((mbedtls_pk_context *)k, hash_id, digest, dlen, sig, sigcap, 1);
+}
+int32_t crypto_rsa_verify_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+    (void)siglen;
+    return sc_rsa_do_verify((mbedtls_pk_context *)k, hash_id, digest, dlen, sig, 1);
+}
+
+int32_t crypto_rsa_encrypt_oaep(void *k, int32_t hash_id, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    mbedtls_rsa_context *rsa;
+    mbedtls_md_type_t md = sc_rsa_mdtype(hash_id);
+    size_t klen;
+    if (!pk || md == MBEDTLS_MD_NONE) return -1;
+    if (sc_rsa_rng_init() != 0) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    klen = mbedtls_rsa_get_len(rsa);
+    if (klen > cap) return -1;
+    mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md);
+    if (mbedtls_rsa_rsaes_oaep_encrypt(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                       NULL, 0, (size_t)plen, (const unsigned char *)plain, out) != 0)
+        return -1;
+    return (int32_t)klen;
+}
+int32_t crypto_rsa_decrypt_oaep(void *k, int32_t hash_id, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    mbedtls_rsa_context *rsa;
+    mbedtls_md_type_t md = sc_rsa_mdtype(hash_id);
+    size_t olen = 0;
+    if (!pk || md == MBEDTLS_MD_NONE) return -1;
+    if (sc_rsa_rng_init() != 0) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V21, md);
+    if (mbedtls_rsa_rsaes_oaep_decrypt(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                       NULL, 0, &olen, (const unsigned char *)cipher, out, (size_t)cap) != 0)
+        return -1;
+    return (int32_t)olen;
+}
+
+int32_t crypto_rsa_encrypt_pkcs1(void *k, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    mbedtls_rsa_context *rsa;
+    size_t klen;
+    if (!pk) return -1;
+    if (sc_rsa_rng_init() != 0) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    klen = mbedtls_rsa_get_len(rsa);
+    if (klen > cap) return -1;
+    mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V15, MBEDTLS_MD_NONE);
+    if (mbedtls_rsa_rsaes_pkcs1_v15_encrypt(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                            (size_t)plen, (const unsigned char *)plain, out) != 0)
+        return -1;
+    return (int32_t)klen;
+}
+int32_t crypto_rsa_decrypt_pkcs1(void *k, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+    mbedtls_pk_context *pk = (mbedtls_pk_context *)k;
+    mbedtls_rsa_context *rsa;
+    size_t olen = 0;
+    if (!pk) return -1;
+    if (sc_rsa_rng_init() != 0) return -1;
+    rsa = mbedtls_pk_rsa(*pk);
+    mbedtls_rsa_set_padding(rsa, MBEDTLS_RSA_PKCS_V15, MBEDTLS_MD_NONE);
+    if (mbedtls_rsa_rsaes_pkcs1_v15_decrypt(rsa, mbedtls_ctr_drbg_random, &sc_rsa_drbg,
+                                            &olen, (const unsigned char *)cipher, out, (size_t)cap) != 0)
+        return -1;
+    return (int32_t)olen;
+}
+
 #elif defined(SCC_WITH_OPENSSL)
 /* ===================== OpenSSL 后端（系统库；内存 BIO 非阻塞客户端） =====================
  * 经传输回调缝解耦：SSL 读写密文走两个内存 BIO——
