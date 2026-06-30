@@ -1565,11 +1565,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             if (std::filesystem::exists(uvInc)) unitCFlags += " -I " + uvInc.string();
         }
 #endif
-        // ssl —— TLS 记录层（builtins/ssl）。编译器以 -DSCC_WITH_OPENSSL 构建时（CMake
-        //   SCC_SSL_BACKEND=openssl，find_package 定位系统 OpenSSL），编译 ssl_impl.c 需
-        //   -DSCC_WITH_OPENSSL + OpenSSL 头路径，并向用户程序链接 -lssl -lcrypto（系统库，
-        //   不 vendor）。ssl_impl.c 已经上方拼接逻辑并入 ssl 单元 .c（同 TU）。mbedTLS 后端
-        //   （-DSCC_WITH_MBEDTLS）走 vendor 源码，留待 roadmap step 3。
+        // ssl —— TLS 记录层（builtins/ssl）。后端由构建 scc 时 CMake SCC_SSL_BACKEND 固化：
+        //   mbedtls（默认）：以 -DSCC_WITH_MBEDTLS 构建，走 vendor 源码（vendor/mbedtls），用
+        //     「当前目标」工具链现场编静态库（按 triple 缓存）静态烘进用户二进制 —— 零系统依赖、跨平台。
+        //   openssl：以 -DSCC_WITH_OPENSSL 构建（find_package 定位系统 OpenSSL），编译 ssl_impl.c 需
+        //     -DSCC_WITH_OPENSSL + OpenSSL 头路径，并向用户程序链接 -lssl -lcrypto（系统动态库，不 vendor）。
+        //   none：安全失败桩，零外部依赖。ssl_impl.c 已由上方拼接逻辑并入 ssl 单元 .c（同 TU）。
         if (hasImpl && scStem == "ssl") {
 #ifdef SCC_WITH_OPENSSL
             unitCFlags = " -DSCC_WITH_OPENSSL";

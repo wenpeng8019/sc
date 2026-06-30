@@ -42,15 +42,16 @@ if(SCC_WITH_UV)
 endif()
 
 # ------------------------------------------------------------
-# TLS 后端（builtins/ssl）：-DSCC_SSL_BACKEND=none|openssl|mbedtls（默认 none）
-#   none    ：ssl 模块所有调用安全失败（ssl_backend()==0），零外部依赖。
+# TLS 后端（builtins/ssl）：-DSCC_SSL_BACKEND=mbedtls|openssl|none（默认 mbedtls）
+#   mbedtls ：vendor 源码内置（vendor/mbedtls），按目标工具链现场编静态库并缓存，
+#             静态烘进用户二进制 —— 零系统依赖、真正跨平台。默认后端（ssh client 等依赖之）。
 #   openssl ：用本地系统预装 OpenSSL（find_package 定位头/库），编译 ssl_impl.c 时由
 #             编译器注入 -DSCC_WITH_OPENSSL + OpenSSL 头路径，并向用户程序链接 -lssl -lcrypto。
-#   mbedtls ：vendor 源码内置（roadmap step 3，预编译 .a，仿 libuv）。
+#   none    ：ssl 模块所有调用安全失败（ssl_backend()==0），零外部依赖（仅用于裁剪 TLS）。
 #   本宏仅标记编译器二进制：实际后端选择/头库注入在编译 ssl_impl.c 时进行（见 main.cpp）。
 # ------------------------------------------------------------
-set(SCC_SSL_BACKEND "none" CACHE STRING "TLS 后端：none|openssl|mbedtls")
-set_property(CACHE SCC_SSL_BACKEND PROPERTY STRINGS none openssl mbedtls)
+set(SCC_SSL_BACKEND "mbedtls" CACHE STRING "TLS 后端：mbedtls|openssl|none")
+set_property(CACHE SCC_SSL_BACKEND PROPERTY STRINGS mbedtls openssl none)
 if(SCC_SSL_BACKEND STREQUAL "openssl")
     find_package(OpenSSL REQUIRED)
     get_filename_component(_SCC_SSL_LIBDIR "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
@@ -62,6 +63,8 @@ if(SCC_SSL_BACKEND STREQUAL "openssl")
 elseif(SCC_SSL_BACKEND STREQUAL "mbedtls")
     target_compile_definitions(scc PRIVATE SCC_WITH_MBEDTLS)
     message(STATUS "ssl 后端=mbedtls（vendor 源码内置，按目标工具链现场编静态库 + 缓存）")
+else()
+    message(STATUS "ssl 后端=none（TLS 调用安全失败）")
 endif()
 
 # ------------------------------------------------------------
