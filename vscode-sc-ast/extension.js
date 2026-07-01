@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const TREE_SRC_SCHEME = 'sc-tree-src';
+const API_SRC_SCHEME = 'sc-api-src';
 
 let currentDoc = null; // 当前跟踪的 sc 文档
 
@@ -40,6 +41,7 @@ const ICONS = {
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
     cls: 'symbol-class', dim: 'symbol-method',
     alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', inl: 'symbol-function', rpc: 'symbol-event',
+    fncimpl: 'symbol-function',
     macro: 'symbol-snippet', mix: 'expand-all',
     var: 'symbol-variable', let: 'symbol-constant', tls: 'symbol-variable',
     tok: 'broadcast', dep: 'git-merge', form: 'zap',
@@ -107,6 +109,24 @@ function transformRoot(root) {
 
     const newTop = [];
 
+    // 0. 「导出定义」摘要区：本模块 @导出 的顶层定义项（形如 C 头的接口清单）。
+    //    xp===1 标记导出、x!==1 排除外部导入项；inc/add 非定义项一并略去。
+    const expName = n =>
+        n.n || (n.c ? n.c.map(x => x.n).filter(Boolean).join(', ') : '') || n.k;
+    const exportNodes = top
+        .filter(n => n.xp === 1 && n.x !== 1 && n.k !== 'inc' && n.k !== 'add')
+        .map(n => ({
+            k: n.k, n: expName(n),
+            d: (n.d || '').replace(/^@\s*/, ''),   // 去掉导出前缀 '@'，表内更清爽
+            l: n.l, f: n.f || null,
+        }));
+    if (exportNodes.length) {
+        newTop.push({
+            k: 'section', n: '导出定义', d: `${exportNodes.length} 项`,
+            c: exportNodes,
+        });
+    }
+
     // 3. 顶层"外部描述符"汇总区
     if (sources.length) {
         const usedSum = sources.reduce((s, e) => s + e.usedCount, 0);
@@ -144,7 +164,9 @@ class AstProvider {
         this.onDidChangeTreeData = this._em.event;
         this.root = null;
         this.error = null;
-        this.treeSrcProvider = treeSrcProvider;
+        // 关联的虚拟文档提供者（树结构源码 / 导出接口摘要）：AST 刷新后一并触发其重渲染
+        this.emitProviders = Array.isArray(treeSrcProvider) ? treeSrcProvider
+                           : treeSrcProvider ? [treeSrcProvider] : [];
     }
 
     async refresh(doc) {
@@ -171,7 +193,7 @@ class AstProvider {
             this.root = null;
         }
         this._em.fire();
-        this.treeSrcProvider.fireChange();
+        for (const p of this.emitProviders) p.fireChange();
     }
 
     getChildren(el) {
@@ -221,16 +243,22 @@ class AstProvider {
     }
 }
 
-// ---------------- 树结构源码（虚拟文档） ----------------
-class TreeSrcProvider {
-    constructor() {
+// ---------------- 派生虚拟文档（树结构源码 / 导出接口摘要） ----------------
+// 一套通用的只读虚拟文档提供者：对当前 sc 文档实时调用 scc 派生视图。
+//   · 树结构源码：scc --emit-sc  → <名>.tree.sc
+//   · 导出接口摘要：scc --api     → <名>.api.sc（形如 C 头的 @导出 定义清单）
+class EmitSrcProvider {
+    constructor(scheme, sccArgs, suffix) {
         this._em = new vscode.EventEmitter();
         this.onDidChange = this._em.event;
+        this.scheme = scheme;
+        this.sccArgs = sccArgs;   // 传给 scc 的模式参数，如 ['--emit-sc'] / ['--api']
+        this.suffix = suffix;     // 虚拟文档文件名后缀
     }
 
     uriFor(doc) {
-        const name = path.basename(doc.fileName).replace(/\.sc$/, '') + '.tree.sc';
-        return vscode.Uri.parse(`${TREE_SRC_SCHEME}:/${name}`);
+        const name = path.basename(doc.fileName).replace(/\.sc$/, '') + this.suffix;
+        return vscode.Uri.parse(`${this.scheme}:/${name}`);
     }
 
     fireChange() {
@@ -240,22 +268,46 @@ class TreeSrcProvider {
     async provideTextDocumentContent() {
         if (!currentDoc) return '# 没有活动的 sc 文件';
         try {
-            return await runScc(['-', '--emit-sc'], currentDoc.getText());
+            const args = ['-', ...this.sccArgs];
+            // 文件已落盘时传 --from：使 inc/add <file>.sc 依赖以源文件目录为基准解析
+            if (currentDoc.uri.scheme === 'file') args.push('--from', currentDoc.uri.fsPath);
+            return await runScc(args, currentDoc.getText());
         } catch (e) {
-            return '# 解析错误，无法生成树结构源码\n# ' +
+            return '# 解析错误，无法生成\n# ' +
                    String(e.message || e).replace(/\n/g, '\n# ');
         }
     }
 }
 
+// 通用「切换派生视图」：已打开则关闭（切换语义），否则在侧栏打开为 sc 语言只读文档
+async function toggleEmitView(provider) {
+    for (const tab of vscode.window.tabGroups.all.flatMap(g => g.tabs)) {
+        const input = tab.input;
+        if (input && input.uri && input.uri.scheme === provider.scheme) {
+            await vscode.window.tabGroups.close(tab);
+            return;
+        }
+    }
+    if (!currentDoc) {
+        vscode.window.showInformationMessage('请先打开一个 .sc 文件');
+        return;
+    }
+    const doc = await vscode.workspace.openTextDocument(provider.uriFor(currentDoc));
+    await vscode.languages.setTextDocumentLanguage(doc, 'sc');
+    await vscode.window.showTextDocument(doc,
+        { viewColumn: vscode.ViewColumn.Beside, preview: false, preserveFocus: true });
+}
+
 // ---------------- 激活 ----------------
 function activate(context) {
-    const treeSrc = new TreeSrcProvider();
-    const ast = new AstProvider(treeSrc);
+    const treeSrc = new EmitSrcProvider(TREE_SRC_SCHEME, ['--emit-sc'], '.tree.sc');
+    const apiSrc = new EmitSrcProvider(API_SRC_SCHEME, ['--api'], '.api.sc');
+    const ast = new AstProvider([treeSrc, apiSrc]);
 
     context.subscriptions.push(
         vscode.window.createTreeView('scAstView', { treeDataProvider: ast, showCollapseAll: true }),
-        vscode.workspace.registerTextDocumentContentProvider(TREE_SRC_SCHEME, treeSrc));
+        vscode.workspace.registerTextDocumentContentProvider(TREE_SRC_SCHEME, treeSrc),
+        vscode.workspace.registerTextDocumentContentProvider(API_SRC_SCHEME, apiSrc));
 
     // 命令：刷新
     context.subscriptions.push(vscode.commands.registerCommand('scAst.refresh', () => {
@@ -281,24 +333,12 @@ function activate(context) {
     }));
 
     // 命令：切换树结构源码视图
-    context.subscriptions.push(vscode.commands.registerCommand('scAst.toggleTreeSource', async () => {
-        // 已打开则关闭（切换）
-        for (const tab of vscode.window.tabGroups.all.flatMap(g => g.tabs)) {
-            const input = tab.input;
-            if (input && input.uri && input.uri.scheme === TREE_SRC_SCHEME) {
-                await vscode.window.tabGroups.close(tab);
-                return;
-            }
-        }
-        if (!currentDoc) {
-            vscode.window.showInformationMessage('请先打开一个 .sc 文件');
-            return;
-        }
-        const doc = await vscode.workspace.openTextDocument(treeSrc.uriFor(currentDoc));
-        await vscode.languages.setTextDocumentLanguage(doc, 'sc');
-        await vscode.window.showTextDocument(doc,
-            { viewColumn: vscode.ViewColumn.Beside, preview: false, preserveFocus: true });
-    }));
+    context.subscriptions.push(vscode.commands.registerCommand('scAst.toggleTreeSource',
+        () => toggleEmitView(treeSrc)));
+
+    // 命令：切换导出接口摘要视图（scc --api，形如 C 头的 @导出 定义清单）
+    context.subscriptions.push(vscode.commands.registerCommand('scAst.toggleApi',
+        () => toggleEmitView(apiSrc)));
 
     // 实时刷新：编辑（防抖）与切换编辑器
     let timer = null;

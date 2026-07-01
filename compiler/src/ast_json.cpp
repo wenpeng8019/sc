@@ -338,11 +338,15 @@ std::string declNodeCore(const Decl& d) {
 
 // 包装：为经 `add <file>.sc` 内联的声明补挂来源文件字段 "f"（供插件标注归属、跳转到被
 //   add 的源文件；其 "l" 行号即相对该文件）。原生声明（inlinedFrom 空）原样返回。
+//   另为 @导出 声明补挂 "xp":1，供插件汇总「导出定义表」时可靠识别（不依赖 detail 前缀）。
 std::string declNode(const Decl& d) {
     std::string s = declNodeCore(d);
-    if (d.inlinedFrom.empty() || s.empty() || s.back() != '}') return s;
-    s.pop_back();
-    s += ",\"f\":\"" + jesc(d.inlinedFrom) + "\"}";
+    if (s.empty() || s.back() != '}') return s;
+    if (d.exported) { s.pop_back(); s += ",\"xp\":1}"; }
+    if (!d.inlinedFrom.empty()) {
+        s.pop_back();
+        s += ",\"f\":\"" + jesc(d.inlinedFrom) + "\"}";
+    }
     return s;
 }
 

@@ -15,6 +15,7 @@
 //   --emit-c → emitC()       sc源码转译为C源码
 //   --ast    → emitAstJson() AST结构导出为JSON树
 //   --emit-sc → emitSc()     从AST再生规范化sc源码
+//   --api    → emitScApi()   导出接口摘要（仅 @导出 定义项签名，形如 C 头）
 //
 // 所有编译错误通过 CompileError 异常传播，在此统一捕获并格式化输出。
 // ============================================================
@@ -87,6 +88,7 @@ static void usage() {
               << "             目标平台头解析复用交叉编译配置（triple/sysroot/inc/cflags）；\n"
               << "             完全不带 --clang 则退化为头文件文本匹配\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
+              << "  --api      输出模块导出接口摘要（仅 @导出 定义项签名，形如 C 头；配合 -o 缺省 stdout）\n"
               << "  --check=ref  开启自动指针 T@ 栈悬挂检查：注入栈对象引用头并在退域处\n"
               << "             断言悬挂（含源码定位）；默认关闭（堆 ARC 自动回收始终生效）\n"
               << "  --check=mem  开启越界 canary：ref 头堆对象注入头尾哨兵（地址派生魔数）、\n"
@@ -97,9 +99,9 @@ static void usage() {
               << "  --test     单元测试模式：编译目标文件的 tst 用例为测试 runner 并运行；\n"
               << "             逐用例隔离执行（assert 失败软中止本例继续下一例），\n"
               << "             汇总 通过/失败/跳过，退出码为失败用例数\n"
-              << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc 模式下有效）\n"
+              << "  -o <file>  输出文件（--build/--emit-c/--ast/--emit-sc/--api 模式下有效）\n"
               << "             裸 -o 不带值时按输入文件名 + 模式后缀推导，写入输入文件所在目录：\n"
-              << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --build→无后缀\n"
+              << "             --emit-c→.c  --ast→.json  --emit-sc→.out.sc  --api→.api.sc  --build→无后缀\n"
               << "  '-' 表示从 stdin 读入；'--' 之后的参数传递给被执行的程序\n";
 }
 
@@ -2365,6 +2367,7 @@ int main(int argc, char** argv) {
         else if (a == "--emit-c") mode = "c";                // 转译 C 模式
         else if (a == "--ast") mode = "ast";                 // AST JSON 模式
         else if (a == "--emit-sc") mode = "sc";              // 再生 sc 模式
+        else if (a == "--api") mode = "api";                 // 导出接口摘要模式（仅 @导出 签名）
         else if (a == "--test") mode = "test";               // 单元测试模式
         else if (a == "--check=ref") setRefCheck(true);      // 自动指针 T@ 栈悬挂检查（带源码定位）
         else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "ref") {
@@ -2394,6 +2397,7 @@ int main(int argc, char** argv) {
         if (mode == "c")        name = stem + ".c";
         else if (mode == "ast") name = stem + ".json";
         else if (mode == "sc")  name = stem + ".out.sc";
+        else if (mode == "api") name = stem + ".api.sc";
         else if (mode == "build") name = stem;
         if (!name.empty()) {
             const auto dir = ip.has_parent_path() ? ip.parent_path() : std::filesystem::path(".");
@@ -2492,8 +2496,8 @@ int main(int argc, char** argv) {
             gatherCHeaderDescriptors(prog, baseDir, copt, collectExternalRefs(prog));
         }
         auto warnings = analyzeExternalUsage(prog);                 // 外部描述符使用统计（标记 used）+ 导入未使用警告
-        // 泛型宏单态化：仅实际编译路径生效；--emit-sc/--ast 保留原始 def/mix 以便源码回写。
-        if (mode != "sc" && mode != "ast") expandGenericMixes(prog);
+        // 泛型宏单态化：仅实际编译路径生效；--emit-sc/--ast/--api 保留原始 def/mix（源码回写/接口摘要）。
+        if (mode != "sc" && mode != "ast" && mode != "api") expandGenericMixes(prog);
         ensureBuiltinHeaderSymbols(unitPath.has_parent_path() ? unitPath.parent_path()
                                                               : std::filesystem::current_path());
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
@@ -2502,6 +2506,7 @@ int main(int argc, char** argv) {
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
         if (getRefCheck() || getMemCheck() || getPtrCheck()) setRefSrcFile(input);  // T@ 栈悬挂/栈数组越界/指针下标守卫 site 用源码文件名
         auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
+               : mode == "api" ? emitScApi(prog)                    // AST→导出接口摘要（@导出 签名）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc
                : (mode == "c" && !output.empty())                   // --emit-c 到文件：分离 stringify.h
                      // 源文件输入时以源路径作 #line srcFile：导出的 .c 自带回 .sc 的行号映射，

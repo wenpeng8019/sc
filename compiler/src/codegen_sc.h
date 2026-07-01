@@ -18,6 +18,15 @@
 // ============================================================
 std::string emitSc(const Program& prog);
 
+// ------------------------------------------------------------
+// 导出接口摘要（--api）：仅输出本模块 @导出 定义项的「签名」，剥去实现体，
+// 形如 C 头文件的接口清单。供 `scc --api` 命令与 VSCode 插件「导出定义表」使用。
+//   · 只列本单元 @导出 声明（external/inc/add/未导出项一律略去）；
+//   · 类型（enum/struct/union/alias）连字段与成员函数签名一并列出（无函数体）；
+//   · fnc/fnctype/rpc 仅签名；var/let 仅「名: 类型」（省初值）。
+// ------------------------------------------------------------
+std::string emitScApi(const Program& prog);
+
 // 泛型宏单态化辅助：把宏体语句列表（DeclS 包裹的嵌套声明）再生成 sc 源码文本，
 // 供单态化 pass 做类型/名参数文本替换后重新解析为具体声明。
 std::string emitMacroBodySc(const std::vector<StmtPtr>& body);

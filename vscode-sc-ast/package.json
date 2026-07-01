@@ -29,19 +29,29 @@
                 "command": "scAst.toggleTreeSource",
                 "title": "SC AST: 切换树结构源码视图",
                 "icon": "$(code)"
+            },
+            {
+                "command": "scAst.toggleApi",
+                "title": "SC AST: 切换导出接口摘要视图",
+                "icon": "$(symbol-interface)"
             }
         ],
         "menus": {
             "view/title": [
                 {
-                    "command": "scAst.toggleTreeSource",
+                    "command": "scAst.toggleApi",
                     "when": "view == scAstView",
                     "group": "navigation@1"
                 },
                 {
-                    "command": "scAst.refresh",
+                    "command": "scAst.toggleTreeSource",
                     "when": "view == scAstView",
                     "group": "navigation@2"
+                },
+                {
+                    "command": "scAst.refresh",
+                    "when": "view == scAstView",
+                    "group": "navigation@3"
                 }
             ]
         },

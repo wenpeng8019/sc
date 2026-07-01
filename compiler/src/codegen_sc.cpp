@@ -16,6 +16,8 @@ namespace {
 struct SGen {
     std::ostringstream out;
     int depth = 0;
+    // 导出接口摘要模式（--api）：剥去所有实现体、变量初值，仅保留签名/声明。
+    bool apiMode = false;
     // 成员函数表：所属类型 → 方法 Decl 列表（再生时印回结构体内部）
     std::unordered_map<std::string, std::vector<const Decl*>> methodImpls;
     // tok/dep 合成的隐藏回调（combine/follow）：C 名 → Decl，供 tok/dep 块回写其体
@@ -24,6 +26,7 @@ struct SGen {
     void ind() { for (int i = 0; i < depth; i++) out << "    "; }
 
     void emitStmts(const std::vector<StmtPtr>& stmts) {
+        if (apiMode) return;                 // 接口摘要：一律剥去实现体（函数/成员/tok 回调体）
         for (auto& s : stmts) emitStmt(*s);
     }
 
@@ -40,7 +43,7 @@ struct SGen {
         out << kw << " ";
         for (size_t i = 0; i < items.size(); i++) {
             if (i) out << ", ";
-            out << fieldToStr(items[i], true);
+            out << fieldToStr(items[i], !apiMode);   // 接口摘要省略初值，仅「名: 类型」
         }
         out << "\n";
     }
@@ -487,6 +490,35 @@ struct SGen {
         }
         return out.str();
     }
+
+    // --api：仅输出本模块 @导出 定义项的签名摘要（形如 C 头文件的接口清单）。
+    std::string runApi(const Program& prog) {
+        // 预扫（与 run 一致）：成员函数归入所属类型；tok/dep 隐藏回调建表。
+        for (auto& d : prog.decls)
+            if (!d->external && (
+                (d->kind == Decl::FuncD && !d->methodOwner.empty()) ||
+                (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())))
+                methodImpls[d->methodOwner].push_back(d.get());
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::FuncD && d->tokHidden)
+                tokHiddenFns[d->name] = d.get();
+
+        out << "# 由 scc --api 生成：本模块导出接口摘要（仅签名，无实现体）\n\n";
+        if (prog.isRoot) out << "@@\n\n";              // 根模块标记（其 @导出 注入全体依赖）
+        for (auto& d : prog.decls) {
+            if (d->genTypeHeader) continue;            // 编译器合成 future_id 枚举：非接口项
+            if (d->external) continue;                 // 外部导入项：非本模块定义
+            if (!d->exported) continue;                // 仅列 @导出 项
+            if (d->kind == Decl::IncD || d->kind == Decl::AddD) continue;  // 引入/添加：非定义项
+            // 成员函数 / tok·dep 隐藏回调：随所属类型/块输出，顶层不单列
+            if ((d->kind == Decl::FuncD && !d->methodOwner.empty())
+                || (d->kind == Decl::FuncTypeD && d->cImpl && !d->methodOwner.empty())) continue;
+            if (d->kind == Decl::FuncD && d->tokHidden) continue;
+            emitDecl(*d);                              // apiMode 使函数/成员体被剥除
+            out << "\n";
+        }
+        return out.str();
+    }
 };
 
 } // namespace
@@ -494,6 +526,12 @@ struct SGen {
 std::string emitSc(const Program& prog) {
     SGen g;
     return g.run(prog);
+}
+
+std::string emitScApi(const Program& prog) {
+    SGen g;
+    g.apiMode = true;
+    return g.runApi(prog);
 }
 
 std::string emitMacroBodySc(const std::vector<StmtPtr>& body) {
