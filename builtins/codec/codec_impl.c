@@ -126,6 +126,170 @@ int64_t codec_rle_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     return (int64_t)o;
 }
 
+/* ---- 流式 RLE（unit 粒度 + feed/flush，TGA/TrueVision 兼容线格式）----
+ * 原始包：控制字节 bit7=0，紧随 (ctrl&0x7F)+1 个字面 unit；
+ * 行程包：控制字节 bit7=1，紧随 1 个 unit 重复 (ctrl&0x7F)+1 次。unit=每 unit 字节数(1..8)。
+ * 编码器为经典 PackBits 单前瞻状态机（INIT/LIT/RUN），只在 unit 内逐 unit 比较，
+ * 不跨 flush 边界合并行程——调用方每逢自然边界（如 TGA 扫描行）应 flush。 */
+
+void codec_rle_enc_init(codec_rle_enc *e, int32_t unit) {
+    e->unit = unit;
+    e->st = 0;
+    e->n = 0;
+}
+
+uint64_t codec_rle_enc_bound(uint64_t nunits, int32_t unit) {
+    return nunits * (uint64_t)unit + (nunits / 128u + 2u) * (1u + (uint64_t)unit);
+}
+
+/* 内部：发射一个包（ctrl + nbytes 字节载荷）到 out[op..]，返回新 op 或 -1（越界）。 */
+static int64_t codec__rle_emit(uint8_t *out, int64_t op, uint64_t cap,
+                               uint8_t ctrl, const uint8_t *src, int64_t nbytes) {
+    int64_t k;
+    if ((uint64_t)(op + 1 + nbytes) > cap) return -1;
+    out[op] = ctrl;
+    for (k = 0; k < nbytes; k++) out[op + 1 + k] = src[k];
+    return op + 1 + nbytes;
+}
+
+int64_t codec_rle_enc_feed(codec_rle_enc *e, uint8_t *in, uint64_t nunits,
+                           uint8_t *out, uint64_t cap) {
+    int32_t unit = e->unit;
+    int64_t op = 0;
+    uint64_t i;
+    for (i = 0; i < nunits; i++) {
+        int64_t ib = (int64_t)i * unit;
+        if (e->st == 0) {
+            /* INIT：当前 unit 存为第一个字面。 */
+            int32_t k;
+            for (k = 0; k < unit; k++) e->buf[k] = in[ib + k];
+            e->n = 1;
+            e->st = 1;
+        } else if (e->st == 1) {
+            /* LIT：与最后一个字面 unit 比较。 */
+            int32_t lb = (e->n - 1) * unit, eq = 1, k;
+            for (k = 0; k < unit; k++) if (in[ib + k] != e->buf[lb + k]) eq = 0;
+            if (eq) {
+                /* 相等 → 行程起始：先冲掉前面 (n-1) 个字面。 */
+                if (e->n >= 2) {
+                    int32_t cnt = e->n - 1, j;
+                    op = codec__rle_emit(out, op, cap, (uint8_t)((cnt - 1) & 0x7F), e->buf, (int64_t)cnt * unit);
+                    if (op < 0) return -1;
+                    (void)j;
+                }
+                { int32_t j; for (j = 0; j < unit; j++) e->rv[j] = in[ib + j]; }
+                e->n = 2;
+                e->st = 2;
+            } else {
+                /* 追加字面。 */
+                int32_t db = e->n * unit, j;
+                for (j = 0; j < unit; j++) e->buf[db + j] = in[ib + j];
+                e->n++;
+                if (e->n == 128) {
+                    op = codec__rle_emit(out, op, cap, 127, e->buf, (int64_t)128 * unit);
+                    if (op < 0) return -1;
+                    e->n = 0;
+                    e->st = 0;
+                }
+            }
+        } else {
+            /* RUN：与行程值比较。 */
+            int32_t eq = 1, k;
+            for (k = 0; k < unit; k++) if (in[ib + k] != e->rv[k]) eq = 0;
+            if (eq) {
+                e->n++;
+                if (e->n == 128) {
+                    op = codec__rle_emit(out, op, cap, (uint8_t)(0x80u | 127u), e->rv, unit);
+                    if (op < 0) return -1;
+                    e->n = 0;
+                    e->st = 0;
+                }
+            } else {
+                int32_t j;
+                op = codec__rle_emit(out, op, cap, (uint8_t)(0x80u | (uint32_t)((e->n - 1) & 0x7F)), e->rv, unit);
+                if (op < 0) return -1;
+                for (j = 0; j < unit; j++) e->buf[j] = in[ib + j];
+                e->n = 1;
+                e->st = 1;
+            }
+        }
+    }
+    return op;
+}
+
+int64_t codec_rle_enc_flush(codec_rle_enc *e, uint8_t *out, uint64_t cap) {
+    int32_t unit = e->unit;
+    int64_t op = 0;
+    if (e->st == 1) {
+        op = codec__rle_emit(out, op, cap, (uint8_t)((e->n - 1) & 0x7F), e->buf, (int64_t)e->n * unit);
+        if (op < 0) return -1;
+    } else if (e->st == 2) {
+        op = codec__rle_emit(out, op, cap, (uint8_t)(0x80u | (uint32_t)((e->n - 1) & 0x7F)), e->rv, unit);
+        if (op < 0) return -1;
+    }
+    e->st = 0;
+    e->n = 0;
+    return op;
+}
+
+void codec_rle_dec_init(codec_rle_dec *d, int32_t unit) {
+    d->unit = unit;
+    d->phase = 0;
+    d->rem = 0;
+    d->rvn = 0;
+}
+
+/* 流式解码：喂 inlen 字节输入，最多向 out 写 cap 字节。
+ * out 满即优雅停止（返回已产出字节数，非报错），内部状态（phase/rem/rvn/rv）保留，
+ *   下次调用续传；phase 2 的重复串发射亦可跨调用续传。故正确用法是把 cap 设为「本次期望
+ *   产出上限」（如剩余总字节数），并按返回值累计——满则说明达到上限，可停止喂入。
+ * 返回值 >= 0（本次产出字节数）。 */
+int64_t codec_rle_dec_feed(codec_rle_dec *d, uint8_t *in, uint64_t inlen,
+                           uint8_t *out, uint64_t cap) {
+    int32_t unit = d->unit;
+    int64_t op = 0;
+    uint64_t i = 0;
+    for (;;) {
+        /* 先排空 phase 2 待发射的重复串（值字节已齐），可跨调用续传。 */
+        if (d->phase == 2 && d->rvn == unit) {
+            while (d->rem > 0) {
+                int32_t k;
+                if ((uint64_t)op + (uint64_t)unit > cap) return op;  /* out 满，优雅停 */
+                for (k = 0; k < unit; k++) out[op + k] = d->rv[k];
+                op += unit;
+                d->rem--;
+            }
+            d->phase = 0;
+        }
+        if (i >= inlen) break;
+        {
+            uint8_t b = in[i];
+            if (d->phase == 0) {
+                if (b & 0x80) {
+                    d->phase = 2;
+                    d->rem = (int32_t)(b & 0x7F) + 1;        /* 重复次数 */
+                    d->rvn = 0;
+                } else {
+                    d->phase = 1;
+                    d->rem = ((int32_t)(b & 0x7F) + 1) * unit; /* 剩余字面字节数 */
+                }
+                i++;
+            } else if (d->phase == 1) {
+                if ((uint64_t)op >= cap) break;              /* out 满，优雅停 */
+                out[op++] = b;
+                d->rem--;
+                if (d->rem == 0) d->phase = 0;
+                i++;
+            } else {
+                /* phase 2：收集重复值字节，齐 unit 后由顶部排空逻辑发射。 */
+                d->rv[d->rvn++] = b;
+                i++;
+            }
+        }
+    }
+    return op;
+}
+
 /* ====================== Layer 1 · 簇 4：DEFLATE / zlib / gzip ======================
  *
  * 自实现 DEFLATE 解码（RFC 1951），结构借鉴 Mark Adler 的教学实现 puff.c（public domain）
@@ -367,6 +531,257 @@ int64_t codec_gzip_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     return n;
 }
 
+/* ══════════════ Layer 1 · 簇 4b：流式 inflate（可分块喂输入 / 分块取输出）══════════════
+ * 设计：内部缓冲未解码输入 inbuf + 已提交读位(bit 粒度) + 32K 滑窗 window；每次 feed 追加输入、
+ * 尽量产出到 out。以「单元原子 + 回滚到已提交位」处理输入不足：块头/单符号/动态头若中途缺字节
+ * 则不提交、等下次 feed 重解（inbuf 保留原始字节，回滚即不推进 bytepos，零额外子状态）；输出满
+ * 则在符号边界或拷贝/stored 中途挂起(copy_len/copy_dist/stored_rem)。back-ref 从 window 取（调用方
+ * out 会被抽走）。与整块 codec_inflate 对拍验证。目前支持 wrap=0(raw)/1(zlib)；gzip(2) 待补。 */
+
+#define ZW_SIZE 32768
+enum { ZM_HDR = 0, ZM_BHDR, ZM_STORED, ZM_CODES, ZM_TRAILER, ZM_DONE, ZM_ERR };
+
+typedef struct {
+    int      wrap;              /* 0 raw / 1 zlib / 2 gzip */
+    int      mode, last;
+    uint8_t *inbuf;
+    uint64_t incap, inlen;     /* inbuf 容量 / 有效字节数 */
+    uint64_t bytepos;          /* 已提交读位：字节索引 */
+    int      bitpos;           /* 已提交读位：字节内 bit（0..7） */
+    short    lcount[16], lsym[288];
+    short    dcount[16], dsym[30];
+    uint32_t stored_rem;       /* stored 块剩余字节 */
+    int      copy_len;         /* 挂起的 LZ 拷贝剩余长度 */
+    uint32_t copy_dist;        /* 挂起的 LZ 拷贝距离 */
+    uint8_t  window[ZW_SIZE];
+    uint32_t wpos;             /* window 下个写位（环形） */
+    uint64_t total_out;        /* 累计产出字节 */
+    uint32_t s1, s2, spend;    /* adler-32 running（延迟取模） */
+    uint32_t crc;              /* gzip crc running */
+} codec_zdec;
+
+uint64_t codec_zdec_size(void) { return sizeof(codec_zdec); }
+
+int32_t codec_zdec_init(void *sp, int32_t wrap) {
+    codec_zdec *z = (codec_zdec *)sp;
+    memset(z, 0, sizeof(*z));
+    z->wrap = wrap;
+    z->mode = (wrap == 0) ? ZM_BHDR : ZM_HDR;
+    z->s1 = 1; z->s2 = 0; z->spend = 0;
+    z->crc = 0;
+    return 0;
+}
+
+void codec_zdec_free(void *sp) {
+    codec_zdec *z = (codec_zdec *)sp;
+    if (z->inbuf) { free(z->inbuf); z->inbuf = 0; z->incap = 0; z->inlen = 0; }
+}
+
+int32_t codec_zdec_ended(void *sp) { return ((codec_zdec *)sp)->mode == ZM_DONE ? 1 : 0; }
+
+static int z_reserve(codec_zdec *z, uint64_t add) {
+    uint64_t nc;
+    uint8_t *np;
+    if (z->inlen + add <= z->incap) return 0;
+    nc = z->incap ? z->incap : 1024;
+    while (z->inlen + add > nc) nc *= 2;
+    np = (uint8_t *)realloc(z->inbuf, nc);
+    if (!np) return -1;
+    z->inbuf = np; z->incap = nc;
+    return 0;
+}
+
+/* 位读取器：跨 inbuf 的本地游标（byte bi + bit ci）；越过 inlen 置 under。 */
+typedef struct { codec_zdec *z; uint64_t bi; int ci; int under; } zbr;
+static void zbr_start(zbr *r, codec_zdec *z) { r->z = z; r->bi = z->bytepos; r->ci = z->bitpos; r->under = 0; }
+static int  zbr_bit(zbr *r) {
+    int b;
+    if (r->bi >= r->z->inlen) { r->under = 1; return 0; }
+    b = (r->z->inbuf[r->bi] >> r->ci) & 1;
+    if (++r->ci == 8) { r->ci = 0; r->bi++; }
+    return b;
+}
+static int  zbr_bits(zbr *r, int n) { int v = 0, i; for (i = 0; i < n; i++) v |= zbr_bit(r) << i; return v; }
+static void zbr_align(zbr *r) { if (r->ci) { r->ci = 0; r->bi++; } }
+static void zbr_commit(zbr *r) { r->z->bytepos = r->bi; r->z->bitpos = r->ci; }
+static int  zbr_decode(zbr *r, const short *count, const short *symbol) {
+    int len, code = 0, first = 0, cnt, index = 0;
+    for (len = 1; len <= 15; len++) {
+        code |= zbr_bit(r);
+        if (r->under) return -99;
+        cnt = count[len];
+        if (code - first < cnt) return symbol[index + (code - first)];
+        index += cnt; first += cnt; first <<= 1; code <<= 1;
+    }
+    return -900;
+}
+
+/* 解析动态块头（原子）：建 litlen/dist 表进 z。返回 0；缺字节 -99；非法 <0（且 != -99）。 */
+static int z_build_dynamic(zbr *r, codec_zdec *z) {
+    static const short order[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
+    short lengths[320], clc[16], cls[19], cll[19];
+    int nlit, ndist, ncode, index, sym, err, i;
+    nlit  = 257 + zbr_bits(r, 5);
+    ndist = 1   + zbr_bits(r, 5);
+    ncode = 4   + zbr_bits(r, 4);
+    if (r->under) return -99;
+    if (nlit > 286 || ndist > 30) return -3;
+    for (i = 0; i < 19; i++) cll[i] = 0;
+    for (index = 0; index < ncode; index++) { cll[order[index]] = (short)zbr_bits(r, 3); if (r->under) return -99; }
+    err = cd_construct(clc, cls, cll, 19);
+    if (err < 0) return -4;
+    index = 0;
+    while (index < nlit + ndist) {
+        sym = zbr_decode(r, clc, cls);
+        if (sym == -99) return -99;
+        if (sym < 0) return -5;
+        if (sym < 16) { lengths[index++] = (short)sym; }
+        else {
+            short val = 0; int rep;
+            if (sym == 16) { if (index == 0) return -6; val = lengths[index - 1]; rep = 3 + zbr_bits(r, 2); }
+            else if (sym == 17) { rep = 3 + zbr_bits(r, 3); }
+            else { rep = 11 + zbr_bits(r, 7); }
+            if (r->under) return -99;
+            if (index + rep > nlit + ndist) return -7;
+            while (rep-- > 0) lengths[index++] = val;
+        }
+    }
+    err = cd_construct(z->lcount, z->lsym, lengths, nlit);
+    if (err < 0) return -8;
+    err = cd_construct(z->dcount, z->dsym, lengths + nlit, ndist);
+    if (err < 0) return -9;
+    return 0;
+}
+
+/* 产出一字节：写 window（环形）+ out，并累进校验和。调用前须保证 op<cap。 */
+static void z_emit(codec_zdec *z, uint8_t *out, uint64_t *op, uint8_t b) {
+    z->window[z->wpos] = b;
+    z->wpos = (z->wpos + 1) & (ZW_SIZE - 1);
+    z->total_out++;
+    out[*op] = b; (*op)++;
+    if (z->wrap == 1) {
+        z->s1 += b; z->s2 += z->s1;
+        if (++z->spend >= 5552) { z->s1 %= 65521; z->s2 %= 65521; z->spend = 0; }
+    } else if (z->wrap == 2) {
+        z->crc = codec_crc32_update(z->crc, &b, 1);
+    }
+}
+
+int64_t codec_zdec_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
+    codec_zdec *z = (codec_zdec *)sp;
+    uint64_t op = 0;
+    if (z->mode == ZM_ERR) { if (consumed) *consumed = 0; return -1; }
+    if (inlen) {
+        if (z_reserve(z, inlen) < 0) { z->mode = ZM_ERR; if (consumed) *consumed = 0; return -1; }
+        memcpy(z->inbuf + z->inlen, in, inlen); z->inlen += inlen;
+    }
+    if (consumed) *consumed = inlen;
+
+    for (;;) {
+        if (z->mode == ZM_DONE) break;
+        if (z->mode == ZM_HDR) {
+            if (z->wrap == 1) {
+                int c0, c1;
+                if (z->inlen - z->bytepos < 2) break;
+                c0 = z->inbuf[z->bytepos]; c1 = z->inbuf[z->bytepos + 1];
+                if ((c0 & 0x0f) != 8 || (((c0 << 8) | c1) % 31) != 0 || (c1 & 0x20)) { z->mode = ZM_ERR; return -1; }
+                z->bytepos += 2; z->bitpos = 0; z->mode = ZM_BHDR; continue;
+            }
+            z->mode = ZM_ERR; return -1;                 /* gzip 待补 */
+        }
+        if (z->mode == ZM_BHDR) {
+            zbr r; int bf, bt;
+            zbr_start(&r, z);
+            bf = zbr_bit(&r); bt = zbr_bits(&r, 2);
+            if (r.under) break;
+            if (bt == 0) {
+                int len;
+                zbr_align(&r);
+                if (r.bi + 4 > z->inlen) break;
+                len = z->inbuf[r.bi] | (z->inbuf[r.bi + 1] << 8);
+                r.bi += 4;
+                z->stored_rem = (uint32_t)len; z->last = bf;
+                zbr_commit(&r); z->mode = ZM_STORED; continue;
+            } else if (bt == 1) {
+                if (!cd_fix_ready) cd_build_fixed();
+                memcpy(z->lcount, cd_fix_lcount, sizeof(z->lcount));
+                memcpy(z->lsym,   cd_fix_lsym,   sizeof(z->lsym));
+                memcpy(z->dcount, cd_fix_dcount, sizeof(z->dcount));
+                memcpy(z->dsym,   cd_fix_dsym,   sizeof(z->dsym));
+                z->last = bf; zbr_commit(&r); z->mode = ZM_CODES; continue;
+            } else if (bt == 2) {
+                int e = z_build_dynamic(&r, z);
+                if (e == -99) break;
+                if (e < 0) { z->mode = ZM_ERR; return -1; }
+                z->last = bf; zbr_commit(&r); z->mode = ZM_CODES; continue;
+            } else { z->mode = ZM_ERR; return -1; }
+        }
+        if (z->mode == ZM_STORED) {
+            while (z->stored_rem > 0) {
+                if (op >= cap) goto suspend;
+                if (z->bytepos >= z->inlen) goto suspend;
+                z_emit(z, out, &op, z->inbuf[z->bytepos]);
+                z->bytepos++; z->stored_rem--;
+            }
+            z->mode = z->last ? ZM_TRAILER : ZM_BHDR; continue;
+        }
+        if (z->mode == ZM_CODES) {
+            for (;;) {
+                if (z->copy_len > 0) {
+                    while (z->copy_len > 0) {
+                        uint8_t b;
+                        if (op >= cap) goto suspend;
+                        b = z->window[(z->wpos - z->copy_dist) & (ZW_SIZE - 1)];
+                        z_emit(z, out, &op, b); z->copy_len--;
+                    }
+                }
+                {
+                    zbr r; int sym, length, dsy; uint32_t dist;
+                    zbr_start(&r, z);
+                    sym = zbr_decode(&r, z->lcount, z->lsym);
+                    if (sym == -99) goto suspend;
+                    if (sym < 0) { z->mode = ZM_ERR; return -1; }
+                    if (sym < 256) { if (op >= cap) goto suspend; z_emit(z, out, &op, (uint8_t)sym); zbr_commit(&r); continue; }
+                    if (sym == 256) { zbr_commit(&r); z->mode = z->last ? ZM_TRAILER : ZM_BHDR; break; }
+                    sym -= 257;
+                    if (sym >= 29) { z->mode = ZM_ERR; return -1; }
+                    length = cd_lbase[sym] + zbr_bits(&r, cd_lext[sym]);
+                    dsy = zbr_decode(&r, z->dcount, z->dsym);
+                    if (dsy == -99) goto suspend;
+                    if (dsy < 0 || dsy >= 30) { z->mode = ZM_ERR; return -1; }
+                    dist = (uint32_t)cd_dbase[dsy] + (uint32_t)zbr_bits(&r, cd_dext[dsy]);
+                    if (r.under) goto suspend;
+                    if ((uint64_t)dist > z->total_out) { z->mode = ZM_ERR; return -1; }
+                    z->copy_len = length; z->copy_dist = dist; zbr_commit(&r);
+                }
+            }
+            continue;
+        }
+        if (z->mode == ZM_TRAILER) {
+            if (z->wrap == 0) { z->mode = ZM_DONE; continue; }
+            if (z->bitpos) { z->bitpos = 0; z->bytepos++; }
+            if (z->wrap == 1) {
+                uint32_t want, adler;
+                if (z->inlen - z->bytepos < 4) break;
+                want = ((uint32_t)z->inbuf[z->bytepos] << 24) | ((uint32_t)z->inbuf[z->bytepos + 1] << 16)
+                     | ((uint32_t)z->inbuf[z->bytepos + 2] << 8) | (uint32_t)z->inbuf[z->bytepos + 3];
+                z->bytepos += 4;
+                z->s1 %= 65521; z->s2 %= 65521; adler = (z->s2 << 16) | z->s1;
+                if (adler != want) { z->mode = ZM_ERR; return -1; }
+                z->mode = ZM_DONE; continue;
+            }
+            z->mode = ZM_ERR; return -1;
+        }
+        break;
+    }
+suspend:
+    if (z->bytepos > 0) {
+        memmove(z->inbuf, z->inbuf + z->bytepos, z->inlen - z->bytepos);
+        z->inlen -= z->bytepos; z->bytepos = 0;
+    }
+    return (int64_t)op;
+}
+
 /* ─────────── DEFLATE 编码（固定 Huffman + 贪心 LZ77，或 stored 直通）───────────
  *
  * level 0：stored 块直通（不压缩，保证不失败，作为 incompressible 兜底）。
@@ -598,8 +1013,9 @@ static int cd_rle_lengths(const short *lens, int n, uint8_t *clsym, uint8_t *clx
     return m;
 }
 
-/* 动态 Huffman + 贪心 LZ77（level ≥ 2）：两遍 LZ77（先统计频率建树，再写码流）。 */
-static int64_t cd_deflate_dynamic(const uint8_t *src, uint64_t len, uint8_t *out, uint64_t cap) {
+/* 动态 Huffman 块核心：写入已初始化的位写手 w（不初始化、不 flush、BFINAL=last），
+ * 供整块 deflate 与流式 deflate 复用。返回 0；malloc 失败 -1。LZ77 仅限本 src 段（不跨段）。 */
+static int cd_dynamic_core(cd_wr *w, const uint8_t *src, uint64_t len, int last) {
     static const int order[19] = {16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15};
     uint32_t fll[286], fd[30], fcl[19];
     uint8_t  ll_len[286], d_len[30], cl_len[19];
@@ -607,7 +1023,6 @@ static int64_t cd_deflate_dynamic(const uint8_t *src, uint64_t len, uint8_t *out
     short    lens[320];
     uint8_t  clsym[320], clxb[320], clxv[320];
     int     *head;
-    cd_wr    w;
     cd_cntctx cnt;
     cd_emitctx em;
     int i, nlit, ndist, ncode, m, ll_max, d_max, cl_max;
@@ -647,24 +1062,31 @@ static int64_t cd_deflate_dynamic(const uint8_t *src, uint64_t len, uint8_t *out
     ncode = 19;  while (ncode > 4 && cl_len[order[ncode - 1]] == 0) ncode--;
 
     /* —— 写块头 —— */
-    w.out = out; w.cap = cap; w.cnt = 0; w.bitbuf = 0; w.bitcnt = 0; w.err = 0;
-    cd_putbit(&w, 1);                       /* BFINAL=1（单块） */
-    cd_putbits(&w, 2, 2);                   /* BTYPE=10 动态 Huffman */
-    cd_putbits(&w, nlit - 257, 5);          /* HLIT */
-    cd_putbits(&w, ndist - 1, 5);           /* HDIST */
-    cd_putbits(&w, ncode - 4, 4);           /* HCLEN */
-    for (i = 0; i < ncode; i++) cd_putbits(&w, cl_len[order[i]], 3);
-    for (i = 0; i < m; i++) {               /* 码长码流（码字 MSB-first + 附加位 LSB-first） */
-        cd_huffbits(&w, (int)cl_code[clsym[i]], cl_len[clsym[i]]);
-        if (clxb[i]) cd_putbits(&w, clxv[i], clxb[i]);
+    cd_putbit(w, last & 1);                 /* BFINAL */
+    cd_putbits(w, 2, 2);                     /* BTYPE=10 动态 Huffman */
+    cd_putbits(w, nlit - 257, 5);           /* HLIT */
+    cd_putbits(w, ndist - 1, 5);            /* HDIST */
+    cd_putbits(w, ncode - 4, 4);            /* HCLEN */
+    for (i = 0; i < ncode; i++) cd_putbits(w, cl_len[order[i]], 3);
+    for (i = 0; i < m; i++) {                /* 码长码流（码字 MSB-first + 附加位 LSB-first） */
+        cd_huffbits(w, (int)cl_code[clsym[i]], cl_len[clsym[i]]);
+        if (clxb[i]) cd_putbits(w, clxv[i], clxb[i]);
     }
 
     /* —— 第二遍：写数据 —— */
-    em.w = &w; em.ll_code = ll_code; em.ll_len = ll_len; em.d_code = d_code; em.d_len = d_len;
+    em.w = w; em.ll_code = ll_code; em.ll_len = ll_len; em.d_code = d_code; em.d_len = d_len;
     cd_lz77(src, len, head, cd_dyn_lit, cd_dyn_match, &em);
-    cd_huffbits(&w, (int)ll_code[256], ll_len[256]);   /* 块结束符 */
-    cd_flush(&w);
+    cd_huffbits(w, (int)ll_code[256], ll_len[256]);   /* 块结束符 */
     free(head);
+    return 0;
+}
+
+/* 动态 Huffman + 贪心 LZ77（level ≥ 2）：两遍 LZ77（先统计频率建树，再写码流）。单块 BFINAL=1。 */
+static int64_t cd_deflate_dynamic(const uint8_t *src, uint64_t len, uint8_t *out, uint64_t cap) {
+    cd_wr w;
+    w.out = out; w.cap = cap; w.cnt = 0; w.bitbuf = 0; w.bitcnt = 0; w.err = 0;
+    if (cd_dynamic_core(&w, src, len, 1) < 0) return -1;
+    cd_flush(&w);
     if (w.err) return -1;
     return (int64_t)w.cnt;
 }
@@ -721,6 +1143,150 @@ int64_t codec_gzip_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, i
     out[o++] = (uint8_t)((isize >> 16) & 0xff);
     out[o++] = (uint8_t)((isize >> 24) & 0xff);
     return (int64_t)o;
+}
+
+/* ══════════════ 簇 4b：流式 deflate（分块喂输入 / 分块取输出，边 filter 边写编码）══════════════
+ * 设计：输入按 ZE_BLK(32K) 缓冲成块；每满一块用 cd_dynamic_core 发一个 BFINAL=0 动态块（位写手
+ * 跨块持久、块间不做字节对齐）。finish 时把残块作为 BFINAL=1 末块发出（残块空则发空末块），再 flush
+ * 字节对齐、追加 wrap 尾（zlib=Adler32 / gzip=CRC32+ISIZE / raw=无）。LZ77 不跨块（略损压缩率，可接受）。
+ * 产出先积入内部输出缓冲 ob，再随 feed/finish 抽到调用方 out。状态结构对 sc 不透明。 */
+
+#define ZE_BLK 32768
+
+typedef struct {
+    int      wrap, level;
+    uint8_t  blk[ZE_BLK];
+    uint32_t blen;
+    uint8_t *ob;                   /* 输出缓冲（含 header/块字节/trailer） */
+    uint64_t obcap, oblen, obpos;  /* 容量 / 有效长度 / 已抽走位置 */
+    int      bitbuf, bitcnt;       /* 跨块持久的位写手低位状态 */
+    int      final_done;           /* 末块 + 尾已产出 */
+    uint64_t total_in;
+    uint32_t s1, s2, spend;        /* adler-32 running */
+    uint32_t crc;                  /* gzip crc running */
+} codec_zenc;
+
+uint64_t codec_zenc_size(void) { return sizeof(codec_zenc); }
+
+static int ze_grow(codec_zenc *z, uint64_t need) {
+    uint64_t nc;
+    uint8_t *np;
+    if (z->oblen + need <= z->obcap) return 0;
+    nc = z->obcap ? z->obcap : 4096;
+    while (z->oblen + need > nc) nc *= 2;
+    np = (uint8_t *)realloc(z->ob, nc);
+    if (!np) return -1;
+    z->ob = np; z->obcap = nc;
+    return 0;
+}
+
+int32_t codec_zenc_init(void *sp, int32_t wrap, int32_t level) {
+    codec_zenc *z = (codec_zenc *)sp;
+    memset(z, 0, sizeof(*z));
+    z->wrap = wrap; z->level = level;
+    z->s1 = 1; z->s2 = 0; z->spend = 0; z->crc = 0;
+    (void)z->level;                                    /* 目前均用动态块，level 预留 */
+    if (ze_grow(z, 16) < 0) return -1;
+    if (wrap == 1) {                                   /* zlib 头 */
+        z->ob[z->oblen++] = 0x78; z->ob[z->oblen++] = 0x9c;
+    } else if (wrap == 2) {                             /* gzip 头（10 字节） */
+        z->ob[z->oblen++] = 0x1f; z->ob[z->oblen++] = 0x8b; z->ob[z->oblen++] = 8; z->ob[z->oblen++] = 0;
+        z->ob[z->oblen++] = 0; z->ob[z->oblen++] = 0; z->ob[z->oblen++] = 0; z->ob[z->oblen++] = 0;
+        z->ob[z->oblen++] = 0; z->ob[z->oblen++] = 0xff;
+    }
+    return 0;
+}
+
+void codec_zenc_free(void *sp) {
+    codec_zenc *z = (codec_zenc *)sp;
+    if (z->ob) { free(z->ob); z->ob = 0; z->obcap = 0; z->oblen = 0; z->obpos = 0; }
+}
+
+int32_t codec_zenc_ended(void *sp) {
+    codec_zenc *z = (codec_zenc *)sp;
+    return (z->final_done && z->obpos >= z->oblen) ? 1 : 0;
+}
+
+/* 压一块（src[0..len)）为 deflate 块（BFINAL=last），产出追加进 ob。 */
+static int ze_block(codec_zenc *z, const uint8_t *src, uint64_t len, int last) {
+    cd_wr w;
+    if (ze_grow(z, codec_deflate_bound(len) + 16) < 0) return -1;
+    w.out = z->ob; w.cap = z->obcap; w.cnt = z->oblen;
+    w.bitbuf = z->bitbuf; w.bitcnt = z->bitcnt; w.err = 0;
+    if (cd_dynamic_core(&w, src, len, last) < 0) return -1;
+    if (last) cd_flush(&w);
+    if (w.err) return -1;
+    z->oblen = w.cnt; z->bitbuf = w.bitbuf; z->bitcnt = w.bitcnt;
+    return 0;
+}
+
+/* 把已产出的 ob[obpos..oblen) 抽到调用方 out[0..cap)，返回抽出的字节数并推进 obpos。 */
+static uint64_t ze_drain(codec_zenc *z, uint8_t *out, uint64_t cap) {
+    uint64_t avail = z->oblen - z->obpos, take = avail < cap ? avail : cap;
+    if (take) memcpy(out, z->ob + z->obpos, take);
+    z->obpos += take;
+    if (z->obpos >= z->oblen) { z->obpos = 0; z->oblen = 0; }   /* 抽空即复位缓冲 */
+    return take;
+}
+
+int64_t codec_zenc_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
+    codec_zenc *z = (codec_zenc *)sp;
+    const uint8_t *p = (const uint8_t *)in;
+    uint64_t i = 0, op = 0;
+    /* 先吸收输入、逢满块即压缩（产出积入 ob） */
+    while (i < inlen) {
+        uint64_t room = ZE_BLK - z->blen, take = (inlen - i) < room ? (inlen - i) : room;
+        memcpy(z->blk + z->blen, p + i, take);
+        z->blen += (uint32_t)take; i += take;
+        /* 更新校验和 */
+        if (z->wrap == 1) {
+            uint64_t k;
+            for (k = 0; k < take; k++) { z->s1 += p[i - take + k]; z->s2 += z->s1;
+                if (++z->spend >= 5552) { z->s1 %= 65521; z->s2 %= 65521; z->spend = 0; } }
+        } else if (z->wrap == 2) {
+            z->crc = codec_crc32_update(z->crc, (void *)(p + (i - take)), take);
+        }
+        z->total_in += take;
+        if (z->blen == ZE_BLK) { if (ze_block(z, z->blk, ZE_BLK, 0) < 0) return -1; z->blen = 0; }
+    }
+    if (consumed) *consumed = inlen;
+    /* 抽产出到 out */
+    op = ze_drain(z, out, cap);
+    return (int64_t)op;
+}
+
+int64_t codec_zenc_finish(void *sp, uint8_t *out, uint64_t cap) {
+    codec_zenc *z = (codec_zenc *)sp;
+    uint64_t op = 0;
+    if (!z->final_done) {
+        /* 末块（残块，可空）BFINAL=1 */
+        if (ze_block(z, z->blk, z->blen, 1) < 0) return -1;
+        z->blen = 0;
+        /* 尾封装 */
+        if (z->wrap == 1) {
+            uint32_t ad;
+            z->s1 %= 65521; z->s2 %= 65521; ad = (z->s2 << 16) | z->s1;
+            if (ze_grow(z, 4) < 0) return -1;
+            z->ob[z->oblen++] = (uint8_t)((ad >> 24) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((ad >> 16) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((ad >> 8) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)(ad & 0xff);
+        } else if (z->wrap == 2) {
+            uint32_t isize = (uint32_t)(z->total_in & 0xffffffffu);
+            if (ze_grow(z, 8) < 0) return -1;
+            z->ob[z->oblen++] = (uint8_t)(z->crc & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((z->crc >> 8) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((z->crc >> 16) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((z->crc >> 24) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)(isize & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((isize >> 8) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((isize >> 16) & 0xff);
+            z->ob[z->oblen++] = (uint8_t)((isize >> 24) & 0xff);
+        }
+        z->final_done = 1;
+    }
+    op = ze_drain(z, out, cap);
+    return (int64_t)op;
 }
 
 /* ====================== Layer 0 · 簇 1：熵编码原子（规范 Huffman）======================

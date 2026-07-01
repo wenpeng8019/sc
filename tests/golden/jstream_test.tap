@@ -1,0 +1,4 @@
+ok 1 - JPEG 熵层块级 round-trip（DC 差分 + AC 游程 + ZRL/EOB）
+ok 2 - JPEG 熵层流式：逐字节喂 + 块级回滚（need_more 挂起/重解）
+1..2
+==> 测试通过 2，失败 0，跳过 0

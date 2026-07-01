@@ -96,6 +96,58 @@
 # 解码 src[0..len) -> out[0..cap)；返回写入字节数，cap 不足 / 数据截断返回 -1。
 @fnc codec_rle_decode:: i8, src: &, len: u8, out: u1&, cap: u8
 
+# ─────────────────── Layer 1 · 簇 3b：流式 RLE（unit 粒度，TGA 兼容）───────────────────
+# 与上面「一次性 PackBits」并列的另一套 RLE 接口，专为「分块喂数据 + 保留残余状态」设计，
+# 且把编码单元从「字节」泛化为「unit（步长 stride 字节，1..8）」，控制字节采用 TGA/TrueVision
+# 家族约定（与上面经典 PackBits 的 1-n 计数不同，两套线格式不通用）：
+#   原始包：控制字节 bit7=0，紧随 (ctrl & 0x7F)+1 个字面 unit（1..128）
+#   行程包：控制字节 bit7=1，紧随 1 个 unit，重复 (ctrl & 0x7F)+1 次（2..128）
+# unit=1 即字节 RLE；unit=channels 即 TGA 像素 RLE（BGR/BGRA）。编码器只在 unit 内逐 unit 比较，
+# 不跨 flush 边界合并行程——调用方每逢自然边界（如 TGA 扫描行）应 flush，保证包不跨行。
+#
+# 用法（编码，逐块喂 + 收尾冲刷）：
+#   var e: codec_rle_enc
+#   codec_rle_enc_init(&e, unit)
+#   n = codec_rle_enc_feed(&e, in, nunits, out, cap)      # 返回本次写出字节数（-1=cap 不足）
+#   n += codec_rle_enc_flush(&e, out + n, cap - n)        # 收尾：冲刷挂起包
+# 用法（解码，逐块喂）：
+#   var d: codec_rle_dec
+#   codec_rle_dec_init(&d, unit)
+#   m = codec_rle_dec_feed(&d, in, inlen, out, cap)       # 返回本次解出字节数（-1=cap 不足）
+
+# 流式编码器状态（调用方持有，勿手改内部字段；布局与 codec.h 的 codec_rle_enc 逐字段一致）。
+@def codec_rle_enc: {
+    unit: i4            # 每 unit 字节数（1..8）
+    st:   i4            # 0=INIT 空 / 1=LIT 字面累积中 / 2=RUN 行程累积中
+    n:    i4            # LIT：已缓冲字面 unit 数（1..128）；RUN：行程计数（2..128）
+    buf[1024]: u1       # LIT 字面缓冲（≤128 unit × ≤8 字节）
+    rv[8]:     u1       # RUN 重复值
+}
+
+# 流式解码器状态（调用方持有，勿手改内部字段；布局与 codec.h 的 codec_rle_dec 逐字段一致）。
+@def codec_rle_dec: {
+    unit:  i4           # 每 unit 字节数（1..8）
+    phase: i4           # 0=待控制字节 / 1=原始载荷 / 2=行程载荷（收值 + 发射）
+    rem:   i4           # 原始：剩余字面字节数；行程：剩余重复 unit 次数
+    rvn:   i4           # 行程：已收集的重复值字节数（0..unit）
+    rv[8]: u1           # 行程重复值
+}
+
+# 初始化编码器（unit 取 1..8）。
+@fnc codec_rle_enc_init:: e: codec_rle_enc&, unit: i4
+# 编码输出上界：全字面最坏 nunits*unit + 控制字节，另加一次冲刷余量。
+@fnc codec_rle_enc_bound:: u8, nunits: u8, unit: i4
+# 喂 nunits 个 unit（in 连续存放，每 unit 为 unit 字节）；压缩字节写入 out[0..cap)。
+# 返回本次写出字节数；cap 不足返回 -1（此时流已损坏，须整体重来）。
+@fnc codec_rle_enc_feed:: i8, e: codec_rle_enc&, in: u1&, nunits: u8, out: u1&, cap: u8
+# 冲刷挂起包（喂完全部 unit 后调用一次）；返回写出字节数，cap 不足返回 -1。
+@fnc codec_rle_enc_flush:: i8, e: codec_rle_enc&, out: u1&, cap: u8
+# 初始化解码器（unit 取 1..8）。
+@fnc codec_rle_dec_init:: d: codec_rle_dec&, unit: i4
+# 喂 inlen 字节压缩流；解出的 unit 写入 out[0..cap)。返回本次解出字节数；cap 不足返回 -1。
+# 可反复调用，跨调用保留半包状态（残余控制/载荷）。
+@fnc codec_rle_dec_feed:: i8, d: codec_rle_dec&, in: u1&, inlen: u8, out: u1&, cap: u8
+
 # ─────────────────── Layer 1 · 簇 4：DEFLATE / zlib / gzip ───────────────────
 # DEFLATE（RFC 1951）：三种块（stored / 固定 Huffman / 动态 Huffman）+ LZ77 回溯。
 # zlib（RFC 1950）/ gzip（RFC 1952）为其封装容器。out 须为预分配缓冲。
@@ -118,6 +170,45 @@
 @fnc codec_zlib_encode:: i8, src: &, len: u8, out: u1&, cap: u8, level: i4
 # gzip 封装（头 + deflate + CRC-32 + ISIZE 尾）。返回输出字节数；cap 不足返回 -1。
 @fnc codec_gzip_encode:: i8, src: &, len: u8, out: u1&, cap: u8, level: i4
+
+
+# —— 流式 inflate（簇 4b）：可分块喂输入 / 分块取输出，供 PNG 边读 IDAT 边解等场景 ——
+# 状态结构对 sc 不透明：用 codec_zdec_size() 取字节数，chunk 分配后当 & 传入。
+#   var sz: u8 = codec_zdec_size()
+#   var s: & = chunk(sz)
+#   codec_zdec_init(s, 1)                                  # wrap：0=raw / 1=zlib / 2=gzip(待补)
+#   n = codec_zdec_feed(s, in, inlen, &consumed, out, cap) # 返回本次产出字节数；out 满则抽走后再喂续解
+#   ... 直到 codec_zdec_ended(s) == 1
+#   codec_zdec_free(s)                                     # 释放内部输入缓冲；再 recycle(s)
+# 返回状态结构字节数（供分配）。
+@fnc codec_zdec_size:: u8
+# 初始化解码器；wrap 0=raw DEFLATE / 1=zlib / 2=gzip(待补)；返回 0。
+@fnc codec_zdec_init:: i4, sp: &, wrap: i4
+# 喂 inlen 字节（全部吸入内部缓冲，*consumed 恒为 inlen），尽量解出到 out[0..cap)；
+# 返回本次产出字节数（>=0），出错 -1。out 满可抽走后再喂 inlen=0 续解。
+@fnc codec_zdec_feed:: i8, sp: &, in: &, inlen: u8, consumed: u8&, out: u1&, cap: u8
+# 流是否已完整结束（末块 + 尾校验通过）。
+@fnc codec_zdec_ended:: i4, sp: &
+# 释放内部输入缓冲（用完须调；随后调用方再 recycle 状态结构本身）。
+@fnc codec_zdec_free:: sp: &
+
+# —— 流式 deflate（簇 4b）：分块喂输入 / 分块取输出，供 PNG 边 filter 边写编码等场景 ——
+# 用法同流式 inflate：codec_zenc_size() 分配 → init(s, wrap, level) → 反复 feed → 反复 finish 直到 ended → free。
+#   codec_zenc_init(s, 1, 2)                                # wrap 0=raw/1=zlib/2=gzip；level 预留
+#   n = codec_zenc_feed(s, in, inlen, &consumed, out, cap)  # 产出压缩字节；out 未抽完以 inlen=0 续抽
+#   n = codec_zenc_finish(s, out, cap)                      # 收尾发末块+尾；反复调至 codec_zenc_ended==1
+# 返回状态结构字节数（供分配）。
+@fnc codec_zenc_size:: u8
+# 初始化编码器；wrap 0=raw/1=zlib/2=gzip；level 预留（当前恒用动态 Huffman）；返回 0。
+@fnc codec_zenc_init:: i4, sp: &, wrap: i4, level: i4
+# 喂 inlen 字节原文（全部吸入，*consumed 恒为 inlen），产出压缩流到 out[0..cap)，返回产出字节数。
+@fnc codec_zenc_feed:: i8, sp: &, in: &, inlen: u8, consumed: u8&, out: u1&, cap: u8
+# 收尾：发末块 + wrap 尾，产出到 out[0..cap)，返回产出字节数；反复调用直至 ended。
+@fnc codec_zenc_finish:: i8, sp: &, out: u1&, cap: u8
+# 是否已收尾且产出抽空。
+@fnc codec_zenc_ended:: i4, sp: &
+# 释放内部缓冲（用完须调；随后调用方再 recycle 状态结构本身）。
+@fnc codec_zenc_free:: sp: &
 
 # ─────────────────── Layer 1 · 簇 7：LZW 字典编码 ───────────────────
 # 变长码 LZW（GIF / Unix compress 同族），与 DEFLATE 并列的字典编码原子：

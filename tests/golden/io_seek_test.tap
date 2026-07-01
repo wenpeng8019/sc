@@ -1,0 +1,4 @@
+ok 1 - stream seek：绝对/相对/从尾定位 + 读定位
+ok 2 - stream seek：写定位（回填 header 场景）
+1..2
+==> 测试通过 2，失败 0，跳过 0

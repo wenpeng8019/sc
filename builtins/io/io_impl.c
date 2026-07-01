@@ -63,6 +63,26 @@ static int32_t sc_file_error(com *_this) {
     return (d->fp && ferror(d->fp)) ? -1 : 0;
 }
 
+/* 随机寻址：按 whence（0=SEEK_SET/1=SEEK_CUR/2=SEEK_END）定位文件游标，
+ * 回写并返回寻址后的绝对位置（>=0）；无句柄/非法 whence/寻址失败返回 <0。
+ * seek(0, 1) 取当前位置。清 EOF 标志，便于 seek 后继续读。 */
+static int64_t sc_file_seek(com *_this, int64_t off, int32_t whence) {
+    sc_file_dev *d = (sc_file_dev *)_this;
+    if (!d->fp) return -1;
+    int w = (whence == 0) ? SEEK_SET : (whence == 1) ? SEEK_CUR
+          : (whence == 2) ? SEEK_END : -1;
+    if (w < 0) return -1;
+#if defined(_WIN32)
+    if (_fseeki64(d->fp, (long long)off, w) != 0) return -1;
+    long long pos = _ftelli64(d->fp);
+#else
+    if (fseeko(d->fp, (off_t)off, w) != 0) return -1;
+    off_t pos = ftello(d->fp);
+#endif
+    if (pos < 0) return -1;
+    return (int64_t)pos;
+}
+
 /* 关闭设备：fclose 文件并释放 sc_file_dev（含 com 及内置 ioq）。
  * 调用后 _this 失效，不得再用；返回 0 / fclose 出错返回 <0。 */
 static int32_t sc_file_close(com *_this) {
@@ -98,6 +118,7 @@ com *file(const char *name, uint8_t txt, uint8_t read, uint8_t write) {
     d->com.free  = sc_file_free;
     d->com.error = sc_file_error;
     d->com.close = sc_file_close;
+    d->com.seek  = sc_file_seek;
     if (read)  d->com.read  = sc_file_read;
     if (write) d->com.write = sc_file_write;
     /* 异步模式（==2）：自动初始化对应方向 ioq（_buf 惰性分配；com 指针回填） */
@@ -172,6 +193,25 @@ static int32_t sc_stream_write(com *_this, void *buf, uint32_t *size) {
 
 static int32_t sc_stream_error(com *_this) { (void)_this; return 0; }
 
+/* 随机寻址：按 whence（0=SEEK_SET/1=SEEK_CUR/2=SEEK_END）在绑定内存内定位游标，
+ * 回写并返回寻址后的绝对位置（>=0）；越界/非法 whence 返回 <0。
+ * 读写双开时以读游标为 SEEK_CUR 基准，并把读写游标一并置到目标位置；
+ * 仅读→读游标、仅写→写游标。seek(0, 1) 取当前位置。 */
+static int64_t sc_stream_seek(com *_this, int64_t off, int32_t whence) {
+    sc_stream_dev *d = (sc_stream_dev *)_this;
+    if (!d->mem) return -1;
+    uint64_t cur = (d->com.read) ? d->rpos : d->wpos;   /* SEEK_CUR 基准游标 */
+    int64_t base = (whence == 0) ? 0
+                 : (whence == 1) ? (int64_t)cur
+                 : (whence == 2) ? (int64_t)d->size : -1;
+    if (base < 0) return -1;                            /* 非法 whence */
+    int64_t target = base + off;
+    if (target < 0 || (uint64_t)target > d->size) return -1;   /* 越界 */
+    if (d->com.read)  d->rpos = (uint64_t)target;
+    if (d->com.write) d->wpos = (uint64_t)target;
+    return target;
+}
+
 /* 关闭设备：仅释放 sc_stream_dev（含 com 及内置 ioq、游标）。
  * 绑定的 mem 归调用方所有，绝不在此释放；返回 0。 */
 static int32_t sc_stream_close(com *_this) {
@@ -194,6 +234,7 @@ com *stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
     d->com.free  = sc_stream_free;
     d->com.error = sc_stream_error;
     d->com.close = sc_stream_close;
+    d->com.seek  = sc_stream_seek;
     if (read)  d->com.read  = sc_stream_read;
     if (write) d->com.write = sc_stream_write;
     /* 异步模式（==2）：自动初始化对应方向 ioq（内存恒就绪，异步内核立即驱动 io） */

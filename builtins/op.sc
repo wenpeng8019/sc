@@ -725,6 +725,12 @@ def io: [
     fnc readable: ret, id: &&           # 读就绪查询（多路复用探测，见上契约）
     fnc writable: ret, id: &&           # 写就绪查询（语义对称）
     fnc close: ret                      # 关闭设备：释放底层资源（nil=无需关闭，OS 回收）
+
+    # seek：随机寻址（仅可寻址设备实现，如 file/stream；tcp/ssl/ssh 等流式设备为 nil）。
+    #   off    —— 偏移字节数（可负，配合 whence）
+    #   whence —— 基准：0=从头绝对(SEEK_SET) / 1=相对当前(SEEK_CUR) / 2=从尾(SEEK_END)
+    #   返回   —— 寻址后的绝对位置(>=0) / <0 出错或不支持；c->seek(0, 1) 即取当前位置。
+    fnc seek: i8, off: i8, whence: i4   # 随机寻址（可寻址设备实现，nil=流式设备不支持）
 }
 
 # ---------------- async_io：com 设备 io 的就绪事件循环 ----------------

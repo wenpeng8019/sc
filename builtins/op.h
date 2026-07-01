@@ -549,6 +549,10 @@ struct com {
     int32_t (*readable)(struct com *_this, void **id);  /* 读就绪查询：*id=可监听句柄（nil=不支持多路复用，转看返回值） */
     int32_t (*writable)(struct com *_this, void **id);  /* 写就绪查询（语义对称，见 op.sc 契约） */
     int32_t (*close)(struct com *_this);                /* 关闭设备：释放底层资源（nil=无需关闭，OS 回收） */
+    /* seek：随机寻址（仅可寻址设备实现，如 file/stream；tcp/ssl/ssh 等流式设备为 NULL）。
+     * whence：0=SEEK_SET(从头绝对) / 1=SEEK_CUR(相对当前) / 2=SEEK_END(相对尾部)；
+     * 返回寻址后的绝对位置(>=0) / <0 出错或不支持。seek(0, 1) 即取当前位置。 */
+    int64_t (*seek)(struct com *_this, int64_t off, int32_t whence);
 };
 
 /* com 异步收发桥接：rpc 体内 com >> v / com << v 由编译器整合 await 时生成对其的调用，

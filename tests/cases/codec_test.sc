@@ -747,3 +747,131 @@ tst "varint（LEB128）+ ZigZag 编解码"
     assert codec_zigzag_decode(codec_zigzag_encode(-123456789)) == -123456789, "zigzag round-trip neg"
     assert codec_zigzag_decode(codec_zigzag_encode(123456789)) == 123456789, "zigzag round-trip pos"
 
+# ===== 批3：流式 RLE（unit 粒度 + feed/flush，TGA 兼容线格式）=====
+
+tst "流式 RLE 字节粒度 round-trip（unit=1，重复 + 字面 + 分块喂）"
+    # 同 PackBits 用例的数据：64 字节 0xAB + 8 字节递增 + 32 字节 0x5A。
+    var src[104]: u1
+    var i: u4 = 0
+    while i < 64
+        src[i] = 0xAB
+        i = i + 1
+    while i < 72
+        src[i] = (i: u1)
+        i = i + 1
+    while i < 104
+        src[i] = 0x5A
+        i = i + 1
+    # 分两块喂（边界 50 落在 0xAB 行程内，验证跨调用状态保持）。
+    var e: codec_rle_enc
+    codec_rle_enc_init(&e, 1)
+    var enc[256]: u1
+    var elen: i8 = 0
+    var n1: i8 = codec_rle_enc_feed(&e, (&src[0]: u1&), 50, (&enc[0]: u1&), 256)
+    assert n1 >= 0, "feed1 ok"
+    elen = n1
+    var n2: i8 = codec_rle_enc_feed(&e, (&src[50]: u1&), 54, (&enc[elen]: u1&), (256 - elen: u8))
+    assert n2 >= 0, "feed2 ok"
+    elen = elen + n2
+    var nf: i8 = codec_rle_enc_flush(&e, (&enc[elen]: u1&), (256 - elen: u8))
+    assert nf >= 0, "flush ok"
+    elen = elen + nf
+    assert elen < 60, "streaming rle compresses runs"
+    # 解码（一次性喂回）。
+    var d: codec_rle_dec
+    codec_rle_dec_init(&d, 1)
+    var dec[256]: u1
+    var dlen: i8 = codec_rle_dec_feed(&d, (&enc[0]: u1&), (elen: u8), (&dec[0]: u1&), 256)
+    assert dlen == 104, "streaming rle decode length"
+    var same: i4 = 1
+    i = 0
+    while i < 104
+        if dec[i] != src[i]
+            same = 0
+        i = i + 1
+    assert same == 1, "streaming rle byte round-trip identical"
+
+tst "流式 RLE 分块解码与一次性一致（unit=1）"
+    var src[80]: u1
+    var i: u4 = 0
+    while i < 40
+        src[i] = 0x77
+        i = i + 1
+    while i < 80
+        src[i] = (i * 3: u1)
+        i = i + 1
+    var e: codec_rle_enc
+    codec_rle_enc_init(&e, 1)
+    var enc[256]: u1
+    var elen: i8 = codec_rle_enc_feed(&e, (&src[0]: u1&), 80, (&enc[0]: u1&), 256)
+    elen = elen + codec_rle_enc_flush(&e, (&enc[elen]: u1&), (256 - elen: u8))
+    # 分块解码：先喂前 5 字节，再喂剩余。
+    var d: codec_rle_dec
+    codec_rle_dec_init(&d, 1)
+    var dec[256]: u1
+    var m1: i8 = codec_rle_dec_feed(&d, (&enc[0]: u1&), 5, (&dec[0]: u1&), 256)
+    assert m1 >= 0, "dec feed1 ok"
+    var m2: i8 = codec_rle_dec_feed(&d, (&enc[5]: u1&), (elen - 5: u8), (&dec[m1]: u1&), (256 - m1: u8))
+    assert m2 >= 0, "dec feed2 ok"
+    assert m1 + m2 == 80, "chunked decode total length"
+    var same: i4 = 1
+    i = 0
+    while i < 80
+        if dec[i] != src[i]
+            same = 0
+        i = i + 1
+    assert same == 1, "chunked decode identical"
+
+tst "流式 RLE 像素粒度 + TGA 控制字节（unit=3）"
+    # 6 像素 RGB：前 4 像素相同(行程) + 后 2 像素各异(字面)。
+    var px[18]: u1
+    var p: u4 = 0
+    while p < 4
+        px[p * 3 + 0] = 10
+        px[p * 3 + 1] = 20
+        px[p * 3 + 2] = 30
+        p = p + 1
+    px[12] = 1
+    px[13] = 2
+    px[14] = 3
+    px[15] = 4
+    px[16] = 5
+    px[17] = 6
+    var e: codec_rle_enc
+    codec_rle_enc_init(&e, 3)
+    var enc[64]: u1
+    var n: i8 = codec_rle_enc_feed(&e, (&px[0]: u1&), 6, (&enc[0]: u1&), 64)
+    assert n >= 0, "px feed ok"
+    var nf: i8 = codec_rle_enc_flush(&e, (&enc[n]: u1&), (64 - n: u8))
+    assert nf >= 0, "px flush ok"
+    var elen: i8 = n + nf
+    # 行程包(4 像素) 1+3=4 字节 + 字面包(2 像素) 1+6=7 字节 = 11。
+    assert elen == 11, "px stream encode size"
+    assert enc[0] == 0x83, "TGA 行程控制 0x80|(4-1)"
+    assert enc[4] == 0x01, "TGA 字面控制 (2-1)"
+    var d: codec_rle_dec
+    codec_rle_dec_init(&d, 3)
+    var dec[64]: u1
+    var dlen: i8 = codec_rle_dec_feed(&d, (&enc[0]: u1&), (elen: u8), (&dec[0]: u1&), 64)
+    assert dlen == 18, "px stream decode length"
+    var same: i4 = 1
+    var q: u4 = 0
+    while q < 18
+        if dec[q] != px[q]
+            same = 0
+        q = q + 1
+    assert same == 1, "px stream round-trip identical"
+
+tst "流式 RLE 编码 cap 不足返回 -1（unit=1）"
+    var src[40]: u1
+    var i: u4 = 0
+    while i < 40
+        src[i] = (i: u1)
+        i = i + 1
+    var e: codec_rle_enc
+    codec_rle_enc_init(&e, 1)
+    var tiny[4]: u1
+    var r: i8 = codec_rle_enc_feed(&e, (&src[0]: u1&), 40, (&tiny[0]: u1&), 4)
+    var rf: i8 = codec_rle_enc_flush(&e, (&tiny[0]: u1&), 4)
+    assert r == -1 || rf == -1, "streaming encode cap overflow"
+

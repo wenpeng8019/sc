@@ -1,0 +1,8 @@
+ok 1 - 流式 inflate vs 整块（zlib 动态块，分块喂 7 字节）
+ok 2 - 流式 inflate（raw DEFLATE wrap=0，一次喂 + 小 out 背压抽取）
+ok 3 - 流式 inflate（固定 Huffman level=1，分块喂 3 字节）
+ok 4 - 流式 deflate（zlib）分块喂 -> 整块 zlib_decode 还原 == 原文
+ok 5 - 流式 deflate(raw) 小 out 背压 -> 流式 inflate(raw) 往返 == 原文
+ok 6 - 流式 deflate（gzip）分块喂 -> 整块 gzip_decode 还原 == 原文
+1..6
+==> 测试通过 6，失败 0，跳过 0
