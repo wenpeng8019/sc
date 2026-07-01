@@ -30,10 +30,10 @@ fnc main: i4
     var nn: i4 = 42
     var nm: char& = "hello"
     print "print 基础输出 n=", nn, " s=", nm
-    print("E: 错误级别示例 code=%d", -1)
-    print "W: 警告级别示例"
-    print "V: 详细级别（默认 SC_LOG=D 下本行不输出）"
-    print<7> "通道 7：自定义日志通道"
+    print<E>("错误级别示例 code=%d", -1)
+    print<W> "警告级别示例"
+    print<V> "详细级别（默认 SC_LOG=D 下本行不输出）"
+    print<D> "调试级别示例"
     var pi: f8 = 3.14159
     print "默认浮点=", pi, " 定点=", (pi: "%.2f")
     var s: string&

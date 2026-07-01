@@ -749,19 +749,34 @@ def io: [
 #       就绪→执行 io→兑现这套「机制」语言自有（op_impl.c）。
 @fnc async_io::             # 驱动 com 设备 io 就绪循环至全部待办 io 完成
 
+# ---------------- log：print 级别/通道枚举 ----------------
+# 「级别就是通道」：print 首参 chn（u1）—— 0=普通 stdout（默认）；1..6=日志级别，
+# 按级别着色 stdout（仅 tty）并可镜像系统日志。枚举名即通道号，供 print<级别> 用
+# （print<I> → 通道 4=状态）。顺序与语义对齐 stdc log_level_e。
+def log: [
+    F = 1                       # 致命（紫）：程序无法继续运行
+    E                           # 2 错误（红）：不应发生但不影响继续
+    W                           # 3 警告（黄）：可能有问题/未达预期
+    I                           # 4 状态（默认色）：运行状态
+    D                           # 5 调试（青）：程序调试
+    V                           # 6 详尽（灰）：任意信息
+] : u1
+
 # ---------------- print：日志输出（语言关键字） ----------------
 # print 是语言关键字，属语言内核（op.sc 默认导入、op.h 默认带入每个 C 单元、
 # op_impl.c 始终链接）——无需 inc。编译器按实参静态类型拼接/补格式后生成
-# 对本接口的调用（首参 chn 为 u1 日志通道，其后为 C printf 风格格式串与可变参数）：
+# 对本接口的调用（首参 chn 为 u1 级别/通道，其后为 C printf 风格格式串与可变参数）：
 #   print "x = ", x             # 无括号=拼接糖：字符串字面量=纯文本，
 #                               # 变量按静态类型自动补 printf 说明符（i4→%d, char&→%s ...）
 #   print("x = %d", x)          # 有括号=C printf 兼容模式：首参格式串，实参原样传递
-#   print<3> "通道 3 的日志"     # <chn> 指定 u1 日志通道（默认 0）
+#   print<I> "运行状态"          # <chn> = 级别/通道 u1（见 def log）：0=普通 stdout（默认）
+#   print<E> "错误：", msg       # 1..6=F/E/W/I/D/V，按级别着色（F紫/E红/W黄/I默认/D青/V灰）
 #   print<s> "x = ", x          # <chn> 为 string 变量 → 不输出 stdout，改「追加进该串」
-#                               # （等价 s.printf(...)：无时间戳/级别/通道修饰，纯格式化文本）
-#   print "E: open ", p, " 失败" # fmt 文本前缀 "X:" 指定级别，X ∈ F/E/W/I/D/V
-#   - 输出格式：HH:MM:SS.mmm L| 文本（chn!=0 时加通道标记；自动补换行）
-#   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；高于该级别的输出被丢弃）
+#                               # （等价 s.printf(...)：无级别/着色修饰，纯格式化文本）
+#   - 输出：按级别着色的一行文本（仅 tty 着色；I=默认色；自动补换行）
+#   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；更详尽的级别被丢弃）
+#   - 系统日志：环境变量 SC_LOG_SYS 非空 → 额外写系统日志设施
+#                （Win=OutputDebugString / macOS=os_log / Linux=syslog / Android=logcat ...）
 # C ABI 见 op.h（默认带入），运行时见 op_impl.c（始终链接）。
 @fnc print:: chn: u1, fmt: char&, ...
 

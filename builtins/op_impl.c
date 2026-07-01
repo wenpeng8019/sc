@@ -3,6 +3,7 @@
  * 编译器对每个工程都自动编译并链接本文件（op.sc 为默认导入模块，无需 inc）。
  * 契约见同目录 op.h。
  */
+#define P_LOG_SYS_IMPL  /* 在本 TU 内展开 platform.h 的 P_log_sys 系统日志实现（print 用） */
 #include "op.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include <stdlib.h>     /* ioq 循环缓冲：malloc/free */
@@ -519,14 +520,21 @@ void thread_join(thread *_this) {
 /* ---------------- print：日志输出（语言关键字） ----------------
  * print：C printf 风格日志输出。print 属语言内核，故其运行时下沉到此
  * （op_impl.c 始终随工程编译链接，无需 inc）。
- *   - 首参 chn：u1 日志通道（透传），chn!=0 时在行首附加通道标记
- *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定级别，无前缀默认 D
- *   - 输出 stdout：HH:MM:SS.mmm L| 文本（自动补换行）
- *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取 */
+ *   - 首参 chn：u1 级别/通道（「级别就是通道」）。0=普通 stdout（默认，无着色）；
+ *     1..6 = F/E/W/I/D/V（见 op.h enum / op.sc def log），按级别着色 stdout
+ *   - 输出：一行文本（仅 tty 着色；I=状态用默认色；自动补换行；单次 fprintf 防撕裂）
+ *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；更详尽的级别被丢弃），首次读取
+ *   - 系统日志：环境变量 SC_LOG_SYS 非空 → 额外经 platform.h 的 P_log_sys 写系统日志
+ *     （Win=OutputDebugString / macOS=os_log / Linux=syslog / Android=logcat ...） */
 
-/* 级别：1=F 致命 2=E 错误 3=W 警告 4=I 状态 5=D 调试 6=V 详尽 */
+/* 级别字符：1=F 2=E 3=W 4=I 5=D 6=V（顺序对齐 op.sc def log 与 stdc log_level_e） */
 static const char SC_LV_CHARS[] = "FEWIDV";
-#define SC_LV_DEF 5 /* D */
+#define SC_LV_DEF 5 /* D：默认过滤阈值（V 更详尽，默认丢弃） */
+
+/* 单行日志缓冲字节数：编译期可覆盖（-DSC_PRINT_BUF=4096），超长截断 */
+#ifndef SC_PRINT_BUF
+#define SC_PRINT_BUF 2048
+#endif
 
 static int sc_log_level(void) {
     static int s_level = 0;
@@ -541,51 +549,70 @@ static int sc_log_level(void) {
     return s_level;
 }
 
+/* 级别 → ANSI 前景色（tty 时用）；I(状态)=默认色（空串） */
+static const char *sc_lv_color(int lv) {
+    switch (lv) {
+        case 1: return P_ANSI_PURPLE;  /* F 致命 */
+        case 2: return P_ANSI_RED;     /* E 错误 */
+        case 3: return P_ANSI_YELLOW;  /* W 警告 */
+        case 5: return P_ANSI_CYAN;    /* D 调试 */
+        case 6: return P_ANSI_GRAY;    /* V 详尽 */
+        default: return "";            /* I 状态：默认色 */
+    }
+}
+
+/* stdout 是否着色：一次探测（tty 才着色，重定向/管道输出纯文本）；Windows 顺带启用 VT */
+static int sc_use_color(void) {
+    static int s = -1;
+    if (s < 0) {
+        s = P_isatty(stdout) ? 1 : 0;
+#if P_WIN
+        if (s) {
+            HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+            DWORD m = 0;
+            if (GetConsoleMode(h, &m))
+                SetConsoleMode(h, m | 0x0004u /* ENABLE_VIRTUAL_TERMINAL_PROCESSING */);
+        }
+#endif
+    }
+    return s;
+}
+
+/* 系统日志镜像开关：环境变量 SC_LOG_SYS 非空 → print 额外写系统日志（一次读取） */
+static int sc_log_sys_on(void) {
+    static int s = -1;
+    if (s < 0) { const char *e = getenv("SC_LOG_SYS"); s = (e && *e) ? 1 : 0; }
+    return s;
+}
+
 void print(uint8_t chn, const char *fmt, ...) {
     if (!fmt) return;
 
-    /* "X:" 级别前缀 */
-    int lv = SC_LV_DEF;
-    if (*fmt && fmt[1] == ':') {
-        const char *p = strchr(SC_LV_CHARS, *fmt);
-        if (p) {
-            lv = (int)(p - SC_LV_CHARS) + 1;
-            fmt += 2;
-            if (*fmt == ' ') fmt++;   /* 忽略 1 个且只忽略 1 个空格（允许多空格缩进） */
-        }
-    }
-    if (lv > sc_log_level()) return;
+    const int lv = (int)chn;                 /* 0=普通 stdout；1..6=F/E/W/I/D/V */
+    if (lv >= 1 && lv <= 6 && lv > sc_log_level()) return;   /* 级别过滤 */
 
-    /* 时间戳 HH:MM:SS.mmm（本地时间） */
-    P_clock now;
-    char ts[16] = "--:--:--.---";
-    if (P_time_now(&now) == 0) {
-        struct tm tmv;
-#if P_WIN
-        time_t sec = now.tv_sec;
-        localtime_s(&tmv, &sec);
-#else
-        time_t sec = now.tv_sec;
-        localtime_r(&sec, &tmv);
-#endif
-        snprintf(ts, sizeof(ts), "%02d:%02d:%02d.%03ld",
-                 tmv.tm_hour, tmv.tm_min, tmv.tm_sec, now.tv_nsec / 1000000L);
-    }
-
-    char line[2048];
+    char text[SC_PRINT_BUF];
     va_list args;
     va_start(args, fmt);
-    int n = vsnprintf(line, sizeof(line), fmt, args);
+    int n = vsnprintf(text, sizeof(text), fmt, args);
     va_end(args);
     if (n < 0) return;
-    if (n >= (int)sizeof(line)) n = (int)sizeof(line) - 1;
+    if (n >= (int)sizeof(text)) n = (int)sizeof(text) - 1;
+    /* 去掉用户尾部换行（统一由本函数补一个），便于着色包裹与系统日志单行 */
+    while (n > 0 && (text[n - 1] == '\n' || text[n - 1] == '\r')) text[--n] = '\0';
 
-    /* 单次 fprintf 输出整行（多线程下行内不撕裂），自动补换行 */
-    const char *nl = (n > 0 && line[n - 1] == '\n') ? "" : "\n";
-    if (chn)
-        fprintf(stdout, "%s %c|%u| %s%s", ts, SC_LV_CHARS[lv - 1], (unsigned)chn, line, nl);
-    else
-        fprintf(stdout, "%s %c| %s%s", ts, SC_LV_CHARS[lv - 1], line, nl);
+    /* stdout：按级别着色（单次 fprintf，多线程行内不撕裂） */
+    if (lv >= 1 && lv <= 6 && sc_use_color()) {
+        const char *c = sc_lv_color(lv);
+        if (*c) fprintf(stdout, "%s%s%s\n", c, text, P_ANSI_RESET);
+        else    fprintf(stdout, "%s\n", text);
+    } else {
+        fprintf(stdout, "%s\n", text);
+    }
+
+    /* 可选：镜像到系统日志（跨平台自适应，实现在 platform.h） */
+    if (lv >= 1 && lv <= 6 && sc_log_sys_on())
+        P_log_sys(lv, NULL, text);
 }
 
 /* ============================================================================

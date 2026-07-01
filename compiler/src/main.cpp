@@ -69,6 +69,9 @@ static void usage() {
               << "          platforms = plat.tbl     # 外置平台表文件（SCC_PLATFORMS 优先；行 pattern:threads:debug）\n"
               << "          run     = qemu-arm -L .. # 运行包装器/模拟器（SCC_RUN 优先；run 模式用）\n"
               << "  -l <名>    追加链接库（可重复；-lm 写法也支持，与配置的 libs 合并）\n"
+              << "  -D<宏>[=值]  透传宏定义给 C 编译器（可重复；-D FOO=1 分写亦可）；\n"
+              << "             最高优先级，追加在末尾，可覆盖配置/内置默认（如 -DSC_PRINT_BUF=4096）\n"
+              << "  --cflags <opts>  透传任意 C 编译选项给 C 编译器（可重复；如 --cflags -O3）\n"
               << "  --adt <x>  adt 自定义实现（.c/.o/.a，照 builtins/adt/adt.h 契约实现）；\n"
               << "             未指定时 inc adt.sc 自动链接内置默认实现 builtins/adt/adt_impl.c\n"
               << "  --target <file>  加载交叉编译目标档（key=value，同 .sc 配置语法；SCC_TARGET 亦可）\n"
@@ -342,9 +345,10 @@ static std::string pickTool(const char* env, const char* key, const char* def) {
     return v.empty() ? std::string(def ? def : "") : v;
 }
 
-// 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l
+// 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l、extraCflags 来自 -D/--cflags
 static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
-                                 const std::string& adtOpt = "") {
+                                 const std::string& adtOpt = "",
+                                 const std::vector<std::string>& extraCflags = {}) {
     ToolConfig tc;
     const std::string cflags = configValue("SCC_CFLAGS", "cflags");
     if (!cflags.empty()) tc.cflags += " " + cflags;
@@ -433,6 +437,10 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     tc.ccStyle    = configValue("SCC_CC_STYLE",   "cc_style");
     tc.vcvars     = configValue("SCC_VCVARS",     "vcvars");
     tc.sshBackend = configValue("SCC_SSH_BACKEND","ssh_backend");
+
+    // 命令行 -D/--cflags：最高优先级，追加在末尾（同名宏后者覆盖前者）
+    for (auto& f : extraCflags)
+        if (!f.empty()) tc.cflags += " " + f;
     return tc;
 }
 
@@ -2340,6 +2348,7 @@ int main(int argc, char** argv) {
     std::string input, output, mode = "run";  // 默认：编译+执行
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
     std::vector<std::string> cmdLibs;         // -l 指定的链接库名
+    std::vector<std::string> cmdCflags;       // -D / --cflags 指定的 C 编译选项（最高优先级）
     std::string adtOpt;                       // --adt 指定的 adt 自定义实现
     std::string fromPath;                     // --from 源文件路径（stdin 输入时供 inc 解析基准目录）
     std::string clangLib;                     // --clang 指定的 libclang 路径（空 + clangRequested = 自动检测）
@@ -2366,6 +2375,10 @@ int main(int argc, char** argv) {
             else bareO = true;
         }
         else if (a == "-l" && i + 1 < argc) cmdLibs.push_back(argv[++i]);  // -l m
+        else if (a == "--cflags" && i + 1 < argc) cmdCflags.push_back(argv[++i]);  // 透传 C 编译选项
+        else if (a == "-D" && i + 1 < argc) cmdCflags.push_back("-D" + std::string(argv[++i]));  // -D FOO=1 分写
+        else if (a.size() > 2 && a.compare(0, 2, "-D") == 0)
+            cmdCflags.push_back(a);                          // -DFOO=1 连写，透传给 C 编译器
         else if (a == "--adt" && i + 1 < argc) adtOpt = argv[++i];  // adt 自定义实现
         else if (a == "--target" && i + 1 < argc) loadProfile(argv[++i]);  // 交叉编译目标档
         else if (a == "--builtins" && i + 1 < argc)                 // 目标适配 builtins 目录
@@ -2574,7 +2587,7 @@ int main(int argc, char** argv) {
         // 3d. run 模式：不保存中间文件，直接编译并执行（run/build 模式应用工具链扩展配置）
         if (mode == "run") {
             
-            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt, cmdCflags);
             addBuiltinsInclude(tc, input);                      // builtins 根级别（platform.h 等）头文件默认可见
 
             // 远程工具链构建：用已内联自包含的 C 推到远端原生编译并运行（回传输出/退出码）
@@ -2594,7 +2607,7 @@ int main(int argc, char** argv) {
                 std::cerr << "错误: 测试模式需要源文件输入（不支持 stdin）\n";
                 return 1;
             }
-            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt, cmdCflags);
             addBuiltinsInclude(tc, input);
             const std::string testKey =
                 std::filesystem::weakly_canonical(std::filesystem::path(input)).string();
@@ -2604,7 +2617,7 @@ int main(int argc, char** argv) {
         // 3d'. build 模式：编译链接为持久产物（类型按 -o 后缀决定）
         if (mode == "build") {
 
-            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt);
+            ToolConfig tc = loadToolConfig(cmdLibs, adtOpt, cmdCflags);
             addBuiltinsInclude(tc, input);                      // builtins 根级别（platform.h 等）头文件默认可见
 
             std::string out = output;

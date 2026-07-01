@@ -36,7 +36,7 @@ const KEYWORDS = [
     ['goto', '跳转到标签'],
     ['sizeof', '返回表达式或类型的字节大小'],
     ['offsetof', '返回字段在类型中的偏移量'],
-    ['print', 'C 风格日志输出（print("E: %d", n)，级别前缀 F/E/W/I/D/V，需 inc io.sc）'],
+    ['print', 'C 风格日志输出（print<E>("%d", n)，通道即级别 F/E/W/I/D/V=1..6，无 <> 为通道 0 纯 stdout；终端着色 + SC_LOG 过滤 + SC_LOG_SYS 系统日志）'],
     ['break', '跳出循环'],
     ['continue', '继续下一次循环'],
     ['run', '以 rpc 调用创建线程或入池（run 调用[, &t|pool]，需 inc mt.sc）'],

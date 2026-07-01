@@ -170,6 +170,38 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
+// 日志：终端着色 + 系统日志（跨平台自适应，参考 stdc）
+///////////////////////////////////////////////////////////////////////////////
+// print 关键字运行时（op_impl.c）据此着色 stdout / 写系统日志。
+// 级别/通道 1..6 = F/E/W/I/D/V（与 op.h enum、op.sc def log 对齐）。
+
+/* 终端检测：判断流是否连到 tty（print 据此决定是否着色，重定向/管道则纯文本） */
+#if P_WIN
+#   include <io.h>
+#   define P_isatty(f) _isatty(_fileno(f))
+#else
+#   define P_isatty(f) isatty(fileno(f))
+#endif
+
+/* ANSI 前景色码（按级别取用；I=状态用默认色，无码）。仅在 tty 输出时启用。 */
+#define P_ANSI_RESET   "\033[0m"
+#define P_ANSI_PURPLE  "\033[35m"   /* F 致命 */
+#define P_ANSI_RED     "\033[31m"   /* E 错误 */
+#define P_ANSI_YELLOW  "\033[33m"   /* W 警告 */
+#define P_ANSI_CYAN    "\033[36m"   /* D 调试 */
+#define P_ANSI_GRAY    "\033[90m"   /* V 详尽 */
+
+/* 系统日志（跨平台自适应）：把一行文本写入各平台系统日志设施。
+ *   level：1..6 = F/E/W/I/D/V；  tag：日志标签（NULL/空 → "sc"）；
+ *   text ：单行文本（不含级别/颜色修饰，末尾无换行）。
+ * 平台映射：Win=OutputDebugStringA / macOS=os_log / Android=logcat /
+ *          QNX=slog2 / Linux·BSD=syslog。实现体较重（含各平台专属头），仅在定义
+ *          P_LOG_SYS_IMPL 的翻译单元（op_impl.c）内展开；其余 TU 不引入。
+ * 注：实现体置于本头「主 include guard 之外」的末尾（见文件底部），因 op_impl.c 常在
+ *     op.h 已先行带入 platform.h 之后才 #define P_LOG_SYS_IMPL 重包含本头——主体被
+ *     guard 跳过，唯有 guard 外的实现块能据 P_LOG_SYS_IMPL 延迟展开。 */
+
+///////////////////////////////////////////////////////////////////////////////
 // 内存对齐
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1102,3 +1134,79 @@ static inline void P_rand_bytes(void *buf, size_t len) {
 #include "op.h"
 
 #endif /* SC_PLATFORM_H */
+
+///////////////////////////////////////////////////////////////////////////////
+// 系统日志实现（延迟展开，置于主 include guard 之外）
+///////////////////////////////////////////////////////////////////////////////
+// 仅当 TU 定义了 P_LOG_SYS_IMPL（op_impl.c）时展开；一次性守卫，独立于 SC_PLATFORM_H。
+// 依赖的平台判定宏（P_WIN/P_DARWIN/...）由上方主体首次包含时已定义并留存。
+#if defined(P_LOG_SYS_IMPL) && !defined(SC_PLATFORM_LOG_SYS_DONE)
+#define SC_PLATFORM_LOG_SYS_DONE
+
+#if P_WIN
+    /* <windows.h> 已由主体在 P_WIN 下带入，OutputDebugStringA 直接可用 */
+#elif P_DARWIN
+#   include <os/log.h>
+#elif defined(__ANDROID__)
+#   include <android/log.h>
+#elif defined(__QNX__)
+#   include <sys/slog2.h>
+#elif P_LINUX || P_BSD
+#   include <syslog.h>
+#endif
+
+static void P_log_sys(int level, const char *tag, const char *text) {
+    if (!text) return;
+    if (level < 1) level = 1;
+    if (level > 6) level = 6;
+    const int i = level - 1;                 /* 0=F 1=E 2=W 3=I 4=D 5=V */
+    if (!tag || !*tag) tag = "sc";
+#if P_WIN
+    char buf[4096];
+    snprintf(buf, sizeof(buf), "[%s] %s\n", tag, text);
+    OutputDebugStringA(buf);
+#elif P_DARWIN
+    static const os_log_type_t s_lv[6] = {
+        OS_LOG_TYPE_FAULT,   /* F */ OS_LOG_TYPE_ERROR,   /* E */
+        OS_LOG_TYPE_DEFAULT, /* W */ OS_LOG_TYPE_INFO,    /* I */
+        OS_LOG_TYPE_DEBUG,   /* D */ OS_LOG_TYPE_DEBUG    /* V */
+    };
+    static os_log_t s_h;
+    if (!s_h) s_h = os_log_create(tag, "sc");
+    os_log_with_type(s_h, s_lv[i], "%{public}s", text);
+#elif defined(__ANDROID__)
+    static const int s_lv[6] = {
+        ANDROID_LOG_FATAL, ANDROID_LOG_ERROR, ANDROID_LOG_WARN,
+        ANDROID_LOG_INFO,  ANDROID_LOG_DEBUG, ANDROID_LOG_VERBOSE
+    };
+    __android_log_write(s_lv[i], tag, text);
+#elif defined(__QNX__)
+    static const int s_lv[6] = {
+        SLOG2_CRITICAL, SLOG2_ERROR, SLOG2_WARNING,
+        SLOG2_INFO,     SLOG2_DEBUG1, SLOG2_DEBUG2
+    };
+    static slog2_buffer_t s_h;
+    if (!s_h) {
+        slog2_buffer_set_config_t cfg;
+        cfg.buffer_set_name = tag;
+        cfg.num_buffers = 1;
+        cfg.verbosity_level = SLOG2_DEBUG2;
+        cfg.buffer_config[0].buffer_name = "main";
+        cfg.buffer_config[0].num_pages = 8;
+        slog2_register(&cfg, &s_h, 0);
+    }
+    if (s_h) slog2c(s_h, 0, s_lv[i], text);
+#elif P_LINUX || P_BSD
+    static const int s_lv[6] = {
+        LOG_CRIT, LOG_ERR, LOG_WARNING, LOG_INFO, LOG_DEBUG, LOG_DEBUG
+    };
+    static int s_opened = 0;
+    if (!s_opened) { openlog(tag, LOG_CONS | LOG_PID, LOG_USER); s_opened = 1; }
+    syslog(s_lv[i], "%s", text);
+#else
+    (void)i;
+    fprintf(stderr, "[%s] %s\n", tag, text);
+#endif
+}
+
+#endif /* P_LOG_SYS_IMPL && !SC_PLATFORM_LOG_SYS_DONE */

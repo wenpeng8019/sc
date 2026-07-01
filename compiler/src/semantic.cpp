@@ -994,14 +994,17 @@ struct Checker {
     }
 
     // typo 近似名提示：标识符（值）位置，在可调用名基础上再加枚举常量候选。
+    // 候选顺序：先就地可见名（locals/globals），后函数/类型/枚举常量——closestName 取
+    // 首个最小编辑距离者，故等距离时优先提示在作用域内的名字（用户更可能是把它拼错），
+    // 避免把 op.sc 内置枚举常量（如 print 级别 F/E/W/I/D/V）误当作 typo 目标。
     std::string hintIdent(const std::string& nm,
                           const std::unordered_map<std::string, Ty>& locals) const {
         std::vector<std::string> cands;
+        for (auto& kv : locals) cands.push_back(kv.first);
+        for (auto& kv : globals) cands.push_back(kv.first);
         for (auto& kv : funcSigs) cands.push_back(kv.first);
         for (auto& n : declNames) cands.push_back(n);
         for (auto& n : enumConsts) cands.push_back(n);
-        for (auto& kv : locals) cands.push_back(kv.first);
-        for (auto& kv : globals) cands.push_back(kv.first);
         std::string c = closestName(nm, cands);
         return c.empty() ? std::string{} : "，是否想用 '" + c + "'？";
     }

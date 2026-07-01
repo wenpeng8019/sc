@@ -876,30 +876,33 @@ fnc main: i4
 
 ## io —— 输入输出子项目
 
-`inc io.sc` 引入。io.sc 本身只含文档注释（无类型/函数声明），引入它的作用
-是把 `io_impl.c` 拉入编译链接，为 `print` 关键字提供运行时实现。
+`inc io.sc` 引入 file / stream / tcp 三种 com 设备原语（声明见 io.sc、
+C ABI 见 io.h、默认实现 io_impl.c）。`print` 关键字不属于 io，见下。
 
 ### print —— C 风格日志输出（关键字）
 
-`print(fmt, ...)` 由编译器直接生成对 `print`（io_impl.c，C ABI 见 io.h）
-的调用：
+`print` 是编译器内置关键字，运行时由 `op_impl.c` 提供（C ABI 见 op.h；
+op 模块始终链接，**无需 inc**）。第一参数为通道 `chn`（`print<级别>`）：
 
 ```sc
-print("n=%d s=%s", 42, "hello")    # 默认 D 级别
-print("E: 错误 code=%d", -1)        # 前缀 "X:" 设级别
+print("n=%d s=%s", 42, "hello")    # 通道 0：纯 stdout，无色、不过滤
+print<E>("错误 code=%d", -1)        # 通道 E：错误级别（红），彩色 stdout
+print<W> "内存偏低"                  # 通道 W：警告级别（黄）
 ```
 
-- 格式串与 printf 完全一致（vsnprintf 实现，参考 stdc 的简化移植）。
-- 级别前缀：`F:` 致命 / `E:` 错误 / `W:` 警告 / `I:` 信息 / `D:` 调试 /
-  `V:` 详细；无前缀默认 `D`；前缀后的一个空格自动跳过。
-- 输出格式：`HH:MM:SS.mmm L| 文本`，自动补换行；整行一次 fprintf 写 stdout，
-  多线程不串行。单行上限 2048 字节，超出截断。
-- 过滤：环境变量 `SC_LOG=F/E/W/I/D/V`（启动后首次 print 时读取一次），
-  默认 `D`（V 级不输出）。
-- `print` 是上下文关键字：作用域内存在同名函数/变量时按普通标识符解析；
-  未 `inc io.sc` 而使用会编译报错。
-- 相比 stdc 完整日志系统，省略了 tag/UDP 上报/缓冲模式等机制，保留接口
-  风格以便后续扩展。
+- 通道即级别：`def log` 枚举 `F/E/W/I/D/V = 1..6`（见 op.sc / op.h）——
+  F 致命(紫) / E 错误(红) / W 警告(黄) / I 状态(默认色) / D 调试(青) /
+  V 详尽(灰)；无 `<>` 即通道 0，纯 stdout、不着色、不过滤。
+- 格式串与 printf 完全一致（vsnprintf 实现，参考 stdc 的简化移植）；
+  自动补换行，单行上限 2048 字节（编译期 `-DSC_PRINT_BUF=N` 可覆盖），超出截断。
+- 着色：仅当输出为终端（isatty）且级别为 1..6 时按级别加 ANSI 颜色；
+  重定向到管道/文件时退化为纯文本；Windows 自动开启 VT 序列。
+- 过滤：环境变量 `SC_LOG=F/E/W/I/D/V`（首次 print 时读取一次），默认 `D`
+  （级别数值大于阈值即丢弃，故默认 V 不输出）；通道 0 不受过滤。
+- 系统日志：设 `SC_LOG_SYS=1` 时，级别 1..6 的日志经 `P_log_sys`
+  （platform.h）镜像到系统日志——Windows `OutputDebugString`、
+  macOS/iOS `os_log`、Android `logcat`、QNX `slog2`、Linux/BSD `syslog`。
+- `print` 是上下文关键字：作用域内存在同名函数/变量时按普通标识符解析。
 
 ## sys —— 运行环境 / 系统路径子项目
 

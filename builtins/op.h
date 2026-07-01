@@ -572,14 +572,17 @@ future *com_limit_read_async(struct com *_this, struct limit *s);
 void     async_io(void);
 
 /* ---------------- print：日志输出（语言关键字） ----------------
- * print 关键字 → 编译器生成 print 调用（首参为 u1 通道 chn，默认 0）。
+ * print 关键字 → 编译器生成 print 调用（首参为 u1 级别/通道 chn，默认 0）。
  * print 属语言内核：声明在此（默认带入每个 C 单元），运行时实现在 op_impl.c
  * （始终随工程编译链接）——无需 inc。
- *   - chn：日志通道（透传），chn==0 为默认通道；F/E/W/I/D/V 级别与通道正交
+ *   - chn：级别/通道（「级别就是通道」）。0=普通 stdout（默认，无着色）；
+ *          1..6=F/E/W/I/D/V，按级别着色 stdout（仅 tty）并可镜像系统日志
+ *   - 下列裸枚举常量 F/E/W/I/D/V 供 print<级别> 生成的 print((uint8_t)(级别), ...)
+ *     编译（与 op.sc 的 def log 对齐）；数值即通道号
  *   - 特例：<chn> 为 string 变量时编译器改生成 string_printf（追加进该串，不走本函数）
- *   - fmt 前缀 "X:"（X ∈ FEWIDV）指定日志级别，无前缀默认 D（调试）
- *   - 输出 stdout：HH:MM:SS.mmm L| 文本（chn!=0 时加 通道标记；自动补换行）
- *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取 */
+ *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取
+ *   - 系统日志：环境变量 SC_LOG_SYS 非空 → 额外写系统日志（见 platform.h P_log_sys） */
+enum { F = 1, E = 2, W = 3, I = 4, D = 5, V = 6 };
 void print(uint8_t chn, const char *fmt, ...);
 
 /* ---------------- stringify：JSON 格式化关键字选项 ----------------

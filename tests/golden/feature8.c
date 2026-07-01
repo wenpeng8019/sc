@@ -210,13 +210,13 @@ int32_t main(void) {
     /* line 38 */
     print((uint8_t)(0), "print 基础输出 n=%d s=%s", (int)(nn), nm);
     /* line 39 */
-    print((uint8_t)(0), "E: 错误级别示例 code=%d", -(1));
+    print((uint8_t)(E), "错误级别示例 code=%d", -(1));
     /* line 40 */
-    print((uint8_t)(0), "W: 警告级别示例");
+    print((uint8_t)(W), "警告级别示例");
     /* line 41 */
-    print((uint8_t)(0), "V: 详细级别（默认 SC_LOG=D 下本行不输出）");
+    print((uint8_t)(V), "详细级别（默认 SC_LOG=D 下本行不输出）");
     /* line 42 */
-    print((uint8_t)(7), "通道 7：自定义日志通道");
+    print((uint8_t)(D), "调试级别示例");
     /* line 43 */
     double pi = 3.14159;
     /* line 44 */
