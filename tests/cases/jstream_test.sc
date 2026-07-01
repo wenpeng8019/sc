@@ -9,7 +9,7 @@
 inc mem.sc
 add ../../templates/utils/img/img_jpg_codec.sc
 
-# zigzag→自然序映射（与 img_jpg_codec.c 的 cj_dezigzag 前 64 项一致）。
+# zigzag→自然序映射（与 img_jpg_codec.sc 的 cj_dezigzag 前 64 项一致）。
 fnc fill_zz: zz: i4&
     zz[0]=0
     zz[1]=1
