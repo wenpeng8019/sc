@@ -1,6 +1,6 @@
-# sec_demo —— securechan 自通讯加密信道示例 + socketpair 单进程自测
+# sec_demo —— securechn 自通讯加密信道示例 + socketpair 单进程自测
 #
-# 用 templates/utils/securechan.sc 组件，在单进程里用 os.sc 的 net_socketpair 同时跑
+# 用 templates/utils/securechn.sc 组件，在单进程里用 os.sc 的 net_socketpair 同时跑
 # 「发起方 + 响应方」两个 async rpc，事件循环驱动一次完整闭环：
 #   握手（PSK 或 PSK+X25519 临时）→ 双向加密收发明文 → 篡改帧被拒。
 #
@@ -15,7 +15,7 @@ inc async.sc
 inc io.sc
 inc os.sc
 inc crypto.sc
-inc ../utils/securechan.sc
+inc ../utils/securechn.sc
 
 var g_srv_msg[64]: u1     # 响应方收到的明文
 var g_srv_n: i4 = -1
@@ -30,8 +30,8 @@ var g_psk[16]: u1 = [0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x50, 0x53, 0x4b, 0x21,
 
 # 发起方：握手 → 发 "ping from initiator" → 收响应方的明文回复。
 rpc sec_initiator: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&g_psk[0]: &), 16, 1, mode, c)
     g_cli_hs = hs
     if hs < 0
@@ -56,8 +56,8 @@ rpc sec_initiator: ret, mode: i4, c: com&
 
 # 响应方（正常闭环）：握手 → 收发起方明文 → 回 "pong from responder"。
 rpc sec_responder: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&g_psk[0]: &), 16, 0, mode, c)
     g_srv_hs = hs
     if hs < 0
@@ -80,8 +80,8 @@ rpc sec_responder: ret, mode: i4, c: com&
 
 # 响应方（篡改测试）：握手 → 收第一帧 → 回 pong → 再收一帧（被篡改 → 应认证失败）。
 rpc sec_responder_tamper: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&g_psk[0]: &), 16, 0, mode, c)
     g_srv_hs = hs
     if hs < 0
@@ -153,8 +153,8 @@ fnc run_tamper: i4, mode: i4
 
 # 配合 run_tamper 的发起方：先正常握手 + 发一帧让响应方第一次 recv 成功，再发一帧坏密文。
 rpc sec_initiator_then_tamper: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&g_psk[0]: &), 16, 1, mode, c)
     g_cli_hs = hs
     if hs < 0

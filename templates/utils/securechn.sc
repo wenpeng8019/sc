@@ -1,4 +1,4 @@
-# securechan —— 自通讯加密信道组件（两端都是自己的 sc 程序，无需 PKI）
+# securechn —— 自通讯加密信道组件（两端都是自己的 sc 程序，无需 PKI）
 #
 # 定位：templates 通用 utils 组件。把 crypto.sc 的算法积木组合成一条「自己和自己」通讯用的
 #   端到端加密信道：比 TLS 轻（不需要证书/CA/握手协商套件），因为约定双方都是使用者自己的
@@ -58,7 +58,7 @@ inc os.sc
 ] : i4
 
 # 信道状态：调用方持有，握手后供 send/recv 使用。
-@def sec_chan: {
+@def sec_chn: {
     key_tx[32]:   u1   # 本端发送方向会话密钥
     key_rx[32]:   u1   # 本端接收方向会话密钥
     seq_tx:       u8   # 发送方向单调序号
@@ -68,7 +68,7 @@ inc os.sc
 }
 
 # 初始化信道（清零）。握手前调用一次。
-@fnc sec_chan_init: i4, ch: sec_chan&
+@fnc sec_chn_init: i4, ch: sec_chn&
     ch->seq_tx = 0
     ch->seq_rx = 0
     ch->is_initiator = 0
@@ -118,7 +118,7 @@ inc os.sc
     return 0
 
 # 密钥派生：salt=ni‖nr，ikm=PSK‖ECDH；按角色把 c2s/s2c 装入 ch 的 tx/rx。
-@fnc sec_derive: i4, ch: sec_chan&, is_init: i4, ni: u1&, nr: u1&, psk: &, psklen: u8, ecdh: u1&, ecdhlen: u8
+@fnc sec_derive: i4, ch: sec_chn&, is_init: i4, ni: u1&, nr: u1&, psk: &, psklen: u8, ecdh: u1&, ecdhlen: u8
     var salt[64]: u1
     var k: u4 = 0
     while k < 32
@@ -180,12 +180,12 @@ inc os.sc
 # ================================ 握手 ================================
 
 # 在已连接的 com 设备 c 上完成端到端加密握手。
-#   ch       —— 已 sec_chan_init 的信道状态（出参，成功后承载会话密钥/序号）。
+#   ch       —— 已 sec_chn_init 的信道状态（出参，成功后承载会话密钥/序号）。
 #   psk/psklen —— 预共享密钥（双方必须一致）。
 #   is_init  —— 1=发起方，0=响应方（双方必须取相反角色）。
 #   mode     —— SEC_PSK_ONLY 或 SEC_EPHEMERAL（双方必须一致，否则握手失败）。
 # 返回 SEC_OK(0) / SEC_EIO(-1) / SEC_EAUTH(-2)。
-@rpc sec_handshake: i4, ch: sec_chan&, psk: &, psklen: u8, is_init: i4, mode: i4, c: com&
+@rpc sec_handshake: i4, ch: sec_chn&, psk: &, psklen: u8, is_init: i4, mode: i4, c: com&
     var use_eph: i4 = 0
     if mode == SEC_EPHEMERAL
         use_eph = 1
@@ -275,7 +275,7 @@ inc os.sc
 
 # 加密并发送一条明文消息 data[0..len)。len 须 <= SEC_MAXFRAME。
 # 返回 SEC_OK(0) / SEC_EIO(-1) / SEC_EFRAME(-3)。
-@rpc sec_send: i4, ch: sec_chan&, data: &, len: u4, c: com&
+@rpc sec_send: i4, ch: sec_chn&, data: &, len: u4, c: com&
     if len > (SEC_MAXFRAME: u4)
         return SEC_EFRAME
     var hdr[4]: u1
@@ -304,7 +304,7 @@ inc os.sc
 # 接收并解密一条消息到 out（调用方提供 cap 字节缓冲）。
 # 返回 >=0 明文长度；SEC_EIO(-1) io 错误；SEC_EAUTH(-2) 认证失败（已篡改/密钥不符）；
 #   SEC_EFRAME(-3) 帧过大或超出 cap。校验失败时不向 out 释放明文。
-@rpc sec_recv: i4, ch: sec_chan&, out: u1&, cap: u4, c: com&
+@rpc sec_recv: i4, ch: sec_chn&, out: u1&, cap: u4, c: com&
     var hdr[4]: u1
     var r1: i4 = await sec_read_full((&hdr[0]: &), 4, c)
     if r1 < 0

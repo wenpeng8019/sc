@@ -1,18 +1,18 @@
-# securechan 单元测试：自通讯加密信道端到端闭环 + codec 辅助
+# securechn 单元测试：自通讯加密信道端到端闭环 + codec 辅助
 #   在单进程里用 net_socketpair 跑「发起方 + 响应方」两个 async rpc，事件循环驱动：
 #     · PSK 快路握手 → 双向加密收发 → 明文一致
 #     · PSK + X25519 临时握手（前向保密）→ 同上
 #     · 被篡改的密文帧被 AEAD 认证拒绝（SEC_EAUTH）
 #   再单测纯同步 codec 辅助（nonce 构造 / 常量时间比较）。
-# 运行：scc tests/cases/securechan_test.sc --test
+# 运行：scc tests/cases/securechn_test.sc --test
 #
-# 被测组件 templates/utils/securechan.sc 经默认搜索路径 inc（连带 crypto/io/async/os）。
+# 被测组件 templates/utils/securechn.sc 经默认搜索路径 inc（连带 crypto/io/async/os）。
 
 inc async.sc
 inc io.sc
 inc os.sc
 inc crypto.sc
-inc ../../templates/utils/securechan.sc
+inc ../../templates/utils/securechn.sc
 
 # 预共享密钥（双方一致）。
 var t_psk[16]: u1 = [0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x50, 0x53, 0x4b, 0x21, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35]
@@ -38,8 +38,8 @@ fnc tceq: i4, a: char&, b: char&
 
 # 发起方：握手 → 发 "ping" → 收回复。
 rpc t_initiator: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&t_psk[0]: &), 16, 1, mode, c)
     t_cli_hs = hs
     if hs < 0
@@ -60,8 +60,8 @@ rpc t_initiator: ret, mode: i4, c: com&
 
 # 响应方：握手 → 收 ping → 回 "pong"。
 rpc t_responder: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&t_psk[0]: &), 16, 0, mode, c)
     t_srv_hs = hs
     if hs < 0
@@ -80,8 +80,8 @@ rpc t_responder: ret, mode: i4, c: com&
 
 # 篡改测试响应方：握手 → 收第一帧 → 回 pong → 再收一帧（应认证失败）。
 rpc t_responder_tamper: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&t_psk[0]: &), 16, 0, mode, c)
     t_srv_hs = hs
     if hs < 0
@@ -97,8 +97,8 @@ rpc t_responder_tamper: ret, mode: i4, c: com&
 
 # 篡改测试发起方：正常握手 + 发一帧（让响应方第一次 recv 成功），再手工封一帧坏密文。
 rpc t_initiator_tamper: ret, mode: i4, c: com&
-    var ch: sec_chan
-    sec_chan_init(&ch)
+    var ch: sec_chn
+    sec_chn_init(&ch)
     var hs: i4 = await sec_handshake(&ch, (&t_psk[0]: &), 16, 1, mode, c)
     t_cli_hs = hs
     if hs < 0

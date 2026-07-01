@@ -1,10 +1,10 @@
-# echo —— WebSocket 回显服务端示例 + socketpair 单进程自测
+# ws_echo —— WebSocket 回显服务端示例 + socketpair 单进程自测
 #
 # 用 templates/utils/ws.sc 组件（构建在 io.sc 的 tcp com 设备之上）实现一个最小
 # WebSocket echo 服务端，并用 os.sc 的 net_socketpair 在单进程里同时跑「服务端 + 测试
 # 客户端」两个 async rpc，事件循环驱动一次完整闭环：握手 → 收发文本帧 → 关闭。
 #
-# 运行：scc templates/websocket/echo.sc
+# 运行：scc templates/demo/ws_echo.sc
 #   期望输出：cli got "hello"（客户端收到服务端回显），done=1。
 #
 # 真实部署时把 net_socketpair 换成 listen/accept 得到的已连接 fd，对每个连接

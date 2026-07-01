@@ -199,7 +199,7 @@ TEST_RUN=(
     tests/cases/rsa_proxy_test.sc
     tests/cases/ssl_test.sc
     tests/cases/ws_test.sc
-    tests/cases/securechan_test.sc
+    tests/cases/securechn_test.sc
 )
 
 pass=0 fail=0 upd=0
