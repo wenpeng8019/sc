@@ -382,13 +382,18 @@ struct CGen {
     }
 
     // 声明一个字段/变量：T [*...]name[size]
-    void emitDeclarator(const Field& f, bool asConst = false) {
+    void emitDeclarator(const Field& f, bool asConst = false, const char* nameOverride = nullptr) {
+        // 声明名：默认用形参/字段名（this→_this）；nameOverride 非空时以其为 C 变量名
+        //（供 inl 展开将非字面值实参先算入唯一临时时用）。
+        auto oname = [&](const std::string& dflt) -> std::string {
+            return nameOverride ? std::string(nameOverride) : dflt;
+        };
         // 分身/切片句柄字段/参数 name: T[...] → struct T__project name
         // （rpc 伪形参与普通结构体成员皆可承载分身句柄，其本质即一个结构体）
         if (f.type.project) {
             if (asConst) out << "const ";
             out << "struct " << f.type.name << "__project "
-                << (f.name == "this" ? "_this" : f.name);
+                << oname(f.name == "this" ? "_this" : f.name);
             return;
         }
         // 胖指针（自动指针 T@）：C 侧统一为 sc_fat（24 字节，首成员 p 即裸指针）。
@@ -396,7 +401,7 @@ struct CGen {
         if (f.type.fat) {
             if (asConst) out << "const ";
             out << (f.type.thin ? "sc_thin " : (f.type.name.empty() ? "sc_afat " : "sc_fat "))
-                << (f.name == "this" ? "_this" : f.name);
+                << oname(f.name == "this" ? "_this" : f.name);
             for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
         }
@@ -407,7 +412,7 @@ struct CGen {
                 out << base << " ";
                 for (int i = 0; i < ptr; i++) out << "*";
             } else out << "void ";  // 省略返回类型 = void
-            out << "(*" << f.name << ")(";
+            out << "(*" << oname(f.name) << ")(";
             bool firstParam = true;
             if (f.type.fnKind == TypeRef::FncKind::MethodPtr && !structOwnerTag.empty()) {
                 // 每对象方法指针：C 类型隐式前置接收者 T*（声明/调用端隐藏接收者）
@@ -434,7 +439,7 @@ struct CGen {
             depth--;
             indent();
             out << "}";
-            if (!f.name.empty()) out << " " << f.name;
+            if (nameOverride || !f.name.empty()) out << " " << oname(f.name);
             for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
             return;
         }
@@ -456,7 +461,7 @@ struct CGen {
                 }
             }
         }
-        out << (f.name == "this" ? "_this" : f.name);  // 参数名 this → _this
+        out << oname(f.name == "this" ? "_this" : f.name);  // 参数名 this → _this
         for (auto& dim : f.type.arrayDims) out << "[" << dim << "]";
     }
 
@@ -4452,6 +4457,21 @@ struct CGen {
         //   · 其余实参   → 同名块级临时 T p = 实参（在此求值一次，绑定一次）。
         //  代入表在块体发射期间生效（保存/恢复外层，支持内联体内再嵌套展开）。
         std::unordered_map<std::string, std::string> newParamSub;
+        // 先把所有非字面值实参在“形参尚未声明”时算入唯一临时 _inla*（以外层代入表渲染）。
+        // 否则嵌套展开中，内层形参与外层同名变量在 C 作用域内相互遮蔽，会生成 `T b = b;`
+        // 之类的自初始化（右值读到刚声明、未初始化的内层 b），运行期即野指针 → 段错误。
+        std::vector<std::string> argTmp(params.size());
+        for (size_t i = 0; i < params.size(); i++) {
+            const Expr& a = *args[i];
+            if (inlArgLiteral(a)) continue;
+            std::string tn = "_inla" + std::to_string(inlTmpSeq++);
+            indent();
+            emitDeclarator(params[i], false, tn.c_str());
+            out << " = ";
+            emitExpr(a, true);                  // 此刻内层形参均未入作用域，引用的是外层同名变量
+            out << ";\n";
+            argTmp[i] = std::move(tn);
+        }
         for (size_t i = 0; i < params.size(); i++) {
             const Field& p = params[i];
             const Expr& a = *args[i];
@@ -4460,9 +4480,7 @@ struct CGen {
             } else {
                 indent();
                 emitDeclarator(p);
-                out << " = ";
-                emitExpr(a, true);
-                out << ";\n";
+                out << " = " << argTmp[i] << ";\n";       // 从外层已算好的临时绑定，避免自遮蔽
                 regVar(p);                      // 登记，使块体引用形参可解析
             }
         }
@@ -7527,7 +7545,15 @@ struct CGen {
             if (d->isDim) continue;  // 维度：折叠进分派器（emitDispatcher）
             // 测试模式：屏蔽用户 main（由合成 runner main 取代）
             if (g_testMode && !d->isRpc && d->name == "main") continue;
-            emitFunc(*d);
+            // 经 add 内联的函数：#line 映射回被 add 的源文件（调试断点/单步落在原 .sc）
+            if (!srcFile.empty() && !d->inlinedFrom.empty()) {
+                const std::string save = srcFile;
+                srcFile = d->inlinedFrom;
+                emitFunc(*d);
+                srcFile = save;
+            } else {
+                emitFunc(*d);
+            }
         }
         // 测试模式：tst 用例 → static 测试函数
         if (g_testMode)

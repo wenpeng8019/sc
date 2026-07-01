@@ -65,6 +65,7 @@ std::string nodeExt(const std::string& k, const std::string& n, const std::strin
 }
 
 std::string declNode(const Decl& d);
+std::string declNodeCore(const Decl& d);
 
 std::string stmtNode(const Stmt& s) {
     switch (s.kind) {
@@ -216,7 +217,7 @@ std::string stmtNode(const Stmt& s) {
     return "{}";
 }
 
-std::string declNode(const Decl& d) {
+std::string declNodeCore(const Decl& d) {
     // @导出对象在 detail 前加 "@" 标记
     const std::string X = d.exported ? "@ " : "";
     switch (d.kind) {
@@ -333,6 +334,16 @@ std::string declNode(const Decl& d) {
         }
     }
     return "{}";
+}
+
+// 包装：为经 `add <file>.sc` 内联的声明补挂来源文件字段 "f"（供插件标注归属、跳转到被
+//   add 的源文件；其 "l" 行号即相对该文件）。原生声明（inlinedFrom 空）原样返回。
+std::string declNode(const Decl& d) {
+    std::string s = declNodeCore(d);
+    if (d.inlinedFrom.empty() || s.empty() || s.back() != '}') return s;
+    s.pop_back();
+    s += ",\"f\":\"" + jesc(d.inlinedFrom) + "\"}";
+    return s;
 }
 
 } // namespace

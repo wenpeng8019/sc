@@ -478,6 +478,11 @@ struct Decl {
     std::string name;               // 类型名 / 函数名；IncD 时为头文件文本
 
     std::string origin;             // 外部符号来源（导入文件路径或 builtin 名称）
+    std::string inlinedFrom;        // 经 `add <file>.sc` 内联到本单元的来源文件绝对路径（空=本单元原生）。
+                                    // 本声明属本编译单元（external=false，正常发码），但源自另一 .sc：
+                                    //   · inc/add 相对路径按该来源目录解析（而非容器目录）；
+                                    //   · codegen #line 映射回原文件（调试断点/单步落在被 add 的 .sc）；
+                                    //   · AST 归属：插件据此把成员标注/跳转到被 add 的源文件。
     bool external = false;          // 来自 inc 导入的外部符号（AST/插件可与本地符号区分）
     bool used = false;              // external 描述符是否被当前单元引用（仅对 external 有意义；
                                     // 由 analyzeExternalUsage 统计，供插件区分"已引用/仅导入未用"）

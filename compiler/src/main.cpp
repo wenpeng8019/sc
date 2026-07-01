@@ -933,7 +933,84 @@ resolveModulePath(const std::string& raw, const std::filesystem::path& baseDir) 
     return {};
 }
 
-// 注册默认 #include 的内置 C 头（platform.h）符号到语义检查器（一次性，按内容动态扫描）。
+// 顶级 add <file>.sc 内联：把被 add 的 .sc 源码「拼接」进容器单元（本质＝两个 .sc 文件拼接）。
+//   · 被 add 文件的全部声明并入容器单元：其默认（未 @导出、static）辅助函数/类型对容器可见，
+//     恰如把大段前置辅助集中抽离到独立 .sc；被 add 文件是「前置关系」（其声明插在 add 处）。
+//   · 被 add 文件自身的 inc/add 关系随之并入容器（融合归并）：inc/add 的相对路径仍按被 add
+//     文件所在目录解析（记于各声明 inlinedFrom），保证被 add 文件是自完备的独立子单元。
+//   · 递归：被 add 文件可再 add 其它 .sc。
+//   · keepDirective=true（--ast 视图）保留 add 指令节点本体，供插件在大纲展示 add 关系；
+//     构建/转译（false）丢弃指令、仅保留内联声明。
+//   · active 记录内联链上的规范化路径，检测 add 环（A add B、B add A / 自我 add）。
+//   人为约束「一个 .sc 只能被一个文件 add」由使用方遵守（避免重复内联导致的重复符号，
+//   同时省去递归依赖去重逻辑）；本函数仅在单条内联链上防环。
+static bool spliceAddModules(Program& prog, const std::filesystem::path& srcPath,
+                             bool keepDirective,
+                             std::unordered_set<std::string>& active,
+                             std::string& err) {
+    auto isAddSc = [](const Decl& d) {
+        return d.kind == Decl::AddD && endsWith(stripDelims(d.name), ".sc");
+    };
+    bool any = false;
+    for (auto& d : prog.decls) if (isAddSc(*d)) { any = true; break; }
+    if (!any) return true;                                 // 无 add .sc：对既有代码零影响
+
+    const auto baseDir = srcPath.has_parent_path() ? srcPath.parent_path()
+                                                   : std::filesystem::current_path();
+    std::vector<std::unique_ptr<Decl>> merged;
+    merged.reserve(prog.decls.size());
+    for (auto& d : prog.decls) {
+        if (!isAddSc(*d)) { merged.push_back(std::move(d)); continue; }
+
+        const auto addPath = resolveModulePath(d->name, baseDir);
+        if (addPath.empty()) {
+            err = "add 的 .sc 文件未找到: " + d->name + "（在 " + srcPath.string() + "）";
+            return false;
+        }
+        const std::string key = addPath.string();
+        if (!active.insert(key).second) {
+            err = "add 循环依赖: " + key;
+            return false;
+        }
+        Program ap;
+        try {
+            ap = parse(lex(readWholeFile(addPath)));
+        } catch (...) {
+            active.erase(key);
+            err = "add 的 .sc 文件解析失败: " + key;
+            return false;
+        }
+        if (!spliceAddModules(ap, addPath, keepDirective, active, err)) {  // 递归内联嵌套 add
+            active.erase(key);
+            return false;
+        }
+        active.erase(key);
+
+        if (keepDirective) {                               // 保留 add 指令节点（仅大纲展示）
+            d->origin = key;
+            merged.push_back(std::move(d));
+        }
+        for (auto& cd : ap.decls) {                        // 内联子文件全部声明，标注来源
+            if (cd->inlinedFrom.empty()) cd->inlinedFrom = key;
+            merged.push_back(std::move(cd));
+        }
+    }
+    prog.decls = std::move(merged);
+    return true;
+}
+
+// 便捷入口：对一个单元源文件应用 add .sc 内联（失败抛 CompileError）。
+static void applyAddModules(Program& prog, const std::filesystem::path& srcPath,
+                            bool keepDirective = false) {
+    if (srcPath.empty()) return;                           // stdin 无基准目录：跳过（add .sc 需文件基准）
+    std::unordered_set<std::string> active;
+    active.insert(std::filesystem::weakly_canonical(srcPath).string());
+    std::string err;
+    if (!spliceAddModules(prog, srcPath, keepDirective, active, err))
+        throw CompileError(err, 0);
+}
+
+
 // 使 P_usleep / sc_thread_id / P_clock 等 platform 自有符号无需显式 inc 即被认作已知，
 // 且 platform.h 后续增删符号自动生效，无需改编译器白名单。
 static void ensureBuiltinHeaderSymbols(const std::filesystem::path& baseDir) {
@@ -963,7 +1040,12 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
                                                    : std::filesystem::current_path();
     for (auto& d : prog.decls) {
         if (d->kind != Decl::IncD) continue;
-        auto modPath = resolveModulePath(d->name, baseDir);
+        // 经 add 内联的 inc：相对路径按被 add 文件所在目录解析（inlinedFrom），而非容器目录。
+        const auto declBase = d->inlinedFrom.empty()
+            ? baseDir
+            : (std::filesystem::path(d->inlinedFrom).has_parent_path()
+                   ? std::filesystem::path(d->inlinedFrom).parent_path() : baseDir);
+        auto modPath = resolveModulePath(d->name, declBase);
         if (!modPath.empty() && endsWith(modPath.string(), ".sc")) {
             d->external = true;
             d->origin = modPath.string();
@@ -1032,6 +1114,12 @@ resolveUnitDeps(Program& prog, const std::filesystem::path& srcPath) {
         if (text.empty()) continue;
         try {
             Program mp = parse(lex(text));
+            {   // 依赖若 add .sc：内联后其 @导出（含被 add 文件中的）方能并入本单元
+                std::unordered_set<std::string> act;
+                act.insert(std::filesystem::weakly_canonical(dep).string());
+                std::string e;
+                spliceAddModules(mp, dep, false, act, e);
+            }
             for (auto& md : mp.decls) {
                 if (!md->exported && md->kind != Decl::MacroD) continue;
                 md->external = true;
@@ -1148,6 +1236,7 @@ static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPat
     std::unordered_set<std::string> injectedInc;  // 本次注入的兄弟 inc，去重
     try {
         Program mp = parse(lex(text));
+        applyAddModules(mp, rootPath);   // 根若 add .sc：内联后再解析其依赖/导出
         // 解析根的依赖（带入其 inc 进来的宏定义）并展开根的顶层 mix，使「由宏展开产生的
         //   @导出 对象」（如 mix ARGS_B 展开出的 @var ARGS_verbose）也作为根导出对消费单元
         //   可见——与根自身编译时 scm_<root>.h 收录这些符号保持一致。
@@ -1509,6 +1598,7 @@ static bool loadUnitGraph(const std::filesystem::path& srcPath,
     u.path = canon;
     try {
         u.prog = parse(lex(src));                   // 解析源代码为 AST
+        applyAddModules(u.prog, canon);             // 顶级 add <file>.sc：内联被 add 的 .sc（拼接进本单元）
         u.deps = resolveUnitDeps(u.prog, canon);    // 先合并依赖导出声明（external）
         mergeOpModule(u.prog, canon);               // 默认导入 op.sc 语法机制声明（operand/chain 等）
         // 根模块导出注入（语义可见性）：非根、非内置单元并入根前奏。
@@ -1870,11 +1960,14 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         std::unordered_set<std::string> seenAdd;  // 已处理的源/库规范化路径
         int addSeq = 0;
         for (auto& kv : units) {
-            const std::filesystem::path srcDir =
+            const std::filesystem::path unitDir =
                 std::filesystem::path(kv.first).parent_path();
             for (auto& d : kv.second.prog.decls) {
                 if (d->kind != Decl::AddD) continue;
 
+                // 经 add 内联的 add：相对路径按被 add 文件所在目录解析（inlinedFrom）
+                const std::filesystem::path srcDir = d->inlinedFrom.empty()
+                    ? unitDir : std::filesystem::path(d->inlinedFrom).parent_path();
                 // 解析路径：绝对路径直接用，否则相对模块 .sc 目录
                 std::filesystem::path target(d->name);
                 if (!target.is_absolute()) target = srcDir / target;
@@ -1933,10 +2026,12 @@ static bool gatherAddDeps(const std::filesystem::path& rootPath,
     if (!loadUnitGraph(rootPath, units, visiting, err)) return false;
     std::unordered_set<std::string> seen;
     for (auto& kv : units) {
-        const std::filesystem::path srcDir =
+        const std::filesystem::path unitDir =
             std::filesystem::path(kv.first).parent_path();
         for (auto& d : kv.second.prog.decls) {
             if (d->kind != Decl::AddD) continue;
+            const std::filesystem::path srcDir = d->inlinedFrom.empty()
+                ? unitDir : std::filesystem::path(d->inlinedFrom).parent_path();
             std::filesystem::path target(d->name);
             if (!target.is_absolute()) target = srcDir / target;
             std::error_code ec;
@@ -2327,6 +2422,9 @@ int main(int argc, char** argv) {
         std::filesystem::path unitPath;                             // 当前单元源路径（文件输入 / stdin 的 --from）
         if (input != "-") unitPath = std::filesystem::path(input);  // 对于目标工程文件输入
         else if (!fromPath.empty()) unitPath = std::filesystem::path(fromPath);  // stdin + --from
+        // 顶级 add <file>.sc 内联：拼接被 add 的 .sc（emit-sc 保留 add 指令以保源码回写；
+        //   ast 视图保留 add 节点+内联成员，供插件展示归属并跳转到被 add 的源文件）。
+        if (mode != "sc") applyAddModules(prog, unitPath, mode == "ast");
         if (!unitPath.empty())                                      // 解析 inc 依赖（不展开源码，合并 .sc 依赖导出声明）
             resolveUnitDeps(prog, unitPath);                        //   使插件实时编辑场景也能合并外部描述符
         mergeOpModule(prog, unitPath);                              // 默认导入 op.sc 语法机制声明（operand/chain 等）
