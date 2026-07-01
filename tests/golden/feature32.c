@@ -41,6 +41,7 @@ typedef struct com__project {
 
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 50 */
     printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5));
     /* line 52 */

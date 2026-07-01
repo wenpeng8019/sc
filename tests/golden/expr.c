@@ -16,6 +16,7 @@ typedef struct com__project {
 
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 9 */
     pair p = {0};
     /* line 10 */

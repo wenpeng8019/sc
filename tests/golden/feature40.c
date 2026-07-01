@@ -53,6 +53,7 @@ static void consume_n_rpc(struct consume_n *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 26 */
     pool *p = default_pool(2);

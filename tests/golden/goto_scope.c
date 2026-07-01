@@ -32,6 +32,7 @@ static inline node *node__new_ref(int32_t _atom) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 8 */
     int32_t i = 0;
     /* line 9 */

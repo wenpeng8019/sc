@@ -45,6 +45,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     level = token_bind("sensor.level", (token_combine)__sctok_sensor_level_combine);
     alert = token_bind("sensor.alert", NULL);
     { token *_deps0[] = { level }; token_depend(_deps0, 1, 0, __scdep_0_tramp, NULL); }

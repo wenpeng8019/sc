@@ -47,6 +47,7 @@ static int32_t dev_write(com *_this, void *buf, uint32_t *size) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 32 */
     com c = {0};
     /* line 33 */

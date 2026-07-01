@@ -125,6 +125,7 @@ static void my_printf(char *fmt, ...) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 98 */
     printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10));
     /* line 101 */

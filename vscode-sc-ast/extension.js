@@ -2,6 +2,7 @@
 const vscode = require('vscode');
 const cp = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const TREE_SRC_SCHEME = 'sc-tree-src';
@@ -32,6 +33,70 @@ function runScc(args, input) {
         proc.stdin.write(input);
         proc.stdin.end();
     });
+}
+
+// ---------------- 程序结构依赖图（proggraph）Webview ----------------
+// 大视图：对当前已保存的 .sc 跑 `scc --graph`（整程序），把生成的自包含 HTML
+// 塞进一个可复用的 Webview 面板（类似 Markdown 预览），保存时自动刷新。
+let graphPanel = null;   // 复用的单个面板
+let graphDoc = null;     // 当前面板跟踪的 sc 文档
+
+// 不喂 stdin 的 scc 调用：--graph 整程序模式以文件路径为输入，从磁盘解析全部 inc 依赖。
+function runSccNoStdin(args) {
+    return new Promise((resolve, reject) => {
+        cp.execFile(findScc(), args, { maxBuffer: 32 * 1024 * 1024 },
+            (err, stdout, stderr) => {
+                if (err) reject(new Error((stderr || err.message).trim()));
+                else resolve(stdout);
+            });
+    });
+}
+
+// 生成依赖图 HTML：scc <file> --graph -o <tmp.html>，读回内容后删临时文件。
+async function graphHtml(doc) {
+    const tmp = path.join(os.tmpdir(),
+        `sc-graph-${process.pid}-${Date.now()}.html`);
+    try {
+        await runSccNoStdin([doc.uri.fsPath, '--graph', '-o', tmp]);
+        return fs.readFileSync(tmp, 'utf8');
+    } finally {
+        fs.unlink(tmp, () => {});
+    }
+}
+
+function graphErrorHtml(msg) {
+    const esc = String(msg).replace(/[&<>]/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font:13px/1.6 -apple-system,sans-serif;background:#0d1117;color:#f85149;padding:24px">
+<h3>依赖图生成失败</h3><pre style="white-space:pre-wrap;color:#c9d1d9">${esc}</pre></body></html>`;
+}
+
+// 打开或刷新依赖图面板
+async function showGraph(doc) {
+    if (!doc || doc.languageId !== 'sc') {
+        vscode.window.showInformationMessage('请先打开一个 .sc 文件');
+        return;
+    }
+    if (doc.uri.scheme !== 'file') {
+        vscode.window.showInformationMessage('请先把文件保存到磁盘再查看依赖图（整程序模式需解析 inc 依赖）');
+        return;
+    }
+    graphDoc = doc;
+    if (!graphPanel) {
+        graphPanel = vscode.window.createWebviewPanel(
+            'scGraph', 'SC 依赖图',
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+            { enableScripts: true, retainContextWhenHidden: true });
+        graphPanel.onDidDispose(() => { graphPanel = null; graphDoc = null; });
+    }
+    graphPanel.title = 'SC 依赖图: ' + path.basename(doc.fileName);
+    try {
+        graphPanel.webview.html = await graphHtml(doc);
+    } catch (e) {
+        graphPanel.webview.html = graphErrorHtml(e.message || e);
+    }
+    graphPanel.reveal(vscode.ViewColumn.Beside, true);
 }
 
 // ---------------- AST 树视图 ----------------
@@ -339,6 +404,17 @@ function activate(context) {
     // 命令：切换导出接口摘要视图（scc --api，形如 C 头的 @导出 定义清单）
     context.subscriptions.push(vscode.commands.registerCommand('scAst.toggleApi',
         () => toggleEmitView(apiSrc)));
+
+    // 命令：打开/刷新程序结构依赖图（proggraph）大视图 Webview
+    context.subscriptions.push(vscode.commands.registerCommand('scAst.showGraph',
+        () => showGraph(activeScDoc())));
+
+    // 依赖图随保存自动刷新（面板已打开且保存的正是其跟踪的文档）
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(saved => {
+        if (graphPanel && graphDoc && saved.uri.toString() === graphDoc.uri.toString()) {
+            showGraph(saved);
+        }
+    }));
 
     // 实时刷新：编辑（防抖）与切换编辑器
     let timer = null;

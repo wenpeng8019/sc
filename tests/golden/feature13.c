@@ -177,6 +177,7 @@ static void compute_rpc(struct compute *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     sc_mod_async_init();
     /* line 183 */

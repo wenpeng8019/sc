@@ -74,6 +74,7 @@ uint8_t dump_int(const void *key, sc_thin value, void *ctx) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 35 */
     lru ca = {0};

@@ -92,6 +92,7 @@ int32_t loopy(int32_t n) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 40 */
     printf("== 多退出点 ==\n");
     /* line 41 */

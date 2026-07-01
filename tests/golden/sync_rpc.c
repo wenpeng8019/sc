@@ -116,6 +116,7 @@ void square_rpc(struct square *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 26 */
     int32_t r = add(3, 4);
     /* line 27 */

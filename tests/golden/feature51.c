@@ -70,6 +70,7 @@ static uint8_t __scdep_4_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     fetch = token_bind("pipe.fetch", NULL);
     token_set_crit(fetch, 1, 0);
     token_set_degree(fetch, 0, 2);

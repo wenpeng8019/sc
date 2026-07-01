@@ -54,6 +54,7 @@ static void server_rpc(struct server *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 26 */
     queue *sq = default_queue(NULL);

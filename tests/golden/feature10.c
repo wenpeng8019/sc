@@ -71,6 +71,7 @@ static int32_t cnt_cmp(void *a, void *b) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 28 */
     counter c = {0};

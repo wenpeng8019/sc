@@ -59,6 +59,7 @@ uint8_t sum_each(const void *key, sc_thin value, void *ctx) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 29 */
     dict da = {0};

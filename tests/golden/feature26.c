@@ -119,6 +119,7 @@ static tnode * slist_prev(slist *_this, tnode *item) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 75 */
     printf("闭区间[1,5]:");

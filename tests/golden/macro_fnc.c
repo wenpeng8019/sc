@@ -19,6 +19,7 @@ static TLS int32_t cnt_b = 0;
 static int32_t bump_b(void);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 16 */
     int32_t _sq0 = bump_a();
     int32_t _sq1 = bump_a();

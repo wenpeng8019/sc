@@ -105,6 +105,7 @@ static void consume1_rpc(struct consume1 *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 36 */
     queue *qa = default_queue(NULL);

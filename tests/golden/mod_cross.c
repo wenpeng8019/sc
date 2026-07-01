@@ -12,6 +12,7 @@ typedef struct com__project {
 void sc_mod_mod_cross_lib_init(void); void sc_mod_mod_cross_lib_drop(void);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mod_cross_lib_init();
     /* line 5 */
     store_m_add(&store, 10);

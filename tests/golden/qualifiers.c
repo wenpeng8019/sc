@@ -21,6 +21,7 @@ void copy(int32_t *restrict dst, const int32_t *restrict src) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 14 */
     volatile int32_t a = 5;
     /* line 15 */

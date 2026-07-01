@@ -73,6 +73,7 @@ static int32_t async_proc(future_id id, future *f) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_async_init();
     /* line 55 */
     async_init();

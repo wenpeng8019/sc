@@ -1,0 +1,25 @@
+{
+  "schema": "sc-proggraph/1",
+  "root": "tests/cases/graph_demo.sc",
+  "mode": "unit",
+  "entry": {"kind":"main","roots":["main"]},
+  "nodes": [
+    {"id":"mod:tests/cases/graph_demo.sc","kind":"module","name":"graph_demo","module":"graph_demo","file":"tests/cases/graph_demo.sc","active":1,"fanIn":0,"fanOut":0},
+    {"id":"counter","kind":"struct","name":"counter","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":4,"parent":"mod:tests/cases/graph_demo.sc","active":1,"depth":1,"fanIn":1,"fanOut":0},
+    {"id":"counter.step","kind":"method","name":"step","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":6,"parent":"counter","active":1,"depth":1,"fanIn":1,"fanOut":0},
+    {"id":"total","kind":"var","name":"total","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":11,"parent":"mod:tests/cases/graph_demo.sc","active":1,"depth":1,"fanIn":3,"fanOut":0},
+    {"id":"add","kind":"fnc","name":"add","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":13,"parent":"mod:tests/cases/graph_demo.sc","active":1,"depth":1,"fanIn":1,"fanOut":0},
+    {"id":"bump","kind":"fnc","name":"bump","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":16,"parent":"mod:tests/cases/graph_demo.sc","active":1,"depth":1,"fanIn":1,"fanOut":2},
+    {"id":"main","kind":"fnc","name":"main","module":"graph_demo","file":"tests/cases/graph_demo.sc","line":20,"parent":"mod:tests/cases/graph_demo.sc","active":1,"depth":0,"fanIn":0,"fanOut":5}
+  ],
+  "edges": [
+    {"from":"bump","to":"total","kind":"write","line":17},
+    {"from":"bump","to":"total","kind":"read","line":17},
+    {"from":"main","to":"counter","kind":"type","line":21},
+    {"from":"main","to":"add","kind":"call","line":22},
+    {"from":"main","to":"counter.step","kind":"method","line":23},
+    {"from":"main","to":"bump","kind":"call","line":24},
+    {"from":"main","to":"total","kind":"read","line":25}
+  ],
+  "stats": {"nodes":7,"edges":7,"active":6,"dead":0,"cycles":[]}
+}

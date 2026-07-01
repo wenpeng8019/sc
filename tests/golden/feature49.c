@@ -63,6 +63,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     x = token_bind("nn.x", NULL);
     token_set_crit(x, 1, 0);
     token_set_degree(x, 0, 1);

@@ -25,6 +25,7 @@ void app_report(metric m) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_feature30_mod_init();
     /* line 42 */
     sensor_sample("temp", 21);

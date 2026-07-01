@@ -173,6 +173,7 @@ static void handle_body_rpc(struct handle_body *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 78 */
     membuf mb = {0};
     /* line 79 */

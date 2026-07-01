@@ -97,6 +97,7 @@ static int32_t use_globals(void) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 56 */
     fill_buf();
     /* line 57 */

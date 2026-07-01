@@ -29,6 +29,7 @@ static void bump(int32_t *p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 23 */
     demo_scalar();
     /* line 25 */

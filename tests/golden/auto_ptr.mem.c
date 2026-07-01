@@ -52,6 +52,7 @@ sc_fat make(int32_t val) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 15 */
     sc_fat root = {0};
     root = make(1);

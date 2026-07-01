@@ -24,6 +24,7 @@ int32_t cfg_lo = 10;
 static int32_t cfg_hi = 20;
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 41 */
     int32_t count = CAP;
     /* line 42 */

@@ -61,6 +61,7 @@ static void tag_rpc(struct tag *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 33 */
     acc a = {0};

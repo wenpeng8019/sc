@@ -14,6 +14,7 @@ void sc_mod_feature46_config_init(void); void sc_mod_feature46_config_drop(void)
 void sc_mod_feature46_logger_init(void); void sc_mod_feature46_logger_drop(void);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_feature46_config_init();
     sc_mod_feature46_logger_init();
     /* line 26 */

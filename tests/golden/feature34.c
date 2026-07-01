@@ -12,6 +12,7 @@ typedef struct com__project {
 
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 28 */
     counter_hits_inc();
     /* line 29 */

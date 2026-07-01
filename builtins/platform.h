@@ -156,6 +156,19 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #define P_POSIX_LIKE 0
 #endif
 
+/* ---------------- 控制台 UTF-8 ---------------- */
+/* sc 程序内部一律以 UTF-8 字节输出，但 Windows 控制台默认代码页为本地 ANSI
+ * （简体中文为 GBK/936），直接 printf UTF-8 会显示为乱码。SC_CONSOLE_UTF8() 在
+ * 程序入口把本进程控制台的输出/输入代码页切到 UTF-8（65001），令 UTF-8 字节正确
+ * 显示与读取；非 Windows 平台为空操作。
+ *   - 仅作用于当前进程的控制台句柄；stdout 被重定向到文件/管道时不影响其字节。
+ *   - <windows.h> 已由上方平台基础头在 P_WIN 下带入，SetConsole*CP 直接可用。 */
+#if P_WIN
+#define SC_CONSOLE_UTF8() do { SetConsoleOutputCP(65001u); SetConsoleCP(65001u); } while (0)
+#else
+#define SC_CONSOLE_UTF8() ((void)0)
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////
 // 内存对齐
 ///////////////////////////////////////////////////////////////////////////////

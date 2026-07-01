@@ -81,6 +81,7 @@ static uint8_t __scdep_5_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     s = token_bind("bat.s", NULL);
     token_set_crit(s, 1, 0);
     token_set_degree(s, 0, 3);

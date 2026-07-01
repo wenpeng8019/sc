@@ -97,6 +97,7 @@ sc_fat make(int32_t x) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 50 */
     bst ta = {0};

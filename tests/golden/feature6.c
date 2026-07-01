@@ -58,6 +58,7 @@ static void dump(char *tag, chain *l) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 41 */
     chain l = {0};
     /* line 42 */

@@ -121,6 +121,7 @@ static int32_t use_globals(void) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
 #if !SC_HAVE_AUTO_HOOKS
     __sc_gcanary_init();
 #endif

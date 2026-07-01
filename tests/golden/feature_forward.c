@@ -42,6 +42,7 @@ uint8_t is_odd(int32_t n) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 24 */
     node_a x = {0};
     /* line 25 */

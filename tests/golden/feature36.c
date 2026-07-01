@@ -115,6 +115,7 @@ void tree_drop(tree *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 51 */
     sc_fat t = {0};
     tree *_fat3 = tree__new_ref(0);

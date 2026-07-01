@@ -200,6 +200,7 @@ static char *stringify_point_buf(point _v, char *_buf, uint64_t _n, stringify_t 
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     sc_mod_io_init();
     /* line 36 */

@@ -46,6 +46,7 @@ void tracker_add(tracker *_this, int32_t k) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 37 */
     printf("add = %d\n", add(2, 3));
     /* line 38 */

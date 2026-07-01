@@ -116,6 +116,7 @@ static int32_t run_pipeline(void) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 78 */
     show_suffix();
     /* line 79 */

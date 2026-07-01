@@ -31,6 +31,7 @@ static void dump(array *a) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 16 */
     array a = {0};

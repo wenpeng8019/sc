@@ -4,6 +4,10 @@ project(scc CXX C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 导出 compile_commands.json：供 VS Code IntelliSense 精确解析包含路径，
+# 修正 proggraph.cpp 中 #include "proggraph_viewer.inc"（原始字符串内联）误报。
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 add_executable(scc
     src/main.cpp
     src/lexer.cpp
@@ -15,6 +19,9 @@ add_executable(scc
     src/semantic.cpp
     src/cheaders.cpp
     src/remote.cpp
+    # 程序结构依赖图（proggraph 子项目）：编译期只读分析，把 AST 烘焙成结构对象依赖图，
+    # 从 main/@导出 做激活分析，导出 JSON / 自包含 HTML。与 codegen 解耦。见 proggraph/。
+    src/proggraph.cpp
     # 图算法（builtins/tok/graph）：编译期被 scc 引入，对 tok 依赖图（dep…map）做
     # 环检测/拓扑/深度/逆拓扑预计算，结果烘焙为生成代码常量。graph.h 为编译期生产者
     # 与运行时消费者共享的规范接口（spec interface）。图是 tok 的一部分，故同居 tok 目录。

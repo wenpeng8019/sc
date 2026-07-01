@@ -47,6 +47,7 @@ void node_drop(node *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 29 */
     sc_fat root = {0};
     node *_fat0 = node__new_ref(0);

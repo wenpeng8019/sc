@@ -12,6 +12,7 @@ typedef struct com__project {
 void sc_mod_ts_init(void); void sc_mod_ts_drop(void);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_ts_init();
     /* line 12 */
     int32_t shp[2];

@@ -66,6 +66,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sig = token_bind("cd.sig", NULL);
     gauge = token_bind("cd.gauge", (token_combine)__sctok_cd_gauge_combine);
     hits = token_bind("cd.hits", NULL);

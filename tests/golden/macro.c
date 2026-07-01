@@ -19,6 +19,7 @@ static int32_t g_lo = 0;
 static int32_t g_hi = 1;
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 23 */
     int32_t count = TAG;
     /* line 24 */

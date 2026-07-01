@@ -12,6 +12,7 @@ typedef struct com__project {
 void sc_mod_mem_init(void); void sc_mod_mem_drop(void);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_mem_init();
     /* line 30 */
     void *p = chunk(100);

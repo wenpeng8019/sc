@@ -47,6 +47,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     a = token_bind("fp.a", NULL);
     token_set_scc(a, 0, 2);
     b = token_bind("fp.b", NULL);

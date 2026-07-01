@@ -52,6 +52,7 @@ int32_t take(sc_afat p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 23 */
     sc_afat d = {0};
     node *_fat0 = node__new_ref(0);

@@ -255,6 +255,7 @@ static float forward(void) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_neuron_init();
     i0 = token_bind("g.i0", NULL);
     token_set_crit(i0, 1, 0);

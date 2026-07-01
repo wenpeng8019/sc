@@ -148,6 +148,7 @@ static tnode * slist_prev(slist *_this, tnode *item) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 97 */
     slist lst = {0};
     slist_init(&lst);

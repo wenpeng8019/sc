@@ -202,6 +202,11 @@ TEST_RUN=(
     tests/cases/securechn_test.sc
 )
 
+# 程序结构依赖图（proggraph）：--graph=unit 导出 JSON，快照锁定节点/边结构。
+GRAPH_UNIT=(
+    tests/cases/graph_demo.sc
+)
+
 pass=0 fail=0 upd=0
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
@@ -211,6 +216,9 @@ norm_err() { sed -E 's#^([^ ]*/)?([A-Za-z0-9_]+\.sc):#\2:#'; }
 
 # 归一化 TAP 报告：把行内任意绝对/相对路径前缀压成 文件名.sc（assert 失败定位行用）
 norm_tap() { sed -E 's#(/[^ ]*/)?([A-Za-z0-9_]+\.sc:)#\2#g'; }
+
+# 归一化 proggraph JSON：把绝对 ROOT 路径前缀压成工作区相对路径（跨机器稳定）
+norm_graph() { sed "s#${ROOT}/##g"; }
 
 # 比对或更新一个快照。 $1=标签  $2=黄金文件  $3=实际内容
 snapshot() {
@@ -296,6 +304,17 @@ for src in "${TEST_RUN[@]}"; do
     tap="$("$SCC" "$src" --test 2>&1)"
     tap="$(printf '%s' "$tap" | norm_tap)"
     snapshot "$name (test)" "$GOLDEN/$name.tap" "$tap"
+done
+
+# 程序结构依赖图：--graph=unit 导出 JSON，归一化绝对路径后比对 .graph.json 黄金。
+for src in "${GRAPH_UNIT[@]}"; do
+    name="$(basename "$src" .sc)"
+    if g="$("$SCC" "$src" --graph=unit 2>/dev/null)"; then
+        g="$(printf '%s' "$g" | norm_graph)"
+        snapshot "$name (graph=unit)" "$GOLDEN/$name.graph.json" "$g"
+    else
+        echo "  ✗ $name (graph=unit)：scc 失败"; fail=$((fail + 1))
+    fi
 done
 
 echo

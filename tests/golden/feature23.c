@@ -37,6 +37,7 @@ static int32_t sum_point(const point *p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 29 */
     int32_t src[3] = {10, 20, 30};
     /* line 30 */

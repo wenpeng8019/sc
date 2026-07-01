@@ -41,6 +41,7 @@ static inline string *string__new_ref_init(const char *s, int32_t _atom) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 4 */
     sc_fat s = {0};

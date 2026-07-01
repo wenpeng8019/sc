@@ -42,6 +42,7 @@ static int32_t max_i(int32_t a, int32_t b);
 static double max_d(double a, double b);
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 45 */
     Vec_int vi = {0};
     /* line 46 */

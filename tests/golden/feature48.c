@@ -48,6 +48,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     raw = token_bind("wf.raw", NULL);
     token_set_crit(raw, 1, 0);
     token_set_degree(raw, 0, 1);

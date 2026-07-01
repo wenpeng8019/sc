@@ -7136,6 +7136,9 @@ struct CGen {
 
     // main 序言：递归各直接依赖模块 init，再构造入口自有全局（源序）。
     void emitMainPrologue() {
+        // 控制台 UTF-8：须先于任何输出——Windows 控制台默认代码页为本地 ANSI（简体中文=
+        //   GBK/936），而 sc 输出一律 UTF-8 字节，不切码页则中文乱码（非 Windows 空操作）。
+        indent(); out << "SC_CONSOLE_UTF8();\n";
         // 退化路径：栈哨兵填充须先于任何全局构造（捕获构造期溢出）。
         if (hasGcanaryHook()) {
             out << "#if !SC_HAVE_AUTO_HOOKS\n";

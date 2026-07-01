@@ -94,6 +94,7 @@ static int32_t unwrap_or(Result r, int32_t fallback) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 54 */
     Shape a = ((Shape){ .tag = Shape__Circle, .u.Circle = 2.0 });
     /* line 55 */

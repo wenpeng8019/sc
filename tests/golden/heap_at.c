@@ -77,6 +77,7 @@ int32_t drain_keys(heap *h) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 35 */
     heap ta = {0};

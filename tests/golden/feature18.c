@@ -100,6 +100,7 @@ static void com_free(com *_this, limit *s) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 66 */
     ctx cctx = {0};
     /* line 67 */

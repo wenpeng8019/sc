@@ -57,6 +57,7 @@ static void counter_m_do_step(counter_m *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     counter_m_init(&counter);
     /* line 29 */
     counter_m_bump(&counter);

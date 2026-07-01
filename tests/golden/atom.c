@@ -33,6 +33,7 @@ static inline node *node__new_ref(int32_t _atom) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 10 */
     sc_fat root = {0};
     node *_fat0 = node__new_ref(SC_REF_ATOM);

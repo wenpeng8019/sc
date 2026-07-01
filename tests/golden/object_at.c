@@ -107,6 +107,7 @@ static void Node_drop(Node *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 30 */
     sc_fat d = {0};
     Dog *_fat0 = Dog__new_ref(0);

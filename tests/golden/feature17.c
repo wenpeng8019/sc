@@ -94,6 +94,7 @@ static void handler_rpc(struct handler *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_async_init();
     /* line 52 */
     async_init();

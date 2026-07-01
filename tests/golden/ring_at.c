@@ -77,6 +77,7 @@ void consumer_rpc(struct consumer *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     sc_mod_mt_init();
     /* line 32 */

@@ -52,6 +52,7 @@ static void buffer_free(buffer *_this, view *v) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 46 */
     buffer b = {0};
     /* line 47 */

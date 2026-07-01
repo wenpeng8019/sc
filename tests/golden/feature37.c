@@ -79,6 +79,7 @@ static void Item_init(Item *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     gDog._class = Dog_hyper_impl;
     Dog_init(&gDog);
     /* line 62 */

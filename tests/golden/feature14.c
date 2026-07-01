@@ -28,6 +28,7 @@ static int32_t neg(handler *_this, int32_t x) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 23 */
     handler a = {0};
     /* line 24 */

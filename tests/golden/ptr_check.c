@@ -38,6 +38,7 @@ int32_t deref(int32_t *p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 20 */
     int32_t arr[3] = {10, 20, 30};
     /* line 21 */

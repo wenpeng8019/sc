@@ -48,6 +48,7 @@ static void dev_free(dev *_this, view *v) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 32 */
     dev d = {0};
     /* line 33 */

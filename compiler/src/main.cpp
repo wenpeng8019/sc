@@ -29,6 +29,7 @@
 #include "semantic.h"
 #include "cheaders.h"
 #include "remote.h"
+#include "proggraph.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -89,6 +90,10 @@ static void usage() {
               << "             完全不带 --clang 则退化为头文件文本匹配\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
               << "  --api      输出模块导出接口摘要（仅 @导出 定义项签名，形如 C 头；配合 -o 缺省 stdout）\n"
+              << "  --graph    程序结构依赖图（proggraph）：默认整程序（递归解析全部 inc 依赖），\n"
+              << "             Decl 级节点 + 调用/类型/读写/方法/构造/宏/token/模块边，从 main（可执行）\n"
+              << "             或 @导出（库）做激活分析；-o *.html→自包含可视化，其余/stdout→JSON。\n"
+              << "             --graph=unit 仅分析当前单元（外部引用建为叶子节点）\n"
               << "  --check=ref  开启自动指针 T@ 栈悬挂检查：注入栈对象引用头并在退域处\n"
               << "             断言悬挂（含源码定位）；默认关闭（堆 ARC 自动回收始终生效）\n"
               << "  --check=mem  开启越界 canary：ref 头堆对象注入头尾哨兵（地址派生魔数）、\n"
@@ -1787,6 +1792,15 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         if (hasImpl && scStem == "m" && extraLd && !tc.threadsLib.empty()
             && extraLd->find(tc.threadsLib) == std::string::npos)
             *extraLd += " " + tc.threadsLib;
+        // mem —— 跨进程共享内存（POSIX shm_open/shm_unlink）。glibc < 2.34 将这两个符号
+        //   放在 librt，故 Linux 目标须补 -lrt；macOS 在 libc、Windows 用 Win32 API，均无需。
+        //   目标族按「显式 triple，缺省回退宿主」判定，兼顾本机 Linux 构建与交叉到 Linux。
+        if (hasImpl && scStem == "mem" && extraLd) {
+            const std::string fam =
+                platformFamily(tc.triple.empty() ? hostTriple() : tc.triple);
+            if (fam == "linux" && extraLd->find("-lrt") == std::string::npos)
+                *extraLd += " -lrt";
+        }
 #ifdef SCC_WITH_UV
         if (hasImpl && scStem == "async") {
             const std::filesystem::path repo = scDir.parent_path().parent_path();
@@ -2331,6 +2345,7 @@ int main(int argc, char** argv) {
     std::string clangLib;                     // --clang 指定的 libclang 路径（空 + clangRequested = 自动检测）
     bool clangRequested = false;              // 是否出现 --clang（决定检测/加载失败是否报错）
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
+    bool graphWhole = true;                   // --graph 默认整程序；--graph=unit 仅当前单元
     if (const char* rc = std::getenv("SCC_REF_CHECK"); rc && *rc && std::string(rc) != "0")
         setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     if (const char* mc = std::getenv("SCC_MEM_CHECK"); mc && *mc && std::string(mc) != "0")
@@ -2369,6 +2384,8 @@ int main(int argc, char** argv) {
         else if (a == "--emit-sc") mode = "sc";              // 再生 sc 模式
         else if (a == "--api") mode = "api";                 // 导出接口摘要模式（仅 @导出 签名）
         else if (a == "--test") mode = "test";               // 单元测试模式
+        else if (a == "--graph") mode = "graph";             // 程序结构依赖图（整程序，proggraph）
+        else if (a == "--graph=unit") { mode = "graph"; graphWhole = false; }  // 仅当前单元
         else if (a == "--check=ref") setRefCheck(true);      // 自动指针 T@ 栈悬挂检查（带源码定位）
         else if (a == "--check" && i + 1 < argc && std::string(argv[i + 1]) == "ref") {
             ++i; setRefCheck(true);                          // --check ref 分写形式
@@ -2399,6 +2416,7 @@ int main(int argc, char** argv) {
         else if (mode == "sc")  name = stem + ".out.sc";
         else if (mode == "api") name = stem + ".api.sc";
         else if (mode == "build") name = stem;
+        else if (mode == "graph") name = stem + ".graph.json";
         if (!name.empty()) {
             const auto dir = ip.has_parent_path() ? ip.parent_path() : std::filesystem::path(".");
             output = (dir / name).string();
@@ -2501,6 +2519,45 @@ int main(int argc, char** argv) {
         ensureBuiltinHeaderSymbols(unitPath.has_parent_path() ? unitPath.parent_path()
                                                               : std::filesystem::current_path());
         semanticCheck(prog);                                        // 语义检查：类型/方法可见性、@导出对象合法性等
+
+        // 3b'. 程序结构依赖图（proggraph）：只读分析，导出 JSON / 自包含 HTML。
+        //   整程序（默认）：用 loadUnitGraph 递归解析全部 inc 依赖，从 main/@导出 做激活分析。
+        //   单元（--graph=unit）：仅当前已处理单元，外部引用建为叶子节点。
+        //   输出格式按 -o 后缀：*.html→HTML 查看器；其余/stdout→JSON。
+        if (mode == "graph") {
+            std::string gjson;
+            const std::string rootDisp = input == "-"
+                ? (fromPath.empty() ? std::string("stdin") : fromPath)
+                : std::filesystem::weakly_canonical(std::filesystem::path(input)).string();
+            if (graphWhole && input != "-") {
+                std::unordered_map<std::string, UnitInfo> units;
+                std::unordered_set<std::string> visiting;
+                std::string gerr;
+                const std::filesystem::path rootModule =
+                    findRootModule(unitDirOf(std::filesystem::path(input)));
+                const bool enableRP = !rootModule.empty();
+                std::unordered_set<std::string> preludeSkip;
+                if (enableRP) collectExportedIncClosure(rootModule, preludeSkip);
+                const std::filesystem::path rp =
+                    enableRP ? rootModule : std::filesystem::path{};
+                if (!loadUnitGraph(std::filesystem::path(input), units, visiting, gerr,
+                                   {}, rp, enableRP ? &preludeSkip : nullptr)) {
+                    std::cerr << "错误: " << gerr << "\n";
+                    return 1;
+                }
+                std::vector<GraphUnit> gus;
+                for (auto& kv : units) gus.push_back({kv.first, &kv.second.prog});
+                gjson = emitGraphJson(gus, rootDisp, true);
+            } else {
+                std::vector<GraphUnit> gus{{rootDisp, &prog}};
+                gjson = emitGraphJson(gus, rootDisp, false);
+            }
+            const std::string gout =
+                (!output.empty() && endsWith(output, ".html")) ? emitGraphHtml(gjson) : gjson;
+            if (output.empty()) std::cout << gout;
+            else if (!writeTextFile(output, gout)) return 1;
+            return 0;
+        }
 
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）

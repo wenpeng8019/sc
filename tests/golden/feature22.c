@@ -149,6 +149,7 @@ static void async_read_rpc(struct async_read *_p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_io_init();
     sc_mod_async_init();
     /* line 51 */

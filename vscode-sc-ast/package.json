@@ -34,9 +34,21 @@
                 "command": "scAst.toggleApi",
                 "title": "SC AST: 切换导出接口摘要视图",
                 "icon": "$(symbol-interface)"
+            },
+            {
+                "command": "scAst.showGraph",
+                "title": "SC: 打开程序结构依赖图",
+                "icon": "$(type-hierarchy)"
             }
         ],
         "menus": {
+            "editor/title": [
+                {
+                    "command": "scAst.showGraph",
+                    "when": "resourceLangId == sc",
+                    "group": "navigation@1"
+                }
+            ],
             "view/title": [
                 {
                     "command": "scAst.toggleApi",

@@ -22,6 +22,7 @@ void sc_mod_sys_init(void); void sc_mod_sys_drop(void);
 void sc_mod_args_native_mod_init(void); void sc_mod_args_native_mod_drop(void);
 
 int32_t main(int32_t argc, char **argv) {
+    SC_CONSOLE_UTF8();
     sc_mod_sys_init();
     sc_mod_args_native_mod_init();
     arg_def_st_init(&ARGS_DEF_verbose);

@@ -57,6 +57,7 @@ static void point_drop(point *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_feature4_lib_init();
     point_init(&g_origin);
     /* line 42 */

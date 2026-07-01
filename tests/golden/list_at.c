@@ -47,6 +47,7 @@ int32_t node_cmp(void *a, void *b) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 20 */
     list l = {0};

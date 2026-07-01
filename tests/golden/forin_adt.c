@@ -41,6 +41,7 @@ void node_drop(node *_this) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 19 */
     dict d = {0};

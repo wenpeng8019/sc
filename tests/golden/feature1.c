@@ -50,6 +50,7 @@ typedef struct com__project {
 
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 61 */
     int32_t a = 42;
     /* line 62 */

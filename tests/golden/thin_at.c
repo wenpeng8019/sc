@@ -52,6 +52,7 @@ int32_t take(sc_thin p) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     /* line 21 */
     sc_fat a = {0};
     node *_fat0 = node__new_ref(0);

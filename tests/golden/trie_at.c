@@ -76,6 +76,7 @@ uint8_t dump_kv(const char *key, sc_thin value, void *ctx) {
 }
 
 int32_t main(void) {
+    SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 35 */
     trie tt = {0};
