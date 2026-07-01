@@ -2192,6 +2192,32 @@ struct Parser {
                 return s;
             }
 
+            // inl 真内联块定义：inl name: [ret,] p1:t1, p2:t2 \n <体>
+            //   函数体内命名代码块，调用点原地展开（见 codegen）。
+            //   签名同 fnc：冒号后首个非 name: 项为返回类型（可省=void），其余为形参。
+            //   void inl 当语句用（裸 return 早退本块）；有返回类型的 inl 当值用
+            //   （lhs=name() / var|let x=name() 右侧，return v 赋值给 lhs 并早退）。
+            case Tok::KwInl: {
+                auto s = mkStmt(Stmt::InlineDefS);
+                advance();                          // 跳过 inl
+                if (!at(Tok::Ident)) err("期望 inl 块名");
+                auto d = std::make_unique<Decl>();
+                d->kind = Decl::FuncD;              // 复用 FuncD 承载签名（不进 prog.decls）
+                d->line = s->line;
+                d->name = advance().text;
+                s->text = d->name;                  // 块名亦存 text 便于查表
+                expect(Tok::Colon, "':'（inl 签名分隔符不可省略，无参亦写 'name:'）");
+                // 冒号后非换行 → 解析返回类型+形参列表（fnc 风格）
+                if (!at(Tok::Newline))
+                    parseFncVars(d->structCommon);
+                expect(Tok::Newline, "换行");
+                expect(Tok::Indent, "inl 块体");
+                parseStmts(d->body);
+                accept(Tok::Dedent);
+                s->decl = std::move(d);
+                return s;
+            }
+
             case Tok::KwFnc:
                 // 宏体内允许定义函数：宏展开为 C #define，可生成函数定义（符号经
                 // 顶层 mix 展开登记进语义层）。其余位置仍禁止嵌套函数定义。

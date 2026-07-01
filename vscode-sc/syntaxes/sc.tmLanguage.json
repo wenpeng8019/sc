@@ -11,6 +11,7 @@
         { "include": "#def-decl" },
         { "include": "#cls-decl" },
         { "include": "#fnc-decl" },
+        { "include": "#inl-decl" },
         { "include": "#for-in" },
         { "include": "#tok-decl" },
         { "include": "#dep-decl" },
@@ -99,6 +100,13 @@
                 "2": { "name": "entity.name.function.sc" }
             }
         },
+        "inl-decl": {
+            "match": "^\\s*(inl)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.function.sc" },
+                "2": { "name": "entity.name.function.sc" }
+            }
+        },
         "for-in": {
             "begin": "^\\s*(for)\\b(?=[^;\\n]*\\bin\\b)",
             "beginCaptures": {
@@ -180,7 +188,7 @@
                 },
                 {
                     "name": "keyword.declaration.sc",
-                    "match": "\\b(def|fnc|rpc|var|let|tls|mod|inc|add|tst|cls|tok|dep)\\b"
+                    "match": "\\b(def|fnc|inl|rpc|var|let|tls|mod|inc|add|tst|cls|tok|dep)\\b"
                 },
                 {
                     "name": "keyword.declaration.sc",

@@ -40,6 +40,7 @@ enum class Tok {
     KwInc,      // inc  — 引入头文件/模块（对齐 C 的 #include，后跟行尾文本）
     KwAdd,      // add  — 添加实现/库文件到工程（.c/.o/.a/.so...，后跟行尾文本）
     KwMix,      // mix  — 展开宏（def 宏的调用点；顶层展开声明 / 函数体展开语句）
+    KwInl,      // inl  — 定义函数体内真内联块（命名 {} 代码块，调用点原地展开，见 §内联块）
     KwReturn,   // return
     KwIf,       // if
     KwElse,     // else

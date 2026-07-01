@@ -39,7 +39,7 @@ const ICONS = {
     add: 'file-binary',
     enum: 'symbol-enum', struct: 'symbol-class', union: 'symbol-class',
     cls: 'symbol-class', dim: 'symbol-method',
-    alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', rpc: 'symbol-event',
+    alias: 'symbol-interface', fnctype: 'symbol-method', fnc: 'symbol-function', inl: 'symbol-function', rpc: 'symbol-event',
     macro: 'symbol-snippet', mix: 'expand-all',
     var: 'symbol-variable', let: 'symbol-constant', tls: 'symbol-variable',
     tok: 'broadcast', dep: 'git-merge', form: 'zap',
@@ -208,10 +208,13 @@ class AstProvider {
             item.description = `已用 ${n._used || 0} / 共 ${n._total < 0 ? '?' : n._total}`;
         } else if (n.x && n.o && n.k !== 'module') {
             item.description = `${item.description}  [${path.basename(n.o)}]`;
+        } else if (n.f) {
+            // 经 `add <file>.sc` 内联而来的成员：标注来源子单元文件名。
+            item.description = `${item.description}  [${path.basename(n.f)}]`;
         }
         if (n.l) {
             item.command = {
-                command: 'scAst.reveal', title: '跳转到源码', arguments: [n.l],
+                command: 'scAst.reveal', title: '跳转到源码', arguments: [n.l, n.f || null],
             };
         }
         return item;
@@ -259,10 +262,18 @@ function activate(context) {
         ast.refresh(activeScDoc());
     }));
 
-    // 命令：AST 节点跳转源码
-    context.subscriptions.push(vscode.commands.registerCommand('scAst.reveal', async (line) => {
-        if (!currentDoc) return;
-        const editor = await vscode.window.showTextDocument(currentDoc,
+    // 命令：AST 节点跳转源码（第二参 file 为经 `add .sc` 内联的来源子单元绝对路径）
+    context.subscriptions.push(vscode.commands.registerCommand('scAst.reveal', async (line, file) => {
+        let target = currentDoc;
+        if (file) {
+            try {
+                target = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+            } catch (e) {
+                target = currentDoc;
+            }
+        }
+        if (!target) return;
+        const editor = await vscode.window.showTextDocument(target,
             { viewColumn: vscode.ViewColumn.One, preserveFocus: false });
         const pos = new vscode.Position(line - 1, 0);
         editor.selection = new vscode.Selection(pos, pos);

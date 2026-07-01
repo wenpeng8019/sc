@@ -17,6 +17,7 @@
 #include <cctype>
 #include <filesystem>
 #include <functional>
+#include <list>
 #include <map>
 #include <set>
 #include <sstream>
@@ -330,6 +331,27 @@ struct CGen {
     std::ostringstream lambdaOut;                       // 提升后的 static 函数定义（在函数体前回填）
     std::unordered_map<const Expr*, std::string> lambdaNames;  // FncLit 节点 → 生成的函数名
     int lambdaSeq = 0;                                  // 函数名序号
+
+    // ---- inl 真内联块支撑 ----
+    // 函数体内命名代码块：定义处仅登记，调用点原地展开为
+    //   { 形参临时=实参; 块体; label:; }，共享外层栈帧。
+    //   void inl：裸 return→goto label；值 inl：return v→lhs=v; goto label。
+    struct InlineFrame {
+        std::string endLabel;   // 本层尾标签
+        std::string lhs;        // 值上下文的赋值目标（C 代码串；空=void/丢弃上下文）
+    };
+    std::unordered_map<std::string, const Stmt*> inlineDefs;  // 块名 → InlineDefS（函数域，emitFunc 清空）
+    std::vector<std::string> inlineActive;             // 正在展开的块名栈（递归检测）
+    std::vector<InlineFrame> inlineFrames;             // 展开中各层帧栈（return→goto/赋值）
+    int inlineSeq = 0;                                  // 尾标签唯一序号
+    // ---- 带值 inl 作子表达式：自动临时提升 ----
+    // 嵌套在更大表达式里的值 inl 调用先展开到自动临时 _inlN，原位以临时名引用。
+    // 用链表栈保存各层替换表（内联体展开时体内语句可再嵌套提升 → 需稳定地址的多层）。
+    std::list<std::unordered_map<const Expr*, std::string>> inlSubStack;      // 各层：inl 调用节点 → 临时名
+    std::vector<const std::unordered_map<const Expr*, std::string>*> inlSubPrev; // 各层压入前的 curInlSub
+    const std::unordered_map<const Expr*, std::string>* curInlSub = nullptr;  // 当前活动替换表
+    int inlTmpSeq = 0;                                  // 提升临时计数（全 TU 单调）
+    std::unordered_map<std::string, std::string> inlParamSub;  // 形参名 → 直接代入文本（快路径，无临时）
 
     // ---- 聚合体定义顺序无关支撑 ----
     // 按值包含要求被包含者「完整类型」先于包含者出现（前置声明仅满足指针引用）。
@@ -1429,6 +1451,19 @@ struct CGen {
                     return exprVType(*e.a, vt);
                 return false;
             case Expr::Call:
+                // inl 内联块调用 → 其返回类型（供无类型 var=inl 推断 + 提升临时 ctype）
+                if (e.a && e.a->kind == Expr::Ident) {
+                    auto iit = inlineDefs.find(e.a->text);
+                    if (iit != inlineDefs.end()) {
+                        const auto& rt = iit->second->decl->structCommon.type;
+                        if (rt && (rt->fat || !(rt->name.empty() && rt->ptr == 0))) {
+                            vt = {rt->name, rt->ptr, (int)rt->arrayDims.size()};
+                            vt.fat = rt->fat;
+                            return true;
+                        }
+                        return false;   // void inl：无返回类型
+                    }
+                }
                 // T() 伪调用结果类型：T&（使链式方法调用可推断；T(args) 同样为 T&）
                 if (const Decl* td = typeCallee(e)) {
                     vt = {td->name, 1, 0};
@@ -1568,6 +1603,7 @@ struct CGen {
                  std::unordered_map<const Expr*, std::string>& sub) {
         switch (e.kind) {
             case Expr::Call: {
+                if (asInlineCall(&e)) break;                 // inl 调用交由 inl 值提升处理，勿递归其子树
                 if (e.a) planSeq(*e.a, live, list, sub);     // 被调对象（o.m 的 o 等）
                 int seCount = 0;
                 for (auto& a : e.args) if (a && seqHasSideEffect(*a)) seCount++;
@@ -1639,6 +1675,117 @@ struct CGen {
         return true;
     }
     void seqHoistEnd() { curSeqSub = nullptr; seqSubMap.clear(); seqList.clear(); }
+
+    // ---------------- 带值 inl 作子表达式：自动临时提升 ----------------
+    struct InlHoist { const Expr* e; std::string name; };   // e=inl 调用节点，name=临时名
+
+    // 规划一个语句级表达式内的 inl 值提升：递归找出「无条件求值区」的 inl 调用，
+    // 按求值顺序（嵌套实参内的 inl 先登记）登记为自动临时（list + sub 替换表）。
+    // live=false 表示 &&/|| 右侧、三元 ?: 分支等条件求值区域——inl 不可外提 → 报错。
+    void planInl(const Expr& e, bool live,
+                 std::vector<InlHoist>& list,
+                 std::unordered_map<const Expr*, std::string>& sub) {
+        switch (e.kind) {
+            case Expr::Call: {
+                if (asInlineCall(&e)) {
+                    if (!live)
+                        throw CompileError{"inl 内联块 '" + e.a->text +
+                            "' 不能出现在条件求值位置（&&/|| 右侧、三元 ?: 分支）；"
+                            "请先用中间变量保存其值", e.line};
+                    // 实参内嵌套的 inl 由 emitInlineExpand 在展开块内部自行提升（勿在此递归，
+                    // 否则与展开块内提升重复发射）。
+                    std::string nm = "_inl" + std::to_string(inlTmpSeq++);
+                    list.push_back({ &e, nm });
+                    sub[&e] = nm;
+                    return;
+                }
+                if (e.a) planInl(*e.a, live, list, sub);
+                for (auto& a : e.args) if (a) planInl(*a, live, list, sub);
+                break;
+            }
+            case Expr::Binary:
+                if (e.a) planInl(*e.a, live, list, sub);
+                if (e.b) planInl(*e.b, live && e.op != "&&" && e.op != "||", list, sub);
+                break;
+            case Expr::Ternary:
+                if (e.a) planInl(*e.a, live, list, sub);
+                if (e.b) planInl(*e.b, false, list, sub);
+                if (e.c) planInl(*e.c, false, list, sub);
+                break;
+            case Expr::Unary: case Expr::PostUnary: case Expr::Cast: case Expr::Sizeof:
+                if (e.a) planInl(*e.a, live, list, sub);
+                break;
+            case Expr::Index: case Expr::Member:
+                if (e.a) planInl(*e.a, live, list, sub);
+                if (e.b) planInl(*e.b, live, list, sub);
+                break;
+            default: break;
+        }
+    }
+
+    // 为一组「无条件求值」表达式发射 inl 值提升临时（各 inl 调用先原地展开到 _inlN），
+    // 并压入替换层使后续 emitExpr 以临时名引用。返回 true=已压层（须配对 inlHoistEnd）。
+    bool inlHoistBegin(const std::vector<const Expr*>& exprs) {
+        if (inMacro) return false;                        // def 宏体须保持单逻辑行，不外提
+        std::vector<InlHoist> list;
+        std::unordered_map<const Expr*, std::string> sub;
+        for (auto* e : exprs) if (e) planInl(*e, true, list, sub);
+        if (list.empty()) return false;
+        inlSubStack.push_back(std::move(sub));
+        inlSubPrev.push_back(curInlSub);
+        curInlSub = &inlSubStack.back();                  // 展开各 inl 时，其嵌套 inl 实参可被替换
+        for (auto& h : list) {
+            const Stmt* def = asInlineCall(h.e);
+            std::string ct = inlRetCType(*def);
+            indent();
+            out << ct;
+            if (!ct.empty() && ct.back() != '*') out << ' ';
+            out << h.name << ";\n";                        // 先声明临时（值 inl 必有返回类型）
+            emitInlineExpand(*def, h.e->args, h.e->a->text, h.name);
+        }
+        return true;
+    }
+    void inlHoistEnd() {
+        curInlSub = inlSubPrev.back();
+        inlSubPrev.pop_back();
+        inlSubStack.pop_back();
+    }
+
+    // 决定语句 s 的哪些「无条件求值」表达式须做 inl 值提升，并发射临时。
+    // 快路径（整体 RHS/init 是 inl 调用、裸 inl 调用）不提升——各 case 直接原地展开。
+    bool beginInlHoistFor(const Stmt& s) {
+        switch (s.kind) {
+            case Stmt::ExprS: {
+                if (!s.expr) return false;
+                if (asInlineCall(s.expr.get())) return false;         // 裸 name(args) 快路径
+                if (s.expr->kind == Expr::Binary && s.expr->op == "=" &&
+                    asInlineCall(s.expr->b.get())) return false;      // lhs = name(args) 快路径
+                return inlHoistBegin({ s.expr.get() });
+            }
+            case Stmt::ReturnS:
+                if (!s.expr) return false;
+                return inlHoistBegin({ s.expr.get() });
+            case Stmt::VarS: case Stmt::LetS: case Stmt::TlsS: {
+                if (s.decls.size() == 1 && s.decls[0].init &&
+                    asInlineCall(s.decls[0].init.get())) return false; // 单声明整体 inl 初值快路径
+                std::vector<const Expr*> es;
+                for (auto& f : s.decls) if (f.init) es.push_back(f.init.get());
+                return es.empty() ? false : inlHoistBegin(es);
+            }
+            case Stmt::PrintS: {
+                std::vector<const Expr*> es;
+                for (auto& a : s.printArgs) if (a) es.push_back(a.get());
+                return es.empty() ? false : inlHoistBegin(es);
+            }
+            case Stmt::AssertS: {
+                std::vector<const Expr*> es;
+                if (s.expr) es.push_back(s.expr.get());
+                if (s.assertMsg) es.push_back(s.assertMsg.get());
+                return es.empty() ? false : inlHoistBegin(es);
+            }
+            default: return false;
+        }
+    }
 
     // 取址 &access 的「最近胖 hop」：从 access 的 base 链向内 walk，首个胖子表达式
     // 即该子成员所住堆对象的 hop（其 tar 即子成员共享的 in 计数）。无胖 base 返回 nullptr。
@@ -1815,6 +1962,11 @@ struct CGen {
 
     // ---------------- 表达式 ----------------
     void emitExpr(const Expr& e, bool top = false) {
+        // inl 值提升替换：嵌套值 inl 调用已先行展开到自动临时，原位以临时名引用
+        if (curInlSub) {
+            auto it = curInlSub->find(&e);
+            if (it != curInlSub->end()) { out << it->second; return; }
+        }
         // 顺序化替换：被外提为有序临时的子表达式，原位以临时名引用（值已先行算好）
         if (curSeqSub) {
             auto it = curSeqSub->find(&e);
@@ -1836,6 +1988,11 @@ struct CGen {
                 out << e.text;
                 break;
             case Expr::Ident:
+                // inl 形参快路径代入：形参名直接替换为实参文本（字面值/安全裸变量，无临时）
+                if (!inlParamSub.empty()) {
+                    auto pit = inlParamSub.find(e.text);
+                    if (pit != inlParamSub.end()) { out << pit->second; break; }
+                }
                 if (e.cBridge) { out << e.text; break; }    // C 桥接 ::name：原样 emit C 符号
                 if (e.text == "this") out << "_this";      // 方法内接收者
                 else if (e.text == "$") out << "_sc_ret";  // ret 调用语法糖结果变量（$ 非 C99 合法名，映射）
@@ -1899,6 +2056,13 @@ struct CGen {
                 if (!top) out << ")";
                 break;
             case Expr::Call: {
+                // inl 内联块调用未被值提升即到达此处 = 非法位置（循环/if 条件、
+                // &&/|| 右侧、三元 ?: 分支等条件求值区域）。
+                if (asInlineCall(&e))
+                    throw CompileError{"inl 内联块 '" + e.a->text +
+                        "' 只能出现在无条件求值的位置（赋值右侧 / return / var|let 初始化 / "
+                        "print|assert 实参 / 调用实参等），不能用于循环或 if 条件、&&/|| 右侧、"
+                        "三元 ?: 分支；请先用中间变量保存其值", e.line};
                 // C 桥接调用 ::name(args)：原样 emit C 函数/宏调用，跳过所有 sc 调用糖
                 if (e.a && e.a->kind == Expr::Ident && e.a->cBridge) {
                     out << e.a->text << "(";
@@ -4230,6 +4394,117 @@ struct CGen {
         out << ";\n";
     }
 
+    // 若表达式是「已登记 inl 块名的调用」，返回其 InlineDefS，否则 nullptr
+    const Stmt* asInlineCall(const Expr* e) const {
+        if (e && e->kind == Expr::Call && e->a && e->a->kind == Expr::Ident) {
+            auto it = inlineDefs.find(e->a->text);
+            if (it != inlineDefs.end()) return it->second;
+        }
+        return nullptr;
+    }
+
+    // inl 块返回类型的 C 类型串（值 inl 用于提升临时声明；void inl 返回空串）
+    std::string inlRetCType(const Stmt& def) const {
+        const auto& rt = def.decl->structCommon.type;
+        if (!rt || (rt->name.empty() && rt->ptr == 0 && !rt->fat)) return "";
+        VType vt{rt->name, rt->ptr, (int)rt->arrayDims.size()};
+        vt.fat = rt->fat;
+        return cTypeOf(vt.name, vt.ptr);
+    }
+
+    // 把表达式渲染为 C 代码串（用于捕获 inl 值上下文的赋值目标 lhs）
+    std::string renderExprStr(const Expr& e) {
+        std::ostringstream tmp;
+        std::swap(tmp, out);
+        emitExpr(e, true);
+        std::swap(tmp, out);
+        return tmp.str();
+    }
+
+    // inl 真内联块展开：调用点原地展开为 { 形参临时=实参; 块体; 尾标签:; }
+    //   · 形参在展开处求值一次到同名块级临时（绑定一次，非文本多次求值）；
+    //   · 块体经 emitStmts 输出，共享外层栈帧（前置局部可见可改）；
+    //   · void 上下文（lhs 空）：块体裸 return → goto 尾标签（早退本块）；
+    //   · 值上下文（lhs 非空）：块体 return v → lhs=v; goto 尾标签；
+    //   · 递归（直接/互相）经 inlineActive 栈检测报错（语义层亦有静态检测）。
+    void emitInlineExpand(const Stmt& def, const std::vector<ExprPtr>& args,
+                          const std::string& name, const std::string& lhs) {
+        const auto& params = def.decl->structCommon.fields;
+        for (auto& a : inlineActive)
+            if (a == name)
+                throw CompileError{"inl 递归展开：内联块 '" + name +
+                                   "' 直接或间接调用自身（内联块不可递归）", def.line};
+        if (args.size() != params.size())
+            throw CompileError{"inl 块 '" + name + "' 需 " +
+                               std::to_string(params.size()) + " 个实参，得到 " +
+                               std::to_string(args.size()), def.line};
+
+        std::string endLabel = "__sc_inl_end_" + std::to_string(inlineSeq++);
+
+        indent(); out << "{\n";
+        depth++;
+        // 先提升实参内嵌套的 inl 调用（其临时须先于形参绑定发射），使形参绑定处可替换。
+        std::vector<const Expr*> argPtrs;
+        for (auto& a : args) if (a) argPtrs.push_back(a.get());
+        bool argHoist = inlHoistBegin(argPtrs);
+        // 形参绑定：
+        //   · 字面值实参 → 直接文本代入（快路径，无临时；块体引用形参处替换为该文本）；
+        //   · 其余实参   → 同名块级临时 T p = 实参（在此求值一次，绑定一次）。
+        //  代入表在块体发射期间生效（保存/恢复外层，支持内联体内再嵌套展开）。
+        std::unordered_map<std::string, std::string> newParamSub;
+        for (size_t i = 0; i < params.size(); i++) {
+            const Field& p = params[i];
+            const Expr& a = *args[i];
+            if (inlArgLiteral(a)) {
+                newParamSub[p.name] = renderExprStr(a);   // 以当前(外层)代入表渲染实参文本
+            } else {
+                indent();
+                emitDeclarator(p);
+                out << " = ";
+                emitExpr(a, true);
+                out << ";\n";
+                regVar(p);                      // 登记，使块体引用形参可解析
+            }
+        }
+        if (argHoist) inlHoistEnd();            // 实参绑定完毕，撤实参提升替换层
+        // 展开块体：入展开上下文（帧栈 + 递归栈 + 形参代入表），emitStmts 自管其内层作用域清理
+        auto savedParamSub = std::move(inlParamSub);
+        inlParamSub = std::move(newParamSub);
+        inlineFrames.push_back({endLabel, lhs});
+        inlineActive.push_back(name);
+        emitStmts(def.decl->body);
+        inlineActive.pop_back();
+        inlineFrames.pop_back();
+        inlParamSub = std::move(savedParamSub);
+        // 尾标签：return 早退目标（label 后接空语句，兼容其后无语句）
+        indent(); out << endLabel << ":;\n";
+        depth--;
+        indent(); out << "}\n";
+    }
+
+    // 实参是否字面值（形参绑定快路径：直接文本代入，无需临时）
+    static bool inlArgLiteral(const Expr& e) {
+        return e.kind == Expr::IntLit || e.kind == Expr::FloatLit ||
+               e.kind == Expr::CharLit || e.kind == Expr::StrLit;
+    }
+
+    // var/let x = name(args)：若初值是 inl 值调用，先声明 x（无初值），再展开块把
+    //   return v 赋给 x。要求 inl 值调用独占单声明（语义层已强制）。返回 true=已处理。
+    bool emitInlineInitVar(const std::vector<Field>& decls) {
+        if (decls.size() != 1) return false;
+        const Field& f = decls[0];
+        const Stmt* def = f.init ? asInlineCall(f.init.get()) : nullptr;
+        if (!def) return false;
+        // 先声明目标变量（非 const，便于块内赋值；sc let 的不可变性由语义层保证）
+        indent();
+        emitDeclarator(f);
+        out << ";\n";
+        regVar(f);
+        // 值上下文展开：块内 return v → f.name = v; goto label
+        emitInlineExpand(*def, f.init->args, f.init->a->text, f.name);
+        return true;
+    }
+
     void emitStmt(const Stmt& s) {
         // 行号映射：指定了源文件时输出 #line 指令（调试器断点/单步/堆栈
         // 直接落在 .sc 源码）；否则输出注释供人工对照
@@ -4241,9 +4516,35 @@ struct CGen {
                 out << "/* line " << s.line << " */\n";
             }
         }
-        
+
+        // inl 值提升：无条件求值位置内嵌套的值 inl 调用先展开到自动临时 _inlN，
+        // 原位以临时名参与外层表达式。作用域覆盖整个语句发射（RAII 保证各 break 分支亦清理）。
+        struct InlHoistScope {
+            CGen* cg; bool active;
+            ~InlHoistScope() { if (active) cg->inlHoistEnd(); }
+        } _ihs{ this, beginInlHoistFor(s) };
+        (void)_ihs;
+
         switch (s.kind) {
             case Stmt::ExprS:
+                // inl 真内联块调用：
+                //   · 裸 name(args)          → void 上下文展开（lhs 空）
+                //   · lhs = name(args)       → 值上下文展开（return v → lhs=v; goto）
+                if (s.expr) {
+                    if (const Stmt* def = asInlineCall(s.expr.get())) {
+                        emitInlineExpand(*def, s.expr->args, s.expr->a->text, "");
+                        break;
+                    }
+                    if (s.expr->kind == Expr::Binary && s.expr->op == "=") {
+                        if (const Stmt* def = asInlineCall(s.expr->b.get())) {
+                            std::string lhs = renderExprStr(*s.expr->a);
+                            emitInlineExpand(*def, s.expr->b->args,
+                                             s.expr->b->a->text, lhs);
+                            break;
+                        }
+                    }
+                }
+
                 // com 通讯链（同步形态）：com << v（发）/ com >> v（收）→ 直接 write/read
                 if (s.expr && s.expr->kind == Expr::Binary &&
                     (s.expr->op == "<<" || s.expr->op == ">>")) {
@@ -4301,10 +4602,30 @@ struct CGen {
                     if (seq) seqHoistEnd();
                 }
                 break;
-            case Stmt::VarS: emitVarDecls(s.decls, false, inMacro && !s.exported, false, inMacro && s.exported); break;
-            case Stmt::LetS: emitVarDecls(s.decls, true, inMacro && !s.exported, false, inMacro && s.exported); break;
+            case Stmt::VarS:
+                if (emitInlineInitVar(s.decls)) break;
+                emitVarDecls(s.decls, false, inMacro && !s.exported, false, inMacro && s.exported); break;
+            case Stmt::LetS:
+                if (emitInlineInitVar(s.decls)) break;
+                emitVarDecls(s.decls, true, inMacro && !s.exported, false, inMacro && s.exported); break;
             case Stmt::TlsS: emitVarDecls(s.decls, false, false, true); break;
             case Stmt::ReturnS:
+                // inl 内联块展开中：return 早退本块（不返回外层函数）。
+                //   · void 上下文（帧 lhs 空）：裸 return → goto 尾标签；
+                //   · 值上下文（帧 lhs 非空）：return v → lhs=v; goto 尾标签。
+                //   语义层已保证 void inl 只裸 return、值 inl 必带值 return。
+                if (!inlineFrames.empty()) {
+                    const auto& fr = inlineFrames.back();
+                    indent();
+                    if (s.expr && !fr.lhs.empty()) {
+                        out << fr.lhs << " = ";
+                        emitExpr(*s.expr, true);
+                        out << "; goto " << fr.endLabel << ";\n";
+                    } else {
+                        out << "goto " << fr.endLabel << ";\n";
+                    }
+                    break;
+                }
                 if (curRpc) {
                     indent();
                     // rpc 实际函数：返回值写入结构体首个默认成员 _
@@ -4546,6 +4867,11 @@ struct CGen {
                 indent();
                 if (s.expr) emitExpr(*s.expr);
                 out << "\n";
+                break;
+            case Stmt::InlineDefS:
+                // inl 真内联块定义：仅登记进函数域块表，定义处不产码；调用点 name(args)
+                //   由 ExprS 分支拦截并原地展开（emitInlineExpand）。
+                inlineDefs[s.text] = &s;
                 break;
             case Stmt::FinalS:
                 // final 钩子：登记入当前作用域，退出点（emitScopeCleanupAt phase0）发出 body。
@@ -5448,6 +5774,7 @@ struct CGen {
         fnVarsL.clear();
         varDimsL.clear();
         projVarsL.clear();
+        inlineDefs.clear();     // inl 内联块为函数域，跨函数不可见
         inFunc = true;
         retDollarDeclared = false;
         const Decl* sig = &d;
@@ -5650,9 +5977,11 @@ struct CGen {
         auto savedDropScopes  = std::move(dropScopes);
         auto savedAutoFreeScopes = std::move(autoFreeScopes);
         auto savedAutoFreeVars   = std::move(autoFreeVars);
+        auto savedInlineDefs = std::move(inlineDefs);        // inl 块为外层函数域，lambda 不继承
         dropScopes.clear();
         autoFreeScopes.clear();
         autoFreeVars.clear();
+        inlineDefs.clear();
         scanManualDrops(e.fncBody);
 
         Decl sigDecl;                                   // 仅承载返回类型给 emitRetType
@@ -5684,6 +6013,7 @@ struct CGen {
         dropScopes     = std::move(savedDropScopes);
         autoFreeScopes = std::move(savedAutoFreeScopes);
         autoFreeVars   = std::move(savedAutoFreeVars);
+        inlineDefs     = std::move(savedInlineDefs);
     }
 
     // ---------------- rpc：伪形参函数糖 ----------------

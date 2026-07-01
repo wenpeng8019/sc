@@ -188,6 +188,7 @@ TEST_RUN=(
     tests/cases/crypto_test.sc
     tests/cases/codec_test.sc
     tests/cases/img_test.sc
+    tests/cases/inl_test.sc
     tests/cases/rsa_proxy_test.sc
     tests/cases/ssl_test.sc
     tests/cases/ws_test.sc

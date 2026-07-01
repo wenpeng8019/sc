@@ -147,6 +147,11 @@ struct SGen {
             case Stmt::MixS:
                 ind(); out << "mix " << (s.expr ? exprToStr(*s.expr) : "") << "\n";
                 break;
+            case Stmt::InlineDefS:
+                // inl 真内联块：inl name[: ret, p:t...] + 缩进块体（签名同 fnc）
+                ind(); out << "inl " << s.decl->name << fncItemsK(*s.decl) << "\n";
+                depth++; emitStmts(s.decl->body); depth--;
+                break;
             case Stmt::FinalS:
                 ind(); out << "final\n";
                 depth++; emitStmts(s.body); depth--;

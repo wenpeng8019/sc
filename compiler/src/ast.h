@@ -312,6 +312,15 @@ struct Stmt {
 
         DeclS,      // 内嵌类型声明     函数体内用 def 定义局部类型（不常见但允许）
         MixS,       // 函数体内 mix 展开  mix name(args)；调用表达式存 expr（Expr::Call）
+        InlineDefS, // 函数体内 inl 定义  inl name: [ret,] p:t, ...（真内联块）
+                    //                > text=块名；decl=签名（DeclPtr，kind=FuncD，
+                    //                  structCommon.type=返回类型/空=void，structCommon.fields=形参，
+                    //                  body=块体语句）
+                    //                > 定义处不产码，仅登记；调用点原地展开为
+                    //                  { 形参临时=实参; body; label:; }。
+                    //                > void inl：当语句用，裸 return→goto label；
+                    //                  值 inl（有返回类型）：仅作 lhs=name() / var|let x=name() 右侧，
+                    //                  每个 return v → lhs=v; goto label
         FinalS,     // final 域退出钩子  final \n body...（本作用域每个退出点运行 body，
                     //                先于自动胖边拆解/断言；body 存于 body 字段）
         RunS,       // run 线程语句    run[<opt:v,...>] rpc调用 [, thread出参地址]

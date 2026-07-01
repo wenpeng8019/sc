@@ -350,6 +350,12 @@ struct Checker {
     // 此时整体关闭未定义函数/标识符检查（宁可漏报不可误报）。实参个数/类型、成员检查不受影响。
     bool lenientCalls = false;
 
+    // ---- inl 真内联块（函数域）----
+    // 定义处登记名→InlineDefS；调用点仅允许作独立语句(void inl)或
+    //   lhs=name()/var|let x=name() 右侧(值 inl)。每函数体开头清空。
+    std::unordered_map<std::string, const Stmt*> curInlineDefs;
+    bool curInlValueBody = false;   // 当前正在检查的 inl 体是否为值 inl（禁止裸 return）
+
     explicit Checker(const Program& p) : prog(p) {}
 
     [[noreturn]] void err(int line, const std::string& msg) const {
@@ -774,6 +780,13 @@ struct Checker {
                 // 普通函数调用：直接 name(...) 形态 → 未定义/实参检查
                 if (e.a->kind == Expr::Ident) {
                     const std::string& nm = e.a->text;
+                    // inl 内联块调用作为带类型子表达式：校验实参并返回其返回类型。
+                    //   值 inl 返回其返回类型；void inl 返回内部 "v"（用于值位置时由
+                    //   后续 void 检查拦截）。位置合法性（须无条件求值）在 codegen 拦截。
+                    if (auto iit = curInlineDefs.find(nm); iit != curInlineDefs.end()) {
+                        checkInlineArgs(*iit->second, e, locals);
+                        return inlRetType(*iit->second);
+                    }
                     const bool known = isKnownCallable(nm, locals);
                     if (!known && !lenientCalls)
                         err(e.line, "未定义的函数 '" + nm + "'" + hintCallable(nm, locals));
@@ -1232,6 +1245,47 @@ struct Checker {
         return t;
     }
 
+    // ---- inl 真内联块辅助 ----
+    // 若表达式是「已登记 inl 块名的调用」，返回其 InlineDefS，否则 nullptr
+    const Stmt* asInlineCallSem(const Expr* e) const {
+        if (e && e->kind == Expr::Call && e->a && e->a->kind == Expr::Ident) {
+            auto it = curInlineDefs.find(e->a->text);
+            if (it != curInlineDefs.end()) return it->second;
+        }
+        return nullptr;
+    }
+
+    // inl 块的返回类型（无声明 = void 内部标记 "v"）
+    Ty inlRetType(const Stmt& def) const {
+        const auto& rt = def.decl->structCommon.type;
+        if (!rt) return Ty{"v", 0, 0, true, false};
+        Ty t = fromTypeRef(*rt);
+        if (!t.valid || (t.name.empty() && t.ptr == 0 && t.arr == 0 && !t.fat))
+            return Ty{"v", 0, 0, true, false};
+        return t;
+    }
+
+    // inl 块是否有返回值（值 inl）
+    bool inlHasRet(const Stmt& def) const {
+        Ty t = inlRetType(def);
+        return !(t.name == "v" && t.ptr == 0 && t.arr == 0);
+    }
+
+    // 校验 inl 调用实参：个数匹配 + 逐个推断（触发内部表达式检查）+ 类型兼容
+    void checkInlineArgs(const Stmt& def, const Expr& call,
+                         const std::unordered_map<std::string, Ty>& locals) {
+        const auto& params = def.decl->structCommon.fields;
+        if (call.args.size() != params.size())
+            err(call.line, "inl 内联块 '" + def.decl->name + "' 需 " +
+                std::to_string(params.size()) + " 个实参，得到 " +
+                std::to_string(call.args.size()));
+        for (size_t i = 0; i < call.args.size(); i++) {
+            Ty at = inferExpr(*call.args[i], locals, call.line);
+            if (i < params.size())
+                checkAssignable(fromTypeRef(params[i].type), at, call.line);
+        }
+    }
+
     // ---- 语句遍历 ----
     // 对一条语句及其子语句做语义检查。locals 传递当前作用域的局部变量表，
     // if/while/for/case 的分支在 locals 副本上检查（不影响外层）。
@@ -1241,6 +1295,22 @@ struct Checker {
         switch (s.kind) {
             // -- 表达式语句：赋值时检查逃逸（禁止局部地址泄露到全局存储）--------
             case Stmt::ExprS:
+                // inl 真内联块调用（值上下文快路径，先于普通推断拦截）：
+                //   · lhs = name(args)   → 必须是值 inl，返回类型须可赋给 lhs
+                //   裸 name(args)（丢弃返回值）与嵌套子表达式经通用 inferExpr 处理。
+                if (s.expr) {
+                    if (s.expr->kind == Expr::Binary && s.expr->op == "=") {
+                        if (const Stmt* def = asInlineCallSem(s.expr->b.get())) {
+                            if (!inlHasRet(*def))
+                                err(s.line, "inl 内联块 '" + def->decl->name +
+                                    "' 无返回类型，不能用作值（请作独立语句调用）");
+                            Ty lhs = inferExpr(*s.expr->a, locals, s.line);
+                            checkInlineArgs(*def, *s.expr->b, locals);
+                            checkAssignable(lhs, inlRetType(*def), s.line);
+                            break;
+                        }
+                    }
+                }
                 if (s.expr && s.expr->kind == Expr::Binary && isAssignOp(s.expr->op)) {
                     if (containsAddrOfLocal(*s.expr->b, locals) &&
                         rootedAtGlobal(*s.expr->a, locals)) {
@@ -1262,10 +1332,34 @@ struct Checker {
             case Stmt::VarS:
             case Stmt::LetS:
             case Stmt::TlsS:
+                // var/let x = name(args)：值 inl 初始化（单声明独占）
+                if ((s.kind == Stmt::VarS || s.kind == Stmt::LetS)
+                    && s.decls.size() == 1 && s.decls[0].init
+                    && asInlineCallSem(s.decls[0].init.get())) {
+                    const Field& f = s.decls[0];
+                    const Stmt* def = asInlineCallSem(f.init.get());
+                    if (!inlHasRet(*def))
+                        err(s.line, "inl 内联块 '" + def->decl->name +
+                            "' 无返回类型，不能用作 var/let 初值");
+                    checkInlineArgs(*def, *f.init, locals);
+                    Ty rt = inlRetType(*def);
+                    const bool declared = f.type.hasInline || !f.type.name.empty() ||
+                                          f.type.ptr > 0 || !f.type.arrayDims.empty() ||
+                                          f.type.fat ||
+                                          f.type.fnKind != TypeRef::FncKind::None;
+                    Ty vt = declared ? fromTypeRef(f.type) : rt;
+                    if (declared) checkAssignable(vt, rt, s.line);
+                    vt.immutable = (s.kind == Stmt::LetS);
+                    locals[f.name] = vt;
+                    break;
+                }
                 checkVarDecls(s.decls, locals, s.kind == Stmt::LetS);
                 break;
             // -- return：检查返回类型兼容 + 禁止返回局部地址 --------------------
             case Stmt::ReturnS:
+                // 值 inl 内联块体内：return 必须带返回值（裸 return 报错）
+                if (curInlValueBody && !s.expr)
+                    err(s.line, "有返回类型的 inl 内联块内 return 必须带返回值");
                 if (s.expr) {
                     if (retTy.valid && retTy.name == "v" && retTy.ptr == 0)
                         err(s.line, "无返回值函数不能 return 表达式（返回类型省略即 void）");
@@ -1416,6 +1510,19 @@ struct Checker {
             // -- mix（宏展开）：实参为宏形参/C 名，无 sc 类型，跳过检查 -----------
             case Stmt::MixS:
                 break;
+            // -- inl 真内联块定义：登记名，检查体（定义点作用域 + 形参，共享栈帧）--
+            case Stmt::InlineDefS: {
+                curInlineDefs[s.decl->name] = &s;   // 先登记（自引用 → codegen 递归报错）
+                auto a = locals;                    // 共享外层帧：定义点前置局部可见
+                for (auto& p : s.decl->structCommon.fields)
+                    a[p.name] = fromTypeRef(p.type);
+                Ty ret = inlRetType(s);
+                bool savedVB = curInlValueBody;
+                curInlValueBody = inlHasRet(s);
+                for (auto& b : s.decl->body) checkStmt(*b, a, ret);
+                curInlValueBody = savedVB;
+                break;
+            }
             // -- final 域退出钩子：体在独立作用域检查 ---------------------------
             case Stmt::FinalS: {
                 auto a = locals;
@@ -1716,6 +1823,7 @@ struct Checker {
             }
 
             Ty ret = funcRetType(*d);
+            curInlineDefs.clear();          // inl 内联块为函数域，跨函数不可见
             for (auto& s : d->body) checkStmt(*s, locals, ret);
         }
 
@@ -1724,6 +1832,7 @@ struct Checker {
             if (d->kind != Decl::TestD) continue;
             std::unordered_map<std::string, Ty> locals;
             const Ty voidRet{"v", 0, 0, true, false};
+            curInlineDefs.clear();
             for (auto& s : d->body) checkStmt(*s, locals, voidRet);
         }
     }

@@ -1,0 +1,9 @@
+ok 1 - void inl：共享帧 + 裸 return 早退
+ok 2 - 值 inl：多 return 早退，赋值/初始化两种上下文
+ok 3 - 值 inl：赋值到下标左值
+ok 4 - 形参绑定一次：实参只求值一次
+ok 5 - 值 inl 作子表达式：赋值/初始化/实参/嵌套 inl
+ok 6 - 值 inl 作 return 子表达式 + 丢弃
+ok 7 - assert 实参内嵌 inl 调用
+1..7
+==> 测试通过 7，失败 0，跳过 0

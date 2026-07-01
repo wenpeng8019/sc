@@ -203,6 +203,15 @@ std::string stmtNode(const Stmt& s) {
                         (s.assertMsg ? ", " + exprToStr(*s.assertMsg) : ""), s.line);
         case Stmt::MixS:
             return node("mix", "", s.expr ? exprToStr(*s.expr) : "", s.line);
+        case Stmt::InlineDefS: {
+            // inl 真内联块：形参/返回类型同 fnc，子节点含形参与块体
+            std::vector<std::string> c;
+            for (auto& f : s.decl->structCommon.fields)
+                c.push_back(node("param", f.name, fieldDetail(f, false), f.line));
+            for (auto& b : s.decl->body) c.push_back(stmtNode(*b));
+            std::string ret = typeToStr(s.decl->structCommon.type);
+            return node("inl", s.decl->name, ret.empty() ? "" : ": " + ret, s.line, c);
+        }
     }
     return "{}";
 }
