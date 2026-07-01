@@ -1,0 +1,10 @@
+ok 1 - BMP 24 位 round-trip（5x4 RGB，含行对齐 + 朝向 + bmp_shape）
+ok 2 - BMP 32 位 round-trip（3x2 RGBA，BITFIELDS + alpha 通道）
+ok 3 - BMP alpha_mode：24 位强制 RGBA（alpha 补 255）
+ok 4 - BMP alpha_mode：32 位强制 RGB（丢弃 alpha）
+ok 5 - BMP flip_mode：flip_mode<0 归一自底向上（相对自顶存储翻转）
+ok 6 - BMP invert_mode=2：自底向上存储 + flip_mode=1 归一 round-trip 一致
+ok 7 - BMP 读：手工构造 8 位调色板（2x2，自底向上）
+ok 8 - BMP 读：手工构造 16 位 RGB555（2x1）
+1..8
+==> 测试通过 8，失败 0，跳过 0

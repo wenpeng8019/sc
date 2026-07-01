@@ -1,0 +1,6 @@
+ok 1 - JPEG RGB round-trip（32x24，jpg_shape + 容差）
+ok 2 - JPEG 灰度 round-trip（24x16，channels=1）
+ok 3 - JPEG flip 垂直翻转 round-trip（16x16）
+ok 4 - JPEG req_comp=1 从彩色取灰度
+1..4
+==> 测试通过 4，失败 0，跳过 0

@@ -1,0 +1,8 @@
+ok 1 - PNG RGB 8 位 round-trip（6x5，含 png_shape）
+ok 2 - PNG RGBA 8 位 round-trip（4x4，alpha 保留）
+ok 3 - PNG 灰度 8 位 round-trip（8x3，channels=1）
+ok 4 - PNG 灰度+A 8 位 round-trip（5x2，channels=2）
+ok 5 - PNG req_comp 强制通道（写 RGB，读成 RGBA，alpha=255）
+ok 6 - PNG flip_mode 读朝向翻转（写自顶向下，读自底向上）
+1..6
+==> 测试通过 6，失败 0，跳过 0

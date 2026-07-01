@@ -187,8 +187,15 @@ TEST_RUN=(
     examples/test_demo.sc
     tests/cases/crypto_test.sc
     tests/cases/codec_test.sc
-    tests/cases/img_test.sc
+    tests/cases/zstream_test.sc
+    tests/cases/jstream_test.sc
+    tests/cases/bmp_test.sc
+    tests/cases/tga_test.sc
+    tests/cases/png_test.sc
+    tests/cases/jpg_test.sc
+    tests/cases/add_sc_test.sc
     tests/cases/inl_test.sc
+    tests/cases/io_seek_test.sc
     tests/cases/rsa_proxy_test.sc
     tests/cases/ssl_test.sc
     tests/cases/ws_test.sc

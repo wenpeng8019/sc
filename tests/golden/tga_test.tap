@@ -1,0 +1,16 @@
+ok 1 - TGA 24 位 round-trip（5x4 RGB，RLE + tga_shape）
+ok 2 - TGA 32 位 round-trip（3x2 RGBA）
+ok 3 - TGA RLE 行程包路径（8x3 RGB，行内含长重复）
+ok 4 - TGA 灰度 MONO 8 位（type 3，未压缩 2x2）
+ok 5 - TGA 灰度 MONO 16 位（type 3，含 alpha，2x1）
+ok 6 - TGA 索引色 COLORMAP（8 位索引 + 24 位调色板，2x2）
+ok 7 - TGA 16 位真彩色（5-5-5 + alpha 位，1x2）
+ok 8 - TGA 灰度 RLE（type 3|0x08=11，4x1，行程+字面）
+ok 9 - TGA 空图（type 0，2x2，全 0）
+ok 10 - TGA 未压缩写 tga_write(rle=0)（4x3 RGB round-trip + 类型字节=2）
+ok 11 - TGA 自底向上存储写 tga_write(invert_mode=2)（3x3 RGB round-trip + desc bit5=0）
+ok 12 - TGA tga_read 强制 RGBA（24 位源 alpha_mode>0 → 补不透明 alpha）
+ok 13 - TGA tga_read 强制 RGB（32 位源 alpha_mode<0 → 丢弃 alpha）
+ok 14 - TGA tga_read 输出自底向上（flip_mode<0 → 行序翻转）
+1..14
+==> 测试通过 14，失败 0，跳过 0
