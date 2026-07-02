@@ -61,38 +61,38 @@ fnc sq: i4, x: i4
 
 fnc my_printf: fmt: char&, ...
     var ap: va_list
-    va_start(ap, fmt)
-    vprintf(fmt, ap)
-    va_end(ap)
+    ::va_start(ap, fmt)
+    ::vprintf(fmt, ap)
+    ::va_end(ap)
 
 fnc main: i4
-    printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
+    ::printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
     var r: rect
     (r.lt.x = 0) , (r.lt.y = 0)
     (r.rb.x = 10) , (r.rb.y = 5)
-    printf("area = %d\n", area(&r))
-    printf("add1(3,4) = %d\n", add1(3, 4))
-    printf("add2(3,4) = %d\n", add2(3, 4))
+    ::printf("area = %d\n", area(&r))
+    ::printf("add1(3,4) = %d\n", add1(3, 4))
+    ::printf("add2(3,4) = %d\n", add2(3, 4))
     var cb: fnc: i4, x: i4
     cb = sq
-    printf("cb(7) = %d\n", cb(7))
+    ::printf("cb(7) = %d\n", cb(7))
     var o: obj
     o.abc = 10
     if o.func1 == nil
-        printf("func1 is nil\n")
+        ::printf("func1 is nil\n")
     o.func1 = obj_add
-    printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
-    printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
+    ::printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
+    ::printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
     if o.scale == nil
-        printf("scale is nil\n")
+        ::printf("scale is nil\n")
     o.scale = obj_scale
-    printf("o.scale(3) = %d\n", o.scale(3))
+    ::printf("o.scale(3) = %d\n", o.scale(3))
     var po: obj& = &o
-    printf("po->scale(4) = %d\n", po->scale(4))
+    ::printf("po->scale(4) = %d\n", po->scale(4))
     my_printf("sc says: %s %d\n", "hello", 42)
-    printf("add3(7) = %d\n", add3(7))
-    printf("add3(1,2) = %d\n", add3(1, 2))
-    printf("desc() = %d\n", desc())
-    printf("o.func1(&o) = %d\n", o.func1(&o))
-    printf("cb() = %d\n", cb())
+    ::printf("add3(7) = %d\n", add3(7))
+    ::printf("add3(1,2) = %d\n", add3(1, 2))
+    ::printf("desc() = %d\n", desc())
+    ::printf("o.func1(&o) = %d\n", o.func1(&o))
+    ::printf("cb() = %d\n", cb())
     return 0

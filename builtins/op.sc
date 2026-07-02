@@ -501,22 +501,22 @@ def operand: {
 #   即使合成结果与原值相等也强制传播（对齐 c_prototype 的 C_modified；set 默认仅在新值≠原值时传播）。
 @fnc tok_modified:: *
 
-# combine 上下文（this）：form 候选 combine 体的唯一形参 __sctok_in&，成员均 @（自描述胖指针）。
+# combine 上下文（this）：form 候选 combine 体的唯一形参 tok_in&，成员均 @（自描述胖指针）。
 #   sender —— 发送者（当前恒空 @，预留）；base —— 当前值；input —— 本次输入；tag —— set 随附标签。
 #   combine 体内用 this->base / this->input / this->sender / this->tag 取上下文，return 新值（@）。
-@def __sctok_in: {
+@def tok_in: {
     sender: *
     base: *
     input: *
     tag: i4
 }
 
-# follow 上下文（this）：dep follow 体的唯一形参 __scdep_in&。
+# follow 上下文（this）：dep follow 体的唯一形参 dep_in&。
 #   toks —— 依赖项句柄数组（token&&，下标取第 i 项 token&）；count —— 依赖项数；
-#   active —— 本次触发动作码（负=门事件，>=0 为或门变更项下标；-4=back 反向遍历）；
+#   active —— 本次触发动作码（负＝门事件，>=0 为或门变更项下标；-4＝back 反向遍历）；
 #   ctx —— 注册时透传的关系私有上下文（dep 边状态；无则空 &）。
 #   a:"id" 局部名糖由编译器注入 `var a: token& = this->toks[i]`。
-@def __scdep_in: {
+@def dep_in: {
     toks: token&&
     count: i4
     active: i4

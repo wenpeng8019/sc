@@ -1,18 +1,18 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct Point Point;
+typedef struct sc_Point sc_Point;
 
-#define def_max(T, N) \
+#define sc_def_max(T, N) \
 static T max_##N(T a, T b) { \
         if (a > b) { \
             return a; \
         } \
         return b; \
 }
-def_max(int32_t, i)
-def_max(double, d)
-#define def_vec(T, N) \
+sc_def_max(int32_t, i)
+sc_def_max(double, d)
+#define sc_def_vec(T, N) \
     typedef struct Vec_##N { \
         T *data; \
         int32_t len; \
@@ -25,19 +25,19 @@ static void Vec_##N##_push(Vec_##N *v, T x) { \
 static T Vec_##N##_get(Vec_##N *v, int32_t i) { \
         return v->data[i]; \
 }
-def_vec(int32_t, int)
-def_vec(double, dbl)
-typedef struct Point {
+sc_def_vec(int32_t, int)
+sc_def_vec(double, dbl)
+typedef struct sc_Point {
     int32_t x;
     int32_t y;
-} Point;
+} sc_Point;
 
-def_vec(Point, pt)
-typedef struct com__project {
+sc_def_vec(sc_Point, pt)
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 int32_t main(void) {
@@ -63,15 +63,15 @@ int32_t main(void) {
     /* line 61 */
     printf("Vec_dbl: %g\n", Vec_dbl_get(&(dv), 0));
     /* line 63 */
-    Point pbuf[4] = {0};
+    sc_Point pbuf[4] = {0};
     /* line 64 */
     Vec_pt pv = {pbuf, 0, 4};
     /* line 65 */
-    Point p0 = {3, 4};
+    sc_Point p0 = {3, 4};
     /* line 66 */
     Vec_pt_push(&(pv), p0);
     /* line 67 */
-    Point p = Vec_pt_get(&(pv), 0);
+    sc_Point p = Vec_pt_get(&(pv), 0);
     /* line 68 */
     printf("Vec_pt: %d %d\n", p.x, p.y);
     /* line 69 */

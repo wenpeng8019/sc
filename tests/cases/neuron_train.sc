@@ -124,5 +124,5 @@ fnc main: i4
         OUT[0].adam(LR, B1, B2, EPS, t)
 
     var pred: f4 = forward()
-    printf("loss_small=%d pred_close=%d\n", (last < 0.01f: i4), (pred > 4.8f: i4))
+    ::printf("loss_small=%d pred_close=%d\n", (last < 0.01f: i4), (pred > 4.8f: i4))
     return 0

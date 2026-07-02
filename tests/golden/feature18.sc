@@ -60,12 +60,12 @@ fnc main: i4
     var s: com[256, http_ending]
     s = c
     c >> s
-    printf("收到一行（%u 字节）: ", s._->len)
+    ::printf("收到一行（%u 字节）: ", s._->len)
     var p: char& = (s._->data(): char&)
     var k: i4 = 0
     while (k: u4) < s._->len
-        printf("%c", p[k])
+        ::printf("%c", p[k])
         k = (k + 1)
-    printf("\n")
+    ::printf("\n")
     s = nil
     return 0

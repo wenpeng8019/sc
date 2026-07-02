@@ -11,7 +11,7 @@
 
     @fnc emit: msg: char&
         # 兄弟模块互相可见：直接读取 config 单例的导出等级
-        printf("[L%d] %s\n", config.level(), msg)
+        ::printf("[L%d] %s\n", config.level(), msg)
         this->n = this->n + 1
         return
 

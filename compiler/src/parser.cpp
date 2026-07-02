@@ -172,7 +172,7 @@ struct Parser {
 
     // 判断冒号后是否开始一个类型：命名类型、内联 {}/()、或裸 &/&&（void* 指针）、裸 @（类型擦除）
     bool atTypeStart() const {
-        return at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen)
+        return at(Tok::Ident) || at(Tok::LBrace) || at(Tok::LParen) || at(Tok::DColon)
             || (at(Tok::Op) && (cur().text == "&" || cur().text == "&&" || cur().text == "@" || cur().text == "*"));
     }
 
@@ -184,6 +184,10 @@ struct Parser {
             if (at(Tok::Ident) && cur().text == "const")    { c->castConst = true; advance(); }
             else if (at(Tok::Ident) && cur().text == "volatile") { c->castVolatile = true; advance(); }
             else break;
+        }
+        if (accept(Tok::DColon)) {                    // C 桥接强转 ::T：C 域类型，原样落 C 类型名
+            c->castCBridge = true;
+            if (!at(Tok::Ident)) err("`::` 后需 C 类型名");
         }
         if (at(Tok::Ident)) c->op = advance().text;   // 命名类型存于 op（转换去向，非被操作主体）
         // 裸 & / &&（无名类型）即 void* / void**：op 留空，由 codegen 输出 void
@@ -224,6 +228,14 @@ struct Parser {
             ty.inlineUnion = at(Tok::LParen);  // '(' → union, '{' → struct
             parseFieldBlock(ty.structCommon.fields);   // 递归解析字段列表
             return ty;
+        }
+
+        // C 桥接类型前缀 ::name（严格命名域，类 C++）：访问 C 命名域的类型名，
+        //   转 C 时原样落 C 类型名（不加 sc_ 前缀），语义层不报「未定义类型」。
+        if (at(Tok::DColon)) {
+            advance();                                  // 吃掉 '::'
+            ty.cBridge = true;
+            if (!at(Tok::Ident)) err("`::` 后需 C 类型名");
         }
 
         // 获取类型名
@@ -932,12 +944,12 @@ struct Parser {
     //
     //   tok t: "id"        —— enforce 纯从（无 combine）
     //   tok t: "id"        —— form 候选（紧随缩进体即 combine：体内 this 上下文 → 新值 @）
-    //         <combine体>          combine 体唯一上下文形参 this: __sctok_in&
+    //         <combine体>          combine 体唯一上下文形参 this: tok_in&
     //                              （this->base 当前值 / this->input 输入 / this->sender / this->tag）
     //   form t, v          —— 初始化语句：灌初值 + 升格为 form 主（见 parseStatement）
     //
     //   dep all/any: a:"id1", b:"id2"   —— 行内依赖项列表 + 缩进 follow 体
-    //         <follow体>                   follow 体唯一上下文形参 this: __scdep_in&
+    //         <follow体>                   follow 体唯一上下文形参 this: dep_in&
     //   dep all/any:                     —— 块式：缩进逐行依赖项 + '-' 分隔 + follow 体
     //         a:"id1"                      （this->toks 依赖数组 / this->count / this->active）；
     //         b:"id2"                      a/b 等局部名糖注入 `var a: token& = this->toks[i]`
@@ -992,7 +1004,7 @@ struct Parser {
         }
 
         if (hasBody) {                                   // 带体 → form 候选：合成 combine FuncD
-            combineFn = "__sctok_" + sanitizeTokId(id) + "_combine";
+            combineFn = "sc_tok_" + sanitizeTokId(id) + "_combine";
             auto fn = std::make_unique<Decl>();
             fn->line = line;
             fn->kind = Decl::FuncD;
@@ -1001,9 +1013,9 @@ struct Parser {
             fn->structCommon.type = std::make_shared<TypeRef>();
             fn->structCommon.type->fat = true;           // 返回 *（瘦，新值；token 值为 sc_thin）
             fn->structCommon.type->thin = true;
-            Field self;                                  // 单形参 this: __sctok_in&（combine 上下文）
+            Field self;                                  // 单形参 this: tok_in&（combine 上下文）
             self.name = "this";
-            self.type.name = "__sctok_in";
+            self.type.name = "tok_in";
             self.type.ptr = 1;
             self.line = line;
             fn->structCommon.fields.push_back(std::move(self));
@@ -1089,17 +1101,17 @@ struct Parser {
         if (depLoop && targets.empty())
             err(line, "dep … loop 后需要至少一个目标项（反馈边的下游）");
 
-        std::string followFn = "__scdep_" + std::to_string(depCounter++) + "_follow";
-        auto fn = std::make_unique<Decl>();              // 合成 follow FuncD（唯一形参 this: __scdep_in&，返回 bool）
+        std::string followFn = "sc_dep_" + std::to_string(depCounter++) + "_follow";
+        auto fn = std::make_unique<Decl>();              // 合成 follow FuncD（唯一形参 this: dep_in&，返回 bool）
         fn->line = line;
         fn->kind = Decl::FuncD;
         fn->name = followFn;
         fn->tokHidden = true;
         fn->structCommon.type = std::make_shared<TypeRef>();
         fn->structCommon.type->name = "bool";            // 返回下次门逻辑（true=与门 / false=或门）
-        Field self;                                      // this: __scdep_in&（follow 上下文）
+        Field self;                                      // this: dep_in&（follow 上下文）
         self.name = "this";
-        self.type.name = "__scdep_in";
+        self.type.name = "dep_in";
         self.type.ptr = 1;
         self.line = line;
         fn->structCommon.fields.push_back(std::move(self));
@@ -1387,6 +1399,15 @@ struct Parser {
             e->text = advance().text;
             return e;
         }
+        // C 桥接前缀 ::name：访问 C 命名域符号（原样 emit C 符号，不加 sc_ 前缀）
+        if (at(Tok::DColon)) {
+            advance();                          // 吃掉 '::'
+            if (!at(Tok::Ident)) err("`::` 后需 C 符号名");
+            auto e = mk(Expr::Ident);
+            e->cBridge = true;                  // 标记为 C 桥接：codegen 原样落 C 符号
+            e->text = foldMacroSpelling(advance().text);
+            return e;
+        }
         // 对于标识符
         if (at(Tok::Ident)) {
             auto e = mk(Expr::Ident);
@@ -1438,7 +1459,7 @@ struct Parser {
                     exprBracket--;
                     return e;
                 }
-                if (!at(Tok::Ident) && !atOp("&") && !atOp("&&") && !atOp("@") && !atOp("*")) err("强转期望类型名");
+                if (!at(Tok::Ident) && !at(Tok::DColon) && !atOp("&") && !atOp("&&") && !atOp("@") && !atOp("*")) err("强转期望类型名");
 
                 auto c = mk(Expr::Cast);    // 创建强制类型转换节点
                 parseCastType(c.get());     // [const|volatile]* 类型名 [&]* [restrict]（类型名可省=void*）

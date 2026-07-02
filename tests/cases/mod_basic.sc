@@ -11,7 +11,7 @@ inc stdio.h
         return
 
     fnc drop:
-        printf("drop %s n=%d\n", this->tag, this->n)
+        ::printf("drop %s n=%d\n", this->tag, this->n)
         return
 
     @fnc bump:
@@ -28,5 +28,5 @@ inc stdio.h
 fnc main: i4
     counter.bump()
     counter.bump()
-    printf("value = %d\n", counter.value())
+    ::printf("value = %d\n", counter.value())
     return 0

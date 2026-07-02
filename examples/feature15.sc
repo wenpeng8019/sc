@@ -20,13 +20,13 @@ def dev: <view> {
 
 # 实现：接收者显式为首参 _this: dev&（与普通函数指针赋值对齐）
 fnc dev_alloc: view&, _this: dev&, off: i4, len: i4
-    var v: view& = malloc(sizeof(view)): view&
+    var v: view& = ::malloc(sizeof(view)): view&
     v->p = &_this->data[off]
     v->n = len
     return v
 
 fnc dev_free: _this: dev&, v: view&
-    free(v)
+    ::free(v)
 
 fnc main: i4
     var d: dev
@@ -43,13 +43,13 @@ fnc main: i4
 
     #-------------- 绑定：s = 本体 → 经 d.alloc 字段构造 + 回写 _self
     s = d
-    printf("切片:")
+    ::printf("切片:")
     var j: i4
     for j = 0; j < s._->n; j++
-        printf(" %c", s._->p[j])
-    printf("\n")                          # c d e f g
+        ::printf(" %c", s._->p[j])
+    ::printf("\n")                          # c d e f g
 
     #-------------- 解绑：s = nil → 经 _self->free 字段析构 + 置空
     s = nil
-    printf("已解绑: %d\n", s._ == nil)     # 1
+    ::printf("已解绑: %d\n", s._ == nil)     # 1
     return 0

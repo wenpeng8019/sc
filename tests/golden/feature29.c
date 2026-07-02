@@ -2,11 +2,11 @@
 #include "platform.h"
 #include "builtins/mem/mem.h"
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_mem_init(void); void sc_mod_mem_drop(void);
@@ -15,39 +15,39 @@ int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_mem_init();
     /* line 30 */
-    void *p = chunk(100);
+    void *p = sc_chunk(100);
     /* line 31 */
     char *s = ((char*)(p));
     /* line 32 */
     sprintf(s, "pooled-%d", 42);
     /* line 33 */
-    printf("chunk(100): usable>=100 -> %d, text=%s\n", mem_usable(p) >= 100, s);
+    printf("chunk(100): usable>=100 -> %d, text=%s\n", sc_mem_usable(p) >= 100, s);
     /* line 36 */
-    p = refit(p, 5000);
+    p = sc_refit(p, 5000);
     /* line 37 */
-    printf("refit(5000): usable>=5000 -> %d, keep=%s\n", mem_usable(p) >= 5000, ((char*)(p)));
+    printf("refit(5000): usable>=5000 -> %d, keep=%s\n", sc_mem_usable(p) >= 5000, ((char*)(p)));
     /* line 38 */
-    recycle(p);
+    sc_recycle(p);
     /* line 41 */
-    void *z = chunk0(64);
+    void *z = sc_chunk0(64);
     /* line 42 */
     uint8_t *zb = ((uint8_t*)(z));
     /* line 43 */
     printf("chunk0(64): first=%d last=%d\n", zb[0], zb[63]);
     /* line 44 */
-    recycle(z);
+    sc_recycle(z);
     /* line 47 */
-    void *arr = chunk_array(10, 8);
+    void *arr = sc_chunk_array(10, 8);
     /* line 48 */
     uint8_t *ab = ((uint8_t*)(arr));
     /* line 49 */
-    printf("chunk_array(10,8): usable>=80 -> %d zeroed=%d\n", mem_usable(arr) >= 80, ab[0]);
+    printf("chunk_array(10,8): usable>=80 -> %d zeroed=%d\n", sc_mem_usable(arr) >= 80, ab[0]);
     /* line 50 */
-    recycle(arr);
+    sc_recycle(arr);
     /* line 51 */
-    printf("chunk_array overflow -> nil=%d\n", chunk_array(0xFFFFFFFFFFFFFFFFUL, 2) == NULL);
+    printf("chunk_array overflow -> nil=%d\n", sc_chunk_array(0xFFFFFFFFFFFFFFFFUL, 2) == NULL);
     /* line 54 */
-    void *al = chunk_aligned(200, 64);
+    void *al = sc_chunk_aligned(200, 64);
     /* line 55 */
     uint8_t *alb = ((uint8_t*)(al));
     /* line 56 */
@@ -55,15 +55,15 @@ int32_t main(void) {
     /* line 57 */
     alb[199] = 9;
     /* line 58 */
-    printf("chunk_aligned(200,64): usable>=200 -> %d rw=%d\n", mem_usable(al) >= 200, alb[0] + alb[199]);
+    printf("chunk_aligned(200,64): usable>=200 -> %d rw=%d\n", sc_mem_usable(al) >= 200, alb[0] + alb[199]);
     /* line 60 */
-    recycle(al);
+    sc_recycle(al);
     /* line 61 */
-    printf("chunk_aligned bad-align -> nil=%d\n", chunk_aligned(64, 48) == NULL);
+    printf("chunk_aligned bad-align -> nil=%d\n", sc_chunk_aligned(64, 48) == NULL);
     /* line 64 */
-    arena a = {0};
+    sc_arena a = {0};
     /* line 65 */
-    arena_init(&a, 0);
+    sc_arena_init(&a, 0);
     /* line 66 */
     int32_t i = 0;
     /* line 67 */
@@ -71,7 +71,7 @@ int32_t main(void) {
     /* line 68 */
     for (i = 0; i < 1000; i++) {
         /* line 69 */
-        void *q = arena_chunk(&a, 48);
+        void *q = sc_arena_chunk(&a, 48);
         /* line 70 */
         if (q != NULL) {
             /* line 71 */
@@ -81,29 +81,29 @@ int32_t main(void) {
     /* line 72 */
     printf("arena: 1000x48 allocated=%d\n", n);
     /* line 73 */
-    arena_reset(&a);
+    sc_arena_reset(&a);
     /* line 74 */
-    void *r = arena_chunk(&a, 16);
+    void *r = sc_arena_chunk(&a, 16);
     /* line 75 */
     printf("arena: reset+reuse ok=%d\n", r != NULL);
     /* line 76 */
-    arena_drop(&a);
+    sc_arena_drop(&a);
     /* line 79 */
-    void *p2 = chunk(1000);
+    void *p2 = sc_chunk(1000);
     /* line 80 */
-    void *p3 = chunk(2000);
+    void *p3 = sc_chunk(2000);
     /* line 81 */
-    mem_stat_t st = {0};
+    sc_mem_stat_t st = {0};
     /* line 82 */
-    mem_stat(&(st));
+    sc_mem_stat(&(st));
     /* line 83 */
     printf("stat live: count=%llu live>=3000 -> %d peak>=live -> %d allocs>=2 -> %d\n", st.count, st.live >= 3000, st.peak_live >= st.live, st.allocs >= 2);
     /* line 85 */
-    recycle(p2);
+    sc_recycle(p2);
     /* line 86 */
-    recycle(p3);
+    sc_recycle(p3);
     /* line 87 */
-    mem_stat(&(st));
+    sc_mem_stat(&(st));
     /* line 88 */
     printf("stat freed: count=%llu live=%llu peak>=3000 -> %d\n", st.count, st.live, st.peak_live >= 3000);
     /* line 92 */
@@ -111,70 +111,70 @@ int32_t main(void) {
     /* line 93 */
     for (k = 0; k < 200; k++) {
         /* line 94 */
-        void *t = chunk(64);
+        void *t = sc_chunk(64);
         /* line 95 */
-        recycle(t);
+        sc_recycle(t);
     }
     /* line 96 */
-    uint64_t freed = mem_trim();
+    uint64_t freed = sc_mem_trim();
     /* line 97 */
     printf("mem_trim: freed>0 -> %d\n", freed > 0);
     /* line 100 */
     char *nm = "sc_feature29_region";
     /* line 101 */
-    shm_remove(nm);
+    sc_shm_remove(nm);
     /* line 102 */
-    shm sm = {0};
+    sc_shm sm = {0};
     /* line 103 */
-    if (shm_make(&sm, nm, 256, 0)) {
+    if (sc_shm_make(&sm, nm, 256, 0)) {
         /* line 104 */
-        char *sd = ((char*)(shm_data(&sm)));
+        char *sd = ((char*)(sc_shm_data(&sm)));
         /* line 105 */
         sprintf(sd, "shm-%d", 29);
         /* line 106 */
-        shm sm2 = {0};
+        sc_shm sm2 = {0};
         /* line 107 */
-        shm_make(&sm2, nm, 256, 0);
+        sc_shm_make(&sm2, nm, 256, 0);
         /* line 108 */
-        printf("shm: size>=256 -> %d shared=%s\n", shm_size(&sm) >= 256, ((char*)(shm_data(&sm2))));
+        printf("shm: size>=256 -> %d shared=%s\n", sc_shm_size(&sm) >= 256, ((char*)(sc_shm_data(&sm2))));
         /* line 109 */
-        shm_drop(&sm2);
+        sc_shm_drop(&sm2);
         /* line 110 */
-        shm_drop(&sm);
+        sc_shm_drop(&sm);
     }
     /* line 111 */
-    shm_remove(nm);
+    sc_shm_remove(nm);
     /* line 114 */
-    shm_remove(nm);
+    sc_shm_remove(nm);
     /* line 115 */
-    shm w = {0};
+    sc_shm w = {0};
     /* line 116 */
-    if (shm_make(&w, nm, 256, 0)) {
+    if (sc_shm_make(&w, nm, 256, 0)) {
         /* line 117 */
-        char *wd = ((char*)(shm_data(&w)));
+        char *wd = ((char*)(sc_shm_data(&w)));
         /* line 118 */
         sprintf(wd, "ro-%d", 7);
         /* line 119 */
-        shm ro = {0};
+        sc_shm ro = {0};
         /* line 120 */
-        if (shm_make(&ro, nm, 256, 1)) {
+        if (sc_shm_make(&ro, nm, 256, 1)) {
             /* line 121 */
-            printf("shm rdonly: see=%s size>=256 -> %d\n", ((char*)(shm_data(&ro))), shm_size(&ro) >= 256);
+            printf("shm rdonly: see=%s size>=256 -> %d\n", ((char*)(sc_shm_data(&ro))), sc_shm_size(&ro) >= 256);
             /* line 122 */
-            shm_drop(&ro);
+            sc_shm_drop(&ro);
         }
         /* line 123 */
-        shm ex = {0};
+        sc_shm ex = {0};
         /* line 124 */
-        printf("shm excl on existing -> fail=%d\n", !(shm_make(&ex, nm, 256, 2)));
+        printf("shm excl on existing -> fail=%d\n", !(sc_shm_make(&ex, nm, 256, 2)));
         /* line 125 */
-        shm_drop(&w);
-        shm_drop(&ex);
+        sc_shm_drop(&w);
+        sc_shm_drop(&ex);
     }
     /* line 126 */
-    shm_remove(nm);
+    sc_shm_remove(nm);
     /* line 128 */
-    mem_teardown();
+    sc_mem_teardown();
     /* line 129 */
     printf("mem feature ok\n");
     /* line 130 */

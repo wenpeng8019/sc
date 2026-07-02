@@ -5,7 +5,7 @@
     bump: fnc
         this->v = (this->v + 1)
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc take: i4, p: node*
@@ -21,6 +21,6 @@
     b->v = 40
     var e:@ = b
     var r: i4 = take(b)
-    printf("a=%d c=%d r=%d\n", a->v, c->v, r)
+    ::printf("a=%d c=%d r=%d\n", a->v, c->v, r)
     t = nil
     return 0

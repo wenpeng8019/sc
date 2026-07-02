@@ -9,9 +9,9 @@
 # 均为模块域静态对象，注册延迟到模块 init（编译器生成 tok_bind / tok_depend）；运行时
 # 始终随工程链接（builtins/tok/tok_impl.c），无需 inc。
 #
-# combine 体唯一上下文形参 this: __sctok_in&（成员皆 @）：
+# combine 体唯一上下文形参 this: tok_in&（成员皆 @）：
 #   this->base 当前值 · this->input 本次输入 · this->sender 发送者 · this->tag set 标签。
-# follow 体唯一上下文形参 this: __scdep_in&：
+# follow 体唯一上下文形参 this: dep_in&：
 #   this->toks 依赖项数组 · this->count 个数 · this->active 触发动作码；
 #   a:"id" 局部名糖 → this->toks[i]。
 
@@ -41,15 +41,15 @@ fnc main: i4
     level->set((50: *), 0)               # 50 → 不超阈值
     var lv: i8 = (level->get(): i8)
     var al: i8 = (alert->get(): i8)
-    printf("after 50:  level=%lld alert=%lld\n", lv, al)
+    ::printf("after 50:  level=%lld alert=%lld\n", lv, al)
 
     level->set((150: *), 0)              # 150 → 超阈值，触发 alert
     lv = (level->get(): i8)
     al = (alert->get(): i8)
-    printf("after 150: level=%lld alert=%lld\n", lv, al)
+    ::printf("after 150: level=%lld alert=%lld\n", lv, al)
 
     level->set((30: *), 0)               # 30 < 当前峰值 150：combine 取较大者 → 仍 150
     lv = (level->get(): i8)
-    printf("after 30:  level=%lld\n", lv)
+    ::printf("after 30:  level=%lld\n", lv)
 
     return 0

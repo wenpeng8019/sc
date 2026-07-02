@@ -25,10 +25,10 @@ dep all: s:"rch.m2" map t:"rch.leaf2"
     return false
 
 fnc main: i4
-    printf("node     reach\n")
-    printf("root     %5d\n", root->reach())
-    printf("m1       %5d\n", m1->reach())
-    printf("m2       %5d\n", m2->reach())
-    printf("leaf1    %5d\n", leaf1->reach())
-    printf("leaf2    %5d\n", leaf2->reach())
+    ::printf("node     reach\n")
+    ::printf("root     %5d\n", root->reach())
+    ::printf("m1       %5d\n", m1->reach())
+    ::printf("m2       %5d\n", m2->reach())
+    ::printf("leaf1    %5d\n", leaf1->reach())
+    ::printf("leaf2    %5d\n", leaf2->reach())
     return 0

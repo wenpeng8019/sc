@@ -31,9 +31,9 @@ inc ts.sc
 
 # 打印一维向量（逻辑扁平遍历）。
 @fnc print_vec: t: tensor&, label: const char&
-    printf("%s [", label)
+    ::printf("%s [", label)
     var n: i8 = t->numel
     for i in n
-        printf("%s%.4f", i ? ", " : "", t->at(i))
+        ::printf("%s%.4f", i ? ", " : "", t->at(i))
     print "]"
     return

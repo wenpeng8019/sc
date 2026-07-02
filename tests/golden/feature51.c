@@ -1,163 +1,163 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static token *fetch = {0};
-static token *decode = {0};
-static token *render = {0};
-static token *audio = {0};
-static token *output = {0};
-static bool __scdep_0_follow(__scdep_in *_this);
-static bool __scdep_1_follow(__scdep_in *_this);
-static bool __scdep_2_follow(__scdep_in *_this);
-static bool __scdep_3_follow(__scdep_in *_this);
-static bool __scdep_4_follow(__scdep_in *_this);
-typedef struct com__project {
+static sc_token *sc_fetch = {0};
+static sc_token *sc_decode = {0};
+static sc_token *sc_render = {0};
+static sc_token *sc_audio = {0};
+static sc_token *sc_output = {0};
+static bool sc_dep_0_follow(sc_dep_in *_this);
+static bool sc_dep_1_follow(sc_dep_in *_this);
+static bool sc_dep_2_follow(sc_dep_in *_this);
+static bool sc_dep_3_follow(sc_dep_in *_this);
+static bool sc_dep_4_follow(sc_dep_in *_this);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static int __scdep_0_tramp(token **, int, int, void *);
-static int __scdep_1_tramp(token **, int, int, void *);
-static int __scdep_2_tramp(token **, int, int, void *);
-static int __scdep_3_tramp(token **, int, int, void *);
-static int __scdep_4_tramp(token **, int, int, void *);
+static int sc_dep_0_tramp(sc_token **, int, int, void *);
+static int sc_dep_1_tramp(sc_token **, int, int, void *);
+static int sc_dep_2_tramp(sc_token **, int, int, void *);
+static int sc_dep_3_tramp(sc_token **, int, int, void *);
+static int sc_dep_4_tramp(sc_token **, int, int, void *);
 
-static bool __scdep_0_follow(__scdep_in *_this) {
+static bool sc_dep_0_follow(sc_dep_in *_this) {
     /* line 20 */
-    token *s = _this->toks[0];
+    sc_token *s = _this->toks[0];
     /* line 20 */
-    token *t = _this->toks[1];
+    sc_token *t = _this->toks[1];
     /* line 21 */
     return false;
 }
 
-static bool __scdep_1_follow(__scdep_in *_this) {
+static bool sc_dep_1_follow(sc_dep_in *_this) {
     /* line 22 */
-    token *s = _this->toks[0];
+    sc_token *s = _this->toks[0];
     /* line 22 */
-    token *t = _this->toks[1];
+    sc_token *t = _this->toks[1];
     /* line 23 */
     return false;
 }
 
-static bool __scdep_2_follow(__scdep_in *_this) {
+static bool sc_dep_2_follow(sc_dep_in *_this) {
     /* line 24 */
-    token *s = _this->toks[0];
+    sc_token *s = _this->toks[0];
     /* line 24 */
-    token *t = _this->toks[1];
+    sc_token *t = _this->toks[1];
     /* line 25 */
     return false;
 }
 
-static bool __scdep_3_follow(__scdep_in *_this) {
+static bool sc_dep_3_follow(sc_dep_in *_this) {
     /* line 26 */
-    token *s = _this->toks[0];
+    sc_token *s = _this->toks[0];
     /* line 26 */
-    token *t = _this->toks[1];
+    sc_token *t = _this->toks[1];
     /* line 27 */
     return false;
 }
 
-static bool __scdep_4_follow(__scdep_in *_this) {
+static bool sc_dep_4_follow(sc_dep_in *_this) {
     /* line 28 */
-    token *s = _this->toks[0];
+    sc_token *s = _this->toks[0];
     /* line 28 */
-    token *t = _this->toks[1];
+    sc_token *t = _this->toks[1];
     /* line 29 */
     return false;
 }
 
 int32_t main(void) {
     SC_CONSOLE_UTF8();
-    fetch = token_bind("pipe.fetch", NULL);
-    token_set_crit(fetch, 1, 0);
-    token_set_degree(fetch, 0, 2);
-    token_set_reach(fetch, 4);
-    token_set_batch(fetch, 1);
-    token_set_dom(fetch, 1, 4);
-    decode = token_bind("pipe.decode", NULL);
-    token_set_depth(decode, 1);
-    token_set_crit(decode, 1, 0);
-    token_set_degree(decode, 1, 1);
-    token_set_reach(decode, 2);
-    token_set_batch(decode, 2);
-    token_set_dom(decode, 1, 1);
-    render = token_bind("pipe.render", NULL);
-    token_set_depth(render, 2);
-    token_set_crit(render, 1, 0);
-    token_set_degree(render, 1, 1);
-    token_set_reach(render, 1);
-    token_set_batch(render, 1);
-    token_set_dom(render, 0, 0);
-    audio = token_bind("pipe.audio", NULL);
-    token_set_depth(audio, 1);
-    token_set_crit(audio, 0, 1);
-    token_set_degree(audio, 1, 1);
-    token_set_reach(audio, 1);
-    token_set_batch(audio, 2);
-    token_set_dom(audio, 0, 0);
-    output = token_bind("pipe.output", NULL);
-    token_set_depth(output, 3);
-    token_set_crit(output, 1, 0);
-    token_set_degree(output, 2, 0);
-    token_set_reach(output, 0);
-    token_set_batch(output, 1);
-    token_set_dom(output, 0, 0);
-    { token *_deps0[] = { fetch, decode }; token_depend_map(_deps0, 1, 1, 1, __scdep_0_tramp, NULL); }
-    { token *_deps1[] = { decode, render }; token_depend_map(_deps1, 1, 1, 1, __scdep_1_tramp, NULL); }
-    { token *_deps2[] = { render, output }; token_depend_map(_deps2, 1, 1, 1, __scdep_2_tramp, NULL); }
-    { token *_deps3[] = { fetch, audio }; token_depend_map(_deps3, 1, 1, 1, __scdep_3_tramp, NULL); }
-    { token *_deps4[] = { audio, output }; token_depend_map(_deps4, 1, 1, 1, __scdep_4_tramp, NULL); }
+    sc_fetch = sc_token_bind("pipe.fetch", NULL);
+    sc_token_set_crit(sc_fetch, 1, 0);
+    sc_token_set_degree(sc_fetch, 0, 2);
+    sc_token_set_reach(sc_fetch, 4);
+    sc_token_set_batch(sc_fetch, 1);
+    sc_token_set_dom(sc_fetch, 1, 4);
+    sc_decode = sc_token_bind("pipe.decode", NULL);
+    sc_token_set_depth(sc_decode, 1);
+    sc_token_set_crit(sc_decode, 1, 0);
+    sc_token_set_degree(sc_decode, 1, 1);
+    sc_token_set_reach(sc_decode, 2);
+    sc_token_set_batch(sc_decode, 2);
+    sc_token_set_dom(sc_decode, 1, 1);
+    sc_render = sc_token_bind("pipe.render", NULL);
+    sc_token_set_depth(sc_render, 2);
+    sc_token_set_crit(sc_render, 1, 0);
+    sc_token_set_degree(sc_render, 1, 1);
+    sc_token_set_reach(sc_render, 1);
+    sc_token_set_batch(sc_render, 1);
+    sc_token_set_dom(sc_render, 0, 0);
+    sc_audio = sc_token_bind("pipe.audio", NULL);
+    sc_token_set_depth(sc_audio, 1);
+    sc_token_set_crit(sc_audio, 0, 1);
+    sc_token_set_degree(sc_audio, 1, 1);
+    sc_token_set_reach(sc_audio, 1);
+    sc_token_set_batch(sc_audio, 2);
+    sc_token_set_dom(sc_audio, 0, 0);
+    sc_output = sc_token_bind("pipe.output", NULL);
+    sc_token_set_depth(sc_output, 3);
+    sc_token_set_crit(sc_output, 1, 0);
+    sc_token_set_degree(sc_output, 2, 0);
+    sc_token_set_reach(sc_output, 0);
+    sc_token_set_batch(sc_output, 1);
+    sc_token_set_dom(sc_output, 0, 0);
+    { sc_token *_deps0[] = { sc_fetch, sc_decode }; sc_token_depend_map(_deps0, 1, 1, 1, sc_dep_0_tramp, NULL); }
+    { sc_token *_deps1[] = { sc_decode, sc_render }; sc_token_depend_map(_deps1, 1, 1, 1, sc_dep_1_tramp, NULL); }
+    { sc_token *_deps2[] = { sc_render, sc_output }; sc_token_depend_map(_deps2, 1, 1, 1, sc_dep_2_tramp, NULL); }
+    { sc_token *_deps3[] = { sc_fetch, sc_audio }; sc_token_depend_map(_deps3, 1, 1, 1, sc_dep_3_tramp, NULL); }
+    { sc_token *_deps4[] = { sc_audio, sc_output }; sc_token_depend_map(_deps4, 1, 1, 1, sc_dep_4_tramp, NULL); }
     /* line 32 */
     printf("stage     depth crit slack\n");
     /* line 33 */
-    int32_t _sq0 = token_depth(fetch);
-    int32_t _sq1 = token_critical(fetch);
-    int32_t _sq2 = token_slack(fetch);
+    int32_t _sq0 = sc_token_depth(sc_fetch);
+    int32_t _sq1 = sc_token_critical(sc_fetch);
+    int32_t _sq2 = sc_token_slack(sc_fetch);
     printf("fetch     %5d %4d %5d\n", _sq0, _sq1, _sq2);
     /* line 34 */
-    int32_t _sq3 = token_depth(decode);
-    int32_t _sq4 = token_critical(decode);
-    int32_t _sq5 = token_slack(decode);
+    int32_t _sq3 = sc_token_depth(sc_decode);
+    int32_t _sq4 = sc_token_critical(sc_decode);
+    int32_t _sq5 = sc_token_slack(sc_decode);
     printf("decode    %5d %4d %5d\n", _sq3, _sq4, _sq5);
     /* line 35 */
-    int32_t _sq6 = token_depth(render);
-    int32_t _sq7 = token_critical(render);
-    int32_t _sq8 = token_slack(render);
+    int32_t _sq6 = sc_token_depth(sc_render);
+    int32_t _sq7 = sc_token_critical(sc_render);
+    int32_t _sq8 = sc_token_slack(sc_render);
     printf("render    %5d %4d %5d\n", _sq6, _sq7, _sq8);
     /* line 36 */
-    int32_t _sq9 = token_depth(audio);
-    int32_t _sq10 = token_critical(audio);
-    int32_t _sq11 = token_slack(audio);
+    int32_t _sq9 = sc_token_depth(sc_audio);
+    int32_t _sq10 = sc_token_critical(sc_audio);
+    int32_t _sq11 = sc_token_slack(sc_audio);
     printf("audio     %5d %4d %5d\n", _sq9, _sq10, _sq11);
     /* line 37 */
-    int32_t _sq12 = token_depth(output);
-    int32_t _sq13 = token_critical(output);
-    int32_t _sq14 = token_slack(output);
+    int32_t _sq12 = sc_token_depth(sc_output);
+    int32_t _sq13 = sc_token_critical(sc_output);
+    int32_t _sq14 = sc_token_slack(sc_output);
     printf("output    %5d %4d %5d\n", _sq12, _sq13, _sq14);
     /* line 38 */
     return 0;
 }
 
-static int __scdep_0_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
-    return (int)__scdep_0_follow(&_self);
+static int sc_dep_0_tramp(sc_token **_ts, int _n, int _acting, void *_ctx) {
+    sc_dep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
+    return (int)sc_dep_0_follow(&_self);
 }
-static int __scdep_1_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
-    return (int)__scdep_1_follow(&_self);
+static int sc_dep_1_tramp(sc_token **_ts, int _n, int _acting, void *_ctx) {
+    sc_dep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
+    return (int)sc_dep_1_follow(&_self);
 }
-static int __scdep_2_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
-    return (int)__scdep_2_follow(&_self);
+static int sc_dep_2_tramp(sc_token **_ts, int _n, int _acting, void *_ctx) {
+    sc_dep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
+    return (int)sc_dep_2_follow(&_self);
 }
-static int __scdep_3_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
-    return (int)__scdep_3_follow(&_self);
+static int sc_dep_3_tramp(sc_token **_ts, int _n, int _acting, void *_ctx) {
+    sc_dep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
+    return (int)sc_dep_3_follow(&_self);
 }
-static int __scdep_4_tramp(token **_ts, int _n, int _acting, void *_ctx) {
-    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
-    return (int)__scdep_4_follow(&_self);
+static int sc_dep_4_tramp(sc_token **_ts, int _n, int _acting, void *_ctx) {
+    sc_dep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;
+    return (int)sc_dep_4_follow(&_self);
 }

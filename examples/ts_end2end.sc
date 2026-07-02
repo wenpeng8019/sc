@@ -13,7 +13,7 @@ fnc main: i4
     var mu: f8 = x2->mean_all()
     var sd: f8 = x2->std_all()
     var xn: tensor@1 = x2->sub_scalar(mu)->div_scalar(sd)
-    printf("stats mean=%g std=%g xn_sum=%g\n", mu, sd, xn->sum_all())
+    ::printf("stats mean=%g std=%g xn_sum=%g\n", mu, sd, xn->sum_all())
 
     # 3) 线代：SPD 矩阵 det/inv/solve
     var s22[2]: i4
@@ -31,7 +31,7 @@ fnc main: i4
 
     var Minv: tensor@1 = M->inv()
     var sol: tensor@1 = M->solve(b)
-    printf("linalg det=%g inv00=%.4f x0=%.4f x1=%.4f\n", M->det(), Minv->at(0), sol->at(0), sol->at(1))
+    ::printf("linalg det=%g inv00=%.4f x0=%.4f x1=%.4f\n", M->det(), Minv->at(0), sol->at(0), sol->at(1))
 
     # 4) meshgrid（ij）
     var xv: tensor@1 = arange(0.0, 3.0, 1.0, DT_F8)
@@ -43,11 +43,11 @@ fnc main: i4
     var ok: bool = meshgrid((inp: &), 2, 0, (out: &))
     var gx: tensor@1 = (out[0]: tensor&)
     var gy: tensor@1 = (out[1]: tensor&)
-    printf("meshgrid ok=%d gx5=%g gy5=%g\n", (ok: i4), gx->at(5), gy->at(5))
+    ::printf("meshgrid ok=%d gx5=%g gy5=%g\n", (ok: i4), gx->at(5), gy->at(5))
 
     # 5) save/load（NumPy .npy）
     var svok: bool = x2->save("/tmp/ts_end2end.npy")
     var xl: tensor@1 = ts_load("/tmp/ts_end2end.npy")
-    printf("io save_ok=%d same=%d\n", (svok: i4), (x2->allclose(xl, 0.000000000001, 0.000000000001): i4))
+    ::printf("io save_ok=%d same=%d\n", (svok: i4), (x2->allclose(xl, 0.000000000001, 0.000000000001): i4))
 
     return 0

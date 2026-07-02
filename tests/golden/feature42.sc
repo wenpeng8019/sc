@@ -3,7 +3,7 @@
 inc mt.sc
 
 rpc serve: i4, tag: i4, info: i4
-    printf("  served tag=%d (%d)\n", tag, info)
+    ::printf("  served tag=%d (%d)\n", tag, info)
     return tag
 
 fnc main: i4
@@ -11,7 +11,7 @@ fnc main: i4
     var a1: promise& = async<q, prio:1> serve(1, 1)
     var a2: promise& = async<q, prio:5> serve(2, 5)
     var a3: promise& = async<q, prio:3> serve(3, 3)
-    printf("priority order (expect tag 2,3,1):\n")
+    ::printf("priority order (expect tag 2,3,1):\n")
     q->pull(-1)
     q->pull(-1)
     q->pull(-1)
@@ -26,7 +26,7 @@ fnc main: i4
     var d1: promise& = async<q2, delay:60> serve(100, 60)
     var d2: promise& = async<q2, delay:20> serve(200, 20)
     var d3: promise& = async<q2, delay:40> serve(300, 40)
-    printf("delay order (expect tag 200,300,100):\n")
+    ::printf("delay order (expect tag 200,300,100):\n")
     q2->pull(-1)
     q2->pull(-1)
     q2->pull(-1)

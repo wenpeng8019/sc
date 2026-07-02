@@ -37,13 +37,13 @@ fnc main: i4
 
     var st1: i4 = -9
     var r1: i4 = sync<q, timeout:2000> compute(3, 4), &st1   # 至多等 2s；消费线程会及时算 7
-    printf("ok path: r=%d st=%d\n", r1, st1)          # r=7 st=0
+    ::printf("ok path: r=%d st=%d\n", r1, st1)          # r=7 st=0
     ct->join()
 
     # ② 超时路径：无任何消费者，timeout 到期后放弃等待
     var st2: i4 = -9
     var r2: i4 = sync<q, timeout:50> compute(10, 20), &st2   # 50ms 无人消费 → 超时
-    printf("timeout path: r=%d st=%d\n", r2, st2)     # r=0 st=1（结果未回填，状态=超时）
+    ::printf("timeout path: r=%d st=%d\n", r2, st2)     # r=0 st=1（结果未回填，状态=超时）
 
     q->drop()
     return 0

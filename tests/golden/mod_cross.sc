@@ -7,5 +7,5 @@ inc mod_cross_lib.sc
 fnc main: i4
     store.add(10)
     store.add(32)
-    printf("sum = %d\n", store.sum())
+    ::printf("sum = %d\n", store.sum())
     return 0

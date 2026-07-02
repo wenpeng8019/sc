@@ -7,10 +7,10 @@ def decl_pair: pfx
     var pfx\_hi: i4 = 1
 
 def show: x
-    printf("%s = %d\n", `x`, x)
+    ::printf("%s = %d\n", `x`, x)
 
 def sumprint: fmt, ...
-    printf(fmt, __VA_ARGS__)
+    ::printf(fmt, __VA_ARGS__)
 
 mix decl_pair(g)
 

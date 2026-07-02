@@ -11,14 +11,14 @@ inc async.sc
 
 #-------------- 收端触发的 rpc：标量参数（同步反序列化触发）-------------------
 rpc on_pair: i4, a: i4, b: i4
-    printf("  rpc 反序列化: a=%d b=%d\n", a, b)
+    ::printf("  rpc 反序列化: a=%d b=%d\n", a, b)
     return 0
 
 #-------------- 同步往返：写端口序列化写入，读端口反序列化读回 ----------------
 fnc sync_roundtrip: i4, path: char&
     var wc: com& = file(path, false, 0, 1)        # 二进制·同步·只写
     if wc == nil
-        printf("E: 打开写端口失败\n")
+        ::printf("E: 打开写端口失败\n")
         return 1
     wc << on_pair(7, 9)                           # rpc 序列化：逐字段写出参数
     var tag: i4 = 42
@@ -28,14 +28,14 @@ fnc sync_roundtrip: i4, path: char&
 
     var rc: com& = file(path, false, 1, 0)        # 二进制·同步·只读
     if rc == nil
-        printf("E: 打开读端口失败\n")
+        ::printf("E: 打开读端口失败\n")
         return 1
     rc >> on_pair                                 # rpc 反序列化：读齐参数后触发
     var t: i4 = 0
     rc >> t
     var buf[8]: char
     rc >> buf
-    printf("  同步读回: tag=%d msg=%s\n", t, &buf[0])
+    ::printf("  同步读回: tag=%d msg=%s\n", t, &buf[0])
     wc->close()                                   # 关闭写端口：fclose + 释放设备
     rc->close()                                   # 关闭读端口
     return 0
@@ -44,16 +44,16 @@ fnc sync_roundtrip: i4, path: char&
 rpc async_read: ret, rc: com&
     var n: i4 = 0
     rc >> n                                       # 异步读标量（事件循环就绪后兑现）
-    printf("  异步读回: n=%d\n", n)
+    ::printf("  异步读回: n=%d\n", n)
     return 0
 
 fnc main: i4
     var path: char& = "/tmp/sc_feature22.bin"
-    printf("== 同步往返 ==\n")
+    ::printf("== 同步往返 ==\n")
     if sync_roundtrip(path) != 0
         return 1
 
-    printf("== 异步读 ==\n")
+    ::printf("== 异步读 ==\n")
     var awc: com& = file(path, false, 0, 1)       # 同步写入一个标量供异步读
     var v: i4 = 2026
     awc << v
@@ -64,5 +64,5 @@ fnc main: i4
     async_final()
     awc->close()                                  # 关闭异步写/读端口
     arc->close()
-    printf("done\n")
+    ::printf("done\n")
     return 0

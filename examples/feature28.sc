@@ -55,12 +55,12 @@ fnc main: i4
     var b: Shape = Shape.Empty
     var rc: Rect = { w = 3.0, h = 4.0 }
     var c: Shape = Shape.Rect(rc)
-    printf("circle area = %.2f\n", area(a))
-    printf("empty area  = %.2f\n", area(b))
-    printf("rect area   = %.2f\n", area(c))
+    ::printf("circle area = %.2f\n", area(a))
+    ::printf("empty area  = %.2f\n", area(b))
+    ::printf("rect area   = %.2f\n", area(c))
 
     var r1: Result = safe_div(10, 2)
     var r2: Result = safe_div(10, 0)
-    printf("10/2 = %d\n", unwrap_or(r1, -999))
-    printf("10/0 = %d (fallback)\n", unwrap_or(r2, -999))
+    ::printf("10/2 = %d\n", unwrap_or(r1, -999))
+    ::printf("10/0 = %d (fallback)\n", unwrap_or(r2, -999))
     return 0

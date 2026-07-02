@@ -20,7 +20,7 @@ fnc main: i4
     form b, (0: @)
     form a, (0: @)
     a->set((100: @), 0)
-    printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
+    ::printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
     var rounds: i4 = a->loop_run(10)
-    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, (a->get(): i8), (b->get(): i8))
+    ::printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, (a->get(): i8), (b->get(): i8))
     return 0

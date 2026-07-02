@@ -3,11 +3,11 @@
 #include "builtins/ts/ts.h"
 #include "builtins/nn/nn.h"
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_ts_init(void); void sc_mod_ts_drop(void);
@@ -18,7 +18,7 @@ int32_t main(void) {
     sc_mod_ts_init();
     sc_mod_nn_init();
     /* line 10 */
-    rand_seed(((int64_t)(7)));
+    sc_rand_seed(((int64_t)(7)));
     /* line 12 */
     int32_t sx[2];
     /* line 13 */
@@ -38,19 +38,19 @@ int32_t main(void) {
     /* line 20 */
     tb[1] = 8.0;
     /* line 21 */
-    tensor *xt = from_data(2, sx, ((void*)(xb)), DT_F4);
+    sc_tensor *xt = sc_from_data(2, sx, ((void*)(xb)), sc_DT_F4);
     /* line 22 */
-    tensor *tt = from_data(2, sx, ((void*)(tb)), DT_F4);
+    sc_tensor *tt = sc_from_data(2, sx, ((void*)(tb)), sc_DT_F4);
     /* line 24 */
-    linear *fc1 = nn_linear(2, 4);
+    sc_linear *fc1 = sc_nn_linear(2, 4);
     /* line 25 */
-    linear *fc2 = nn_linear(4, 2);
+    sc_linear *fc2 = sc_nn_linear(4, 2);
     /* line 26 */
-    optim *opt = nn_sgd(0.05);
+    sc_optim *opt = sc_nn_sgd(0.05);
     /* line 27 */
-    optim_track_linear(opt, fc1);
+    sc_optim_track_linear(opt, fc1);
     /* line 28 */
-    optim_track_linear(opt, fc2);
+    sc_optim_track_linear(opt, fc2);
     /* line 30 */
     double last = 0.0;
     /* line 31 */
@@ -61,56 +61,56 @@ int32_t main(void) {
         for (int _fi0 = _flo0 + 0; _fi0 < _fhi0; _fi0 += 1, _fc0++) {
             int e = _fi0;
             /* line 32 */
-            val *x = nn_input(xt);
+            sc_val *x = sc_nn_input(xt);
             /* line 33 */
-            val *tgt = nn_input(tt);
+            sc_val *tgt = sc_nn_input(tt);
             /* line 34 */
-            val *h = linear_forward(fc1, x);
+            sc_val *h = sc_linear_forward(fc1, x);
             /* line 35 */
-            val *hr = val_relu(h);
+            sc_val *hr = sc_val_relu(h);
             /* line 36 */
-            val *y = linear_forward(fc2, hr);
+            sc_val *y = sc_linear_forward(fc2, hr);
             /* line 37 */
-            val *loss = val_mse_loss(y, tgt);
+            sc_val *loss = sc_val_mse_loss(y, tgt);
             /* line 38 */
-            val_backward(loss);
+            sc_val_backward(loss);
             /* line 39 */
-            optim_step(opt);
+            sc_optim_step(opt);
             /* line 40 */
-            optim_zero_grad(opt);
+            sc_optim_zero_grad(opt);
             /* line 41 */
-            last = val_item(loss);
+            last = sc_val_item(loss);
             /* line 42 */
-            nn_tape_clear();
+            sc_nn_tape_clear();
         }
     }
     /* line 43 */
     printf("trained loss<1=%d\n", ((int32_t)(last < 1.0)));
     /* line 45 */
-    val *x2 = nn_input(xt);
+    sc_val *x2 = sc_nn_input(xt);
     /* line 46 */
-    val *h2 = linear_forward(fc1, x2);
+    sc_val *h2 = sc_linear_forward(fc1, x2);
     /* line 47 */
-    val *hr2 = val_relu(h2);
+    sc_val *hr2 = sc_val_relu(h2);
     /* line 48 */
-    val *y2 = linear_forward(fc2, hr2);
+    sc_val *y2 = sc_linear_forward(fc2, hr2);
     /* line 49 */
-    tensor *yv = val_value(y2);
+    sc_tensor *yv = sc_val_value(y2);
     /* line 50 */
-    int32_t _sq0 = ((int32_t)(tensor_at(yv, 0) > 4.0));
-    int32_t _sq1 = ((int32_t)(tensor_at(yv, 1) > 7.0));
+    int32_t _sq0 = ((int32_t)(sc_tensor_at(yv, 0) > 4.0));
+    int32_t _sq1 = ((int32_t)(sc_tensor_at(yv, 1) > 7.0));
     printf("y0_close=%d y1_close=%d\n", _sq0, _sq1);
     /* line 51 */
-    nn_tape_clear();
+    sc_nn_tape_clear();
     /* line 53 */
     {
         int32_t _ret = 0;
-        if (yv) { tensor_drop(yv); sc_free(yv); }
-        if (opt) { optim_drop(opt); sc_free(opt); }
-        if (fc2) { linear_drop(fc2); sc_free(fc2); }
-        if (fc1) { linear_drop(fc1); sc_free(fc1); }
-        if (tt) { tensor_drop(tt); sc_free(tt); }
-        if (xt) { tensor_drop(xt); sc_free(xt); }
+        if (yv) { sc_tensor_drop(yv); sc_free(yv); }
+        if (opt) { sc_optim_drop(opt); sc_free(opt); }
+        if (fc2) { sc_linear_drop(fc2); sc_free(fc2); }
+        if (fc1) { sc_linear_drop(fc1); sc_free(fc1); }
+        if (tt) { sc_tensor_drop(tt); sc_free(tt); }
+        if (xt) { sc_tensor_drop(xt); sc_free(xt); }
         sc_mod_nn_drop();
         sc_mod_ts_drop();
         return _ret;

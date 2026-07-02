@@ -1,5 +1,5 @@
 /* ============================================================
- * builtins/tok/graph_impl.c —— 有向图算法默认实现
+ * builtins/graph/graph_impl.c —— 有向图算法默认实现
  * ============================================================
  * 规范接口见同目录 graph.h。本实现编译进 scc 二进制（compiler/CMakeLists.txt），
  * 由编译期适配层调用，对 tok 依赖图做预计算并烘焙为生成代码常量。
@@ -10,7 +10,7 @@
 
 /* 由边表 (eu, ev) 构建 CSR 出边邻接：
  *   head[nv+1] 前缀和（顶点 u 的出边落在 to[head[u] .. head[u+1])）、to[ne] 终点。 */
-static void build_csr(const sc_graph *g, int *head, int *to) {
+static void build_csr(sc_graph *g, int *head, int *to) {
     const int nv = g->nv, ne = g->ne;
     for (int i = 0; i <= nv; i++) head[i] = 0;
     for (int e = 0; e < ne; e++) head[g->eu[e] + 1]++;
@@ -50,7 +50,7 @@ static void cyc_dfs(cyc_ctx *c, int u) {
     c->state[u] = 2;
 }
 
-int sc_graph_cycle(const sc_graph *g, int *cyc_out, int *cyc_len) {
+int sc_graph_cycle(sc_graph *g, int *cyc_out, int *cyc_len) {
     const int nv = g->nv, ne = g->ne;
     int *head = (int *)malloc((size_t)(nv + 1) * sizeof(int));
     int *to   = (int *)malloc((size_t)(ne ? ne : 1) * sizeof(int));
@@ -72,7 +72,7 @@ int sc_graph_cycle(const sc_graph *g, int *cyc_out, int *cyc_len) {
 }
 
 /* ---- 拓扑排序：Kahn 入度法 ---- */
-int sc_graph_toposort(const sc_graph *g, int *order_out) {
+int sc_graph_toposort(sc_graph *g, int *order_out) {
     const int nv = g->nv, ne = g->ne;
     int *head  = (int *)malloc((size_t)(nv + 1) * sizeof(int));
     int *to    = (int *)malloc((size_t)(ne ? ne : 1) * sizeof(int));
@@ -94,7 +94,7 @@ int sc_graph_toposort(const sc_graph *g, int *order_out) {
     return cnt == nv;                         /* 全部出队 = 无环 */
 }
 
-int sc_graph_revtoposort(const sc_graph *g, int *order_out) {
+int sc_graph_revtoposort(sc_graph *g, int *order_out) {
     if (!sc_graph_toposort(g, order_out)) return 0;
     for (int i = 0, j = g->nv - 1; i < j; i++, j--) {
         int t = order_out[i]; order_out[i] = order_out[j]; order_out[j] = t;
@@ -103,7 +103,7 @@ int sc_graph_revtoposort(const sc_graph *g, int *order_out) {
 }
 
 /* ---- 最长路径深度分层：沿拓扑序松弛 depth[v] = max(depth[u]+1) ---- */
-void sc_graph_depth(const sc_graph *g, int *depth_out) {
+void sc_graph_depth(sc_graph *g, int *depth_out) {
     const int nv = g->nv, ne = g->ne;
     int *order = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
     for (int i = 0; i < nv; i++) depth_out[i] = 0;
@@ -123,7 +123,7 @@ void sc_graph_depth(const sc_graph *g, int *depth_out) {
 }
 
 /* ---- 关键路径 + 松弛：正向最早 e[v] + 反向最长 rd[v]， crit ⇔ e+rd==L，slack=L-(e+rd) ---- */
-void sc_graph_critical(const sc_graph *g, int *crit_out, int *slack_out) {
+void sc_graph_critical(sc_graph *g, int *crit_out, int *slack_out) {
     const int nv = g->nv, ne = g->ne;
     for (int i = 0; i < nv; i++) { crit_out[i] = 0; if (slack_out) slack_out[i] = 0; }
     int *order = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
@@ -154,7 +154,7 @@ void sc_graph_critical(const sc_graph *g, int *crit_out, int *slack_out) {
 }
 
 /* ---- 扇入/扇出度：直接按边表计数 ---- */
-void sc_graph_degree(const sc_graph *g, int *indeg_out, int *outdeg_out) {
+void sc_graph_degree(sc_graph *g, int *indeg_out, int *outdeg_out) {
     const int nv = g->nv, ne = g->ne;
     if (indeg_out)  for (int i = 0; i < nv; i++) indeg_out[i]  = 0;
     if (outdeg_out) for (int i = 0; i < nv; i++) outdeg_out[i] = 0;
@@ -165,7 +165,7 @@ void sc_graph_degree(const sc_graph *g, int *indeg_out, int *outdeg_out) {
 }
 
 /* ---- 可达性规模：逆拓扑序 + 位集传递闭包，reach[v]=可达其它顶点数 ---- */
-void sc_graph_reach(const sc_graph *g, int *reach_out) {
+void sc_graph_reach(sc_graph *g, int *reach_out) {
     const int nv = g->nv, ne = g->ne;
     for (int i = 0; i < nv; i++) reach_out[i] = 0;
     if (nv == 0) return;
@@ -199,7 +199,7 @@ void sc_graph_reach(const sc_graph *g, int *reach_out) {
 }
 
 /* ---- 拓扑分批：batch=最长路径深度，width=同深度顶点数 ---- */
-void sc_graph_batches(const sc_graph *g, int *batch_out, int *width_out, int *nbatch_out) {
+void sc_graph_batches(sc_graph *g, int *batch_out, int *width_out, int *nbatch_out) {
     const int nv = g->nv;
     int *depth = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
     sc_graph_depth(g, depth);                      /* 复用最长路径分层（有环退化全 0） */
@@ -219,7 +219,7 @@ void sc_graph_batches(const sc_graph *g, int *batch_out, int *width_out, int *nb
 
 /* ---- 支配树（Cooper–Harvey–Kennedy）：虚拟超级源 S 连各入度 0 顶点，求 idom ----
  * checkpoint[v]=是否支配≥1 其它顶点；domsize[v]=支配树后代数。 */
-void sc_graph_dominators(const sc_graph *g, int *checkpoint_out, int *domsize_out) {
+void sc_graph_dominators(sc_graph *g, int *checkpoint_out, int *domsize_out) {
     const int nv = g->nv, ne = g->ne;
     if (checkpoint_out) for (int i = 0; i < nv; i++) checkpoint_out[i] = 0;
     if (domsize_out)    for (int i = 0; i < nv; i++) domsize_out[i] = 0;
@@ -350,7 +350,7 @@ static void scc_dfs(scc_ctx *c, int u) {
     }
 }
 
-int sc_graph_scc(const sc_graph *g, int *comp_out, int *ncomp_out) {
+int sc_graph_scc(sc_graph *g, int *comp_out, int *ncomp_out) {
     const int nv = g->nv, ne = g->ne;
     int *head = (int *)malloc((size_t)(nv + 1) * sizeof(int));
     int *to   = (int *)malloc((size_t)(ne ? ne : 1) * sizeof(int));
@@ -371,4 +371,88 @@ int sc_graph_scc(const sc_graph *g, int *comp_out, int *ncomp_out) {
     free(head); free(to); free(c.index); free(c.low); free(c.onstk); free(c.stk);
     if (ncomp_out) *ncomp_out = c.ncomp;
     return c.ncomp;
+}
+
+/* ---- 并查集（Union-Find，路径减半压缩 + 按秩合并）：连通分量 / MST 共用 ---- */
+static int uf_find(int *parent, int x) {
+    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+}
+static int uf_union(int *parent, int *urank, int a, int b) {
+    int ra = uf_find(parent, a), rb = uf_find(parent, b);
+    if (ra == rb) return 0;                     /* 已同集，合并无效（成环） */
+    if (urank[ra] < urank[rb]) { int t = ra; ra = rb; rb = t; }
+    parent[rb] = ra;
+    if (urank[ra] == urank[rb]) urank[ra]++;
+    return 1;
+}
+
+/* ---- 无权最短路：BFS 层（自 src 按出边方向广度优先） ---- */
+void sc_graph_bfs(sc_graph *g, int src, int *dist_out) {
+    const int nv = g->nv, ne = g->ne;
+    for (int i = 0; i < nv; i++) dist_out[i] = -1;
+    if (nv == 0 || src < 0 || src >= nv) return;
+    int *head = (int *)malloc((size_t)(nv + 1) * sizeof(int));
+    int *to   = (int *)malloc((size_t)(ne ? ne : 1) * sizeof(int));
+    build_csr(g, head, to);
+    int *q = (int *)malloc((size_t)nv * sizeof(int));
+    int qh = 0, qt = 0;
+    dist_out[src] = 0; q[qt++] = src;
+    while (qh < qt) {
+        int u = q[qh++];
+        for (int i = head[u]; i < head[u + 1]; i++) {
+            int v = to[i];
+            if (dist_out[v] < 0) { dist_out[v] = dist_out[u] + 1; q[qt++] = v; }
+        }
+    }
+    free(head); free(to); free(q);
+}
+
+/* ---- 弱连通分量：并查集（忽略边方向，按首次出现序紧凑编号） ---- */
+int sc_graph_components(sc_graph *g, int *comp_out, int *ncomp_out) {
+    const int nv = g->nv, ne = g->ne;
+    int *parent = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
+    int *urank  = (int *)calloc((size_t)(nv ? nv : 1), sizeof(int));
+    for (int i = 0; i < nv; i++) parent[i] = i;
+    for (int e = 0; e < ne; e++) uf_union(parent, urank, g->eu[e], g->ev[e]);
+    int *label = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
+    for (int i = 0; i < nv; i++) label[i] = -1;
+    int nc = 0;
+    for (int i = 0; i < nv; i++) {
+        int r = uf_find(parent, i);
+        if (label[r] < 0) label[r] = nc++;
+        comp_out[i] = label[r];
+    }
+    free(parent); free(urank); free(label);
+    if (ncomp_out) *ncomp_out = nc;
+    return nc;
+}
+
+/* ---- 最小生成树/森林：Kruskal（(权,边) 对按权升序 qsort + 并查集去环） ---- */
+typedef struct { int w, e; } we_pair;
+static int we_cmp(const void *a, const void *b) {
+    const we_pair *x = (const we_pair *)a, *y = (const we_pair *)b;
+    if (x->w != y->w) return x->w < y->w ? -1 : 1;
+    return x->e - y->e;                         /* 权同 → 按边下标稳定定序 */
+}
+int sc_graph_mst(sc_graph *g, const int *ew, int *tree_edges_out, int *total_out) {
+    const int nv = g->nv, ne = g->ne;
+    we_pair *arr = (we_pair *)malloc((size_t)(ne ? ne : 1) * sizeof(we_pair));
+    for (int e = 0; e < ne; e++) { arr[e].w = ew ? ew[e] : 1; arr[e].e = e; }
+    qsort(arr, (size_t)ne, sizeof(we_pair), we_cmp);
+    int *parent = (int *)malloc((size_t)(nv ? nv : 1) * sizeof(int));
+    int *urank  = (int *)calloc((size_t)(nv ? nv : 1), sizeof(int));
+    for (int i = 0; i < nv; i++) parent[i] = i;
+    int cnt = 0, total = 0;
+    for (int k = 0; k < ne && cnt < nv - 1; k++) {
+        int e = arr[k].e;
+        if (uf_union(parent, urank, g->eu[e], g->ev[e])) {   /* 不成环 → 入选 */
+            if (tree_edges_out) tree_edges_out[cnt] = e;
+            total += arr[k].w;
+            cnt++;
+        }
+    }
+    free(arr); free(parent); free(urank);
+    if (total_out) *total_out = total;
+    return cnt;
 }

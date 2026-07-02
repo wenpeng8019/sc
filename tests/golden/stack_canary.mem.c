@@ -1,18 +1,18 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static int32_t gtable[(6) + SC_CANARY_ELEMS(int32_t)];
-static int32_t gmat[(2) + SC_CANARY_OUTER(int32_t, (3))][3];
-static void fill_buf(void);
-static int32_t sum_first(void);
-static int32_t zero_buf(void);
-static int32_t grid_sum(void);
-static int32_t use_globals(void);
-typedef struct com__project {
+static int32_t sc_gtable[(6) + SC_CANARY_ELEMS(int32_t)];
+static int32_t sc_gmat[(2) + SC_CANARY_OUTER(int32_t, (3))][3];
+static void sc_fill_buf(void);
+static int32_t sc_sum_first(void);
+static int32_t sc_zero_buf(void);
+static int32_t sc_grid_sum(void);
+static int32_t sc_use_globals(void);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 #if !SC_HAVE_AUTO_HOOKS
@@ -20,7 +20,7 @@ static void __sc_gcanary_init(void);
 static void __sc_gcanary_fini(void);
 #endif
 
-static void fill_buf(void) {
+static void sc_fill_buf(void) {
     /* line 10 */
     int32_t tmp[(8) + SC_CANARY_ELEMS(int32_t)];
     sc_stack_canary_fill((unsigned char*)tmp + ((8)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), tmp);
@@ -47,7 +47,7 @@ static void fill_buf(void) {
     sc_stack_canary_check((unsigned char*)tmp + ((8)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), tmp, "tmp@stack_canary.sc:10");
 }
 
-static int32_t sum_first(void) {
+static int32_t sc_sum_first(void) {
     /* line 22 */
     int32_t data[(5) + SC_CANARY_ELEMS(int32_t)] = {2, 4, 6, 8, 10};
     sc_stack_canary_fill((unsigned char*)data + ((5)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), data);
@@ -68,7 +68,7 @@ static int32_t sum_first(void) {
     }
 }
 
-static int32_t zero_buf(void) {
+static int32_t sc_zero_buf(void) {
     /* line 33 */
     int32_t buf[(8) + SC_CANARY_ELEMS(int32_t)];
     sc_stack_canary_fill((unsigned char*)buf + ((8)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), buf);
@@ -82,7 +82,7 @@ static int32_t zero_buf(void) {
     }
 }
 
-static int32_t grid_sum(void) {
+static int32_t sc_grid_sum(void) {
     /* line 39 */
     int32_t grid[(3) + SC_CANARY_OUTER(int32_t, (4))][4];
     sc_stack_canary_fill((unsigned char*)grid + ((3) * (4)) * sizeof(int32_t), SC_CANARY, grid);
@@ -106,18 +106,18 @@ static int32_t grid_sum(void) {
     }
 }
 
-static int32_t use_globals(void) {
+static int32_t sc_use_globals(void) {
     /* line 49 */
     int32_t i = 0;
     /* line 50 */
     for (i = 0; i < 6; i++) {
         /* line 51 */
-        gtable[i] = (i * i);
+        sc_gtable[i] = (i * i);
     }
     /* line 52 */
-    gmat[1][2] = 42;
+    sc_gmat[1][2] = 42;
     /* line 53 */
-    return gtable[5] + gmat[1][2];
+    return sc_gtable[5] + sc_gmat[1][2];
 }
 
 int32_t main(void) {
@@ -126,15 +126,15 @@ int32_t main(void) {
     __sc_gcanary_init();
 #endif
     /* line 56 */
-    fill_buf();
+    sc_fill_buf();
     /* line 57 */
-    printf("sum=%d\n", sum_first());
+    printf("sum=%d\n", sc_sum_first());
     /* line 58 */
-    printf("bytes=%d\n", zero_buf());
+    printf("bytes=%d\n", sc_zero_buf());
     /* line 59 */
-    printf("grid=%d\n", grid_sum());
+    printf("grid=%d\n", sc_grid_sum());
     /* line 60 */
-    printf("glob=%d\n", use_globals());
+    printf("glob=%d\n", sc_use_globals());
     /* line 61 */
     {
         int32_t _ret = 0;
@@ -147,10 +147,10 @@ int32_t main(void) {
 
 
 SC_CONSTRUCTOR(__sc_gcanary_init) {
-    sc_stack_canary_fill((unsigned char*)gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), gtable);
-    sc_stack_canary_fill((unsigned char*)gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, gmat);
+    sc_stack_canary_fill((unsigned char*)sc_gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), sc_gtable);
+    sc_stack_canary_fill((unsigned char*)sc_gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, sc_gmat);
 }
 SC_DESTRUCTOR(__sc_gcanary_fini) {
-    sc_stack_canary_check((unsigned char*)gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), gtable, "gtable@stack_canary.sc:6");
-    sc_stack_canary_check((unsigned char*)gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, gmat, "gmat@stack_canary.sc:7");
+    sc_stack_canary_check((unsigned char*)sc_gtable + ((6)) * sizeof(int32_t), SC_CANARY_ELEMS(int32_t) * sizeof(int32_t), sc_gtable, "gtable@stack_canary.sc:6");
+    sc_stack_canary_check((unsigned char*)sc_gmat + ((2) * (3)) * sizeof(int32_t), SC_CANARY, sc_gmat, "gmat@stack_canary.sc:7");
 }

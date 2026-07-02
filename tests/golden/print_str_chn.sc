@@ -10,6 +10,6 @@ inc adt.sc
     print<s> " | second line"
     print<s>("; x=%d y=%d", 7, 8)
     print "stdout still works: ", n
-    printf("collected string = [%s]\n", s.cstr())
+    ::printf("collected string = [%s]\n", s.cstr())
     s.drop()
     return 0

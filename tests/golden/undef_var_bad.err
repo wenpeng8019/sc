@@ -1,2 +1,2 @@
-undef_var_bad.sc:4: [1;31m错误[0m: 未定义的标识符 'y'，是否想用 'x'？
+undef_var_bad.sc:4: [1;31m错误[0m: 未声明的符号 'y'（sc 命名域）：若引用 C 域符号请写 '::y'，是否想用 'x'？
   |      return x + y

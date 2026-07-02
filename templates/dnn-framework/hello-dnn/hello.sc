@@ -114,7 +114,7 @@ fnc backward_step:
 fnc train: i4, epochs: i4
     for e in epochs
         var l: f8 = forward((e: i8))
-        printf("epoch %2d  loss=%.6f  y=[%.4f, %.4f]\n", e, l, gY->at(0), gY->at(1))
+        ::printf("epoch %2d  loss=%.6f  y=[%.4f, %.4f]\n", e, l, gY->at(0), gY->at(1))
         backward_step()
     return 0
 
@@ -166,8 +166,8 @@ fnc main: i4
 
     print "=== 推理 ==="
     var l: f8 = forward(40)
-    printf("final  loss=%.6f  y=[%.4f, %.4f]  (target=[5, 8])\n", l, gY->at(0), gY->at(1))
-    printf("权重 W=[[%.4f, %.4f],[%.4f, %.4f]]  b=[%.4f, %.4f]\n",
+    ::printf("final  loss=%.6f  y=[%.4f, %.4f]  (target=[5, 8])\n", l, gY->at(0), gY->at(1))
+    ::printf("权重 W=[[%.4f, %.4f],[%.4f, %.4f]]  b=[%.4f, %.4f]\n",
            gW->at(0), gW->at(1), gW->at(2), gW->at(3), gB->at(0), gB->at(1))
     teardown()
     return 0

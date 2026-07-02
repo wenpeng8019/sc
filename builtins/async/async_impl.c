@@ -45,9 +45,9 @@ future *delay(uint32_t ms) {
 
 #else
 
-future *delay(uint32_t ms) {
-    future *f = future_new();
-    op_timer_arm(f, ms);     /* op 层基础定时器（poll 单调时钟截止表） */
+sc_future *sc_delay(uint32_t ms) {
+    sc_future *f = sc_future_new();
+    sc_op_timer_arm(f, ms);     /* op 层基础定时器（poll 单调时钟截止表） */
     return f;
 }
 

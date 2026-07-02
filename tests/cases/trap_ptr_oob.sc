@@ -5,5 +5,5 @@
 @fnc main: i4
     var a[3]: i4 = [10, 20, 30]
     var i: i4 = 5
-    printf("%d\n", a[i])        # a[5]：--check=ptr 注入越界校验，命中即 abort
+    ::printf("%d\n", a[i])        # a[5]：--check=ptr 注入越界校验，命中即 abort
     return 0

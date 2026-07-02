@@ -3,11 +3,11 @@
 #include "scm__Users_wenpeng_dev_c_sc_examples_feature46_feature46_config_sc.h"
 #include "scm__Users_wenpeng_dev_c_sc_examples_feature46_feature46_logger_sc.h"
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_feature46_config_init(void); void sc_mod_feature46_config_drop(void);
@@ -18,14 +18,14 @@ int32_t main(void) {
     sc_mod_feature46_config_init();
     sc_mod_feature46_logger_init();
     /* line 26 */
-    config_m_set_level(&config, 3);
+    sc_config_m_set_level(&sc_config, 3);
     /* line 27 */
-    logger_m_emit(&logger, "hello");
+    sc_logger_m_emit(&sc_logger, "hello");
     /* line 28 */
-    logger_m_emit(&logger, "world");
+    sc_logger_m_emit(&sc_logger, "world");
     /* line 29 */
-    int32_t _sq0 = config_m_level(&config);
-    int32_t _sq1 = logger_m_count(&logger);
+    int32_t _sq0 = sc_config_m_level(&sc_config);
+    int32_t _sq1 = sc_logger_m_count(&sc_logger);
     printf("config.level = %d, logger.count = %d\n", _sq0, _sq1);
     /* line 31 */
     {

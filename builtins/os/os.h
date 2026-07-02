@@ -11,7 +11,7 @@ extern "C" {
 
 /* os_rand：填充 n 字节密码学强随机到 buf；返回 0。
  * 转发 platform.h 的 P_rand_bytes（CSPRNG）：arc4random / rand_s / /dev/urandom。 */
-int32_t os_rand(void *buf, uint32_t n);
+int32_t sc_os_rand(void *buf, uint32_t n);
 
 /* （待实现：网卡/防火墙/路由等系统管理查询；fs_* / env_* / proc_* 等基本操作。
  *   应用网络套接字已迁至 sys 模块（sock_*）。） */

@@ -1,52 +1,52 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct point point;
-typedef struct rect rect;
-typedef struct obj obj;
-typedef union value value;
+typedef struct sc_point sc_point;
+typedef struct sc_rect sc_rect;
+typedef struct sc_obj sc_obj;
+typedef union sc_value sc_value;
 
-#define macro(p1, p2, p3, ...) \
-    static int32_t p1##b = 2;
+#define sc_macro(p1, p2, p3, ...) \
+    static int32_t sc_p1##b = 2;
 typedef enum { /* base: int32_t */
-    Red = 0,
-    Green,
-    Blue
-} color;
+    sc_Red = 0,
+    sc_Green,
+    sc_Blue
+} sc_color;
 
-typedef struct point {
+typedef struct sc_point {
     int32_t x;
     int32_t y;
-} point;
+} sc_point;
 
-typedef struct rect {
-    point lt;
-    point rb;
-} rect;
+typedef struct sc_rect {
+    sc_point lt;
+    sc_point rb;
+} sc_rect;
 
-typedef struct obj {
+typedef struct sc_obj {
     int32_t id;
     struct {
         int32_t tag;
         bool flag;
     } meta;
-} obj;
+} sc_obj;
 
-typedef union value {
+typedef union sc_value {
     int32_t i;
     float f;
-} value;
+} sc_value;
 
-typedef uint8_t byte;
+typedef uint8_t sc_byte;
 
-static const int32_t MAX = 100;
-static int32_t counter = 0;
-static const int32_t grid[2][3];
-typedef struct com__project {
+static const int32_t sc_MAX = 100;
+static int32_t sc_counter = 0;
+static const int32_t sc_grid[2][3];
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 int32_t main(void) {
@@ -84,15 +84,15 @@ int32_t main(void) {
     /* line 88 */
     printf("inline var: x=%d y=%d\n", tmp.x, tmp.y);
     /* line 91 */
-    point pt = {5, 6};
+    sc_point pt = {5, 6};
     /* line 92 */
     printf("pt: x=%d y=%d\n", pt.x, pt.y);
     /* line 95 */
-    point pt3 = {.x = 9, .y = 11};
+    sc_point pt3 = {.x = 9, .y = 11};
     /* line 96 */
     printf("pt3: x=%d y=%d\n", pt3.x, pt3.y);
     /* line 99 */
-    obj o = {0};
+    sc_obj o = {0};
     /* line 100 */
     o.id = 1;
     /* line 101 */
@@ -113,15 +113,15 @@ int32_t main(void) {
     /* line 114 */
     printf("vp=%p\n", vp);
     /* line 116 */
-    point pt2 = {0};
+    sc_point pt2 = {0};
     /* line 117 */
     (pt2.x = 7) , (pt2.y = 8);
     /* line 118 */
-    point *px = &(pt2);
+    sc_point *px = &(pt2);
     /* line 119 */
     printf("px->x=%d\n", px->x);
     /* line 122 */
-    point **pp = &(px);
+    sc_point **pp = &(px);
     /* line 123 */
     printf("pp=%p\n", pp);
     /* line 128 */
@@ -193,11 +193,11 @@ int32_t main(void) {
     /* line 184 */
     void *pv = &(tmp);
     /* line 185 */
-    printf("paren cast: %d\n", ((point*)(pv))->x);
+    printf("paren cast: %d\n", ((sc_point*)(pv))->x);
     /* line 189 */
-    printf("sizeof(point)=%lu\n", sizeof(point));
+    printf("sizeof(point)=%lu\n", sizeof(sc_point));
     /* line 190 */
-    printf("offsetof(point,y)=%lu\n", offsetof(point, y));
+    printf("offsetof(point,y)=%lu\n", offsetof(sc_point, y));
     /* line 195 */
     if (tmp.x == 1) {
         /* line 196 */
@@ -218,25 +218,25 @@ int32_t main(void) {
         printf("cond fail\n");
     }
     /* line 211 */
-    counter = 0;
+    sc_counter = 0;
     /* line 212 */
     for (i = 0; i < 3; i++) {
         /* line 213 */
-        counter += i;
+        sc_counter += i;
     }
     /* line 214 */
-    printf("counter = %d\n", counter);
+    printf("counter = %d\n", sc_counter);
     /* line 216 */
-    for (; counter < 10; counter++) {
+    for (; sc_counter < 10; sc_counter++) {
         /* line 217 */
-        printf("counter at %d\n", counter);
+        printf("counter at %d\n", sc_counter);
     }
     /* line 220 */
-    while (counter > 3) {
+    while (sc_counter > 3) {
         /* line 221 */
-        counter--;
+        sc_counter--;
         /* line 222 */
-        if (counter == 5) {
+        if (sc_counter == 5) {
             /* line 223 */
             break;
         }

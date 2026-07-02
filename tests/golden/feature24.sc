@@ -22,11 +22,11 @@
     root->pt.y = 20
     root->child = node()
     root->child->v = 2
-    printf("root.v=%d child.v=%d\n", root->v, root->child->v)
+    ::printf("root.v=%d child.v=%d\n", root->v, root->child->v)
     var alias: node@ = root
-    printf("alias.v=%d\n", alias->v)
+    ::printf("alias.v=%d\n", alias->v)
     var px: point@ = &root->pt
-    printf("px.x=%d px.y=%d\n", px->x, px->y)
+    ::printf("px.x=%d px.y=%d\n", px->x, px->y)
     root->child = nil
-    printf("after-detach root.v=%d\n", root->v)
+    ::printf("after-detach root.v=%d\n", root->v)
     return 0

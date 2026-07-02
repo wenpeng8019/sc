@@ -148,6 +148,13 @@ struct TypeRef {
 
     //---------
 
+    // C 桥接类型 ::name（严格命名域，类 C++）：类型名以 :: 前置书写，标记该基类型为
+    //   C 命名域符号 —— 转 C 时原样落 C 类型名（不加 sc_ 前缀），语义层不报「未定义类型」。
+    //   仅对具名基类型（name 非空）有意义；内联结构/函数指针无 :: 形态。
+    bool cBridge = false;
+
+    //---------
+
     StructCommon structCommon;
 };
 
@@ -256,6 +263,7 @@ struct Expr {
     bool castRestrict = false;  // Cast: 目标指针 restrict 限定（尾置）
     bool castFat = false;       // Cast: 目标为自动指针 T@/裸 @（op 为空 → 裸 @ 类型擦除）
     bool castThin = false;      // Cast: 目标为瘦指针 T*/裸 *（op 为空 → 裸 * 类型擦除）；castFat 同置
+    bool castCBridge = false;   // Cast: 目标为 C 域类型 ::T（严格命名域）：原样落 C 类型名（不加 sc_ 前缀）
 
     // stringify<key:val,...> 选项块（仅 Call 且 callee 为 stringify 关键字时有效）；
     // + 值限整数字面量（如 compact:1），codegen 据此生成 (stringify_t){...} 复合字面量

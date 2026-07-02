@@ -1,21 +1,21 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static int32_t gtable[6];
-static int32_t gmat[2][3];
-static void fill_buf(void);
-static int32_t sum_first(void);
-static int32_t zero_buf(void);
-static int32_t grid_sum(void);
-static int32_t use_globals(void);
-typedef struct com__project {
+static int32_t sc_gtable[6];
+static int32_t sc_gmat[2][3];
+static void sc_fill_buf(void);
+static int32_t sc_sum_first(void);
+static int32_t sc_zero_buf(void);
+static int32_t sc_grid_sum(void);
+static int32_t sc_use_globals(void);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static void fill_buf(void) {
+static void sc_fill_buf(void) {
     /* line 10 */
     int32_t tmp[8];
     /* line 11 */
@@ -38,7 +38,7 @@ static void fill_buf(void) {
     printf("tmp7=%d\n", tmp[7]);
 }
 
-static int32_t sum_first(void) {
+static int32_t sc_sum_first(void) {
     /* line 22 */
     int32_t data[5] = {2, 4, 6, 8, 10};
     /* line 23 */
@@ -54,7 +54,7 @@ static int32_t sum_first(void) {
     return s;
 }
 
-static int32_t zero_buf(void) {
+static int32_t sc_zero_buf(void) {
     /* line 33 */
     int32_t buf[8];
     /* line 34 */
@@ -63,7 +63,7 @@ static int32_t zero_buf(void) {
     return sizeof(buf);
 }
 
-static int32_t grid_sum(void) {
+static int32_t sc_grid_sum(void) {
     /* line 39 */
     int32_t grid[3][4];
     /* line 40 */
@@ -82,32 +82,32 @@ static int32_t grid_sum(void) {
     return grid[2][3];
 }
 
-static int32_t use_globals(void) {
+static int32_t sc_use_globals(void) {
     /* line 49 */
     int32_t i = 0;
     /* line 50 */
     for (i = 0; i < 6; i++) {
         /* line 51 */
-        gtable[i] = (i * i);
+        sc_gtable[i] = (i * i);
     }
     /* line 52 */
-    gmat[1][2] = 42;
+    sc_gmat[1][2] = 42;
     /* line 53 */
-    return gtable[5] + gmat[1][2];
+    return sc_gtable[5] + sc_gmat[1][2];
 }
 
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 56 */
-    fill_buf();
+    sc_fill_buf();
     /* line 57 */
-    printf("sum=%d\n", sum_first());
+    printf("sum=%d\n", sc_sum_first());
     /* line 58 */
-    printf("bytes=%d\n", zero_buf());
+    printf("bytes=%d\n", sc_zero_buf());
     /* line 59 */
-    printf("grid=%d\n", grid_sum());
+    printf("grid=%d\n", sc_grid_sum());
     /* line 60 */
-    printf("glob=%d\n", use_globals());
+    printf("glob=%d\n", sc_use_globals());
     /* line 61 */
     return 0;
 }

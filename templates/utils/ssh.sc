@@ -29,7 +29,8 @@
 #   POSIX（macOS/Linux）+ Windows（winsock，源码就绪未实测），无 zlib 压缩。SFTP 暂缓。
 
 inc sys.sc                                     # sock_connect / sock_close（跨平台 socket）
-inc "../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（直接按名调用）
+inc mem.sc                                     # chunk / chunk0（动态内存）
+inc "../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（'::' 逃逸到 C 域按名调用）
 
 # 把 native 静态库并入工程（路径相对本 .sc 目录解析）。
 add libssh2.a
@@ -37,7 +38,7 @@ add libssh2.a
 # ---------------- 连接句柄 ----------------
 # 不透明连接：SSH 会话 + 其 TCP 套接字（对调用方以 & 隐藏）。
 def ssh_conn: {
-    sess: &         # LIBSSH2_SESSION*
+    sess: &         # ::LIBSSH2_SESSION*
     sock: i4        # 已连接 TCP 套接字 fd（sock_connect 返回）
 }
 
@@ -46,7 +47,7 @@ var g_ssh_inited: i4 = 0
 fnc ssh_init_once: i4
     if g_ssh_inited != 0
         return 0
-    if libssh2_init(0) != 0
+    if ::libssh2_init(0) != 0
         return -1
     g_ssh_inited = 1
     return 0
@@ -61,18 +62,18 @@ fnc ssh_init_once: i4
     var fd: i4 = sock_connect(host, port)
     if fd < 0
         return nil
-    var sess: & = (libssh2_session_init(): &)
+    var sess: & = (::libssh2_session_init(): &)
     if sess == nil
         sock_close(fd)
         return nil
-    libssh2_session_set_blocking(sess, 1)
-    if libssh2_session_handshake(sess, fd) != 0
-        libssh2_session_free(sess)
+    ::libssh2_session_set_blocking(sess, 1)
+    if ::libssh2_session_handshake(sess, fd) != 0
+        ::libssh2_session_free(sess)
         sock_close(fd)
         return nil
-    var c: ssh_conn& = (sc_chunk0(sizeof(ssh_conn)): ssh_conn&)
+    var c: ssh_conn& = (chunk0(sizeof(ssh_conn)): ssh_conn&)
     if c == nil
-        libssh2_session_free(sess)
+        ::libssh2_session_free(sess)
         sock_close(fd)
         return nil
     c->sess = sess
@@ -85,10 +86,10 @@ fnc ssh_init_once: i4
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || out == nil
         return -1
-    var fp: & = (libssh2_hostkey_hash(c->sess, LIBSSH2_HOSTKEY_HASH_SHA256): &)
+    var fp: & = (::libssh2_hostkey_hash(c->sess, ::LIBSSH2_HOSTKEY_HASH_SHA256): &)
     if fp == nil
         return -1
-    memcpy(out, fp, 32)
+    ::memcpy(out, fp, 32)
     return 0
 
 # 断开并释放连接（含底层 socket）。
@@ -97,10 +98,10 @@ fnc ssh_init_once: i4
     if c == nil
         return
     if c->sess != nil
-        libssh2_session_disconnect(c->sess, "bye")
-        libssh2_session_free(c->sess)
+        ::libssh2_session_disconnect(c->sess, "bye")
+        ::libssh2_session_free(c->sess)
     sock_close(c->sock)
-    sc_recycle(c)
+    recycle(c)
     return
 
 # ---------------- 用户认证 ----------------
@@ -109,7 +110,7 @@ fnc ssh_init_once: i4
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || user == nil || pass == nil
         return -1
-    if libssh2_userauth_password(c->sess, user, pass) != 0
+    if ::libssh2_userauth_password(c->sess, user, pass) != 0
         return -1
     return 0
 
@@ -123,7 +124,7 @@ fnc ssh_init_once: i4
     var pass: char& = passphrase
     if pass == nil
         pass = ""
-    if libssh2_userauth_publickey_fromfile(c->sess, user, pubpath, privpath, pass) != 0
+    if ::libssh2_userauth_publickey_fromfile(c->sess, user, pubpath, privpath, pass) != 0
         return -1
     return 0
 
@@ -133,22 +134,22 @@ fnc ssh_init_once: i4
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || cmd == nil || buf == nil
         return -1
-    var ch: & = (libssh2_channel_open_session(c->sess): &)
+    var ch: & = (::libssh2_channel_open_session(c->sess): &)
     if ch == nil
         return -1
-    if libssh2_channel_exec(ch, cmd) != 0
-        libssh2_channel_free(ch)
+    if ::libssh2_channel_exec(ch, cmd) != 0
+        ::libssh2_channel_free(ch)
         return -1
     var total: u4 = 0
     var out: char& = (buf: char&)
     while total < cap
-        var n: i8 = libssh2_channel_read(ch, &out[total], ((cap - total): u8))
+        var n: i8 = ::libssh2_channel_read(ch, &out[total], ((cap - total): u8))
         if n > 0
             total = total + (n: u4)
         else
             break                       # n==0 EOF / n<0 错误：返回已取回部分
-    libssh2_channel_close(ch)
-    libssh2_channel_free(ch)
+    ::libssh2_channel_close(ch)
+    ::libssh2_channel_free(ch)
     return (total: i4)
 
 # ---------------- 文件传输（SCP，阻塞式） ----------------
@@ -159,13 +160,13 @@ fnc ssh_init_once: i4
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || remotepath == nil || localpath == nil
         return -1
-    var st: libssh2_struct_stat                 # 由 libssh2 回填远端文件元信息（含 st_size）
-    var ch: & = (libssh2_scp_recv2(c->sess, remotepath, &st): &)
+    var st: ::libssh2_struct_stat                 # 由 libssh2 回填远端文件元信息（含 st_size）
+    var ch: & = (::libssh2_scp_recv2(c->sess, remotepath, &st): &)
     if ch == nil
         return -1
-    var f: & = (fopen(localpath, "wb"): &)
+    var f: & = (::fopen(localpath, "wb"): &)
     if f == nil
-        libssh2_channel_free(ch)
+        ::libssh2_channel_free(ch)
         return -1
     var total: i8 = (st.st_size: i8)            # 远端文件总字节数（SCP 需按此界定读取）
     var got: i8 = 0
@@ -175,18 +176,18 @@ fnc ssh_init_once: i4
         var want: u8 = 16384
         if (want: i8) > total - got
             want = ((total - got): u8)
-        var n: i8 = libssh2_channel_read(ch, &chunk[0], want)
+        var n: i8 = ::libssh2_channel_read(ch, &chunk[0], want)
         if n <= 0
             if n != 0
                 ok = 0                          # n<0 出错；n==0 提前 EOF 视为已尽力
             break
-        if (fwrite(&chunk[0], 1, (n: u8), f): u8) != (n: u8)
+        if (::fwrite(&chunk[0], 1, (n: u8), f): u8) != (n: u8)
             ok = 0
             break
         got = got + n
-    fclose(f)
-    libssh2_channel_close(ch)
-    libssh2_channel_free(ch)
+    ::fclose(f)
+    ::libssh2_channel_close(ch)
+    ::libssh2_channel_free(ch)
     if ok != 0 && got == total
         return (got: i4)
     return -1
@@ -196,44 +197,44 @@ fnc ssh_init_once: i4
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || localpath == nil || remotepath == nil
         return -1
-    var f: & = (fopen(localpath, "rb"): &)
+    var f: & = (::fopen(localpath, "rb"): &)
     if f == nil
         return -1
-    if fseek(f, 0, SEEK_END) != 0
-        fclose(f)
+    if ::fseek(f, 0, ::SEEK_END) != 0
+        ::fclose(f)
         return -1
-    var sz: i8 = (ftell(f): i8)
+    var sz: i8 = (::ftell(f): i8)
     if sz < 0
-        fclose(f)
+        ::fclose(f)
         return -1
-    rewind(f)
+    ::rewind(f)
     var m: i4 = 420                             # 0644
     if mode != 0
         m = mode & 511                          # 0777
-    var ch: & = (libssh2_scp_send64(c->sess, remotepath, m, sz, 0, 0): &)
+    var ch: & = (::libssh2_scp_send64(c->sess, remotepath, m, sz, 0, 0): &)
     if ch == nil
-        fclose(f)
+        ::fclose(f)
         return -1
     var chunk[16384]: char
     var sent: i8 = 0
     var ok: i4 = 1
     while ok != 0
-        var r: u8 = (fread(&chunk[0], 1, 16384, f): u8)
+        var r: u8 = (::fread(&chunk[0], 1, 16384, f): u8)
         if r == 0
             break
         var off: u8 = 0
         while off < r
-            var n: i8 = libssh2_channel_write(ch, &chunk[off], r - off)
+            var n: i8 = ::libssh2_channel_write(ch, &chunk[off], r - off)
             if n < 0
                 ok = 0
                 break
             off = off + (n: u8)
             sent = sent + n
-    fclose(f)
-    libssh2_channel_send_eof(ch)
-    libssh2_channel_wait_eof(ch)
-    libssh2_channel_wait_closed(ch)
-    libssh2_channel_free(ch)
+    ::fclose(f)
+    ::libssh2_channel_send_eof(ch)
+    ::libssh2_channel_wait_eof(ch)
+    ::libssh2_channel_wait_closed(ch)
+    ::libssh2_channel_free(ch)
     if ok != 0
         return (sent: i4)
     return -1
@@ -251,7 +252,7 @@ def ssh_chan_dev: {
     com:  com       # 端点
     rq:   ioq       # 读队列（异步读）
     wq:   ioq       # 写队列（异步写）
-    ch:   &         # LIBSSH2_CHANNEL*
+    ch:   &         # ::LIBSSH2_CHANNEL*
     conn: &         # ssh_conn*
     owns: i4        # 关闭时是否一并释放连接
 }
@@ -267,7 +268,7 @@ fnc sc_ssh_chan_alloc: limit&, _this: com&, size: u4, ending: &
         nbytes = nbytes + (size: u8)
     else
         nbytes = nbytes + 1
-    var s: limit& = (sc_chunk0(nbytes): limit&)
+    var s: limit& = (chunk0(nbytes): limit&)
     if s == nil
         return nil
     s->size = size
@@ -278,43 +279,43 @@ fnc sc_ssh_chan_alloc: limit&, _this: com&, size: u4, ending: &
 
 # com.free（每对象 MethodPtr）：释放 limit。
 fnc sc_ssh_chan_free: _this: com&, s: limit&
-    sc_recycle(s)
+    recycle(s)
     return
 
 # 设备读：channel_read 至多 *size 字节，回写实读字节数。
-#   n>0 → 0 / n==0 → IO_EOF / EAGAIN → IO_AGAIN / 其它 → <0。
+#   n>0 → 0 / n==0 → sc_eof / EAGAIN → sc_again / 其它 → <0。
 fnc sc_ssh_chan_read: ret, _this: com&, data: &, size: u4&
     var d: ssh_chan_dev& = (_this->dev: ssh_chan_dev&)
     if d->ch == nil || size == nil
         return -1
     var want: u4 = *size
     *size = 0
-    var n: i8 = libssh2_channel_read(d->ch, (data: char&), (want: u8))
+    var n: i8 = ::libssh2_channel_read(d->ch, (data: char&), (want: u8))
     if n > 0
         *size = (n: u4)
         return 0
     if n == 0
-        return IO_EOF
-    if n == LIBSSH2_ERROR_EAGAIN
-        return IO_AGAIN
+        return eof
+    if n == ::LIBSSH2_ERROR_EAGAIN
+        return again
     return -1
 
 # 设备写：channel_write 至多 *size 字节，回写实写字节数。
-#   全部写出 → 0 / 部分或 EAGAIN → IO_AGAIN / 其它 → <0。
+#   全部写出 → 0 / 部分或 EAGAIN → sc_again / 其它 → <0。
 fnc sc_ssh_chan_write: ret, _this: com&, buf: &, size: u4&
     var d: ssh_chan_dev& = (_this->dev: ssh_chan_dev&)
     if d->ch == nil || size == nil
         return -1
     var want: u4 = *size
     *size = 0
-    var n: i8 = libssh2_channel_write(d->ch, (buf: char&), (want: u8))
+    var n: i8 = ::libssh2_channel_write(d->ch, (buf: char&), (want: u8))
     if n >= 0
         *size = (n: u4)
         if (n: u4) == want
             return 0
-        return IO_AGAIN
-    if n == LIBSSH2_ERROR_EAGAIN
-        return IO_AGAIN
+        return again
+    if n == ::LIBSSH2_ERROR_EAGAIN
+        return again
     return -1
 
 fnc sc_ssh_chan_error: ret, _this: com&
@@ -341,12 +342,12 @@ fnc sc_ssh_chan_writable: ret, _this: com&, id: &&
 fnc sc_ssh_chan_close: ret, _this: com&
     var d: ssh_chan_dev& = (_this->dev: ssh_chan_dev&)
     if d->ch != nil
-        libssh2_channel_close(d->ch)
-        libssh2_channel_free(d->ch)
+        ::libssh2_channel_close(d->ch)
+        ::libssh2_channel_free(d->ch)
         d->ch = nil
     if d->owns != 0 && d->conn != nil
         ssh_free(d->conn)
-    sc_recycle(d)
+    recycle(d)
     return 0
 
 # 打开一个 exec 通道并封装为异步 com 设备。返回 com&（失败 nil）。
@@ -355,21 +356,21 @@ fnc sc_ssh_chan_close: ret, _this: com&
     var c: ssh_conn& = (h: ssh_conn&)
     if c == nil || cmd == nil
         return nil
-    var ch: & = (libssh2_channel_open_session(c->sess): &)
+    var ch: & = (::libssh2_channel_open_session(c->sess): &)
     if ch == nil
         return nil
-    if libssh2_channel_exec(ch, cmd) != 0
-        libssh2_channel_free(ch)
+    if ::libssh2_channel_exec(ch, cmd) != 0
+        ::libssh2_channel_free(ch)
         return nil
-    var d: ssh_chan_dev& = (sc_chunk0(sizeof(ssh_chan_dev)): ssh_chan_dev&)
+    var d: ssh_chan_dev& = (chunk0(sizeof(ssh_chan_dev)): ssh_chan_dev&)
     if d == nil
-        libssh2_channel_free(ch)
+        ::libssh2_channel_free(ch)
         return nil
     d->ch = ch
     d->conn = (c: &)
     d->owns = owns
     # 自此异步流式：会话切非阻塞
-    libssh2_session_set_blocking(c->sess, 0)
+    ::libssh2_session_set_blocking(c->sess, 0)
     d->com.dev = (d: &)
     d->com.alloc = sc_ssh_chan_alloc
     d->com.free = sc_ssh_chan_free

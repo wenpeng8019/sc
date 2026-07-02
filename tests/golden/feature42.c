@@ -2,30 +2,30 @@
 #include "platform.h"
 #include "builtins/mt/mt.h"
 
-struct serve {
+struct sc_serve {
     int32_t _;
     int32_t tag;
     int32_t info;
 };
-static void serve_rpc(struct serve *_p);
-static inline int32_t serve(int32_t tag, int32_t info) {
-    struct serve _p = {0};
+static void sc_serve_rpc(struct sc_serve *_p);
+static inline int32_t sc_serve(int32_t tag, int32_t info) {
+    struct sc_serve _p = {0};
     _p.tag = tag;
     _p.info = info;
-    serve_rpc(&_p);
+    sc_serve_rpc(&_p);
     return _p._;
 }
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
-static void serve_rpc(struct serve *_p) {
+static void sc_serve_rpc(struct sc_serve *_p) {
     /* line 23 */
     printf("  served tag=%d (%d)\n", _p->tag, _p->info);
     /* line 24 */
@@ -36,13 +36,13 @@ int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 29 */
-    queue *q = default_queue(NULL);
+    sc_queue *q = sc_default_queue(NULL);
     /* line 30 */
-    promise *a1 = q->async(q, (void (*)(void *))serve_rpc, &(struct serve){.tag = 1, .info = 1}, sizeof(struct serve), (int32_t)(1), (int64_t)0);
+    sc_promise *a1 = q->async(q, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 1, .info = 1}, sizeof(struct sc_serve), (int32_t)(1), (int64_t)0);
     /* line 31 */
-    promise *a2 = q->async(q, (void (*)(void *))serve_rpc, &(struct serve){.tag = 2, .info = 5}, sizeof(struct serve), (int32_t)(5), (int64_t)0);
+    sc_promise *a2 = q->async(q, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 2, .info = 5}, sizeof(struct sc_serve), (int32_t)(5), (int64_t)0);
     /* line 32 */
-    promise *a3 = q->async(q, (void (*)(void *))serve_rpc, &(struct serve){.tag = 3, .info = 3}, sizeof(struct serve), (int32_t)(3), (int64_t)0);
+    sc_promise *a3 = q->async(q, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 3, .info = 3}, sizeof(struct sc_serve), (int32_t)(3), (int64_t)0);
     /* line 33 */
     printf("priority order (expect tag 2,3,1):\n");
     /* line 34 */
@@ -66,13 +66,13 @@ int32_t main(void) {
     /* line 43 */
     q->drop(q);
     /* line 46 */
-    queue *q2 = default_queue(NULL);
+    sc_queue *q2 = sc_default_queue(NULL);
     /* line 47 */
-    promise *d1 = q2->async(q2, (void (*)(void *))serve_rpc, &(struct serve){.tag = 100, .info = 60}, sizeof(struct serve), (int32_t)0, (int64_t)(60));
+    sc_promise *d1 = q2->async(q2, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 100, .info = 60}, sizeof(struct sc_serve), (int32_t)0, (int64_t)(60));
     /* line 48 */
-    promise *d2 = q2->async(q2, (void (*)(void *))serve_rpc, &(struct serve){.tag = 200, .info = 20}, sizeof(struct serve), (int32_t)0, (int64_t)(20));
+    sc_promise *d2 = q2->async(q2, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 200, .info = 20}, sizeof(struct sc_serve), (int32_t)0, (int64_t)(20));
     /* line 49 */
-    promise *d3 = q2->async(q2, (void (*)(void *))serve_rpc, &(struct serve){.tag = 300, .info = 40}, sizeof(struct serve), (int32_t)0, (int64_t)(40));
+    sc_promise *d3 = q2->async(q2, (void (*)(void *))sc_serve_rpc, &(struct sc_serve){.tag = 300, .info = 40}, sizeof(struct sc_serve), (int32_t)0, (int64_t)(40));
     /* line 50 */
     printf("delay order (expect tag 200,300,100):\n");
     /* line 51 */

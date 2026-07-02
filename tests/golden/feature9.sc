@@ -15,7 +15,7 @@ rpc work: c: ctx&, rounds: i4
         c->mu.unlock()
 
 rpc note: tag: i4
-    printf("detached note: tag=%d\n", tag)
+    ::printf("detached note: tag=%d\n", tag)
 
 tls hits: i4 = 0
 
@@ -69,18 +69,18 @@ fnc main: i4
     var t2: thread& = nil
     run work(&c, 10000), &t1
     run<stack:262144, prio:5> work(&c, 10000), &t2
-    printf("t1 id set: %d\n", t1 != nil)
+    ::printf("t1 id set: %d\n", t1 != nil)
     t1->join()
     t2->join()
-    printf("threads done: n=%d\n", c.n)
+    ::printf("threads done: n=%d\n", c.n)
     run note(7)
-    P_usleep(50000)
+    ::P_usleep(50000)
     if c.mu.try_lock()
-        printf("try_lock ok\n")
+        ::printf("try_lock ok\n")
         c.mu.unlock()
     next_id()
     next_id()
-    printf("tls id=%d\n", next_id())
+    ::printf("tls id=%d\n", next_id())
     c.n = 0
     var b1: thread& = nil
     var b2: thread& = nil
@@ -88,7 +88,7 @@ fnc main: i4
     run bump(&c, 20000), &b2
     b1->join()
     b2->join()
-    printf("tls threads ok: %d\n", c.n)
+    ::printf("tls threads ok: %d\n", c.n)
     c.mu.drop()
     var s: sig
     s.ready = 0
@@ -99,11 +99,11 @@ fnc main: i4
     while s.ready == 0
         s.cv.wait(&s.mu)
     s.mu.unlock()
-    printf("cond wait ok: ready=%d\n", s.ready)
+    ::printf("cond wait ok: ready=%d\n", s.ready)
     s.mu.lock()
     s.cv.wait(&s.mu, 5000000, 0)
     s.mu.unlock()
-    printf("cond timeout ok\n")
+    ::printf("cond timeout ok\n")
     s.cv.drop()
     s.mu.drop()
     var c2: ctx
@@ -114,10 +114,10 @@ fnc main: i4
     for k = 0; k < 8; k++
         run<p> work(&c2, 1000)
     p->join()
-    printf("pool done: n=%d\n", c2.n)
+    ::printf("pool done: n=%d\n", c2.n)
     run<p> work(&c2, 1000)
     p->drop()
-    printf("pool drop: n=%d\n", c2.n)
+    ::printf("pool drop: n=%d\n", c2.n)
     c2.mu.drop()
     var bc: bctx
     bc.arrived = 0
@@ -133,7 +133,7 @@ fnc main: i4
     bt1->join()
     bt2->join()
     bt3->join()
-    printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)
+    ::printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)
     bc.bar.drop()
     bc.mu.drop()
     return 0

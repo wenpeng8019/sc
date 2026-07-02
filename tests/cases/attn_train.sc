@@ -64,6 +64,6 @@ fnc main: i4
         if e == 0
             first = last
         nn_tape_clear()
-    printf("attn_down=%d attn_low=%d\n", (last < first: i4), (last < 0.1: i4))
+    ::printf("attn_down=%d attn_low=%d\n", (last < first: i4), (last < 0.1: i4))
 
     return 0

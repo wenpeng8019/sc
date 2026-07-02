@@ -11,7 +11,7 @@ inc adt.sc
 @def node: {
     v: i4
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc make: node@, x: i4
@@ -21,13 +21,13 @@ inc adt.sc
 
 # 按 MRU→LRU 打印键（字符串）与值
 @fnc dump_str: bool, key: const &, value: *, ctx: &
-    printf(" %s=%d", (key: char&), (value: node&)->v)
+    ::printf(" %s=%d", (key: char&), (value: node&)->v)
     return true
 
 # 按 MRU→LRU 打印键（i4）与值
 @fnc dump_int: bool, key: const &, value: *, ctx: &
     var kp: i4& = (key: i4&)
-    printf(" %d=%d", kp[0], (value: node&)->v)
+    ::printf(" %d=%d", kp[0], (value: node&)->v)
     return true
 
 @fnc main: i4
@@ -41,31 +41,31 @@ inc adt.sc
     ca.put("b", (ha[1]: *))                          # MRU: b a
     ha[2] = make(3)
     ca.put("c", (ha[2]: *))                          # MRU: c b a
-    printf("A len=%llu cap=%llu mru=%s lru=%s\n",
+    ::printf("A len=%llu cap=%llu mru=%s lru=%s\n",
            ca.len(), ca.cap(), (ca.mru_key(): char&), (ca.lru_key(): char&))
 
     # peek 不触顶：lru 仍为 a
-    printf("A peek_a=%d lru_still=%s\n", (ca.peek("a"): node&)->v, (ca.lru_key(): char&))
+    ::printf("A peek_a=%d lru_still=%s\n", (ca.peek("a"): node&)->v, (ca.lru_key(): char&))
     # get 触顶：a 移到 MRU，lru 变 b
-    printf("A get_a=%d mru=%s lru=%s\n",
+    ::printf("A get_a=%d mru=%s lru=%s\n",
            (ca.get("a"): node&)->v, (ca.mru_key(): char&), (ca.lru_key(): char&))
 
     # put 新键 d 超容（>3）→ 淘汰队尾 b
     ha[3] = make(4)
     ca.put("d", (ha[3]: *))                          # MRU: d a c（淘汰 b）
-    printf("A after_put_d: has_b=%d has_d=%d len=%llu\n",
+    ::printf("A after_put_d: has_b=%d has_d=%d len=%llu\n",
            ca.has("b"), ca.has("d"), ca.len())
-    printf("A each:")
+    ::printf("A each:")
     ca.each(dump_str, nil)                           # d=4 a=1 c=3
-    printf("\n")
+    ::printf("\n")
 
     # replace：put 已存在键 a 改挂新 value 99（容器 release 旧 1、retain 新；len 不变 + 触顶）
     ha[4] = make(99)
     ca.put("a", (ha[4]: *))                          # MRU: a d c
-    printf("A replace_a=%d len=%llu\n", (ca.get("a"): node&)->v, ca.len())
-    printf("A each2:")
+    ::printf("A replace_a=%d len=%llu\n", (ca.get("a"): node&)->v, ca.len())
+    ::printf("A each2:")
     ca.each(dump_str, nil)                           # a=99 d=4 c=3
-    printf("\n")
+    ::printf("\n")
     ca.drop()
 
     # ---------- B：定长 i4 键，无界→set_cap 缩容淘汰 + remove ----------
@@ -85,22 +85,22 @@ inc adt.sc
     # MRU→LRU: 40 30 20 10
     var mk: i4& = (cb.mru_key(): i4&)
     var lk: i4& = (cb.lru_key(): i4&)
-    printf("B len=%llu cap=%llu mru=%d lru=%d empty=%d\n",
+    ::printf("B len=%llu cap=%llu mru=%d lru=%d empty=%d\n",
            cb.len(), cb.cap(), mk[0], lk[0], cb.is_empty())
 
     # remove 20 → MRU→LRU: 40 30 10
-    printf("B remove20=%d miss=%d has20=%d len=%llu\n",
+    ::printf("B remove20=%d miss=%d has20=%d len=%llu\n",
            cb.remove((&keys[1]: const &)), cb.remove((&keys[1]: const &)),
            cb.has((&keys[1]: const &)), cb.len())
 
     # set_cap(2) 缩容 → 淘汰队尾 10，剩 40 30
     cb.set_cap(2)
     var lk2: i4& = (cb.lru_key(): i4&)
-    printf("B after_set_cap2: cap=%llu len=%llu has10=%d lru=%d\n",
+    ::printf("B after_set_cap2: cap=%llu len=%llu has10=%d lru=%d\n",
            cb.cap(), cb.len(), cb.has((&keys[0]: const &)), lk2[0])
-    printf("B each:")
+    ::printf("B each:")
     cb.each(dump_int, nil)                           # 40=410 30=310
-    printf("\n")
+    ::printf("\n")
     cb.drop()
     # main 退域：holder 逆序释放 value root → 集中析构
 

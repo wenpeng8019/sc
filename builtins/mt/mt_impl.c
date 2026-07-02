@@ -1,106 +1,40 @@
 /* mt_impl.c —— sc 多线程支持标准（mt.h 契约）默认实现
  * 跨平台经由 builtins/platform.h：POSIX pthread / Windows 线程 API
  */
+#define P_MT_IMPL       /* opt-in 展开 platform.h 的互斥/条件变量/线程/屏障层（本模块转调 P_*） */
+#include "platform.h"   /* 须先于 mt.h：提供 sc_mutex_t / sc_cond_t / sc_barrier_t 等类型 */
 #include "mt.h"
-#include "platform.h"
 
 /* 线程/互斥/条件变量的跨平台原语均由 platform.h 提供（POSIX 下已含 pthread.h） */
 
 /* ---------------- mutex ---------------- */
+/* h 为内联持有的平台锁句柄（sc_mutex_t 值），直接取址转调 P_*，无堆分配。 */
 
-typedef sc_mutex_t mtx_state;
-
-void mutex_init(mutex *_this) {
-    mtx_state *m = (mtx_state *)malloc(sizeof(mtx_state));
-    if (m) sc_mutex_init(m);
-    _this->h = m;
-}
-
-void mutex_drop(mutex *_this) {
-    mtx_state *m = (mtx_state *)_this->h;
-    if (!m) return;
-    sc_mutex_final(m);
-    free(m);
-    _this->h = NULL;
-}
-
-void mutex_lock(mutex *_this) {
-    mtx_state *m = (mtx_state *)_this->h;
-    if (!m) return;
-    sc_mutex_lock(m);
-}
-
-void mutex_unlock(mutex *_this) {
-    mtx_state *m = (mtx_state *)_this->h;
-    if (!m) return;
-    sc_mutex_unlock(m);
-}
-
-bool mutex_try_lock(mutex *_this) {
-    mtx_state *m = (mtx_state *)_this->h;
-    if (!m) return 0;
-    return (uint8_t)sc_mutex_try(m);
-}
+void sc_mutex_init(sc_mutex *_this)     { P_mutex_init(&_this->h); }
+void sc_mutex_drop(sc_mutex *_this)     { P_mutex_final(&_this->h); }
+void sc_mutex_lock(sc_mutex *_this)     { P_mutex_lock(&_this->h); }
+void sc_mutex_unlock(sc_mutex *_this)   { P_mutex_unlock(&_this->h); }
+bool sc_mutex_try_lock(sc_mutex *_this) { return (bool)P_mutex_try(&_this->h); }
 
 /* ---------------- cond ---------------- */
 
-typedef sc_cond_t cnd_state;
+void sc_cond_init(sc_cond *_this) { P_cond_init(&_this->h); }
+void sc_cond_drop(sc_cond *_this) { P_cond_final(&_this->h); }
+void sc_cond_one(sc_cond *_this)  { P_cond_one(&_this->h); }
+void sc_cond_all(sc_cond *_this)  { P_cond_all(&_this->h); }
 
-void cond_init(cond *_this) {
-    cnd_state *c = (cnd_state *)malloc(sizeof(cnd_state));
-    if (c) sc_cond_init(c);
-    _this->h = c;
-}
-
-void cond_drop(cond *_this) {
-    cnd_state *c = (cnd_state *)_this->h;
-    if (!c) return;
-    sc_cond_final(c);
-    free(c);
-    _this->h = NULL;
-}
-
-void cond_one(cond *_this) {
-    cnd_state *c = (cnd_state *)_this->h;
-    if (!c) return;
-    sc_cond_one(c);
-}
-
-void cond_all(cond *_this) {
-    cnd_state *c = (cnd_state *)_this->h;
-    if (!c) return;
-    sc_cond_all(c);
-}
-
-/* wait 方法原语：nsec/sec 全 0 → 无限等待，否则相对超时。
+/* sc_cond.wait 方法原语：nsec/sec 全 0 → 无限等待，否则相对超时。
  * 返回 0 被唤醒 / 1 超时 / -1 错误 */
-int32_t cond_wait(cond *c, mutex *m, uint64_t nsec, uint64_t sec) {
-    if (!c || !c->h || !m || !m->h) return -1;
-    return (int32_t)sc_cond_wait((cnd_state *)c->h, (mtx_state *)m->h, nsec, sec);
+int32_t sc_cond_wait(sc_cond *c, sc_mutex *m, uint64_t nsec, uint64_t sec) {
+    return (int32_t)P_cond_wait(&c->h, &m->h, nsec, sec);
 }
 
 /* ---------------- barrier ---------------- */
 /* 直接复用 platform.h 的 sc_barrier_t（mutex + cond 自实现 N 方汇合）。 */
 
-void barrier_init(barrier *_this, uint32_t n) {
-    sc_barrier_t *b = (sc_barrier_t *)malloc(sizeof(sc_barrier_t));
-    if (b) sc_barrier_init(b, n);
-    _this->h = b;
-}
-
-void barrier_drop(barrier *_this) {
-    sc_barrier_t *b = (sc_barrier_t *)_this->h;
-    if (!b) return;
-    sc_barrier_final(b);
-    free(b);
-    _this->h = NULL;
-}
-
-bool barrier_wait(barrier *_this) {
-    sc_barrier_t *b = (sc_barrier_t *)_this->h;
-    if (!b) return 0;
-    return (uint8_t)(sc_barrier_wait(b) ? 1 : 0);
-}
+void sc_barrier_init(sc_barrier *_this, uint32_t n) { P_barrier_init(&_this->h, n); }
+void sc_barrier_drop(sc_barrier *_this)             { P_barrier_final(&_this->h); }
+bool sc_barrier_wait(sc_barrier *_this)             { return (bool)P_barrier_wait(&_this->h); }
 
 /* ---------------- pool：线程池协议的「默认」实现 ---------------- */
 /* pool 协议（vtable）由语言内核声明（op.h，默认带入）；本模块按「默认策略」用
@@ -116,10 +50,10 @@ typedef struct pool_task {
 
 /* 池盒子：首字段 pool base（协议 vtable）+ 单链 FIFO 队列 + 双条件变量（来活 / 全部完成） */
 typedef struct {
-    pool       base;       /* op 层 pool 协议（首字段：与 pol_state 同址，可互转） */
-    mtx_state  mu;
-    cnd_state  more;       /* 来活：post 唤醒空闲 worker */
-    cnd_state  idle;       /* 全部完成：pending 归零唤醒 join 等待者 */
+    sc_pool       base;       /* op 层 pool 协议（首字段：与 pol_state 同址，可互转） */
+    sc_mutex_t  mu;
+    sc_cond_t  more;       /* 来活：post 唤醒空闲 worker */
+    sc_cond_t  idle;       /* 全部完成：pending 归零唤醒 join 等待者 */
     pool_task *head, *tail;
     uint32_t   pending;    /* 排队 + 执行中的任务数 */
     uint32_t   nthr;
@@ -131,8 +65,8 @@ typedef struct {
 #endif
 } pol_state;
 
-static void pol_lock(pol_state *p)   { sc_mutex_lock(&p->mu); }
-static void pol_unlock(pol_state *p) { sc_mutex_unlock(&p->mu); }
+static void pol_lock(pol_state *p)   { P_mutex_lock(&p->mu); }
+static void pol_unlock(pol_state *p) { P_mutex_unlock(&p->mu); }
 
 /* worker 循环：取任务 → 解锁执行 → pending 递减，归零唤醒 join */
 #if P_WIN
@@ -144,7 +78,7 @@ static void *pol_worker(void *arg) {
     for (;;) {
         pol_lock(p);
         while (!p->head && !p->shutdown)
-            sc_cond_wait(&p->more, &p->mu, 0, 0);   /* 无限等待来活 */
+            P_cond_wait(&p->more, &p->mu, 0, 0);   /* 无限等待来活 */
         pool_task *t = p->head;
         if (!t) { pol_unlock(p); break; }      /* shutdown 且队列已空 */
         p->head = t->next;
@@ -156,7 +90,7 @@ static void *pol_worker(void *arg) {
 
         pol_lock(p);
         if (--p->pending == 0)
-            sc_cond_all(&p->idle);
+            P_cond_all(&p->idle);
         pol_unlock(p);
     }
     return 0;
@@ -164,7 +98,7 @@ static void *pol_worker(void *arg) {
 
 /* run 方法（协议指针，对称 thread_run）：装填好的 rpc 参数入队。
  * 返回 1 成功 / 0 失败（池已停 / 无 worker / 内存不足） */
-static uint8_t pol_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+static uint8_t pol_run(sc_pool *_this, void (*fn)(void *), const void *params, size_t psize) {
     pol_state *p = (pol_state *)_this;
     if (!p || !fn) return 0;
     pool_task *t = (pool_task *)sc_chunk(sizeof(pool_task) + psize);   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
@@ -177,28 +111,28 @@ static uint8_t pol_run(pool *_this, void (*fn)(void *), const void *params, size
     if (p->tail) p->tail->next = t; else p->head = t;
     p->tail = t;
     p->pending++;
-    sc_cond_one(&p->more);
+    P_cond_one(&p->more);
     pol_unlock(p);
     return 1;
 }
 
 /* join 方法：屏障，等待全部已提交任务完成（之后 pool 仍可继续提交） */
-static void pol_join(pool *_this) {
+static void pol_join(sc_pool *_this) {
     pol_state *p = (pol_state *)_this;
     if (!p) return;
     pol_lock(p);
     while (p->pending > 0)
-        sc_cond_wait(&p->idle, &p->mu, 0, 0);   /* 无限等全部完成 */
+        P_cond_wait(&p->idle, &p->mu, 0, 0);   /* 无限等全部完成 */
     pol_unlock(p);
 }
 
 /* drop 方法：等已提交任务全部完成 → 停 worker → 回收整块（含 pool 对象本身） */
-static void pol_drop(pool *_this) {
+static void pol_drop(sc_pool *_this) {
     pol_state *p = (pol_state *)_this;
     if (!p) return;
     pol_lock(p);
     p->shutdown = 1;
-    sc_cond_all(&p->more);
+    P_cond_all(&p->more);
     pol_unlock(p);
     for (uint32_t i = 0; i < p->nthr; i++) {
 #if P_WIN
@@ -208,16 +142,16 @@ static void pol_drop(pool *_this) {
         pthread_join(p->thr[i], NULL);
 #endif
     }
-    sc_mutex_final(&p->mu);
-    sc_cond_final(&p->more);
-    sc_cond_final(&p->idle);
+    P_mutex_final(&p->mu);
+    P_cond_final(&p->more);
+    P_cond_final(&p->idle);
     free(p);                /* 整块回收（pool 对象与盒子同生命周期） */
 }
 
 /* default_pool：「默认策略」线程池构造（填充协议 vtable，返回 pool&）。
  *   - n：工作线程数；0 → CPU 逻辑核数
  *   - 返回 &box->base（失败 NULL）；用完调 p->drop() 停池回收 */
-struct pool *default_pool(uint32_t n) {
+struct sc_pool *sc_default_pool(uint32_t n) {
     if (n == 0) n = P_ncpu();
     pol_state *p = (pol_state *)malloc(sizeof(pol_state) + (n - 1) * sizeof(p->thr[0]));
     if (!p) return NULL;
@@ -226,9 +160,9 @@ struct pool *default_pool(uint32_t n) {
     p->base.run  = pol_run;
     p->base.join = pol_join;
     p->base.drop = pol_drop;
-    sc_mutex_init(&p->mu);
-    sc_cond_init(&p->more);
-    sc_cond_init(&p->idle);
+    P_mutex_init(&p->mu);
+    P_cond_init(&p->more);
+    P_cond_init(&p->idle);
     for (uint32_t i = 0; i < n; i++) {
 #if P_WIN
         p->thr[i] = CreateThread(NULL, 0, pol_worker, p, 0, NULL);
@@ -241,15 +175,15 @@ struct pool *default_pool(uint32_t n) {
     return &p->base;
 }
 
-/* ---------------- sem_pool：pool 协议的「信号量限流」策略实现 ---------------- */
-/* 与 default_pool / drain_pool 并列——同为 pool&、同凭 run 投递。它是有界并发的「一次性
+/* ---------------- sc_sem_pool：pool 协议的「信号量限流」策略实现 ---------------- */
+/* 与 sc_default_pool / sc_drain_pool 并列——同为 pool&、同凭 run 投递。它是有界并发的「一次性
  * worker 派发器」：run = 任务入队（FIFO）+ 计数（队列长度即「待派计数」），永不阻塞；
  * 调度按「剩余信号量」(max - running) 启动线程——一个槽位起一个线程跑一个队头任务；worker
  * 只跑一个任务即退（线程结束、不自循环），退出腾出槽位时再把下一个排队任务交给新线程。
  * sem_state 首字段即 pool base，故 (pool*) 与 (sem_state*) 同址互转。worker 为脱离线程，
  * drop 经「running→0」条件等待汇合。
  *
- * 一致性（核心）：池自有任务队列，故无需 drain_pool 的世代代检，仅一条不变式即足——
+ * 一致性（核心）：池自有任务队列，故无需 sc_drain_pool 的世代代检，仅一条不变式即足——
  *   不变式：running < max ⟹ 队列空。
  * 维持：running 与队列同受池锁 mu 守护；每当①run 入队后、②worker 退出 running-- 后，都在
  * mu 下执行 sem_take（若 running<max 且队非空：running++ 并摘队头派发）。归纳可知：running<max
@@ -267,9 +201,9 @@ typedef struct sem_task {
 } sem_task;
 
 struct sem_state {
-    pool       base;       /* op 层 pool 协议（run/join/drop）：首字段，与 sem_state 同址 */
-    mtx_state  mu;
-    cnd_state  idle;       /* running→0 唤醒 join/drop 等待者 */
+    sc_pool       base;       /* op 层 pool 协议（run/join/drop）：首字段，与 sem_state 同址 */
+    sc_mutex_t  mu;
+    sc_cond_t  idle;       /* running→0 唤醒 join/drop 等待者 */
     sem_task  *head, *tail;/* 溢出 FIFO（running==max 时排队；队列长度=待派计数） */
     uint32_t   max;        /* 并发上限（信号量容量） */
     uint32_t   running;    /* 当前在跑 worker 数（已占信号量） */
@@ -300,11 +234,11 @@ static void *sem_worker(void *arg) {
     sem_state *p = t->p;
     t->fn((void *)(t + 1));               /* 跑一次（参数紧随节点） */
     sc_recycle(t);
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     p->running--;                         /* 释放信号量槽 */
     sem_task *go = sem_take(p);           /* 根据剩余信号量：腾出的槽派给下一个排队任务 */
-    if (p->running == 0) sc_cond_all(&p->idle);   /* go 非空时 running 已回补，不会误判 */
-    sc_mutex_unlock(&p->mu);
+    if (p->running == 0) P_cond_all(&p->idle);   /* go 非空时 running 已回补，不会误判 */
+    P_mutex_unlock(&p->mu);
     if (go) sem_spawn(p, go);             /* 交给新线程（本线程随即退出） */
     return 0;
 }
@@ -318,64 +252,64 @@ static int sem_spawn(sem_state *p, sem_task *t) {
     pthread_t th;
     if (pthread_create(&th, NULL, sem_worker, t) == 0) { pthread_detach(th); return 1; }
 #endif
-    sc_mutex_lock(&p->mu);                 /* 起线程失败：归还槽、丢弃任务 */
+    P_mutex_lock(&p->mu);                 /* 起线程失败：归还槽、丢弃任务 */
     p->running--;
-    if (p->running == 0) sc_cond_all(&p->idle);
-    sc_mutex_unlock(&p->mu);
+    if (p->running == 0) P_cond_all(&p->idle);
+    P_mutex_unlock(&p->mu);
     sc_recycle(t);
     return 0;
 }
 
 /* run 方法（pool 协议）：任务入队 + 计数（永不阻塞）；剩余信号量>0 即起线程跑一次。
  * 返回 1（已入队/已派发）/ 0（池已停或内存不足） */
-static uint8_t sem_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+static uint8_t sem_run(sc_pool *_this, void (*fn)(void *), const void *params, size_t psize) {
     sem_state *p = (sem_state *)_this;
     if (!p || !fn) return 0;
     sem_task *t = (sem_task *)sc_chunk(sizeof(sem_task) + psize);   /* 任务联合块：确定性池化 */
     if (!t) return 0;
     t->next = NULL; t->p = p; t->fn = fn;
     if (params && psize) memcpy(t + 1, params, psize);
-    sc_mutex_lock(&p->mu);
-    if (p->shutdown) { sc_mutex_unlock(&p->mu); sc_recycle(t); return 0; }
+    P_mutex_lock(&p->mu);
+    if (p->shutdown) { P_mutex_unlock(&p->mu); sc_recycle(t); return 0; }
     if (p->tail) p->tail->next = t; else p->head = t;   /* 入队（计数+1） */
     p->tail = t;
     sem_task *go = sem_take(p);          /* 根据剩余信号量启动线程（不变式：running<max 时队头即 t） */
-    sc_mutex_unlock(&p->mu);
+    P_mutex_unlock(&p->mu);
     if (go) sem_spawn(p, go);
     return 1;
 }
 
 /* join 方法：屏障，等已提交任务全部完成（running→0；不变式保证此时队亦空）。之后仍可 run。 */
-static void sem_join(pool *_this) {
+static void sem_join(sc_pool *_this) {
     sem_state *p = (sem_state *)_this;
     if (!p) return;
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     while (p->running > 0 || p->head)
-        sc_cond_wait(&p->idle, &p->mu, 0, 0);
-    sc_mutex_unlock(&p->mu);
+        P_cond_wait(&p->idle, &p->mu, 0, 0);
+    P_mutex_unlock(&p->mu);
 }
 
 /* drop 方法：置停 → 弃排队任务 → 等在跑 worker 退出 → 回收整块（含 pool 对象本身）。 */
-static void sem_drop(pool *_this) {
+static void sem_drop(sc_pool *_this) {
     sem_state *p = (sem_state *)_this;
     if (!p) return;
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     p->shutdown = 1;
     sem_task *t = p->head;               /* 丢弃未派发的排队任务（置停后 sem_take 不再派发） */
     while (t) { sem_task *n = t->next; sc_recycle(t); t = n; }
     p->head = p->tail = NULL;
     while (p->running > 0)
-        sc_cond_wait(&p->idle, &p->mu, 0, 0);
-    sc_mutex_unlock(&p->mu);
-    sc_mutex_final(&p->mu);
-    sc_cond_final(&p->idle);
+        P_cond_wait(&p->idle, &p->mu, 0, 0);
+    P_mutex_unlock(&p->mu);
+    P_mutex_final(&p->mu);
+    P_cond_final(&p->idle);
     free(p);
 }
 
-/* sem_pool：「信号量限流」策略池构造（填充 pool 协议 vtable，返回 pool&）。
+/* sc_sem_pool：「信号量限流」策略池构造（填充 pool 协议 vtable，返回 pool&）。
  *   - n：并发上限；0 → CPU 逻辑核数
  *   - 返回 &p->base（失败 NULL）；构造时不启线程，首个 run 才按需起 */
-struct pool *sem_pool(uint32_t n) {
+sc_pool *sc_sem_pool(uint32_t n) {
     if (n == 0) n = P_ncpu();
     sem_state *p = (sem_state *)malloc(sizeof(sem_state));
     if (!p) return NULL;
@@ -385,8 +319,8 @@ struct pool *sem_pool(uint32_t n) {
     p->base.join = sem_join;
     p->base.drop = sem_drop;
     p->max  = n;
-    sc_mutex_init(&p->mu);
-    sc_cond_init(&p->idle);
+    P_mutex_init(&p->mu);
+    P_cond_init(&p->idle);
     return &p->base;
 }
 
@@ -407,9 +341,9 @@ struct pool *sem_pool(uint32_t n) {
  *     要么 worker 先退出腾 running → run 见 running<max 投新 worker；要么 run 先 gen++ →
  *     worker 复检见 gen 变而再来一轮。生产者只需「先令工作源可见，再 run<dp>」。 */
 typedef struct {
-    pool         base;       /* op 层 pool 协议（run/join/drop）：首字段，与 drn_state 同址 */
-    mtx_state    mu;
-    cnd_state    idle;       /* running→0 唤醒 join/drop 等待者 */
+    sc_pool         base;       /* op 层 pool 协议（run/join/drop）：首字段，与 drn_state 同址 */
+    sc_mutex_t    mu;
+    sc_cond_t    idle;       /* running→0 唤醒 join/drop 等待者 */
     uint32_t     max;        /* worker 上限 */
     uint32_t     running;    /* 当前在跑 worker 数 */
     uint64_t     gen;        /* 工作世代：每次 run 自增（防丢唤醒） */
@@ -433,17 +367,17 @@ static void *drn_worker(void *arg) {
     void     (*fn)(void *) = a->fn;
     void      *params = (void *)(a + 1);
     for (;;) {
-        sc_mutex_lock(&p->mu);
-        if (p->shutdown) { if (--p->running == 0) sc_cond_all(&p->idle); sc_mutex_unlock(&p->mu); break; }
+        P_mutex_lock(&p->mu);
+        if (p->shutdown) { if (--p->running == 0) P_cond_all(&p->idle); P_mutex_unlock(&p->mu); break; }
         uint64_t seen = p->gen;          /* 步进前快照工作世代 */
-        sc_mutex_unlock(&p->mu);
+        P_mutex_unlock(&p->mu);
 
         fn(params);                      /* 工作单元：fn 自身循环排空至本视角无活后返回 */
 
-        sc_mutex_lock(&p->mu);
-        if (!p->shutdown && p->gen != seen) { sc_mutex_unlock(&p->mu); continue; }  /* 期间有新 run → 再来一轮 */
-        if (--p->running == 0) sc_cond_all(&p->idle);   /* 确认无新活：退出 */
-        sc_mutex_unlock(&p->mu);
+        P_mutex_lock(&p->mu);
+        if (!p->shutdown && p->gen != seen) { P_mutex_unlock(&p->mu); continue; }  /* 期间有新 run → 再来一轮 */
+        if (--p->running == 0) P_cond_all(&p->idle);   /* 确认无新活：退出 */
+        P_mutex_unlock(&p->mu);
         break;
     }
     sc_recycle(a);
@@ -452,15 +386,15 @@ static void *drn_worker(void *arg) {
 
 /* run 方法（pool 协议）：通知有新活——gen++ 标记；running<max 则预留名额并脱离激活一个 worker。
  * 返回 1（已通知/已激活）/ 0（池已停或激活失败） */
-static uint8_t drn_run(pool *_this, void (*fn)(void *), const void *params, size_t psize) {
+static uint8_t drn_run(sc_pool *_this, void (*fn)(void *), const void *params, size_t psize) {
     drn_state *p = (drn_state *)_this;
     if (!p || !fn) return 0;
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     p->gen++;
     int spawn = (!p->shutdown && p->running < p->max);
     if (spawn) p->running++;
     uint8_t alive = (uint8_t)(!p->shutdown);
-    sc_mutex_unlock(&p->mu);
+    P_mutex_unlock(&p->mu);
     if (!spawn) return alive;            /* 已达上限：仅 gen++ 通知在跑 worker 经代检再扫一轮 */
     drn_arg *a = (drn_arg *)sc_chunk(sizeof(drn_arg) + psize);   /* 工作实体联合块：确定性池化 */
     if (a) {
@@ -475,40 +409,40 @@ static uint8_t drn_run(pool *_this, void (*fn)(void *), const void *params, size
 #endif
         sc_recycle(a);
     }
-    sc_mutex_lock(&p->mu);                /* 激活失败：归还预留名额 */
-    if (--p->running == 0) sc_cond_all(&p->idle);
-    sc_mutex_unlock(&p->mu);
+    P_mutex_lock(&p->mu);                /* 激活失败：归还预留名额 */
+    if (--p->running == 0) P_cond_all(&p->idle);
+    P_mutex_unlock(&p->mu);
     return 0;
 }
 
 /* join 方法：屏障，等当前在跑 worker 全部退出（running→0；之后仍可继续 run） */
-static void drn_join(pool *_this) {
+static void drn_join(sc_pool *_this) {
     drn_state *p = (drn_state *)_this;
     if (!p) return;
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     while (p->running > 0)
-        sc_cond_wait(&p->idle, &p->mu, 0, 0);
-    sc_mutex_unlock(&p->mu);
+        P_cond_wait(&p->idle, &p->mu, 0, 0);
+    P_mutex_unlock(&p->mu);
 }
 
 /* drop 方法：置停 → 等 worker 全部退出 → 回收整块（含 pool 对象本身） */
-static void drn_drop(pool *_this) {
+static void drn_drop(sc_pool *_this) {
     drn_state *p = (drn_state *)_this;
     if (!p) return;
-    sc_mutex_lock(&p->mu);
+    P_mutex_lock(&p->mu);
     p->shutdown = 1;
     while (p->running > 0)
-        sc_cond_wait(&p->idle, &p->mu, 0, 0);
-    sc_mutex_unlock(&p->mu);
-    sc_mutex_final(&p->mu);
-    sc_cond_final(&p->idle);
+        P_cond_wait(&p->idle, &p->mu, 0, 0);
+    P_mutex_unlock(&p->mu);
+    P_mutex_final(&p->mu);
+    P_cond_final(&p->idle);
     free(p);
 }
 
 /* drain_pool：「按需自调度」策略池构造（填充 pool 协议 vtable，返回 pool&）。
  *   - n：worker 上限；0 → CPU 逻辑核数
  *   - 返回 &p->base（失败 NULL）；构造时不启 worker，首个 run<dp> 才按需激活 */
-struct pool *drain_pool(uint32_t n) {
+sc_pool *sc_drain_pool(uint32_t n) {
     if (n == 0) n = P_ncpu();
     drn_state *p = (drn_state *)malloc(sizeof(drn_state));
     if (!p) return NULL;
@@ -518,8 +452,8 @@ struct pool *drain_pool(uint32_t n) {
     p->base.join = drn_join;
     p->base.drop = drn_drop;
     p->max  = n;
-    sc_mutex_init(&p->mu);
-    sc_cond_init(&p->idle);
+    P_mutex_init(&p->mu);
+    P_cond_init(&p->idle);
     return &p->base;
 }
 
@@ -566,8 +500,8 @@ typedef struct inbox {
 /* 端口：每线程一个收件箱中枢（TLS g_port 惰性堆分配，地址即线程身份）。 */
 typedef struct sc_port {
     inbox             box;         /* 单收件箱（聚合所有 attached queue 的消息） */
-    cnd_state         recv;        /* 消费者等来活（在 g_mutex 上等待） */
-    cnd_state         send;        /* R2：同步调用方阻塞/唤醒（执行器完成时 signal） */
+    sc_cond_t         recv;        /* 消费者等来活（在 g_mutex 上等待） */
+    sc_cond_t         send;        /* R2：同步调用方阻塞/唤醒（执行器完成时 signal） */
     struct que_state *waiting;     /* 本线程当前阻塞 sync 的队列（NULL=未阻塞；环检测用） */
     uint8_t           substituting;/* R2 铁律：有人正替本端口执行（其完成前本端口不得解栈） */
     struct que_state *attached;    /* attached 队列链（线程退出自动 detach；经 anext 串） */
@@ -575,11 +509,11 @@ typedef struct sc_port {
 
 /* 队列盒子：首字段 queue base（协议 vtable）+ consumer（谁 pull）+ staging（attach 前暂存）。 */
 typedef struct que_state {
-    queue            base;         /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
+    sc_queue            base;         /* op 层 queue 协议（首字段：与 que_state 同址，可互转） */
     inbox            staging;      /* attach 前暂存收件箱（首次 attach 整块插 port 首部） */
     uint32_t         count;        /* 归属本队列的在途消息数（detach 清理用） */
     uint8_t          closed;       /* drop 置位：拒收新消息 */
-    struct pool     *host;         /* 宿主绑定：NULL/(pool*)-1/&pool */
+    struct sc_pool     *host;         /* 宿主绑定：NULL/(pool*)-1/&pool */
     struct sc_port  *consumer;     /* 消费此队列的 port（首次 pull 惰性 attach；NULL=未绑） */
     struct que_state *anext;       /* attached 链 next（挂在 consumer->attached 上） */
 } que_state;
@@ -598,11 +532,11 @@ static TLS sc_port *g_port;        /* 每线程 port 指针（惰性堆分配；
  * 其栈与返回槽在执行全程有效。pull 与超时摘除均在 g_mutex 下串行，故原子无竞态。 */
 enum { SS_QUEUED = 0, SS_PULLING = 1, SS_DONE = 2, SS_CLOSED = 3 };
 typedef struct sync_sess {
-    cnd_state *cond;               /* 调用方 port 的 send 条件变量（执行器据此唤醒调用方） */
+    sc_cond_t *cond;               /* 调用方 port 的 send 条件变量（执行器据此唤醒调用方） */
     int32_t    state;             /* SS_QUEUED/PULLING/DONE/CLOSED（g_mutex 保护） */
     void      *params;            /* 调用方 rpc 参数缓冲（含返回槽，执行器原地写回） */
     void     (*fn)(void *);       /* rpc 实际函数（执行器调用 fn(params)） */
-    session    pub;               /* R4：暴露给语言内核的会话句柄（h=&本会话，respond 填 mt_session_respond） */
+    sc_session    pub;               /* R4：暴露给语言内核的会话句柄（h=&本会话，respond 填 mt_session_respond） */
 } sync_sess;
 
 /* ---- 线程退出 TLS 析构：消费线程退出时自动 detach 全部 attached queue + 释放 port ----
@@ -622,7 +556,7 @@ static void mt_port_dtor(void *p) { if (p) port_release((sc_port *)p); }
 
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((constructor)) static void mt_init(void) {
-    sc_mutex_init(&g_mutex);
+    P_mutex_init(&g_mutex);
 #if P_WIN
     g_port_fls = FlsAlloc(mt_port_dtor);
 #else
@@ -635,7 +569,7 @@ static inline void mt_ensure(void) {}
 static int g_mt_inited = 0;
 static inline void mt_ensure(void) {
     if (!g_mt_inited) {
-        sc_mutex_init(&g_mutex);
+        P_mutex_init(&g_mutex);
         g_port_fls = FlsAlloc(mt_port_dtor);
         g_mt_inited = 1;
     }
@@ -649,8 +583,8 @@ static sc_port *port_self(void) {
         mt_ensure();
         p = (sc_port *)calloc(1, sizeof(sc_port));
         if (!p) return NULL;
-        sc_cond_init(&p->recv);
-        sc_cond_init(&p->send);
+        P_cond_init(&p->recv);
+        P_cond_init(&p->send);
         g_port = p;
 #if P_WIN
         FlsSetValue(g_port_fls, p);    /* 线程退出触发 mt_port_dtor */
@@ -721,15 +655,15 @@ static int port_should_substitute(que_state *tq, sc_port *from) {
  *   - 未 attach（consumer 空）：暂存到本队列 staging 收件箱（首次 pull/attach 时整块
  *     插入 port 首部，优先处理历史）。
  * 返回 1 成功 / 0 失败（队列已关闭 / 内存不足） */
-static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, size_t psize,
+static uint8_t que_post(sc_queue *_this, void (*fn)(void *), const void *params, size_t psize,
                         int32_t prio, int64_t delay_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return 0;
     /* 宿主=线程池：投递即提交给池（pool->run 自行 memcpy 参数），忽略 prio/delay。
      * host 只在构造时设定、之后不改，故此处免锁读取安全。 */
     {
-        struct pool *host = q->host;
-        if (host && host != (struct pool *)-1)
+        sc_pool *host = q->host;
+        if (host && host != (sc_pool *)-1)
             return host->run(host, fn, params, psize);
     }
     pmsg *m = (pmsg *)sc_chunk(sizeof(pmsg) + psize);   /* rpc 参数联合块：确定性池化（恒走 mem chunk） */
@@ -743,8 +677,8 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
     if (params && psize) memcpy(m + 1, params, psize);
 
     mt_ensure();
-    sc_mutex_lock(&g_mutex);
-    if (q->closed) { sc_mutex_unlock(&g_mutex); sc_recycle(m); return 0; }
+    P_mutex_lock(&g_mutex);
+    if (q->closed) { P_mutex_unlock(&g_mutex); sc_recycle(m); return 0; }
 
     if (delay_ms > 0) {
         struct timespec now, rel;
@@ -761,14 +695,14 @@ static uint8_t que_post(queue *_this, void (*fn)(void *), const void *params, si
         if (m->delayed) inbox_delay_insert(&cp->box, m);
         else            inbox_ready_insert(&cp->box, m);
         q->count++;
-        sc_cond_one(&cp->recv);
+        P_cond_one(&cp->recv);
     } else {
         /* 未 attach：暂存本队列 staging（首次 attach flush 进 port 首部） */
         if (m->delayed) inbox_delay_insert(&q->staging, m);
         else            inbox_ready_insert(&q->staging, m);
         q->count++;
     }
-    sc_mutex_unlock(&g_mutex);
+    P_mutex_unlock(&g_mutex);
     return 1;
 }
 
@@ -803,12 +737,12 @@ static int inbox_remove(inbox *b, pmsg *m) {
  * 继续死等，待将来 done 经 mt_session_respond 兑现。 */
 static void pool_sess_run(void *arg) {
     sync_sess *s = *(sync_sess **)arg;       /* post 拷贝的是 &sess 指针 */
-    op_session_begin(&s->pub);               /* R4：置当前会话（裸 async 据此取用） */
+    sc_op_session_begin(&s->pub);            /* R4：置当前会话（裸 async 据此取用） */
     s->fn(s->params);                        /* 在调用方栈参数上执行（写返回槽 _） */
-    if (op_session_taken()) return;          /* R4：已转延迟应答 → 不自动应答，待将来 done 兑现 */
-    sc_mutex_lock(&g_mutex);
-    if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
-    sc_mutex_unlock(&g_mutex);
+    if (sc_op_session_taken()) return;       /* R4：已转延迟应答 → 不自动应答，待将来 done 兑现 */
+    P_mutex_lock(&g_mutex);
+    if (s->state != SS_CLOSED) { s->state = SS_DONE; P_cond_one(s->cond); }
+    P_mutex_unlock(&g_mutex);
 }
 
 /* R4：session 协议的 respond 实现（填入 sess.pub.respond）——done s, result 经此兑现延迟应答。
@@ -816,15 +750,15 @@ static void pool_sess_run(void *arg) {
  * 与即时应答写 _ 同布局），置 SS_DONE 并唤醒死等的调用方。任意线程安全（g_mutex 保护）；
  * 调用方已 drop/退出（SS_CLOSED）则丢弃（调用方早已返回 -1，其栈上会话或已失效，绝不触碰）。
  * n==0/src==NULL=无结果（rpc 无返回值）。 */
-static void mt_session_respond(session *s, void *src, size_t n) {
+static void mt_session_respond(sc_session *s, void *src, size_t n) {
     sync_sess *ss = (sync_sess *)s->h;
-    sc_mutex_lock(&g_mutex);
+    P_mutex_lock(&g_mutex);
     if (ss->state != SS_CLOSED) {
         if (n && src) memcpy(ss->params, src, n);   /* 写回返回槽 _（偏移 0，宽度=返回类型 sizeof） */
         ss->state = SS_DONE;
-        sc_cond_one(ss->cond);
+        P_cond_one(ss->cond);
     }
-    sc_mutex_unlock(&g_mutex);
+    P_mutex_unlock(&g_mutex);
 }
 
 /* sync 方法（协议指针）：阻塞带回复（R2 铁律实现）——把 rpc 调用投递给某消费者（另一线程
@@ -843,7 +777,7 @@ static void mt_session_respond(session *s, void *src, size_t n) {
  *   - 返回后若本端口 substituting（有人正替我执行）→ 死等其完成再解栈（铁律）。
  *   - 返回 0 成功 / 1 超时（仅 pull 前）/ -1 投递失败或被中断（队列 drop / 线程退出）。
  *   - 锁序：图操作 + 收件箱 + 会话状态机均用全局唯一 g_mutex，无锁序环。 */
-static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t psize,
+static int32_t que_sync(sc_queue *_this, void (*fn)(void *), void *params, size_t psize,
                         int32_t prio, int64_t delay_ms, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return -1;
@@ -851,27 +785,27 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     sc_port *from = port_self();
     if (!from) return -1;
 
-    sc_mutex_lock(&g_mutex);
+    P_mutex_lock(&g_mutex);
 
     /* ---- 循环死锁替代（P5d）---- */
     if (q->consumer == from) {                   /* 自替代：向自己消费的队列 sync */
-        sc_mutex_unlock(&g_mutex);
-        op_session_begin(NULL);                  /* R4：本地替代不支持延迟应答，置空会话防误领 */
+        P_mutex_unlock(&g_mutex);
+        sc_op_session_begin(NULL);               /* R4：本地替代不支持延迟应答，置空会话防误领 */
         fn(params);                              /* 本线程直接执行（写回返回槽 _） */
         return 0;
     }
     if (port_should_substitute(q, from)) {       /* 循环互锁：本地替代执行受害队列的动作 */
         sc_port *victim = q->consumer;           /* 受害端口=目标队列的消费者（仿参考 to_port） */
         if (victim) victim->substituting = 1;
-        sc_mutex_unlock(&g_mutex);
-        op_session_begin(NULL);                  /* R4：本地替代不支持延迟应答，置空会话防误领 */
+        P_mutex_unlock(&g_mutex);
+        sc_op_session_begin(NULL);               /* R4：本地替代不支持延迟应答，置空会话防误领 */
         fn(params);                              /* 在本线程替代执行（写回返回槽 _） */
-        sc_mutex_lock(&g_mutex);
+        P_mutex_lock(&g_mutex);
         if (victim) {
             victim->substituting = 0;
-            if (!victim->waiting) sc_cond_one(&victim->send);  /* 受害方已超时挂起 → 唤醒它解栈 */
+            if (!victim->waiting) P_cond_one(&victim->send);  /* 受害方已超时挂起 → 唤醒它解栈 */
         }
-        sc_mutex_unlock(&g_mutex);
+        P_mutex_unlock(&g_mutex);
         return 0;
     }
 
@@ -887,30 +821,30 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     int32_t ret;
 
     /* ---- 池宿主：转交池，提交即承诺执行 → 死等至 DONE（无超时摘除） ---- */
-    struct pool *host = q->host;
-    if (host && host != (struct pool *)-1) {
+    sc_pool *host = q->host;
+    if (host && host != (sc_pool *)-1) {
         sync_sess *psess = &sess;
-        sc_mutex_unlock(&g_mutex);               /* 调 pool->run 前释 g_mutex（避免与池锁嵌套） */
+        P_mutex_unlock(&g_mutex);               /* 调 pool->run 前释 g_mutex（避免与池锁嵌套） */
         uint8_t ok = host->run(host, pool_sess_run, &psess, sizeof(psess));
         if (!ok) return -1;
-        sc_mutex_lock(&g_mutex);
+        P_mutex_lock(&g_mutex);
         while (sess.state != SS_DONE && sess.state != SS_CLOSED)
-            sc_cond_wait(&from->send, &g_mutex, 0, 0);
+            P_cond_wait(&from->send, &g_mutex, 0, 0);
         ret = (sess.state == SS_CLOSED) ? -1 : 0;
-        sc_mutex_unlock(&g_mutex);
+        P_mutex_unlock(&g_mutex);
         return ret;
     }
 
     /* ---- 端口宿主：构造会话消息，入 consumer 收件箱或 staging 暂存 ---- */
     pmsg *m = (pmsg *)sc_chunk(sizeof(pmsg));    /* 同步消息不内联参数（在 sess->params）；节点确定性池化 */
-    if (!m) { sc_mutex_unlock(&g_mutex); return -1; }
+    if (!m) { P_mutex_unlock(&g_mutex); return -1; }
     m->next = NULL;
     m->receiver = q;
     m->fn = fn;
     m->sess = &sess;
     m->prio = prio;
     m->delayed = 0;
-    if (q->closed) { sc_mutex_unlock(&g_mutex); sc_recycle(m); return -1; }
+    if (q->closed) { P_mutex_unlock(&g_mutex); sc_recycle(m); return -1; }
     if (delay_ms > 0) {
         struct timespec now, rel;
         P_clock_now(&now);
@@ -926,12 +860,12 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
     if (m->delayed) inbox_delay_insert(box, m);
     else            inbox_ready_insert(box, m);
     q->count++;
-    if (cp) sc_cond_one(&cp->recv);              /* 唤醒消费者来活 */
+    if (cp) P_cond_one(&cp->recv);              /* 唤醒消费者来活 */
 
     /* ---- 等待执行完成（铁律）---- */
     if (timeout_ms <= 0) {
         while (sess.state != SS_DONE && sess.state != SS_CLOSED)
-            sc_cond_wait(&from->send, &g_mutex, 0, 0);
+            P_cond_wait(&from->send, &g_mutex, 0, 0);
         ret = (sess.state == SS_CLOSED) ? -1 : 0;
     } else {
         struct timespec deadline, now, rel;
@@ -955,20 +889,20 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
                 }
                 /* SS_PULLING：执行已开始 → 铁律死等至完成，绝不放弃 */
                 while (sess.state != SS_DONE && sess.state != SS_CLOSED)
-                    sc_cond_wait(&from->send, &g_mutex, 0, 0);
+                    P_cond_wait(&from->send, &g_mutex, 0, 0);
                 ret = (sess.state == SS_CLOSED) ? -1 : 0;
                 break;
             }
             clock_dec(deadline, now, rel);
-            sc_cond_wait(&from->send, &g_mutex, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
+            P_cond_wait(&from->send, &g_mutex, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
         }
     }
 
     from->waiting = NULL;                         /* 清除：已返回 */
     /* 铁律：若有人正替我执行（substituting），不得解栈，死等其完成 */
     while (from->substituting)
-        sc_cond_wait(&from->send, &g_mutex, 0, 0);
-    sc_mutex_unlock(&g_mutex);
+        P_cond_wait(&from->send, &g_mutex, 0, 0);
+    P_mutex_unlock(&g_mutex);
     return ret;
 }
 
@@ -982,40 +916,40 @@ static int32_t que_sync(queue *_this, void (*fn)(void *), void *params, size_t p
  *   - 返回 promise&（失败 NULL）；调用方须先 p->wait() 取结果再 p->drop()（消费者兑现前
  *     drop 会 UAF——引用计数化安全释放待后续）。同线程对自己消费的队列 async+wait 会死锁。 */
 typedef struct promise_box {
-    promise     base;       /* op 层 promise 协议（首字段：与 promise_box 同址，可互转） */
-    mtx_state   mu;
-    cnd_state   done_cv;
+    sc_promise     base;       /* op 层 promise 协议（首字段：与 promise_box 同址，可互转） */
+    sc_mutex_t   mu;
+    sc_cond_t   done_cv;
     uint8_t     done;       /* 消费者兑现后置 1 */
     void       *result;     /* 类型擦除结果（返回槽首 sizeof(void*) 字节） */
     void      (*fn)(void *);/* 真正的 rpc worker */
     /* rpc 参数缓冲紧随本结构体之后：[promise_box][参数 max(psize, sizeof(void*))] */
 } promise_box;
 
-static uint8_t promise_ready(promise *_this) {
+static uint8_t promise_ready(sc_promise *_this) {
     promise_box *b = (promise_box *)_this;
     if (!b) return 0;
-    sc_mutex_lock(&b->mu);
+    P_mutex_lock(&b->mu);
     uint8_t d = b->done;
-    sc_mutex_unlock(&b->mu);
+    P_mutex_unlock(&b->mu);
     return d;
 }
 
-static void *promise_wait(promise *_this) {
+static void *promise_wait(sc_promise *_this) {
     promise_box *b = (promise_box *)_this;
     if (!b) return NULL;
-    sc_mutex_lock(&b->mu);
+    P_mutex_lock(&b->mu);
     while (!b->done)
-        sc_cond_wait(&b->done_cv, &b->mu, 0, 0);      /* 无限阻塞等兑现（超时待后续） */
+        P_cond_wait(&b->done_cv, &b->mu, 0, 0);      /* 无限阻塞等兑现（超时待后续） */
     void *r = b->result;
-    sc_mutex_unlock(&b->mu);
+    P_mutex_unlock(&b->mu);
     return r;
 }
 
-static void promise_drop(promise *_this) {
+static void promise_drop(sc_promise *_this) {
     promise_box *b = (promise_box *)_this;
     if (!b) return;
-    sc_mutex_final(&b->mu);
-    sc_cond_final(&b->done_cv);
+    P_mutex_final(&b->mu);
+    P_cond_final(&b->done_cv);
     sc_recycle(b);          /* 整块回收（promise 对象 + 堆参数缓冲同生命周期；确定性池化） */
 }
 
@@ -1025,13 +959,13 @@ static void q_async_run(void *arg) {
     void *buf = (void *)(b + 1);                      /* 参数缓冲紧随 box */
     b->fn(buf);                                       /* 在堆缓冲上执行（写入返回槽 _） */
     memcpy(&b->result, buf, sizeof(void *));          /* 类型擦除：返回槽首 8 字节（buf ≥8 已保证） */
-    sc_mutex_lock(&b->mu);
+    P_mutex_lock(&b->mu);
     b->done = 1;
-    sc_cond_one(&b->done_cv);
-    sc_mutex_unlock(&b->mu);
+    P_cond_one(&b->done_cv);
+    P_mutex_unlock(&b->mu);
 }
 
-static struct promise *que_async(queue *_this, void (*fn)(void *), const void *params, size_t psize,
+static sc_promise *que_async(sc_queue *_this, void (*fn)(void *), const void *params, size_t psize,
                                  int32_t prio, int64_t delay_ms) {
     que_state *q = (que_state *)_this;
     if (!q || !fn) return NULL;
@@ -1044,8 +978,8 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
     b->base.ready = promise_ready;
     b->base.wait  = promise_wait;
     b->base.drop  = promise_drop;
-    sc_mutex_init(&b->mu);
-    sc_cond_init(&b->done_cv);
+    P_mutex_init(&b->mu);
+    P_cond_init(&b->done_cv);
     b->done   = 0;
     b->result = NULL;
     b->fn     = fn;
@@ -1054,8 +988,8 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
      * prio/delay 透传给 post（优先级排序 / 延迟投递）。 */
     uint8_t ok = q->base.post(&q->base, q_async_run, &b, sizeof(b), prio, delay_ms);
     if (!ok) {
-        sc_mutex_final(&b->mu);
-        sc_cond_final(&b->done_cv);
+        P_mutex_final(&b->mu);
+        P_cond_final(&b->done_cv);
         sc_recycle(b);
         return NULL;
     }
@@ -1070,14 +1004,14 @@ static struct promise *que_async(queue *_this, void (*fn)(void *), const void *p
  *     在本线程执行——故对任一 attach 的队列调 pull 都驱动同一 port 邮箱（跨队列全局时序）。
  * P5：先把 delaying 中已到期项提升进 ready（按 prio），再取 ready 队头（最高优先级）；
  * ready 空时按 min(pull 截止, delaying 头到期时刻) 定时等，醒来重算（鲁棒于虚假唤醒）。 */
-static int32_t que_pull(queue *_this, int64_t timeout_ms) {
+static int32_t que_pull(sc_queue *_this, int64_t timeout_ms) {
     que_state *q = (que_state *)_this;
     if (!q) return -1;
 
     sc_port *port = port_self();
     if (!port) return -1;
 
-    sc_mutex_lock(&g_mutex);
+    P_mutex_lock(&g_mutex);
 
     /* 惰性 attach：首次 pull 把队列绑到本线程 port，并 flush staging 历史进 port 首部 */
     if (q->consumer != port) {
@@ -1112,8 +1046,8 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
     for (;;) {
         inbox_promote(&port->box);              /* 已到期延迟项提升进 ready */
         if (port->box.head) break;              /* ready 有货 → 取队头 */
-        if (q->closed) { sc_mutex_unlock(&g_mutex); return -1; }  /* 本队列已关闭且排空 */
-        if (timeout_ms == 0) { sc_mutex_unlock(&g_mutex); return 0; }  /* 立即模式 */
+        if (q->closed) { P_mutex_unlock(&g_mutex); return -1; }  /* 本队列已关闭且排空 */
+        if (timeout_ms == 0) { P_mutex_unlock(&g_mutex); return 0; }  /* 立即模式 */
 
         /* 本轮等待时限 = min(pull 截止, delaying 头到期时刻)，取较早者 */
         struct timespec now, wake;
@@ -1125,11 +1059,11 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
         }
 
         if (!have_wake) {
-            sc_cond_wait(&port->recv, &g_mutex, 0, 0);          /* 无限等来活 */
+            P_cond_wait(&port->recv, &g_mutex, 0, 0);          /* 无限等来活 */
         } else if (clock_gt(wake, now)) {
             struct timespec rel;
             clock_dec(wake, now, rel);                          /* 相对时限 = wake - now（>0） */
-            sc_cond_wait(&port->recv, &g_mutex, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
+            P_cond_wait(&port->recv, &g_mutex, (uint64_t)rel.tv_nsec, (uint64_t)rel.tv_sec);
         }
         /* 醒来：若是 pull 自身超时且仍无可取货，返 0；否则回到循环顶重算（虚假唤醒亦安全） */
         if (have_pull_deadline) {
@@ -1137,7 +1071,7 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
             P_clock_now(&now2);
             if (clock_ge(now2, pull_deadline)) {
                 inbox_promote(&port->box);
-                if (!port->box.head && !q->closed) { sc_mutex_unlock(&g_mutex); return 0; }
+                if (!port->box.head && !q->closed) { P_mutex_unlock(&g_mutex); return 0; }
             }
         }
     }
@@ -1155,19 +1089,19 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
          * 死等（PULLING），待将来 done 经 mt_session_respond 兑现（会话句柄在调用方栈，存活）。 */
         sync_sess *s = m->sess;
         s->state = SS_PULLING;
-        op_session_begin(&s->pub);                             /* R4：置当前会话（裸 async 据此取用） */
-        sc_mutex_unlock(&g_mutex);
+        sc_op_session_begin(&s->pub);                          /* R4：置当前会话（裸 async 据此取用） */
+        P_mutex_unlock(&g_mutex);
         s->fn(s->params);                                      /* 在调用方栈参数上执行 */
-        sc_mutex_lock(&g_mutex);
-        if (!op_session_taken()) {                             /* R4：未领取 → 即时应答（R2 原行为） */
-            if (s->state != SS_CLOSED) { s->state = SS_DONE; sc_cond_one(s->cond); }
+        P_mutex_lock(&g_mutex);
+        if (!sc_op_session_taken()) {                          /* R4：未领取 → 即时应答（R2 原行为） */
+            if (s->state != SS_CLOSED) { s->state = SS_DONE; P_cond_one(s->cond); }
         }                                                      /* 已领取 → 延迟应答，调用方继续死等 */
-        sc_mutex_unlock(&g_mutex);
+        P_mutex_unlock(&g_mutex);
         sc_recycle(m);
         return 1;
     }
 
-    sc_mutex_unlock(&g_mutex);
+    P_mutex_unlock(&g_mutex);
     m->fn((void *)(m + 1));                                     /* 参数紧随消息节点 */
     sc_recycle(m);
     return 1;
@@ -1179,7 +1113,7 @@ static int32_t que_pull(queue *_this, int64_t timeout_ms) {
 static void pmsg_discard(pmsg *m) {
     if (m->sess) {
         sync_sess *s = m->sess;
-        if (s->state != SS_DONE) { s->state = SS_CLOSED; sc_cond_one(s->cond); }
+        if (s->state != SS_DONE) { s->state = SS_CLOSED; P_cond_one(s->cond); }
     }
     sc_recycle(m);
 }
@@ -1209,7 +1143,7 @@ static void inbox_discard_for(inbox *b, que_state *q) {
  * 正确程序里消费线程退出前已 pull 干净（收件箱空），此处仅做兜底回收。
  * 注：残留同步消息（被阻塞调用方）以 SS_CLOSED 唤醒调用方（返回 -1=被中断），不致其永久挂起。 */
 static void port_release(sc_port *p) {
-    sc_mutex_lock(&g_mutex);
+    P_mutex_lock(&g_mutex);
     /* 解绑所有 attached 队列（consumer 置空、清在途计数） */
     que_state *q = p->attached;
     while (q) {
@@ -1226,20 +1160,20 @@ static void port_release(sc_port *p) {
     m = p->box.delaying;
     while (m) { pmsg *n = m->next; pmsg_discard(m); m = n; }
     p->box.head = p->box.tail = p->box.delaying = NULL;
-    sc_mutex_unlock(&g_mutex);
-    sc_cond_final(&p->recv);
-    sc_cond_final(&p->send);
+    P_mutex_unlock(&g_mutex);
+    P_cond_final(&p->recv);
+    P_cond_final(&p->send);
     free(p);
     if (g_port == p) g_port = NULL;
 }
 
 /* drop 方法：关闭队列 → 若已 attach 则从 port 解绑并清其在 port 收件箱的残留 → 排空 staging
- * 暂存 → 回收 queue 整块。约定 drop 在消费线程退出（join）之后调用：此时 consumer 已被
+ * 暂存 → 回收 queue 整块。约定 drop 在消费线程退出（join） 之后调用：此时 consumer 已被
  * port_release 置空，仅需清 staging 并释放本对象。 */
-static void que_drop(queue *_this) {
+static void que_drop(sc_queue *_this) {
     que_state *q = (que_state *)_this;
     if (!q) return;
-    sc_mutex_lock(&g_mutex);
+    P_mutex_lock(&g_mutex);
     q->closed = 1;
     /* 兜底：若仍 attach（异常路径，正常 drop 在 join 后 consumer 已空）则从 port 解绑并清残留 */
     sc_port *cp = q->consumer;
@@ -1259,15 +1193,15 @@ static void que_drop(queue *_this) {
     while (m) { pmsg *n = m->next; pmsg_discard(m); m = n; }
     q->staging.head = q->staging.tail = q->staging.delaying = NULL;
     q->count = 0;
-    sc_mutex_unlock(&g_mutex);
+    P_mutex_unlock(&g_mutex);
     free(q);                             /* 整块回收（queue 对象与盒子同生命周期） */
 }
 
-/* default_queue：「PORT 单收件箱」消息队列构造（填充协议 vtable，返回 queue&）。
+/* sc_default_queue：「PORT 单收件箱」消息队列构造（填充协议 vtable，返回 queue&）。
  *   - host：宿主三态——NULL 未绑/延迟、(pool*)-1 当前/主线程（手动 pull）、&pool
  *     线程池（post 自动转交池消费，用 pool->join() 作屏障，无需 pull）
  *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收（池宿主须另行 drop 池）*/
-struct queue *default_queue(struct pool *host) {
+struct sc_queue *sc_default_queue(struct sc_pool *host) {
     que_state *q = (que_state *)malloc(sizeof(que_state));
     if (!q) return NULL;
     memset(q, 0, sizeof(*q));

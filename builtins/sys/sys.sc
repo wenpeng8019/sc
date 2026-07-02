@@ -54,9 +54,9 @@
 ] : i4
 
 # 参数值以「自然具体类型」独立存为全局 ARGS_<name>（选项即 app 属性，带编译期默认值）；
-# 描述符 arg_def_st 的 slot 是指向该全局的 void*（裸 &），解析器按 type 以正确宽度写入。
+# 描述符 arg_def 的 slot 是指向该全局的 void*（裸 &），解析器按 type 以正确宽度写入。
 # 已去掉旧的 arg_var 联合体——读取端直接按具体类型访问 ARGS_<name>，取错类型即编译错。
-@def arg_def_st: {
+@def arg_def: {
     name: const char&
     desc: const char&
     type: arg_type
@@ -64,57 +64,57 @@
     l: const char&
     req: bool
     slot: &
-    next: arg_def_st&
+    next: arg_def&
 
     fnc init::    # 构造：把自身挂入全局注册链表 arg_defs（C 实现于 sys_impl.c）
 }
 
-# 已声明参数的全局注册链表头：每个 arg_def_st 构造（init）时把自己挂入此链。
+# 已声明参数的全局注册链表头：每个 arg_def 构造（init）时把自己挂入此链。
 #   sc 侧顶层 mix ARGS_* 展开为真实全局 ARGS_DEF_xxx 后，编译器「声明即构造」自动调用
-#   arg_def_st.init 完成登记；ARGS_parse 优先采用本链（非 nil 时忽略 ... 变参）。
+#   arg_def.init 完成登记；ARGS_parse 优先采用本链（非 nil 时忽略 ... 变参）。
 #   C 侧定义于 sys_impl.c。
-let arg_defs:: arg_def_st&
+let arg_defs:: arg_def&
 
 # 参数定义宏：各自声明「具体类型」的全局 ARGS_<name>（值即 app 属性）与描述符 ARGS_DEF_<name>，
 # 其 slot 取 &ARGS_<name>（隐式具体指针 → void*）。已去 union，故各宏独立、不再共用 ARGS_DEF。
 def ARGS_B: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: bool = false
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_BOOL, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
 
 def ARGS_I: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: i8 = 0
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_INT, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
 
 def ARGS_F: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: f8 = 0
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_FLOAT, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
 
 def ARGS_S: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char& = nil
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_STR, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
 
 def ARGS_D: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char& = nil
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_DIR, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
 
 def ARGS_L: req, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char&& = nil
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_LS, s_cmd, l_cmd, req,
         &ARGS_\name, nil
     }
@@ -122,49 +122,49 @@ def ARGS_L: req, name, s_cmd, l_cmd, desc
 # 带默认值变体：dft 即属性初值。
 def ARGS_Bv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: bool = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_BOOL, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 def ARGS_Iv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: i8 = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_INT, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 def ARGS_Fv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: f8 = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_FLOAT, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 def ARGS_Sv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char& = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_STR, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 def ARGS_Dv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char& = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_DIR, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 def ARGS_Lv: dft, name, s_cmd, l_cmd, desc
     @var ARGS_\name: const char&& = dft
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_LS, s_cmd, l_cmd, false,
         &ARGS_\name, nil
     }
 
 # 预处理回调参数：无值全局，回调地址（cb_pre）直接存入 slot（void*）。
 def ARGS_PRE: cb_pre, name, s_cmd, l_cmd, desc
-    var ARGS_DEF_\name: arg_def_st = {
+    var ARGS_DEF_\name: arg_def = {
         `name`, desc, ARG_PRE, s_cmd, l_cmd, false,
         (cb_pre: &), nil
     }

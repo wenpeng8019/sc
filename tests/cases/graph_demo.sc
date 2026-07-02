@@ -22,5 +22,5 @@ fnc main: i4
     var s: i4 = add(1, 2)             # call 边 → add
     var r: i4 = c.step()              # method 边 → counter.step
     bump()                            # call 边 → bump
-    printf("%d %d %d %d\n", s, r, bump(), total)
+    ::printf("%d %d %d %d\n", s, r, bump(), total)
     return 0

@@ -17,17 +17,17 @@ def CAP: = 4
 
 # ---- 函数宏 + ` 串化：打印「变量名 = 值」 ----
 def dump: x
-    printf("  %s = %d\n", `x`, x)
+    ::printf("  %s = %d\n", `x`, x)
 
 # ---- 函数宏 + \ 粘贴：自带计数器的局部，体内自增并打印 ----
 def tally: tag
     var tag\_n: i4 = 0
     tag\_n = tag\_n + CAP
-    printf("  %s_n = %d\n", `tag`, tag\_n)
+    ::printf("  %s_n = %d\n", `tag`, tag\_n)
 
-# ---- 可变参函数宏：实参透传到 printf ----
+# ---- 可变参函数宏：实参透传到 ::printf ----
 def logf: fmt, ...
-    printf(fmt, __VA_ARGS__)
+    ::printf(fmt, __VA_ARGS__)
 
 # ---- 顶层 mix 展开出一对全局：@var 导出 + var 模块私有（static） ----
 # 符号由语义层自动登记，main 中可直接引用（无需手写 let :: 认领）。
@@ -39,15 +39,15 @@ mix gpair(cfg)
 
 fnc main: i4
     var count: i4 = CAP
-    printf("object macro: CAP=%d\n", CAP)
+    ::printf("object macro: CAP=%d\n", CAP)
 
-    printf("stringify:\n")
+    ::printf("stringify:\n")
     mix dump(count)
 
-    printf("paste:\n")
+    ::printf("paste:\n")
     mix tally(item)
 
-    printf("variadic + macro globals:\n")
+    ::printf("variadic + macro globals:\n")
     mix logf("  sum=%d range=[%d,%d]\n", count + cfg_lo, cfg_lo, cfg_hi)
 
     return 0

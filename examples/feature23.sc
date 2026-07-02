@@ -29,26 +29,26 @@ fnc main: i4
     var src[3]: i4 = [10, 20, 30]
     var dst[3]: i4 = [0, 0, 0]
     copy_n(&dst[0], &src[0], 3)
-    printf("copy:      %d %d %d\n", dst[0], dst[1], dst[2])
+    ::printf("copy:      %d %d %d\n", dst[0], dst[1], dst[2])
 
     # 结构体初始化：指定成员（花括号）
     var pt: point = {x = 9, y = 11}
-    printf("sum_point: %d\n", sum_point(&pt))
+    ::printf("sum_point: %d\n", sum_point(&pt))
 
     # volatile 标量（映射寄存器、被外部修改的标志位等场景）
     var flag: volatile i4 = 1
-    printf("flag:      %d\n", flag)
+    ::printf("flag:      %d\n", flag)
 
     # let 让指针本身只读（const 指针），但所指对象仍可改
     let q: point& = &pt
     q->x = 100
-    printf("q->x:      %d\n", q->x)
+    ::printf("q->x:      %d\n", q->x)
 
     # 强转表达式上的类型限定符：与声明侧同义（const/volatile 前缀，restrict 尾置）
     var raw: i4& = &pt.x
     let ro: const i4& = (raw: const i4&)     # 转成“指向 const 的指针”
-    printf("ro:        %d\n", *ro)
+    ::printf("ro:        %d\n", *ro)
     var vp: volatile i4& = (&flag: volatile i4&)
-    printf("vp:        %d\n", *vp)
+    ::printf("vp:        %d\n", *vp)
 
     return 0

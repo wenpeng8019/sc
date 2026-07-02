@@ -26,20 +26,20 @@ fnc cnt_cmp -> list_cmp
 fnc main: i4
     # 声明即构造：自动调用 counter_init/string_init/list_init
     var c: counter
-    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
+    ::printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
 
     # string：动态字符串（堆专属：string() 构造，drop 释放缓冲+块体）
     var s: string& = string()
     s->append("Hello")
     s->append(", sc!")
-    printf("s=%s len=%llu\n", s->cstr(), s->len())
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
+    ::printf("s=%s len=%llu\n", s->cstr(), s->len())
+    ::printf("find \"sc\"=%lld starts_with(Hello)=%d\n",
            s->find("sc", 0), s->starts_with("Hello"))
     var part: string& = string()
     s->slice(-3, -1, part)              # 负索引切片
-    printf("slice(-3,-1)=%s\n", part->cstr())
+    ::printf("slice(-3,-1)=%s\n", part->cstr())
     s->upper()
-    printf("upper=%s\n", s->cstr())
+    ::printf("upper=%s\n", s->cstr())
 
     # list：段式裸 @ 自动指针容器（拥有元素：push retain、pop/drop release）
     var l: list
@@ -55,7 +55,7 @@ fnc main: i4
     l.sort(cnt_cmp)                         # 按 n 升序
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)    # 借用 + 裸强转读取
+        ::printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)    # 借用 + 裸强转读取
 
     # 析构：手动 drop（释放 list 持有的全部 retain；c1/c2/c3 退域时各自归零自释放）
     var lp: list& = &l
@@ -66,6 +66,6 @@ fnc main: i4
     # 堆构造：string() 伪调用 → sc_alloc + init，drop 释放缓冲并 sc_free 块体
     var hs: string& = string()
     hs->append("on the heap")
-    printf("heap: %s\n", hs->cstr())
+    ::printf("heap: %s\n", hs->cstr())
     hs->drop()
     return 0

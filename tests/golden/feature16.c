@@ -1,16 +1,16 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static int32_t dev_read(com *_this, void *data, uint32_t *size);
-static int32_t dev_write(com *_this, void *buf, uint32_t *size);
-typedef struct com__project {
+static int32_t sc_dev_read(sc_com *_this, void *data, uint32_t *size);
+static int32_t sc_dev_write(sc_com *_this, void *buf, uint32_t *size);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static int32_t dev_read(com *_this, void *data, uint32_t *size) {
+static int32_t sc_dev_read(sc_com *_this, void *data, uint32_t *size) {
     /* line 13 */
     char *p = ((char*)(data));
     /* line 14 */
@@ -26,7 +26,7 @@ static int32_t dev_read(com *_this, void *data, uint32_t *size) {
     return ((int32_t)(*(size)));
 }
 
-static int32_t dev_write(com *_this, void *buf, uint32_t *size) {
+static int32_t sc_dev_write(sc_com *_this, void *buf, uint32_t *size) {
     /* line 22 */
     char *p = ((char*)(buf));
     /* line 23 */
@@ -49,11 +49,11 @@ static int32_t dev_write(com *_this, void *buf, uint32_t *size) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 32 */
-    com c = {0};
+    sc_com c = {0};
     /* line 33 */
-    c.read = dev_read;
+    c.read = sc_dev_read;
     /* line 34 */
-    c.write = dev_write;
+    c.write = sc_dev_write;
     /* line 37 */
     char msg[4];
     /* line 38 */
@@ -81,7 +81,7 @@ int32_t main(void) {
     /* line 48 */
     printf("读入: %s\n", ((char*)(buf)));
     /* line 51 */
-    com *p = &(c);
+    sc_com *p = &(c);
     /* line 52 */
     char a[3];
     /* line 53 */

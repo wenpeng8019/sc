@@ -13,7 +13,7 @@
  *   - fd：已连接套接字（设备全托管：nonblock 时内部置 O_NONBLOCK，close 负责关闭 fd）
  *   - nonblock：1=置非阻塞，并强制启用方向走异步（建 ioq）；0=保持调用方原状
  *   - read/write：0=禁用 1=同步 2=异步(自动建 ioq)；实现 readable/writable 回填 fd 供多路复用
- *   - 返回 struct com*（失败 NULL）；EAGAIN→IO_AGAIN、对端关闭→IO_EOF
+ *   - 返回 struct com*（失败 NULL）；EAGAIN→sc_again、对端关闭→sc_eof
  */
 #ifndef SC_IO_H
 #define SC_IO_H
@@ -24,16 +24,16 @@
 extern "C" {
 #endif
 
-struct com;   /* op.h 定义；此处仅作返回类型的不完全声明 */
+struct sc_com;   /* op.h 定义；此处仅作返回类型的不完全声明 */
 
 /* file 文件 com 设备：read/write ∈ {0 禁用, 1 同步, 2 异步}，失败返回 NULL */
-struct com *file(const char *name, bool txt, uint8_t read, uint8_t write);
+struct sc_com *sc_file(const char *name, bool txt, uint8_t read, uint8_t write);
 
 /* stream 内存 com 设备：绑定 mem[0..size) 为后端，read/write ∈ {0,1,2}，失败返回 NULL */
-struct com *stream(void *mem, uint64_t size, uint8_t read, uint8_t write);
+struct sc_com *sc_stream(void *mem, uint64_t size, uint8_t read, uint8_t write);
 
 /* tcp 套接字 com 设备：以已连接 fd 为后端（设备托管 fd），read/write ∈ {0,1,2}，失败返回 NULL */
-struct com *tcp(int32_t fd, bool nonblock, uint8_t read, uint8_t write);
+struct sc_com *sc_tcp(int32_t fd, bool nonblock, uint8_t read, uint8_t write);
 
 #ifdef __cplusplus
 }

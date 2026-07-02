@@ -35,7 +35,7 @@ inc feature30_mod.sc                # 引入消费单元（其内部引用本根
 }
 
 @fnc app_report: m: metric    # 全局通用操作：被依赖单元直接调用
-    printf("[report] %s = %d\n", m.tag, m.value)
+    ::printf("[report] %s = %d\n", m.tag, m.value)
 
 fnc main: i4
     # 直接调用消费单元的入口；消费单元内部经注入使用本根的 metric / app_report

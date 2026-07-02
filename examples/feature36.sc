@@ -22,10 +22,10 @@
 
     drop: fnc
         if this->left != nil
-            printf("drop v=%d -> 释放左子 v=%d\n", this->v, this->left->v)
+            ::printf("drop v=%d -> 释放左子 v=%d\n", this->v, this->left->v)
             this->left = nil
         if this->right != nil
-            printf("drop v=%d -> 释放右子 v=%d\n", this->v, this->right->v)
+            ::printf("drop v=%d -> 释放右子 v=%d\n", this->v, this->right->v)
             this->right = nil
 }
 
@@ -43,13 +43,13 @@
 
     drop: fnc
         if this->root != nil
-            printf("drop tree -> 释放根 v=%d\n", this->root->v)
+            ::printf("drop tree -> 释放根 v=%d\n", this->root->v)
             this->root = nil             # 根归零 → 沿 node.drop 递归清左右子
 }
 
 @fnc main: i4
     var t: tree@ = tree()                # ref 版本：t.init 构造出 1 ->(2,3) 整棵树
-    printf("树已由 init 建好：root=%d left=%d right=%d\n",
+    ::printf("树已由 init 建好：root=%d left=%d right=%d\n",
         t->root->v, t->root->left->v, t->root->right->v)
-    printf("即将退出作用域\n")
+    ::printf("即将退出作用域\n")
     return 0                             # 退域：t 归零 → tree.drop → root 归零 → 递归清子

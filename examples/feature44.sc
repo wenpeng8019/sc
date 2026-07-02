@@ -41,7 +41,7 @@ fnc main: i4
     run consume1(qb), &tb            # 线程 B：pull qb（成为 qb 消费者），处理 innerB
 
     var rc: i4 = sync<qa> kickA(qb, qa)   # main 投 kickA 给 A → A sync qb → B sync 回 qa → 替代
-    printf("circular substitution: rc=%d\n", rc)   # 期望 30
+    ::printf("circular substitution: rc=%d\n", rc)   # 期望 30
 
     ta->join()
     tb->join()
@@ -54,7 +54,7 @@ fnc main: i4
     run consume1(qs), &ts            # 线程 S：pull qs（成为 qs 消费者），处理 selfish
 
     var rs: i4 = sync<qs> selfish(qs)     # S 处理 selfish 时 sync add 回 qs → 自替代
-    printf("self substitution: rs=%d\n", rs)       # 期望 15
+    ::printf("self substitution: rs=%d\n", rs)       # 期望 15
 
     ts->join()
     qs->drop()

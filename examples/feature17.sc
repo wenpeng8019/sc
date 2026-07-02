@@ -26,12 +26,12 @@ fnc dev_read: ret, _this: com&, data: &, size: u4&
 # 设备写：打印收到的字节，返回写出字节数。
 fnc dev_write: ret, _this: com&, buf: &, size: u4&
     var p: char& = (buf: char&)
-    printf("  写出: ")
+    ::printf("  写出: ")
     var i: u4 = 0
     while i < *size
-        printf("%c", p[i])
+        ::printf("%c", p[i])
         i = i + 1
-    printf("\n")
+    ::printf("\n")
     return (*size: i4)
 
 #-- 异步收发 rpc：含 com >> / << ⇒ 自动状态机；buf/msg 跨收发存活 ⇒ 提升到帧 ----
@@ -39,7 +39,7 @@ rpc handler: ret, c: com&
     var buf[4]: char
     c >> buf                       # 异步接收（await com_read_async）
     buf[3] = 0
-    printf("  读入: %s\n", (buf: char&))
+    ::printf("  读入: %s\n", (buf: char&))
 
     var msg[3]: char
     msg[0] = 'O'
@@ -58,6 +58,6 @@ fnc main: i4
     var f: future& = async handler(&c)   # 挂起式启动 rpc，立即返回 future
     async_loop(nil)                # 驱动事件循环，推进 rpc 直到完成
 
-    printf("done\n")
+    ::printf("done\n")
     async_final()                  # 销毁事件循环
     return 0

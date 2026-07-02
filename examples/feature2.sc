@@ -86,53 +86,53 @@ fnc sq: i4, x: i4
 
 fnc my_printf: fmt: char&, ...
     var ap: va_list
-    va_start(ap, fmt)
-    vprintf(fmt, ap)
-    va_end(ap)
+    ::va_start(ap, fmt)
+    ::vprintf(fmt, ap)
+    ::va_end(ap)
 
 #-------------- 主函数 ---------------------------------------
 
 fnc main: i4
 
     # 直接函数实现
-    printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
+    ::printf("clamp(42,0,10) = %d\n", clamp(42, 0, 10))
 
     # 多行参数函数实现
     var r: rect
     r.lt.x = 0, r.lt.y = 0
     r.rb.x = 10, r.rb.y = 5
-    printf("area = %d\n", area(&r))
+    ::printf("area = %d\n", area(&r))
 
     # 预定义类型实现
-    printf("add1(3,4) = %d\n", add1(3, 4))
-    printf("add2(3,4) = %d\n", add2(3, 4))
+    ::printf("add1(3,4) = %d\n", add1(3, 4))
+    ::printf("add2(3,4) = %d\n", add2(3, 4))
 
     #-------------- 函数指针类型 -------------------------------
 
     # 函数内定义函数指针变量
     var cb: fnc: i4, x: i4
     cb = sq
-    printf("cb(7) = %d\n", cb(7))
+    ::printf("cb(7) = %d\n", cb(7))
 
     # 函数指针字段：默认 nil，绑定后调用
     var o: obj
     o.abc = 10
     if o.func1 == nil
-        printf("func1 is nil\n")
+        ::printf("func1 is nil\n")
     o.func1 = obj_add
-    printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
-    printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
+    ::printf("o.func1(2,3) = %d\n", o.func1(&o, 2, 3))
+    ::printf("po->func1(4,5) = %d\n", o.func1(&o, 4, 5))
 
     #-------------- 每对象方法指针（fnc name: 无体）---------------
     # 与 func1（普通函数指针，名字前置、接收者自传）对照：
     # scale 为 fnc 前置、无函数体的「每对象方法指针」，按成员函数约定调用——
     # 接收者隐藏并自动注入：o.scale(3) → scale(&o, 3)；p->scale(3) → scale(p, 3)。
     if o.scale == nil
-        printf("scale is nil\n")
+        ::printf("scale is nil\n")
     o.scale = obj_scale                          # 绑定实现（函数地址直存）
-    printf("o.scale(3) = %d\n", o.scale(3))      # 隐藏接收者：abc*3 = 30
+    ::printf("o.scale(3) = %d\n", o.scale(3))      # 隐藏接收者：abc*3 = 30
     var po: obj& = &o
-    printf("po->scale(4) = %d\n", po->scale(4))  # 指针接收者注入：abc*4 = 40
+    ::printf("po->scale(4) = %d\n", po->scale(4))  # 指针接收者注入：abc*4 = 40
 
     # C 实现接口调用（声明在本文件，实现在 C 侧）
 
@@ -143,17 +143,17 @@ fnc main: i4
 
     #     o.func2 = fnc: i4, a: i4, b: i4
     #         return a + b
-    #     printf("fnc lit: %d\n", o.func2(3, 4))
+    #     ::printf("fnc lit: %d\n", o.func2(3, 4))
 
     #-------------- 实参默认自动补 0：缺参自动填零 -------------
 
-    printf("add3(7) = %d\n", add3(7))            # b,c 补 0 → 7
-    printf("add3(1,2) = %d\n", add3(1, 2))       # c 补 0 → 3
-    printf("desc() = %d\n", desc())              # s 补 nil, pt 补 {0} → 0
+    ::printf("add3(7) = %d\n", add3(7))            # b,c 补 0 → 7
+    ::printf("add3(1,2) = %d\n", add3(1, 2))       # c 补 0 → 3
+    ::printf("desc() = %d\n", desc())              # s 补 nil, pt 补 {0} → 0
 
     # 函数指针变量/字段调用也自动补 0/nil
-    printf("o.func1(&o) = %d\n", o.func1(&o))    # x,y 补 0
-    printf("cb() = %d\n", cb())                  # x 补 0
+    ::printf("o.func1(&o) = %d\n", o.func1(&o))    # x,y 补 0
+    ::printf("cb() = %d\n", cb())                  # x 补 0
 
 
     return 0

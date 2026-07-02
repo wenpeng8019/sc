@@ -19,17 +19,17 @@ fnc main: i4
     var src[3]: i4 = [10, 20, 30]
     var dst[3]: i4 = [0, 0, 0]
     copy_n(&dst[0], &src[0], 3)
-    printf("copy:      %d %d %d\n", dst[0], dst[1], dst[2])
+    ::printf("copy:      %d %d %d\n", dst[0], dst[1], dst[2])
     var pt: point = {x = 9, y = 11}
-    printf("sum_point: %d\n", sum_point(&pt))
+    ::printf("sum_point: %d\n", sum_point(&pt))
     var flag: volatile i4 = 1
-    printf("flag:      %d\n", flag)
+    ::printf("flag:      %d\n", flag)
     let q: point& = &pt
     q->x = 100
-    printf("q->x:      %d\n", q->x)
+    ::printf("q->x:      %d\n", q->x)
     var raw: i4& = &pt.x
     let ro: const i4& = (raw: const i4&)
-    printf("ro:        %d\n", *ro)
+    ::printf("ro:        %d\n", *ro)
     var vp: volatile i4& = (&flag: volatile i4&)
-    printf("vp:        %d\n", *vp)
+    ::printf("vp:        %d\n", *vp)
     return 0

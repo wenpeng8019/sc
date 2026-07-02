@@ -1,2 +1,2 @@
-undef_func_bad.sc:3: [1;31m错误[0m: 未定义的函数 'compute'
+undef_func_bad.sc:3: [1;31m错误[0m: 未声明的函数 'compute'（sc 命名域）：若调用 C 域函数请写 '::compute'
   |      var r: i4 = compute(1, 2)

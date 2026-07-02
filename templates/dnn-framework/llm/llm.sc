@@ -30,7 +30,7 @@ fnc main: i4
 
     var attn: tensor& = q->sdpa(k, v, false)
     var attn_causal: tensor& = q->sdpa(k, v, true)
-    printf("llm attn at0=%.4f at1=%.4f causal0=%.4f causal1=%.4f\n", attn->at(0), attn->at(1), attn_causal->at(0), attn_causal->at(1))
+    ::printf("llm attn at0=%.4f at1=%.4f causal0=%.4f causal1=%.4f\n", attn->at(0), attn->at(1), attn_causal->at(0), attn_causal->at(1))
     print_vec(attn, "llm.attn")
 
     q->drop()

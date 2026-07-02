@@ -16,17 +16,17 @@ fnc cnt_cmp -> list_cmp
 
 fnc main: i4
     var c: counter
-    printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
+    ::printf("counter: init=%d add(5)=%d\n", c.n, c.add(5))
     var s: string& = string()
     s->append("Hello")
     s->append(", sc!")
-    printf("s=%s len=%llu\n", s->cstr(), s->len())
-    printf("find \"sc\"=%lld starts_with(Hello)=%d\n", s->find("sc", 0), s->starts_with("Hello"))
+    ::printf("s=%s len=%llu\n", s->cstr(), s->len())
+    ::printf("find \"sc\"=%lld starts_with(Hello)=%d\n", s->find("sc", 0), s->starts_with("Hello"))
     var part: string& = string()
     s->slice(-3, -1, part)
-    printf("slice(-3,-1)=%s\n", part->cstr())
+    ::printf("slice(-3,-1)=%s\n", part->cstr())
     s->upper()
-    printf("upper=%s\n", s->cstr())
+    ::printf("upper=%s\n", s->cstr())
     var l: list
     var c1: counter@ = counter()
     c1->add(30)
@@ -40,13 +40,13 @@ fnc main: i4
     l.sort(cnt_cmp)
     var i: u8 = 0
     for i = 0; i < l.len(); i++
-        printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)
+        ::printf("list[%llu]=%d\n", i, (l.get(i): counter&)->n)
     var lp: list& = &l
     lp->drop()
     part->drop()
     s->drop()
     var hs: string& = string()
     hs->append("on the heap")
-    printf("heap: %s\n", hs->cstr())
+    ::printf("heap: %s\n", hs->cstr())
     hs->drop()
     return 0

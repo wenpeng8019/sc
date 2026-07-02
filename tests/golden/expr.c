@@ -1,32 +1,32 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct pair pair;
+typedef struct sc_pair sc_pair;
 
-typedef struct pair {
+typedef struct sc_pair {
     int32_t a;
     int32_t b;
-} pair;
+} sc_pair;
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 9 */
-    pair p = {0};
+    sc_pair p = {0};
     /* line 10 */
     p.a = 3;
     /* line 11 */
     p.b = 4;
     /* line 14 */
-    printf("sz_expr=%lld sz_type=%lld\n", ((int64_t)(sizeof(p))), ((int64_t)(sizeof(pair))));
+    printf("sz_expr=%lld sz_type=%lld\n", ((int64_t)(sizeof(p))), ((int64_t)(sizeof(sc_pair))));
     /* line 17 */
-    printf("off_a=%lld off_b=%lld\n", ((int64_t)(offsetof(pair, a))), ((int64_t)(offsetof(pair, b))));
+    printf("off_a=%lld off_b=%lld\n", ((int64_t)(offsetof(sc_pair, a))), ((int64_t)(offsetof(sc_pair, b))));
     /* line 20 */
     int32_t m = (p.a > p.b) ? p.a : p.b;
     /* line 21 */

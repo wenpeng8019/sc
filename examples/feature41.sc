@@ -34,7 +34,7 @@ fnc main: i4
     var f2: promise& = async<q> compute(100, 23)
     var r1: i4 = f1->wait(): i4                      # 阻塞取回 7（类型擦除，: i4 还原）
     var r2: i4 = f2->wait(): i4                      # 123
-    printf("pool async: r1=%d r2=%d\n", r1, r2)
+    ::printf("pool async: r1=%d r2=%d\n", r1, r2)
     f1->drop()
     f2->drop()
 
@@ -50,7 +50,7 @@ fnc main: i4
     var g2: promise& = async<q2> compute(5, 6)
     var s1: i4 = g1->wait(): i4                       # 阻塞 → 消费线程算 30 → 取回
     var s2: i4 = g2->wait(): i4                       # 11
-    printf("thread async: s1=%d s2=%d\n", s1, s2)
+    ::printf("thread async: s1=%d s2=%d\n", s1, s2)
     g1->drop()
     g2->drop()
 

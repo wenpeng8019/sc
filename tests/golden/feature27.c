@@ -1,20 +1,20 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static void show_suffix(void);
-static int32_t classify(int32_t n);
-static void demo_sugar(void);
-static int32_t check_pos(int32_t n);
-static int32_t do_step(int32_t n);
-static int32_t run_pipeline(void);
-typedef struct com__project {
+static void sc_show_suffix(void);
+static int32_t sc_classify(int32_t n);
+static void sc_demo_sugar(void);
+static int32_t sc_check_pos(int32_t n);
+static int32_t sc_do_step(int32_t n);
+static int32_t sc_run_pipeline(void);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static void show_suffix(void) {
+static void sc_show_suffix(void) {
     /* line 25 */
     int8_t a = 5;
     /* line 26 */
@@ -31,7 +31,7 @@ static void show_suffix(void) {
     printf("suffix: %d %d %u %u %u %lld\n", a, b, c, d, e, f);
 }
 
-static int32_t classify(int32_t n) {
+static int32_t sc_classify(int32_t n) {
     /* line 36 */
     if (n < 0) {
         /* line 37 */
@@ -46,36 +46,36 @@ static int32_t classify(int32_t n) {
     return 1;
 }
 
-static void demo_sugar(void) {
+static void sc_demo_sugar(void) {
     /* line 44 */
     int32_t _sc_ret;
-    if (((_sc_ret = classify(-(2)))) != 0) {
+    if (((_sc_ret = sc_classify(-(2)))) != 0) {
         /* line 45 */
         printf("fail branch, $=%d\n", _sc_ret);
     }
     /* line 47 */
-    if (((_sc_ret = classify(0))) != 0) {
+    if (((_sc_ret = sc_classify(0))) != 0) {
         /* line 48 */
         printf("never here\n");
     }
     /* line 50 */
-    if (((_sc_ret = classify(7)) > 0)) {
+    if (((_sc_ret = sc_classify(7)) > 0)) {
         /* line 51 */
         printf("warn branch, $=%d\n", _sc_ret);
     }
     /* line 53 */
-    if (((_sc_ret = classify(-(2))) < 0)) {
+    if (((_sc_ret = sc_classify(-(2))) < 0)) {
         /* line 54 */
         printf("err branch, $=%d\n", _sc_ret);
     }
     /* line 56 */
-    _sc_ret = classify(0);
+    _sc_ret = sc_classify(0);
     if (_sc_ret != 0) assert(false);
     /* line 57 */
     printf("after assert, $=%d\n", _sc_ret);
 }
 
-static int32_t check_pos(int32_t n) {
+static int32_t sc_check_pos(int32_t n) {
     /* line 61 */
     if (n < 0) {
         /* line 62 */
@@ -85,10 +85,10 @@ static int32_t check_pos(int32_t n) {
     return 0;
 }
 
-static int32_t do_step(int32_t n) {
+static int32_t sc_do_step(int32_t n) {
     /* line 66 */
     int32_t _sc_ret;
-    if (((_sc_ret = check_pos(n))) != 0) {
+    if (((_sc_ret = sc_check_pos(n))) != 0) {
         /* line 67 */
         printf("do_step: check_pos(%d) failed, $=%d, propagate up\n", n, _sc_ret);
         return _sc_ret;
@@ -99,14 +99,14 @@ static int32_t do_step(int32_t n) {
     return 0;
 }
 
-static int32_t run_pipeline(void) {
+static int32_t sc_run_pipeline(void) {
     /* line 72 */
     int32_t _sc_ret;
-    if (((_sc_ret = do_step(5))) != 0) {
+    if (((_sc_ret = sc_do_step(5))) != 0) {
         return _sc_ret;
     }
     /* line 73 */
-    if (((_sc_ret = do_step(-(1)))) != 0) {
+    if (((_sc_ret = sc_do_step(-(1)))) != 0) {
         return _sc_ret;
     }
     /* line 74 */
@@ -118,11 +118,11 @@ static int32_t run_pipeline(void) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 78 */
-    show_suffix();
+    sc_show_suffix();
     /* line 79 */
-    demo_sugar();
+    sc_demo_sugar();
     /* line 80 */
-    int32_t r = run_pipeline();
+    int32_t r = sc_run_pipeline();
     /* line 81 */
     printf("pipeline result = %d\n", r);
     /* line 82 */

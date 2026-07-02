@@ -73,6 +73,7 @@ std::string rec(const Expr& e, bool top) {
             std::string s = "(" + rec(*e.a, true) + ": ";
             if (e.castConst) s += "const ";
             if (e.castVolatile) s += "volatile ";
+            if (e.castCBridge) s += "::";   // C 域强转 ::T
             s += e.op;
             for (int i = 0; i < e.castPtr; i++) s += "&";
             if (e.castFat) s += "@";   // 自动指针强转 T@ / 裸 @（op 为空 → 类型擦除）
@@ -142,6 +143,7 @@ std::string typeToStr(const TypeRef& t) {
     std::string s;
     if (t.qConst) s += "const ";
     if (t.qVolatile) s += "volatile ";
+    if (t.cBridge) s += "::";   // C 域类型 ::name
     s += t.name;
     // 分身/切片句柄 T[...]：方括号内为初值实参（类型侧）
     if (t.project) {
@@ -208,7 +210,8 @@ std::string fieldDetail(const Field& f, bool withInit) {
         // 类型侧限定符 const/volatile 写在类型名前
         if (f.type.qConst) s += " const";
         if (f.type.qVolatile) s += " volatile";
-        if (!f.type.name.empty()) s += " " + f.type.name;
+        if (f.type.cBridge) s += " ::" + f.type.name;    // C 域类型 name: ::T（严格命名域）
+        else if (!f.type.name.empty()) s += " " + f.type.name;
         // 单例指针 T@1：物理 ptr==1，回写为 @1
         if (f.type.autoFree) s += "@1";
         else {

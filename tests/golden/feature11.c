@@ -1,16 +1,16 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-static void demo_scalar(void);
-static void bump(int32_t *p);
-typedef struct com__project {
+static void sc_demo_scalar(void);
+static void sc_bump(int32_t *p);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static void demo_scalar(void) {
+static void sc_demo_scalar(void) {
     /* line 12 */
     int32_t x = 0;
     /* line 13 */
@@ -21,7 +21,7 @@ static void demo_scalar(void) {
     printf("scalar: set(42) get()=%d\n", y);
 }
 
-static void bump(int32_t *p) {
+static void sc_bump(int32_t *p) {
     /* line 19 */
     int32_t cur = sc_get_acq((p));
     /* line 20 */
@@ -31,13 +31,13 @@ static void bump(int32_t *p) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 23 */
-    demo_scalar();
+    sc_demo_scalar();
     /* line 25 */
     int32_t n = 10;
     /* line 26 */
-    bump(&(n));
+    sc_bump(&(n));
     /* line 27 */
-    bump(&(n));
+    sc_bump(&(n));
     /* line 28 */
     printf("pointer: bump x2 -> %d\n", sc_get(&(n)));
     /* line 31 */

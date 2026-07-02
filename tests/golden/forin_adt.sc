@@ -5,7 +5,7 @@ inc adt.sc
 @def node: {
     v: i4
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc main: i4
@@ -28,7 +28,7 @@ inc adt.sc
     for k, v in d
         dksum += (k: i4&)[0]
         dsum += (v: node&)->v
-    printf("dict ksum=%d vsum=%d\n", dksum, dsum)
+    ::printf("dict ksum=%d vsum=%d\n", dksum, dsum)
     var t: bst
     t.init(0, 4, nil, nil)
     var t1: node@ = node()
@@ -47,18 +47,18 @@ inc adt.sc
     t.put((&b1: const &), (t1: @))
     t.put((&b4: const &), (t4: @))
     t.put((&b2: const &), (t2: @))
-    printf("bst asc:")
+    ::printf("bst asc:")
     for k: i4&, v in t
-        printf(" %d=%d", k[0], (v: node&)->v)
-    printf("\n")
-    printf("bst desc:")
+        ::printf(" %d=%d", k[0], (v: node&)->v)
+    ::printf("\n")
+    ::printf("bst desc:")
     for k: i4&, v in t revert
-        printf(" %d", k[0])
-    printf("\n")
-    printf("bst first2:")
+        ::printf(" %d", k[0])
+    ::printf("\n")
+    ::printf("bst first2:")
     for k: i4&, v in t num 2
-        printf(" %d", k[0])
-    printf("\n")
+        ::printf(" %d", k[0])
+    ::printf("\n")
     var lc: lru
     lc.init(4, 0)
     var c1: node@ = node()
@@ -73,10 +73,10 @@ inc adt.sc
     lc.put((&m1: const &), (c1: @))
     lc.put((&m2: const &), (c2: @))
     lc.put((&m3: const &), (c3: @))
-    printf("lru mru->lru:")
+    ::printf("lru mru->lru:")
     for k: i4&, v in lc
-        printf(" %d=%d", k[0], (v: node&)->v)
-    printf("\n")
+        ::printf(" %d=%d", k[0], (v: node&)->v)
+    ::printf("\n")
     var ls: list
     ls.init()
     var e1: node@ = node()
@@ -88,14 +88,14 @@ inc adt.sc
     ls.push((e1: @))
     ls.push((e2: @))
     ls.push((e3: @))
-    printf("list fwd:")
+    ::printf("list fwd:")
     for v, i in ls
-        printf(" [%d]=%d", i, (v: node&)->v)
-    printf("\n")
-    printf("list rev:")
+        ::printf(" [%d]=%d", i, (v: node&)->v)
+    ::printf("\n")
+    ::printf("list rev:")
     for v in ls revert
-        printf(" %d", (v: node&)->v)
-    printf("\n")
+        ::printf(" %d", (v: node&)->v)
+    ::printf("\n")
     var ar: array
     ar.init(4)
     var x0: i4 = 41
@@ -107,7 +107,7 @@ inc adt.sc
     var asum: i4 = 0
     for v in ar
         asum += (v: i4&)[0]
-    printf("array sum=%d\n", asum)
+    ::printf("array sum=%d\n", asum)
     d.drop()
     t.drop()
     lc.drop()

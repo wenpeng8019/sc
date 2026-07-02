@@ -31,14 +31,14 @@
     root->pt.y = 20
     root->child = node()             # 成员出边：root.out++，子对象 in++
     root->child->v = 2
-    printf("root.v=%d child.v=%d\n", root->v, root->child->v)
+    ::printf("root.v=%d child.v=%d\n", root->v, root->child->v)
 
     var alias: node@ = root          # 绑定新边：root 目标 in=2（共享）
-    printf("alias.v=%d\n", alias->v)
+    ::printf("alias.v=%d\n", alias->v)
 
     var px: point@ = &root->pt       # 取址传染：借用 root 堆对象，px 指向内嵌 pt
-    printf("px.x=%d px.y=%d\n", px->x, px->y)
+    ::printf("px.x=%d px.y=%d\n", px->x, px->y)
 
     root->child = nil                # 拆成员出边：子对象 in--（归零 → ARC free）
-    printf("after-detach root.v=%d\n", root->v)
+    ::printf("after-detach root.v=%d\n", root->v)
     return 0                         # 域退出：先拆 px/alias/root 的边，再 ARC 回收

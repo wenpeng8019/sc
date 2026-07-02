@@ -17,7 +17,7 @@ mix Vec(i4, int)                     # 入口侧也实例化 Vec_int（与 gvec.
 fnc main: i4
     var vi: Vec_int
     vec_push3(&vi, 10, 20, 30)       # 调用附属模块导出函数（形参 Vec_int&）
-    printf("sum=%d len=%d\n", vec_sum(&vi), vi.len)
+    ::printf("sum=%d len=%d\n", vec_sum(&vi), vi.len)
     var p: i4& = Vec_int_at(&vi, 1)  # 入口侧直接用模板生成的成员函数
-    printf("at1=%d\n", *p)
+    ::printf("at1=%d\n", *p)
     return 0

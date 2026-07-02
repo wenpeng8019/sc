@@ -76,23 +76,23 @@ fnc fill_raw: dst: char&
 
 #-------------- 收端触发的 rpc：标量参数 ----------------------------------------
 rpc greet: i4, a: i4, b: i4
-    printf("  标量 rpc: a=%d b=%d\n", a, b)
+    ::printf("  标量 rpc: a=%d b=%d\n", a, b)
     return 0
 
 #-------------- 收端触发的 rpc：数组参数 ----------------------------------------
 rpc greet_buf: i4, tag: i4, buf[8]: char
-    printf("  数组 rpc: tag=%d buf=%s\n", tag, &buf[0])
+    ::printf("  数组 rpc: tag=%d buf=%s\n", tag, &buf[0])
     return 0
 
 #-------------- 收端触发的 rpc：com[...] 句柄参数（定长 16）---------------------
 rpc greet_body: i4, n: i4, body: com[16, nil]
     var p: char& = (body._->data(): char&)
-    printf("  句柄 rpc: n=%d body(%u)=", n, body._->len)
+    ::printf("  句柄 rpc: n=%d body(%u)=", n, body._->len)
     var k: i4 = 0
     while (k: u4) < body._->len
-        printf("%c", p[k])
+        ::printf("%c", p[k])
         k = k + 1
-    printf("\n")
+    ::printf("\n")
     return 0
 
 #-- 异步会话 rpc：含 com >> / << ⇒ 自动状态机（标量 / 数组 / 句柄三类序列化）------
@@ -138,6 +138,6 @@ fnc main: i4
     var f: future& = async serve(&c)  # 挂起式启动 rpc，立即返回 future
     async_loop(nil)                     # 驱动事件循环，推进状态机直到完成
 
-    printf("done\n")
+    ::printf("done\n")
     async_final()                       # 销毁事件循环
     return 0

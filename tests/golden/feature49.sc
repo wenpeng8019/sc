@@ -35,7 +35,7 @@ fnc main: i4
     form y, (0: @)
     form x, (0: @)
     x->set((4: @), 0)
-    printf("forward: x=%lld y=%lld loss=%lld\n", (x->get(): i8), (y->get(): i8), (loss->get(): i8))
+    ::printf("forward: x=%lld y=%lld loss=%lld\n", (x->get(): i8), (y->get(): i8), (loss->get(): i8))
     back loss, (1: @)
-    printf("backward(seed=1): gy=%lld gx=%lld\n", (gy->get(): i8), (gx->get(): i8))
+    ::printf("backward(seed=1): gy=%lld gx=%lld\n", (gy->get(): i8), (gx->get(): i8))
     return 0

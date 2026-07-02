@@ -74,33 +74,33 @@ fnc main: i4
     lst.insert(&a[2], 0)
     lst.insert(&a[3], 1)
     var it: task& = (lst.first(): task&)
-    printf("正向:")
+    ::printf("正向:")
     while it != nil
-        printf(" %d", it->id)
+        ::printf(" %d", it->id)
         it = (lst.next(it): task&)
-    printf("\n")
+    ::printf("\n")
     var rit: task& = (lst.last(): task&)
-    printf("反向:")
+    ::printf("反向:")
     while rit != nil
-        printf(" %d", rit->id)
+        ::printf(" %d", rit->id)
         rit = (lst.prev(rit): task&)
-    printf("\n")
+    ::printf("\n")
     var found: task&
     if lst.find(&found, 20) == ok
-        printf("find 20 -> id=%d\n", found->id)
+        ::printf("find 20 -> id=%d\n", found->id)
     var hit: task& = (lst[30]: task&)
     if hit != nil
-        printf("lst[30] -> id=%d\n", hit->id)
+        ::printf("lst[30] -> id=%d\n", hit->id)
     var miss: task& = (lst[99]: task&)
     if miss == nil
-        printf("lst[99] -> nil\n")
+        ::printf("lst[99] -> nil\n")
     lst.remove(&a[1])
     var it2: task& = (lst.first(): task&)
-    printf("remove 20 后:")
+    ::printf("remove 20 后:")
     while it2 != nil
-        printf(" %d", it2->id)
+        ::printf(" %d", it2->id)
         it2 = (lst.next(it2): task&)
-    printf("\n")
+    ::printf("\n")
     var pid: i4& = (base(&a[0]): i4&)
-    printf("base(&a[0]) -> id=%d\n", *pid)
+    ::printf("base(&a[0]) -> id=%d\n", *pid)
     return 0

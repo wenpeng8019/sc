@@ -31,14 +31,14 @@ def buffer: <view> {
 
     # alloc：分身构造器（隐式 this=buffer&，余参=切片参数），返回 view&
     alloc: fnc: view&, off: i4, len: i4
-        var v: view& = malloc(sizeof(view)): view&
+        var v: view& = ::malloc(sizeof(view)): view&
         v->p = &this->data[off]
         v->n = len
         return v
 
     # free：分身析构器
     free: fnc: v: view&
-        free(v)
+        ::free(v)
 }
 
 fnc main: i4
@@ -54,17 +54,17 @@ fnc main: i4
     #-------------- 绑定：s = 本体（生成 alloc + 回写 _self）-------
     s = b
 
-    printf("切片:")
+    ::printf("切片:")
     var j: i4
     for j = 0; j < s._->n; j++
-        printf(" %c", s._->p[j])
-    printf("\n")                          # c d e f g
+        ::printf(" %c", s._->p[j])
+    ::printf("\n")                          # c d e f g
 
     #-------------- self：分身经回指反查本体容量 -----------------
-    printf("本体容量: %d\n", s._->capacity())   # 256
+    ::printf("本体容量: %d\n", s._->capacity())   # 256
 
     #-------------- 解绑：s = nil（生成 free + 置空）-------------
     s = nil
-    printf("已解绑: %d\n", s._ == nil)     # 1
+    ::printf("已解绑: %d\n", s._ == nil)     # 1
 
     return 0

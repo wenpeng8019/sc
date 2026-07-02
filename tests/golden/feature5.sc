@@ -25,7 +25,7 @@
 }
 
 fnc main: i4
-    printf("add = %d\n", add(2, 3))
+    ::printf("add = %d\n", add(2, 3))
     total = add(10, 20)
-    printf("total = %d\n", total)
+    ::printf("total = %d\n", total)
     return 0

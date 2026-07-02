@@ -9,8 +9,8 @@ fnc int_cmp -> array_cmp
 fnc dump: a: array&
     var i: u8 = 0
     for i = 0; i < a->len(); i++
-        printf(" %d", (a->at(i): i4&)[0])
-    printf("\n")
+        ::printf(" %d", (a->at(i): i4&)[0])
+    ::printf("\n")
 
 fnc main: i4
     var a: array
@@ -23,39 +23,39 @@ fnc main: i4
     a.push(&v)
     v = 10
     a.push(&v)
-    printf("len=%llu\n", a.len())
+    ::printf("len=%llu\n", a.len())
     dump(&a)
 
     a.sort(int_cmp)
-    printf("sorted:")
+    ::printf("sorted:")
     dump(&a)
 
     var key: i4 = 20
     var found: i4& = a.bsearch(&key, int_cmp)
-    printf("bsearch(20)=%d\n", found != nil ? found[0] : (0 - 1))
+    ::printf("bsearch(20)=%d\n", found != nil ? found[0] : (0 - 1))
     key = 10
-    printf("find(10)=%lld rfind(10)=%lld\n", a.find(&key, 0, int_cmp), a.rfind(&key, int_cmp))
+    ::printf("find(10)=%lld rfind(10)=%lld\n", a.find(&key, 0, int_cmp), a.rfind(&key, int_cmp))
 
     var b: array
     a.clone(&b)
-    printf("clone equals=%d\n", a.equals(&b, int_cmp))
+    ::printf("clone equals=%d\n", a.equals(&b, int_cmp))
     b.reverse()
-    printf("reversed:")
+    ::printf("reversed:")
     dump(&b)
 
     var part: array
     a.slice(1, 3, &part)
-    printf("slice(1,3):")
+    ::printf("slice(1,3):")
     dump(&part)
 
     v = 99
     a.set(0, &v)
     a.insert(0, &key)
-    printf("after set/insert:")
+    ::printf("after set/insert:")
     dump(&a)
 
     a.erase(0, 2)
-    printf("after erase:")
+    ::printf("after erase:")
     dump(&a)
 
     a.drop()

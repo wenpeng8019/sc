@@ -22,13 +22,13 @@ add_executable(scc
     # 程序结构依赖图（proggraph 子项目）：编译期只读分析，把 AST 烘焙成结构对象依赖图，
     # 从 main/@导出 做激活分析，导出 JSON / 自包含 HTML。与 codegen 解耦。见 proggraph/。
     src/proggraph.cpp
-    # 图算法（builtins/tok/graph）：编译期被 scc 引入，对 tok 依赖图（dep…map）做
+    # 图算法（builtins/graph）：编译期被 scc 引入，对 tok 依赖图（dep…map）做
     # 环检测/拓扑/深度/逆拓扑预计算，结果烘焙为生成代码常量。graph.h 为编译期生产者
-    # 与运行时消费者共享的规范接口（spec interface）。图是 tok 的一部分，故同居 tok 目录。
-    ../builtins/tok/graph_impl.c
+    # 与运行时消费者共享的规范接口（spec interface）。图算法独立子模块，亦可被 sc 程序 inc。
+    ../builtins/graph/graph_impl.c
 )
 
-# builtins 根入 -I：使 src 可 #include "tok/graph.h" 引用图算法规范接口
+# builtins 根入 -I：使 src 可 #include "graph/graph.h" 引用图算法规范接口
 target_include_directories(scc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../builtins)
 
 target_compile_options(scc PRIVATE -Wall -Wextra)

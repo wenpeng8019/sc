@@ -2,57 +2,57 @@
 #include "platform.h"
 #include "builtins/adt/adt.h"
 
-typedef struct tnode tnode;
-typedef struct slist slist;
-typedef struct task task;
-typedef struct cnode cnode;
+typedef struct sc_tnode sc_tnode;
+typedef struct sc_slist sc_slist;
+typedef struct sc_task sc_task;
+typedef struct sc_cnode sc_cnode;
 
-typedef struct tnode {
-    tnode *next;
-    tnode *prev;
-} tnode;
+typedef struct sc_tnode {
+    sc_tnode *next;
+    sc_tnode *prev;
+} sc_tnode;
 
-typedef struct slist {
-    tnode *head;
-    tnode *tail;
-} slist;
+typedef struct sc_slist {
+    sc_tnode *head;
+    sc_tnode *tail;
+} sc_slist;
 
-static void slist_init(slist *_this);
-static int32_t slist_insert(slist *_this, tnode *item, int32_t tag);
-static int32_t slist_remove(slist *_this, tnode *item);
-static int32_t slist_find(slist *_this, tnode **out, int32_t key);
-static tnode * slist_first(slist *_this);
-static tnode * slist_last(slist *_this);
-static tnode * slist_next(slist *_this, tnode *item);
-static tnode * slist_prev(slist *_this, tnode *item);
-typedef struct task {
-    tnode _adt;
+static void sc_slist_init(sc_slist *_this);
+static int32_t sc_slist_insert(sc_slist *_this, sc_tnode *item, int32_t tag);
+static int32_t sc_slist_remove(sc_slist *_this, sc_tnode *item);
+static int32_t sc_slist_find(sc_slist *_this, sc_tnode **out, int32_t key);
+static sc_tnode * sc_slist_first(sc_slist *_this);
+static sc_tnode * sc_slist_last(sc_slist *_this);
+static sc_tnode * sc_slist_next(sc_slist *_this, sc_tnode *item);
+static sc_tnode * sc_slist_prev(sc_slist *_this, sc_tnode *item);
+typedef struct sc_task {
+    sc_tnode _adt;
     int32_t id;
-} task;
+} sc_task;
 
-typedef struct cnode {
+typedef struct sc_cnode {
     void *_prev;
     void *_next;
     int32_t v;
-} cnode;
+} sc_cnode;
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
 
-static void slist_init(slist *_this) {
+static void sc_slist_init(sc_slist *_this) {
     /* line 31 */
     _this->head = NULL;
     /* line 32 */
     _this->tail = NULL;
 }
 
-static int32_t slist_insert(slist *_this, tnode *item, int32_t tag) {
+static int32_t sc_slist_insert(sc_slist *_this, sc_tnode *item, int32_t tag) {
     /* line 34 */
     item->prev = _this->tail;
     /* line 35 */
@@ -71,18 +71,18 @@ static int32_t slist_insert(slist *_this, tnode *item, int32_t tag) {
     return 0;
 }
 
-static int32_t slist_remove(slist *_this, tnode *item) {
+static int32_t sc_slist_remove(sc_slist *_this, sc_tnode *item) {
     /* line 43 */
     return 0;
 }
 
-static int32_t slist_find(slist *_this, tnode **out, int32_t key) {
+static int32_t sc_slist_find(sc_slist *_this, sc_tnode **out, int32_t key) {
     /* line 45 */
-    tnode *p = _this->head;
+    sc_tnode *p = _this->head;
     /* line 46 */
     while (p != NULL) {
         /* line 47 */
-        task *t = ((task*)(p));
+        sc_task *t = ((sc_task*)(p));
         /* line 48 */
         if (t->id != key) {
             /* line 49 */
@@ -98,22 +98,22 @@ static int32_t slist_find(slist *_this, tnode **out, int32_t key) {
     return -(1);
 }
 
-static tnode * slist_first(slist *_this) {
+static sc_tnode * sc_slist_first(sc_slist *_this) {
     /* line 55 */
     return _this->head;
 }
 
-static tnode * slist_last(slist *_this) {
+static sc_tnode * sc_slist_last(sc_slist *_this) {
     /* line 57 */
     return _this->tail;
 }
 
-static tnode * slist_next(slist *_this, tnode *item) {
+static sc_tnode * sc_slist_next(sc_slist *_this, sc_tnode *item) {
     /* line 59 */
     return item->next;
 }
 
-static tnode * slist_prev(slist *_this, tnode *item) {
+static sc_tnode * sc_slist_prev(sc_slist *_this, sc_tnode *item) {
     /* line 61 */
     return item->prev;
 }
@@ -270,25 +270,25 @@ int32_t main(void) {
     /* line 124 */
     printf("\n");
     /* line 127 */
-    chain l = {0};
+    sc_chain l = {0};
     /* line 128 */
-    cnode cn[4] = {0};
+    sc_cnode cn[4] = {0};
     /* line 129 */
     for (k = 0; k < 4; k++) {
         /* line 130 */
         cn[k].v = ((k + 1) * 100);
         /* line 131 */
-        chain_append(&l, &(cn[k]));
+        sc_chain_append(&l, &(cn[k]));
     }
     /* line 132 */
     printf("链:");
     /* line 133 */
     {
-        chain * _fr9 = &l;
-        void *_fi9 = (void *)chain_first(_fr9);
+        sc_chain * _fr9 = &l;
+        void *_fi9 = (void *)sc_chain_first(_fr9);
         long _fc9 = 0; (void)_fc9;
         for (; _fi9 != (void *)0; _fi9 = ((void *)*(void **)((char *)_fi9 + sizeof(void *))), _fc9++) {
-            cnode * it = (cnode *)_fi9;
+            sc_cnode * it = (sc_cnode *)_fi9;
             /* line 134 */
             printf(" %d", it->v);
         }
@@ -299,11 +299,11 @@ int32_t main(void) {
     printf("链逆序:");
     /* line 138 */
     {
-        chain * _fr10 = &l;
-        void *_fi10 = (void *)chain_last(_fr10);
+        sc_chain * _fr10 = &l;
+        void *_fi10 = (void *)sc_chain_last(_fr10);
         long _fc10 = 0; (void)_fc10;
-        for (; _fi10 != (void *)0; _fi10 = ((void *)chain_prev(_fi10)), _fc10++) {
-            cnode * it = (cnode *)_fi10;
+        for (; _fi10 != (void *)0; _fi10 = ((void *)sc_chain_prev(_fi10)), _fc10++) {
+            sc_cnode * it = (sc_cnode *)_fi10;
             /* line 139 */
             printf(" %d", it->v);
         }
@@ -311,26 +311,26 @@ int32_t main(void) {
     /* line 140 */
     printf("\n");
     /* line 142 */
-    slist lst = {0};
-    slist_init(&lst);
+    sc_slist lst = {0};
+    sc_slist_init(&lst);
     /* line 143 */
-    task t[4] = {0};
+    sc_task t[4] = {0};
     /* line 144 */
     for (k = 0; k < 4; k++) {
         /* line 145 */
         t[k].id = ((k + 1) * 10);
         /* line 146 */
-        slist_insert(&lst, (tnode *)(&(t[k])), 0);
+        sc_slist_insert(&lst, (sc_tnode *)(&(t[k])), 0);
     }
     /* line 147 */
     printf("容器:");
     /* line 148 */
     {
-        slist * _fr11 = &lst;
-        void *_fi11 = (void *)slist_first(_fr11);
+        sc_slist * _fr11 = &lst;
+        void *_fi11 = (void *)sc_slist_first(_fr11);
         long _fc11 = 0; (void)_fc11;
-        for (; _fi11 != (void *)0; _fi11 = ((void *)slist_next(_fr11, _fi11)), _fc11++) {
-            task * it = (task *)_fi11;
+        for (; _fi11 != (void *)0; _fi11 = ((void *)sc_slist_next(_fr11, _fi11)), _fc11++) {
+            sc_task * it = (sc_task *)_fi11;
             /* line 149 */
             printf(" %d", it->id);
         }
@@ -341,11 +341,11 @@ int32_t main(void) {
     printf("容器逆序步2:");
     /* line 153 */
     {
-        slist * _fr12 = &lst;
-        void *_fi12 = (void *)slist_last(_fr12);
+        sc_slist * _fr12 = &lst;
+        void *_fi12 = (void *)sc_slist_last(_fr12);
         long _fc12 = 0; (void)_fc12;
-        for (; _fi12 != (void *)0; ({ long _fk12 = (2); while (_fk12-- > 0 && _fi12 != (void *)0) _fi12 = ((void *)slist_prev(_fr12, _fi12)); }), _fc12++) {
-            task * it = (task *)_fi12;
+        for (; _fi12 != (void *)0; ({ long _fk12 = (2); while (_fk12-- > 0 && _fi12 != (void *)0) _fi12 = ((void *)sc_slist_prev(_fr12, _fi12)); }), _fc12++) {
+            sc_task * it = (sc_task *)_fi12;
             /* line 154 */
             printf(" %d", it->id);
         }
@@ -388,11 +388,11 @@ int32_t main(void) {
     printf("链带计数:");
     /* line 172 */
     {
-        chain * _fr15 = &l;
-        void *_fi15 = (void *)chain_first(_fr15);
+        sc_chain * _fr15 = &l;
+        void *_fi15 = (void *)sc_chain_first(_fr15);
         long _fc15 = 0; (void)_fc15;
         for (; _fi15 != (void *)0; _fi15 = ((void *)*(void **)((char *)_fi15 + sizeof(void *))), _fc15++) {
-            cnode * it = (cnode *)_fi15;
+            sc_cnode * it = (sc_cnode *)_fi15;
             int i = (int)(_fc15);
             /* line 173 */
             printf(" #%d=%d", i, it->v);

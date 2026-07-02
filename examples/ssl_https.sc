@@ -53,7 +53,7 @@ fnc main: i4
             print "FAIL: read\n"
             sec->close()
             return 1
-        if rd == 2          # IO_EOF
+        if rd == 2          # sc_eof
             break
         total = total + rn
         if rn == 0

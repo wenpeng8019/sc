@@ -41,7 +41,7 @@ fnc main: i4
         q << add(&a, i)
 
     p->join()          # 屏障：等池把所有已投递消息处理完
-    printf("pool queue: sum=%d cnt=%d\n", a.sum, a.cnt)   # 5050 100
+    ::printf("pool queue: sum=%d cnt=%d\n", a.sum, a.cnt)   # 5050 100
 
     q->drop()          # 队列解绑回收（宿主池另行 drop）
     p->drop()          # 停池回收

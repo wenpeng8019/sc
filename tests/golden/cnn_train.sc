@@ -44,5 +44,5 @@ fnc main: i4
         if e == 0
             first = last
         nn_tape_clear()
-    printf("cnn_down=%d cnn_low=%d\n", (last < first: i4), (last < 0.1: i4))
+    ::printf("cnn_down=%d cnn_low=%d\n", (last < first: i4), (last < 0.1: i4))
     return 0

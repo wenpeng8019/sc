@@ -28,7 +28,7 @@ fnc main: i4
     run consume1(qa), &ta
     run consume1(qb), &tb
     var rc: i4 = sync<qa> kickA(qb, qa)
-    printf("circular substitution: rc=%d\n", rc)
+    ::printf("circular substitution: rc=%d\n", rc)
     ta->join()
     tb->join()
     qa->drop()
@@ -37,7 +37,7 @@ fnc main: i4
     var ts: thread& = nil
     run consume1(qs), &ts
     var rs: i4 = sync<qs> selfish(qs)
-    printf("self substitution: rs=%d\n", rs)
+    ::printf("self substitution: rs=%d\n", rs)
     ts->join()
     qs->drop()
     return 0

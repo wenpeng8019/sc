@@ -10,5 +10,5 @@ fnc main: i4
     config.set_level(3)
     logger.emit("hello")
     logger.emit("world")
-    printf("config.level = %d, logger.count = %d\n", config.level(), logger.count())
+    ::printf("config.level = %d, logger.count = %d\n", config.level(), logger.count())
     return 0

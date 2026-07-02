@@ -8,9 +8,9 @@ var g_tick:: i8
 
 fnc demo: i4
     # 直接调用 C 变参函数
-    printf("v=%d\n", 1)
+    ::printf("v=%d\n", 1)
     # 调用 C 函数，结果赋给 sc 变量
-    var a: i4 = abs(-3)
+    var a: i4 = ::abs(-3)
     # 读取已认领的 C 全局符号
     var b: i4 = MAX_VIEW
     # 认领的可变 C 全局可读写

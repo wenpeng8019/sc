@@ -26,7 +26,7 @@ fnc main: i4
     var feat: tensor& = x->conv2d(w, b, 1, 1, 0, 0)
     var act: tensor& = feat->relu()
     var pool: tensor& = act->max_pool2d(2, 2, 2, 2, 0, 0)
-    printf("cnn feat=%dx%dx%dx%d pool=%dx%dx%dx%d\n",
+    ::printf("cnn feat=%dx%dx%dx%d pool=%dx%dx%dx%d\n",
         feat->dim(0), feat->dim(1), feat->dim(2), feat->dim(3),
         pool->dim(0), pool->dim(1), pool->dim(2), pool->dim(3))
     print_vec(pool, "cnn.pool")

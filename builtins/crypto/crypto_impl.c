@@ -112,7 +112,7 @@ static void sha256_final(sha256_ctx *c, uint8_t *out) {
     }
 }
 
-void crypto_sha256(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha256(void *data, uint64_t len, uint8_t *out) {
     sha256_ctx c;
     sha256_init(&c);
     sha256_update(&c, (const uint8_t *)data, (size_t)len);
@@ -131,7 +131,7 @@ static void hmac_init(hmac_ctx *m, const uint8_t *key, size_t keylen) {
     uint8_t ipad[64];
     int i;
     memset(k, 0, 64);
-    if (keylen > 64) crypto_sha256((void *)key, keylen, k);
+    if (keylen > 64) sc_crypto_sha256((void *)key, keylen, k);
     else             memcpy(k, key, keylen);
     for (i = 0; i < 64; i++) {
         ipad[i]    = k[i] ^ 0x36;
@@ -155,7 +155,7 @@ static void hmac_final(hmac_ctx *m, uint8_t *out) {
     sha256_final(&oc, out);
 }
 
-void crypto_hmac_sha256(void *key, uint64_t keylen,
+void sc_crypto_hmac_sha256(void *key, uint64_t keylen,
                         void *data, uint64_t len, uint8_t *out) {
     hmac_ctx m;
     hmac_init(&m, (const uint8_t *)key, (size_t)keylen);
@@ -165,7 +165,7 @@ void crypto_hmac_sha256(void *key, uint64_t keylen,
 
 /* ====================== HKDF-SHA256（RFC 5869）====================== */
 
-void crypto_hkdf_sha256(void *salt, uint64_t saltlen,
+void sc_crypto_hkdf_sha256(void *salt, uint64_t saltlen,
                         void *ikm,  uint64_t ikmlen,
                         void *info, uint64_t infolen,
                         uint8_t *out, uint64_t outlen) {
@@ -178,9 +178,9 @@ void crypto_hkdf_sha256(void *salt, uint64_t saltlen,
     /* Extract：PRK = HMAC(salt, IKM)；salt 缺省为 HashLen 个 0 */
     if (salt == 0 || saltlen == 0) {
         memset(zero, 0, 32);
-        crypto_hmac_sha256(zero, 32, ikm, ikmlen, prk);
+        sc_crypto_hmac_sha256(zero, 32, ikm, ikmlen, prk);
     } else {
-        crypto_hmac_sha256(salt, saltlen, ikm, ikmlen, prk);
+        sc_crypto_hmac_sha256(salt, saltlen, ikm, ikmlen, prk);
     }
 
     /* Expand：T(i) = HMAC(PRK, T(i-1) | info | i) */
@@ -229,7 +229,7 @@ static void sha1_compress(uint32_t h[5], const uint8_t *p) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
 }
 
-void crypto_sha1(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha1(void *data, uint64_t len, uint8_t *out) {
     uint32_t h[5] = { 0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u, 0xc3d2e1f0u };
     const uint8_t *p = (const uint8_t *)data;
     uint64_t total = (uint64_t)len;
@@ -265,7 +265,7 @@ void crypto_sha1(void *data, uint64_t len, uint8_t *out) {
 /* ====================== Base64 编码（RFC 4648）======================
  * data[0..len) -> out（不补 0），返回写入的字符数（((len+2)/3)*4）。 */
 
-int32_t crypto_base64(void *data, uint64_t len, char *out) {
+int32_t sc_crypto_base64(void *data, uint64_t len, char *out) {
     static const char tab[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const uint8_t *d = (const uint8_t *)data;
@@ -353,7 +353,7 @@ static void chacha20_init(uint32_t st[16], const uint8_t *key,
     st[15] = sc_le32(nonce + 8);
 }
 
-void crypto_chacha20(uint8_t *key, uint8_t *nonce, uint32_t counter,
+void sc_crypto_chacha20(uint8_t *key, uint8_t *nonce, uint32_t counter,
                      void *data, uint64_t len, uint8_t *out) {
     uint32_t st[16];
     uint8_t  ks[64];
@@ -513,7 +513,7 @@ static void poly1305_finish(poly1305_ctx *st, uint8_t mac[16]) {
     mac[14] = (uint8_t)(h3 >> 16); mac[15] = (uint8_t)(h3 >> 24);
 }
 
-void crypto_poly1305(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_poly1305(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     poly1305_ctx st;
     poly1305_init(&st, key);
     poly1305_update(&st, (const uint8_t *)data, (size_t)len);
@@ -550,20 +550,20 @@ static void aead_mac(poly1305_ctx *mac,
     poly1305_update(mac, lenblock, 16);
 }
 
-void crypto_aead_seal(uint8_t *key, uint8_t *nonce,
+void sc_crypto_aead_seal(uint8_t *key, uint8_t *nonce,
                       void *aad, uint64_t aadlen,
                       void *plain, uint64_t plen,
                       uint8_t *cipher, uint8_t *tag) {
     uint8_t polykey[32];
     poly1305_ctx mac;
     aead_poly_key(key, nonce, polykey);
-    crypto_chacha20(key, nonce, 1, plain, plen, cipher);   /* 数据从 counter=1 起 */
+    sc_crypto_chacha20(key, nonce, 1, plain, plen, cipher);   /* 数据从 counter=1 起 */
     poly1305_init(&mac, polykey);
     aead_mac(&mac, (const uint8_t *)aad, aadlen, cipher, plen);
     poly1305_finish(&mac, tag);
 }
 
-int32_t crypto_aead_open(uint8_t *key, uint8_t *nonce,
+int32_t sc_crypto_aead_open(uint8_t *key, uint8_t *nonce,
                          void *aad, uint64_t aadlen,
                          void *cipher, uint64_t clen,
                          uint8_t *tag, uint8_t *plain) {
@@ -579,7 +579,7 @@ int32_t crypto_aead_open(uint8_t *key, uint8_t *nonce,
     /* 常量时间比较，先验证再解密 */
     for (i = 0; i < 16; i++) diff |= (uint8_t)(calc[i] ^ tag[i]);
     if (diff) return -1;
-    crypto_chacha20(key, nonce, 1, cipher, clen, plain);
+    sc_crypto_chacha20(key, nonce, 1, cipher, clen, plain);
     return 0;
 }
 
@@ -667,7 +667,7 @@ static void fe_inv(fe o, const fe i) {
     for (a = 0; a < 16; a++) o[a] = c[a];
 }
 
-void crypto_x25519(uint8_t *out, uint8_t *scalar, uint8_t *point) {
+void sc_crypto_x25519(uint8_t *out, uint8_t *scalar, uint8_t *point) {
     uint8_t z[32];
     int64_t x[80], r, i;
     fe a, b, c, d, e, f;
@@ -698,8 +698,8 @@ void crypto_x25519(uint8_t *out, uint8_t *scalar, uint8_t *point) {
     fe_pack(out, x + 16);
 }
 
-void crypto_x25519_base(uint8_t *out, uint8_t *scalar) {
-    crypto_x25519(out, scalar, (uint8_t *)x25519_base9);
+void sc_crypto_x25519_base(uint8_t *out, uint8_t *scalar) {
+    sc_crypto_x25519(out, scalar, (uint8_t *)x25519_base9);
 }
 
 /* ================================================================
@@ -817,14 +817,14 @@ static void sha512_final(sha512_ctx *c, uint8_t *out, int words) {
     }
 }
 
-void crypto_sha512(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha512(void *data, uint64_t len, uint8_t *out) {
     sha512_ctx c;
     sha512_init(&c, 0);
     sha512_update(&c, (const uint8_t *)data, (size_t)len);
     sha512_final(&c, out, 8);
 }
 
-void crypto_sha384(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha384(void *data, uint64_t len, uint8_t *out) {
     sha512_ctx c;
     sha512_init(&c, 1);
     sha512_update(&c, (const uint8_t *)data, (size_t)len);
@@ -833,13 +833,13 @@ void crypto_sha384(void *data, uint64_t len, uint8_t *out) {
 
 /* ====================== HMAC-SHA512（RFC 4231）====================== */
 
-void crypto_hmac_sha512(void *key, uint64_t keylen,
+void sc_crypto_hmac_sha512(void *key, uint64_t keylen,
                         void *data, uint64_t len, uint8_t *out) {
     uint8_t k[128], ipad[128], ih[64];
     sha512_ctx ic, oc;
     int i;
     memset(k, 0, 128);
-    if (keylen > 128) crypto_sha512(key, keylen, k);    /* 长 key 先散列 */
+    if (keylen > 128) sc_crypto_sha512(key, keylen, k);    /* 长 key 先散列 */
     else              memcpy(k, key, (size_t)keylen);
     for (i = 0; i < 128; i++) ipad[i] = k[i] ^ 0x36;
     sha512_init(&ic, 0);
@@ -857,7 +857,7 @@ void crypto_hmac_sha512(void *key, uint64_t keylen,
  * 复用 SHA-256 节的 hmac_ctx / hmac_init/update/final 流式接口，
  * 首块 U1 = HMAC(pw, salt ‖ INT32BE(i)) 无需拼接缓冲。 */
 
-void crypto_pbkdf2_sha256(void *pw, uint64_t pwlen,
+void sc_crypto_pbkdf2_sha256(void *pw, uint64_t pwlen,
                           void *salt, uint64_t saltlen,
                           uint32_t iters, uint8_t *out, uint64_t outlen) {
     uint32_t blocks = (uint32_t)((outlen + 31) / 32);
@@ -877,7 +877,7 @@ void crypto_pbkdf2_sha256(void *pw, uint64_t pwlen,
         hmac_final(&hm, U);
         memcpy(T, U, 32);
         for (j = 1; j < iters; j++) {
-            crypto_hmac_sha256(pw, pwlen, U, 32, U);
+            sc_crypto_hmac_sha256(pw, pwlen, U, 32, U);
             for (kk = 0; kk < 32; kk++) T[kk] ^= U[kk];
         }
         take = (size_t)(outlen - done);
@@ -973,16 +973,16 @@ static void keccak_sponge(const uint8_t *in, size_t inlen,
     }
 }
 
-void crypto_sha3_256(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha3_256(void *data, uint64_t len, uint8_t *out) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, 32, 136, 0x06);
 }
-void crypto_sha3_512(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha3_512(void *data, uint64_t len, uint8_t *out) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, 64, 72, 0x06);
 }
-void crypto_shake128(void *data, uint64_t len, uint8_t *out, uint64_t outlen) {
+void sc_crypto_shake128(void *data, uint64_t len, uint8_t *out, uint64_t outlen) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, (size_t)outlen, 168, 0x1F);
 }
-void crypto_shake256(void *data, uint64_t len, uint8_t *out, uint64_t outlen) {
+void sc_crypto_shake256(void *data, uint64_t len, uint8_t *out, uint64_t outlen) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, (size_t)outlen, 136, 0x1F);
 }
 
@@ -1140,7 +1140,7 @@ static void aes_decrypt_block(const uint32_t *rk, int nr, const uint8_t in[16], 
 
 /* ====================== AES-CTR（SP 800-38A）====================== */
 /* iv = 完整 16 字节初始计数块，整块按 128 位大端自增；加解密同一函数。 */
-void crypto_aes_ctr(uint8_t *key, uint32_t keybits, uint8_t *iv,
+void sc_crypto_aes_ctr(uint8_t *key, uint32_t keybits, uint8_t *iv,
                     void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
@@ -1162,7 +1162,7 @@ void crypto_aes_ctr(uint8_t *key, uint32_t keybits, uint8_t *iv,
 
 /* ====================== AES-CBC（SP 800-38A）====================== */
 /* len 须为 16 的倍数（不含填充，调用方自理 PKCS#7 等）。 */
-void crypto_aes_cbc_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv,
+void sc_crypto_aes_cbc_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv,
                             void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr, j;
@@ -1178,7 +1178,7 @@ void crypto_aes_cbc_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv,
         off += 16;
     }
 }
-void crypto_aes_cbc_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv,
+void sc_crypto_aes_cbc_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv,
                             void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr, j;
@@ -1281,7 +1281,7 @@ static void gcm_tag(const uint32_t *rk, int nr, const uint8_t *H, const uint8_t 
     for (j = 0; j < 16; j++) tag[j] = EJ0[j] ^ S[j];
 }
 
-void crypto_aes_gcm_seal(uint8_t *key, uint32_t keybits, void *iv, uint64_t ivlen,
+void sc_crypto_aes_gcm_seal(uint8_t *key, uint32_t keybits, void *iv, uint64_t ivlen,
                          void *aad, uint64_t aadlen, void *plain, uint64_t plen,
                          uint8_t *cipher, uint8_t *tag) {
     uint32_t rk[60];
@@ -1297,7 +1297,7 @@ void crypto_aes_gcm_seal(uint8_t *key, uint32_t keybits, void *iv, uint64_t ivle
     gcm_tag(rk, nr, H, J0, (const uint8_t *)aad, aadlen, cipher, plen, tag);
 }
 
-int32_t crypto_aes_gcm_open(uint8_t *key, uint32_t keybits, void *iv, uint64_t ivlen,
+int32_t sc_crypto_aes_gcm_open(uint8_t *key, uint32_t keybits, void *iv, uint64_t ivlen,
                             void *aad, uint64_t aadlen, void *cipher, uint64_t clen,
                             uint8_t *tag, uint8_t *plain) {
     uint32_t rk[60];
@@ -1475,23 +1475,23 @@ static void ed_reduce(uint8_t *r) {
     ed_modL(r, x);
 }
 
-void crypto_ed25519_pubkey(uint8_t *pub, uint8_t *seed) {
+void sc_crypto_ed25519_pubkey(uint8_t *pub, uint8_t *seed) {
     uint8_t h[64];
     fe p[4];
-    crypto_sha512(seed, 32, h);
+    sc_crypto_sha512(seed, 32, h);
     h[0] &= 248; h[31] &= 127; h[31] |= 64;
     ed_scalarbase(p, h);
     ed_pack(pub, p);
 }
 
-void crypto_ed25519_sign(uint8_t *sig, void *msg, uint64_t mlen,
+void sc_crypto_ed25519_sign(uint8_t *sig, void *msg, uint64_t mlen,
                          uint8_t *seed, uint8_t *pub) {
     uint8_t h[64], r[64], hram[64];
     fe p[4];
     int64_t x[64];
     int i, j;
     sha512_ctx ctx;
-    crypto_sha512(seed, 32, h);
+    sc_crypto_sha512(seed, 32, h);
     h[0] &= 248; h[31] &= 127; h[31] |= 64;
     /* r = SHA512(prefix ‖ msg) mod L */
     sha512_init(&ctx, 0);
@@ -1517,7 +1517,7 @@ void crypto_ed25519_sign(uint8_t *sig, void *msg, uint64_t mlen,
     ed_modL(sig + 32, x);            /* S = sig[32..64) */
 }
 
-int32_t crypto_ed25519_verify(uint8_t *sig, void *msg, uint64_t mlen, uint8_t *pub) {
+int32_t sc_crypto_ed25519_verify(uint8_t *sig, void *msg, uint64_t mlen, uint8_t *pub) {
     uint8_t hram[64], t[32];
     fe p[4], q[4];
     sha512_ctx ctx;
@@ -1622,7 +1622,7 @@ static void md5_final(md5_ctx *m, uint8_t out[16]) {
     for (i = 0; i < 4; i++) out[12+i]   = (uint8_t)(m->d >> (8*i));
 }
 
-void crypto_md5(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_md5(void *data, uint64_t len, uint8_t *out) {
     md5_ctx m;
     md5_init(&m);
     md5_update(&m, (const uint8_t *)data, (size_t)len);
@@ -1693,7 +1693,7 @@ static void rmd160_block(uint32_t h[5], const uint8_t *p) {
     h[0] = t;
 }
 
-void crypto_ripemd160(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_ripemd160(void *data, uint64_t len, uint8_t *out) {
     uint32_t h[5] = {0x67452301u,0xefcdab89u,0x98badcfeu,0x10325476u,0xc3d2e1f0u};
     const uint8_t *p = (const uint8_t *)data;
     uint64_t rem = len, total = len;
@@ -1847,7 +1847,7 @@ static uint64_t des_block_op(uint64_t block, const uint64_t subkeys[16], int dec
     }
 }
 
-void crypto_des_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint64_t sk[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
@@ -1855,7 +1855,7 @@ void crypto_des_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out
     for (off = 0; off + 8 <= len; off += 8)
         des_u2b(des_block_op(des_b2u(in + off), sk, 0), out + off);
 }
-void crypto_des_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint64_t sk[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
@@ -1863,7 +1863,7 @@ void crypto_des_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out
     for (off = 0; off + 8 <= len; off += 8)
         des_u2b(des_block_op(des_b2u(in + off), sk, 1), out + off);
 }
-void crypto_des_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint64_t sk[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t prev = des_b2u(iv), off;
@@ -1874,7 +1874,7 @@ void crypto_des_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len,
         prev = c;
     }
 }
-void crypto_des_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint64_t sk[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t prev = des_b2u(iv), off;
@@ -1900,7 +1900,7 @@ static uint64_t des3_dec(uint64_t b, const uint64_t k1[16], const uint64_t k2[16
     return b;
 }
 
-void crypto_des3_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des3_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint64_t k1[16], k2[16], k3[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
@@ -1908,7 +1908,7 @@ void crypto_des3_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *ou
     for (off = 0; off + 8 <= len; off += 8)
         des_u2b(des3_enc(des_b2u(in + off), k1, k2, k3), out + off);
 }
-void crypto_des3_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des3_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint64_t k1[16], k2[16], k3[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
@@ -1916,7 +1916,7 @@ void crypto_des3_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *ou
     for (off = 0; off + 8 <= len; off += 8)
         des_u2b(des3_dec(des_b2u(in + off), k1, k2, k3), out + off);
 }
-void crypto_des3_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des3_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint64_t k1[16], k2[16], k3[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t prev = des_b2u(iv), off;
@@ -1927,7 +1927,7 @@ void crypto_des3_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len
         prev = c;
     }
 }
-void crypto_des3_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_des3_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint64_t k1[16], k2[16], k3[16];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t prev = des_b2u(iv), off;
@@ -1940,7 +1940,7 @@ void crypto_des3_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len
 }
 
 /* ---------------- AES-ECB（裸分组，复用 AES 核心）---------------- */
-void crypto_aes_ecb_encrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_ecb_encrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
     const uint8_t *in = (const uint8_t *)data;
@@ -1949,7 +1949,7 @@ void crypto_aes_ecb_encrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t
     for (off = 0; off + 16 <= len; off += 16)
         aes_encrypt_block(rk, nr, in + off, out + off);
 }
-void crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
     const uint8_t *in = (const uint8_t *)data;
@@ -1967,7 +1967,7 @@ void crypto_aes_ecb_decrypt(uint8_t *key, uint32_t keybits, void *data, uint64_t
  * ================================================================ */
 
 /* ---------------- 哈希补全：复用既有 SHA-256/512/Keccak 核心 ---------------- */
-void crypto_sha224(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha224(void *data, uint64_t len, uint8_t *out) {
     sha256_ctx c;
     uint8_t full[32];
     c.h[0] = 0xc1059ed8u; c.h[1] = 0x367cd507u; c.h[2] = 0x3070dd17u; c.h[3] = 0xf70e5939u;
@@ -1977,7 +1977,7 @@ void crypto_sha224(void *data, uint64_t len, uint8_t *out) {
     sha256_final(&c, full);
     memcpy(out, full, 28);
 }
-void crypto_sha512_256(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha512_256(void *data, uint64_t len, uint8_t *out) {
     sha512_ctx c;
     sha512_init(&c, 0);
     c.h[0] = 0x22312194FC2BF72CULL; c.h[1] = 0x9F555FA3C84C64C2ULL;
@@ -1987,10 +1987,10 @@ void crypto_sha512_256(void *data, uint64_t len, uint8_t *out) {
     sha512_update(&c, (const uint8_t *)data, (size_t)len);
     sha512_final(&c, out, 4);
 }
-void crypto_sha3_224(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha3_224(void *data, uint64_t len, uint8_t *out) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, 28, 144, 0x06);
 }
-void crypto_sha3_384(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sha3_384(void *data, uint64_t len, uint8_t *out) {
     keccak_sponge((const uint8_t *)data, (size_t)len, out, 48, 104, 0x06);
 }
 
@@ -2029,7 +2029,7 @@ static void sm3_block(uint32_t v[8], const uint8_t *p) {
     v[4] ^= e; v[5] ^= f; v[6] ^= g; v[7] ^= h;
 }
 
-void crypto_sm3(void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sm3(void *data, uint64_t len, uint8_t *out) {
     uint32_t v[8] = {0x7380166fu, 0x4914b2b9u, 0x172442d7u, 0xda8a0600u,
                      0xa96f30bcu, 0x163138aau, 0xe38dee4du, 0xb0fb0e4eu};
     const uint8_t *p = (const uint8_t *)data;
@@ -2060,7 +2060,7 @@ static void cmac_dbl(uint8_t b[16]) {
     b[15] = (uint8_t)(b[15] << 1);
     if (carry) b[15] ^= 0x87;
 }
-void crypto_aes_cmac(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_cmac(uint8_t *key, uint32_t keybits, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr, j;
     uint8_t L[16], K1[16], K2[16], X[16], blk[16];
@@ -2093,7 +2093,7 @@ void crypto_aes_cmac(uint8_t *key, uint32_t keybits, void *data, uint64_t len, u
 }
 
 /* ---------------- AES-CFB128 / OFB（SP 800-38A）---------------- */
-void crypto_aes_cfb_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_cfb_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
     uint8_t fb[16], o[16];
@@ -2109,7 +2109,7 @@ void crypto_aes_cfb_encrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *d
         if (take == 16) memcpy(fb, out + off, 16);  /* 反馈密文 */
     }
 }
-void crypto_aes_cfb_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_cfb_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
     uint8_t fb[16], o[16];
@@ -2125,7 +2125,7 @@ void crypto_aes_cfb_decrypt(uint8_t *key, uint32_t keybits, uint8_t *iv, void *d
         for (j = 0; j < take; j++) out[off + j] = (uint8_t)(in[off + j] ^ o[j]);
     }
 }
-void crypto_aes_ofb(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_aes_ofb(uint8_t *key, uint32_t keybits, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[60];
     int nr;
     uint8_t fb[16], o[16];
@@ -2209,21 +2209,21 @@ static void sm4_crypt(const uint32_t rk[32], const uint8_t in[16], uint8_t out[1
         out[4*i+2] = (uint8_t)(v >> 8); out[4*i+3] = (uint8_t)v;
     }
 }
-void crypto_sm4_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sm4_ecb_encrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[32];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
     sm4_keyschedule(key, rk);
     for (off = 0; off + 16 <= len; off += 16) sm4_crypt(rk, in + off, out + off, 0);
 }
-void crypto_sm4_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sm4_ecb_decrypt(uint8_t *key, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[32];
     const uint8_t *in = (const uint8_t *)data;
     uint64_t off;
     sm4_keyschedule(key, rk);
     for (off = 0; off + 16 <= len; off += 16) sm4_crypt(rk, in + off, out + off, 1);
 }
-void crypto_sm4_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sm4_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[32];
     uint8_t prev[16], blk[16];
     const uint8_t *in = (const uint8_t *)data;
@@ -2237,7 +2237,7 @@ void crypto_sm4_cbc_encrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len,
         memcpy(prev, out + off, 16);
     }
 }
-void crypto_sm4_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
+void sc_crypto_sm4_cbc_decrypt(uint8_t *key, uint8_t *iv, void *data, uint64_t len, uint8_t *out) {
     uint32_t rk[32];
     uint8_t prev[16], cur[16], dec[16];
     const uint8_t *in = (const uint8_t *)data;
@@ -2276,21 +2276,21 @@ static void hchacha20(uint8_t out[32], const uint8_t key[32], const uint8_t nonc
     for (i = 0; i < 4; i++) sc_st32le(out + 4*i, x[i]);
     for (i = 0; i < 4; i++) sc_st32le(out + 16 + 4*i, x[12 + i]);
 }
-void crypto_xaead_seal(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
+void sc_crypto_xaead_seal(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
                        void *plain, uint64_t plen, uint8_t *cipher, uint8_t *tag) {
     uint8_t subkey[32], cn[12];
     hchacha20(subkey, key, nonce);
     memset(cn, 0, 4);
     memcpy(cn + 4, nonce + 16, 8);
-    crypto_aead_seal(subkey, cn, aad, aadlen, plain, plen, cipher, tag);
+    sc_crypto_aead_seal(subkey, cn, aad, aadlen, plain, plen, cipher, tag);
 }
-int32_t crypto_xaead_open(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
+int32_t sc_crypto_xaead_open(uint8_t *key, uint8_t *nonce, void *aad, uint64_t aadlen,
                           void *cipher, uint64_t clen, uint8_t *tag, uint8_t *plain) {
     uint8_t subkey[32], cn[12];
     hchacha20(subkey, key, nonce);
     memset(cn, 0, 4);
     memcpy(cn + 4, nonce + 16, 8);
-    return crypto_aead_open(subkey, cn, aad, aadlen, cipher, clen, tag, plain);
+    return sc_crypto_aead_open(subkey, cn, aad, aadlen, cipher, clen, tag, plain);
 }
 
 /* ---------------- AES-CCM（SP 800-38C / RFC 3610）---------------- */
@@ -2361,7 +2361,7 @@ static void ccm_ctr(const uint32_t *rk, int nr, const uint8_t *nonce, uint64_t n
         off += take; ctr++;
     }
 }
-void crypto_aes_ccm_seal(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
+void sc_crypto_aes_ccm_seal(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
                          void *aad, uint64_t aadlen, void *plain, uint64_t plen,
                          uint8_t *cipher, uint8_t *tag, uint64_t taglen) {
     uint32_t rk[60];
@@ -2371,7 +2371,7 @@ void crypto_aes_ccm_seal(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_
             (const uint8_t *)plain, plen, taglen, tag);
     ccm_ctr(rk, nr, nonce, noncelen, L, (const uint8_t *)plain, plen, cipher);
 }
-int32_t crypto_aes_ccm_open(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
+int32_t sc_crypto_aes_ccm_open(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint64_t noncelen,
                             void *aad, uint64_t aadlen, void *cipher, uint64_t clen,
                             uint8_t *tag, uint64_t taglen, uint8_t *plain) {
     uint32_t rk[60];
@@ -2380,13 +2380,13 @@ int32_t crypto_aes_ccm_open(uint8_t *key, uint32_t keybits, uint8_t *nonce, uint
     aes_expand(key, (int)keybits, rk, &nr);
     ccm_ctr(rk, nr, nonce, noncelen, L, (const uint8_t *)cipher, clen, plain);
     ccm_mac(rk, nr, nonce, noncelen, L, (const uint8_t *)aad, aadlen, plain, clen, taglen, exp);
-    if (crypto_verify(tag, exp, taglen) == 0) return 0;
+    if (sc_crypto_verify(tag, exp, taglen) == 0) return 0;
     memset(plain, 0, (size_t)clen);
     return -1;
 }
 
 /* ---------------- 编码：Hex / Base64URL / Base64 解码 ---------------- */
-int32_t crypto_hex_encode(void *data, uint64_t len, char *out) {
+int32_t sc_crypto_hex_encode(void *data, uint64_t len, char *out) {
     static const char *tab = "0123456789abcdef";
     const uint8_t *in = (const uint8_t *)data;
     uint64_t i;
@@ -2402,7 +2402,7 @@ static int hexval1(int c) {
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
-int32_t crypto_hex_decode(char *hex, uint64_t len, uint8_t *out) {
+int32_t sc_crypto_hex_decode(char *hex, uint64_t len, uint8_t *out) {
     uint64_t i;
     if (len & 1) return -1;
     for (i = 0; i < len; i += 2) {
@@ -2413,7 +2413,7 @@ int32_t crypto_hex_decode(char *hex, uint64_t len, uint8_t *out) {
     }
     return (int32_t)(len / 2);
 }
-int32_t crypto_base64url(void *data, uint64_t len, char *out) {
+int32_t sc_crypto_base64url(void *data, uint64_t len, char *out) {
     static const char *tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     const uint8_t *in = (const uint8_t *)data;
     uint64_t i = 0;
@@ -2442,7 +2442,7 @@ static int b64val(int c) {
     if (c == '/' || c == '_') return 63;
     return -1;
 }
-int32_t crypto_base64_decode(char *b64, uint64_t len, uint8_t *out) {
+int32_t sc_crypto_base64_decode(char *b64, uint64_t len, uint8_t *out) {
     uint32_t acc = 0;
     int bits = 0;
     int32_t n = 0;
@@ -2464,14 +2464,14 @@ int32_t crypto_base64_decode(char *b64, uint64_t len, uint8_t *out) {
 }
 
 /* ---------------- 随机数与工具 ---------------- */
-int32_t crypto_verify(void *a, void *b, uint64_t len) {
+int32_t sc_crypto_verify(void *a, void *b, uint64_t len) {
     const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
     uint64_t i;
     uint8_t d = 0;
     for (i = 0; i < len; i++) d |= (uint8_t)(x[i] ^ y[i]);
     return d == 0 ? 0 : -1;
 }
-int32_t crypto_random(uint8_t *out, uint64_t len) {
+int32_t sc_crypto_random(uint8_t *out, uint64_t len) {
     if (len == 0) return 0;
 #if defined(_WIN32)
     P_rand_bytes(out, (size_t)len);
@@ -2512,38 +2512,38 @@ int32_t crypto_random(uint8_t *out, uint64_t len) {
 #  define SC_WEAK
 #endif
 
-SC_WEAK int32_t crypto_rsa_backend(void) { return 0; }
-SC_WEAK void *crypto_rsa_keygen(uint32_t bits, uint32_t pub_e) {
+SC_WEAK int32_t sc_crypto_rsa_backend(void) { return 0; }
+SC_WEAK void *sc_crypto_rsa_keygen(uint32_t bits, uint32_t pub_e) {
     (void)bits; (void)pub_e; return NULL;
 }
-SC_WEAK void crypto_rsa_free(void *k) { (void)k; }
-SC_WEAK void *crypto_rsa_import(void *buf, uint64_t len, int32_t is_private, int32_t fmt) {
+SC_WEAK void sc_crypto_rsa_free(void *k) { (void)k; }
+SC_WEAK void *sc_crypto_rsa_import(void *buf, uint64_t len, int32_t is_private, int32_t fmt) {
     (void)buf; (void)len; (void)is_private; (void)fmt; return NULL;
 }
-SC_WEAK int32_t crypto_rsa_export(void *k, int32_t is_private, int32_t fmt, uint8_t *out, uint64_t cap) {
+SC_WEAK int32_t sc_crypto_rsa_export(void *k, int32_t is_private, int32_t fmt, uint8_t *out, uint64_t cap) {
     (void)k; (void)is_private; (void)fmt; (void)out; (void)cap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_sign_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+SC_WEAK int32_t sc_crypto_rsa_sign_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
     (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)sigcap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_verify_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+SC_WEAK int32_t sc_crypto_rsa_verify_pkcs1(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
     (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)siglen; return -1;
 }
-SC_WEAK int32_t crypto_rsa_sign_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
+SC_WEAK int32_t sc_crypto_rsa_sign_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, uint8_t *sig, uint64_t sigcap) {
     (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)sigcap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_verify_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
+SC_WEAK int32_t sc_crypto_rsa_verify_pss(void *k, int32_t hash_id, void *digest, uint64_t dlen, void *sig, uint64_t siglen) {
     (void)k; (void)hash_id; (void)digest; (void)dlen; (void)sig; (void)siglen; return -1;
 }
-SC_WEAK int32_t crypto_rsa_encrypt_oaep(void *k, int32_t hash_id, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+SC_WEAK int32_t sc_crypto_rsa_encrypt_oaep(void *k, int32_t hash_id, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
     (void)k; (void)hash_id; (void)plain; (void)plen; (void)out; (void)cap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_decrypt_oaep(void *k, int32_t hash_id, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+SC_WEAK int32_t sc_crypto_rsa_decrypt_oaep(void *k, int32_t hash_id, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
     (void)k; (void)hash_id; (void)cipher; (void)clen; (void)out; (void)cap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_encrypt_pkcs1(void *k, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
+SC_WEAK int32_t sc_crypto_rsa_encrypt_pkcs1(void *k, void *plain, uint64_t plen, uint8_t *out, uint64_t cap) {
     (void)k; (void)plain; (void)plen; (void)out; (void)cap; return -1;
 }
-SC_WEAK int32_t crypto_rsa_decrypt_pkcs1(void *k, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
+SC_WEAK int32_t sc_crypto_rsa_decrypt_pkcs1(void *k, void *cipher, uint64_t clen, uint8_t *out, uint64_t cap) {
     (void)k; (void)cipher; (void)clen; (void)out; (void)cap; return -1;
 }

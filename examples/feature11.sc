@@ -12,7 +12,7 @@ fnc demo_scalar:
     var x: i4 = 0
     x.set(42)                          # → sc_set(&x, 42)     原子写
     var y: i4 = x.get()                # → sc_get(&x)         原子读
-    printf("scalar: set(42) get()=%d\n", y)
+    ::printf("scalar: set(42) get()=%d\n", y)
 
 # 指针接收者 -> → 透传 sc_<op>(p, ...)，并演示 acquire/release 序
 fnc bump: p: i4&
@@ -25,10 +25,10 @@ fnc main: i4
     var n: i4 = 10
     bump(&n)
     bump(&n)
-    printf("pointer: bump x2 -> %d\n", n.get())
+    ::printf("pointer: bump x2 -> %d\n", n.get())
 
     # 其它类型同样适配（指令类型无关）：f8 操作数
     var f: f8 = 1.5
     f.set(3.25)
-    printf("f8: set(3.25) get()=%.2f\n", f.get())
+    ::printf("f8: set(3.25) get()=%.2f\n", f.get())
     return 0

@@ -12,19 +12,19 @@ fnc dev_read: ret, _this: com&, data: &, size: u4&
 
 fnc dev_write: ret, _this: com&, buf: &, size: u4&
     var p: char& = (buf: char&)
-    printf("  写出: ")
+    ::printf("  写出: ")
     var i: u4 = 0
     while i < *size
-        printf("%c", p[i])
+        ::printf("%c", p[i])
         i = (i + 1)
-    printf("\n")
+    ::printf("\n")
     return (*size: i4)
 
 rpc handler: ret, c: com&
     var buf[4]: char
     c >> buf
     buf[3] = 0
-    printf("  读入: %s\n", (buf: char&))
+    ::printf("  读入: %s\n", (buf: char&))
     var msg[3]: char
     msg[0] = 'O'
     msg[1] = 'K'
@@ -39,6 +39,6 @@ fnc main: i4
     c.write = dev_write
     var f: future& = async handler(&c)
     async_loop(nil)
-    printf("done\n")
+    ::printf("done\n")
     async_final()
     return 0

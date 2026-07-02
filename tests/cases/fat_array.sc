@@ -16,7 +16,7 @@
     arr[0]->child->v = 99
 
     var pick: node@ = arr[1]          # 元素借用绑定（arr[1] 目标 in++）
-    printf("%d %d %d\n", arr[0]->v, pick->v, arr[0]->child->v)
+    ::printf("%d %d %d\n", arr[0]->v, pick->v, arr[0]->child->v)
     arr[0]->child = nil               # 显式拆元素成员出边（避免释放时悬出边）
 
     var grid[2][2]: node@             # 多维声明：sc_fat[2][2] 零初始化
@@ -26,5 +26,5 @@
         for c = 0; c < 2; c++
             grid[r][c] = node()       # 多维下标赋值：带头分配 + 绑根边
             grid[r][c]->v = r * 10 + c
-    printf("%d %d %d %d\n", grid[0][0]->v, grid[0][1]->v, grid[1][0]->v, grid[1][1]->v)
+    ::printf("%d %d %d %d\n", grid[0][0]->v, grid[0][1]->v, grid[1][0]->v, grid[1][1]->v)
     return 0                          # 退域：pick 拆边 + arr/grid 逐元素 unbind（grid 嵌套）

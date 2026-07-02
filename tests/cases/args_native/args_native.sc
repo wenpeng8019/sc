@@ -25,7 +25,7 @@ fnc main: i4, argc: i4, argv: char&&
     # 子模块直接读取根经注入可见的 ARGS_verbose（验证 @@ 头文件透传）
     args_report_verbose()
 
-    printf("count=%lld input=%s files=%d pos=%d\n",
+    ::printf("count=%lld input=%s files=%d pos=%d\n",
         ARGS_count,
         ARGS_input,
         ARGS_ls_count(ARGS_files),

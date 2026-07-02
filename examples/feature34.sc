@@ -29,6 +29,6 @@ fnc main: i4
     counter_hits_inc()
     counter_hits_inc()
     counter_miss_inc()
-    printf("hits=%d miss=%d\n", counter_hits_get(), counter_miss_get())
-    printf("counter_hits(direct)=%d\n", counter_hits)
+    ::printf("hits=%d miss=%d\n", counter_hits_get(), counter_miss_get())
+    ::printf("counter_hits(direct)=%d\n", counter_hits)
     return 0

@@ -15,8 +15,8 @@ fnc fill_buf:
     if tmp[0] == 0
         var inner[4]: char
         inner[0] = 'x'
-        printf("inner=%c\n", inner[0])
-    printf("tmp7=%d\n", tmp[7])
+        ::printf("inner=%c\n", inner[0])
+    ::printf("tmp7=%d\n", tmp[7])
 
 fnc sum_first: i4
     var data[5]: i4 = [2, 4, 6, 8, 10]
@@ -28,10 +28,10 @@ fnc sum_first: i4
     return s
 
 # sizeof(栈数组) 在 --check=mem 下须回报逻辑大小（原维度×元素），
-# 否则 memset(buf, 0, sizeof buf) 会抹掉尾哨兵造成误报。
+# 否则 ::memset(buf, 0, sizeof buf) 会抹掉尾哨兵造成误报。
 fnc zero_buf: i4
     var buf[8]: i4
-    memset(buf, 0, sizeof(buf))
+    ::memset(buf, 0, sizeof(buf))
     return sizeof(buf)
 
 # 多维栈数组：外层维度超额若干「行」覆盖尾哨兵，逻辑大小=各维元素积×元素。
@@ -54,8 +54,8 @@ fnc use_globals: i4
 
 fnc main: i4
     fill_buf()
-    printf("sum=%d\n", sum_first())
-    printf("bytes=%d\n", zero_buf())
-    printf("grid=%d\n", grid_sum())
-    printf("glob=%d\n", use_globals())
+    ::printf("sum=%d\n", sum_first())
+    ::printf("bytes=%d\n", zero_buf())
+    ::printf("grid=%d\n", grid_sum())
+    ::printf("glob=%d\n", use_globals())
     return 0

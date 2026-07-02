@@ -4,11 +4,11 @@
 
 DEFINE_COUNTER(hits)
 DEFINE_COUNTER(miss)
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 int32_t main(void) {

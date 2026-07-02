@@ -2,64 +2,64 @@
 #include "platform.h"
 #include "builtins/async/async.h"
 
-typedef struct sess sess;
+typedef struct sc_sess sc_sess;
 
 typedef enum { /* base: int32_t */
-    conn,
-    data,
-    term
-} future_id;
+    sc_conn,
+    sc_data,
+    sc_term
+} sc_future_id;
 
-typedef struct sess {
+typedef struct sc_sess {
     char *name;
     int32_t seq;
-} sess;
+} sc_sess;
 
-static int32_t async_proc(future_id id, future *f);
-typedef struct com__project {
+static int32_t sc_async_proc(sc_future_id id, sc_future *f);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_async_init(void); void sc_mod_async_drop(void);
 
-static inline future *future__new(void) {
-    future *_p = (future *)sc_alloc(sizeof(future));
+static inline sc_future *sc_future__new(void) {
+    sc_future *_p = (sc_future *)sc_alloc(sizeof(sc_future));
     if (_p) {
-        memset(_p, 0, sizeof(future));
-        future_init(_p);
+        memset(_p, 0, sizeof(sc_future));
+        sc_future_init(_p);
     }
     return _p;
 }
 
-static inline future *future__new_tagged(int _id, void *_ctx) {
-    future *_p = future__new();
+static inline sc_future *sc_future__new_tagged(int _id, void *_ctx) {
+    sc_future *_p = sc_future__new();
     if (_p) { _p->id = _id; _p->ctx = _ctx; }
     return _p;
 }
 
-static int32_t async_proc(future_id id, future *f) {
+static int32_t sc_async_proc(sc_future_id id, sc_future *f) {
     /* line 42 */
-    int32_t v = ((int32_t)(future_get(f)));
+    int32_t v = ((int32_t)(sc_future_get(f)));
     /* line 43 */
-    sess *s = ((sess*)(future_ctx(f)));
+    sc_sess *s = ((sc_sess*)(sc_future_ctx(f)));
     /* line 44 */
     switch (id) {
-        case conn:
+        case sc_conn:
         {
             /* line 46 */
             printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
-        case data:
+        case sc_data:
         {
             /* line 48 */
             printf("派发 data[%s#%d]: v=%d\n", s->name, s->seq, v);
             break;
         }
-        case term:
+        case sc_term:
         {
             /* line 50 */
             printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v);
@@ -76,31 +76,31 @@ int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_async_init();
     /* line 55 */
-    async_init();
+    sc_async_init();
     /* line 58 */
-    sess s1 = {"alpha", 1};
+    sc_sess s1 = {"alpha", 1};
     /* line 59 */
-    sess s2 = {"beta", 2};
+    sc_sess s2 = {"beta", 2};
     /* line 63 */
-    future *c = future__new_tagged(conn, &(s1));
+    sc_future *c = sc_future__new_tagged(sc_conn, &(s1));
     /* line 64 */
-    future_done(c, (void *)(intptr_t)(7));
+    sc_future_done(c, (void *)(intptr_t)(7));
     /* line 65 */
-    future *d1 = future__new_tagged(data, &(s2));
+    sc_future *d1 = sc_future__new_tagged(sc_data, &(s2));
     /* line 66 */
-    future_done(d1, (void *)(intptr_t)(42));
+    sc_future_done(d1, (void *)(intptr_t)(42));
     /* line 67 */
-    future *d2 = future__new_tagged(data, &(s1));
+    sc_future *d2 = sc_future__new_tagged(sc_data, &(s1));
     /* line 68 */
-    future_done(d2, (void *)(intptr_t)(43));
+    sc_future_done(d2, (void *)(intptr_t)(43));
     /* line 69 */
-    future *x = future__new_tagged(term, &(s2));
+    sc_future *x = sc_future__new_tagged(sc_term, &(s2));
     /* line 70 */
-    future_done(x, (void *)(intptr_t)(0));
+    sc_future_done(x, (void *)(intptr_t)(0));
     /* line 73 */
-    async_loop(async_proc);
+    sc_async_loop(sc_async_proc);
     /* line 75 */
-    async_final();
+    sc_async_final();
     /* line 76 */
     {
         int32_t _ret = 0;

@@ -34,10 +34,10 @@ fnc main: i4
     form a, (0: *)
 
     a->set((100: *), 0)        # 初值 a=100（loop 源不级联，仅置初值，不触发反馈）
-    printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
+    ::printf("init: a=%lld  scc=%d size=%d\n", (a->get(): i8), a->scc(), a->scc_size())
 
     # 显式驱动反馈簇迭代至多 10 轮（Newton 整数 sqrt 收敛到不动点）
     var rounds: i4 = a->loop_run(10)
-    printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, (a->get(): i8), (b->get(): i8))
+    ::printf("after %d rounds: a=%lld b=%lld (sqrt100=10)\n", rounds, (a->get(): i8), (b->get(): i8))
 
     return 0

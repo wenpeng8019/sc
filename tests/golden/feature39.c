@@ -2,71 +2,71 @@
 #include "platform.h"
 #include "builtins/mt/mt.h"
 
-typedef struct acc acc;
+typedef struct sc_acc sc_acc;
 
-typedef struct acc {
-    mutex mu;
+typedef struct sc_acc {
+    sc_mutex mu;
     int32_t sum;
     int32_t cnt;
-} acc;
+} sc_acc;
 
-struct add {
-    acc *a;
+struct sc_add {
+    sc_acc *a;
     int32_t v;
 };
-static void add_rpc(struct add *_p);
-static inline void add(acc *a, int32_t v) {
-    struct add _p = {0};
+static void sc_add_rpc(struct sc_add *_p);
+static inline void sc_add(sc_acc *a, int32_t v) {
+    struct sc_add _p = {0};
     _p.a = a;
     _p.v = v;
-    add_rpc(&_p);
+    sc_add_rpc(&_p);
 }
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
-static void add_rpc(struct add *_p) {
+static void sc_add_rpc(struct sc_add *_p) {
     /* line 23 */
-    mutex_lock(&_p->a->mu);
+    sc_mutex_lock(&_p->a->mu);
     /* line 24 */
     _p->a->sum = (_p->a->sum + _p->v);
     /* line 25 */
     _p->a->cnt = (_p->a->cnt + 1);
     /* line 26 */
-    mutex_unlock(&_p->a->mu);
+    sc_mutex_unlock(&_p->a->mu);
 }
 
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_mt_init();
     /* line 29 */
-    acc a = {0};
+    sc_acc a = {0};
     /* line 30 */
     a.sum = 0;
     /* line 31 */
     a.cnt = 0;
     /* line 32 */
-    mutex_init(&a.mu);
+    sc_mutex_init(&a.mu);
     /* line 35 */
-    pool *p = default_pool(4);
+    sc_pool *p = sc_default_pool(4);
     /* line 36 */
-    queue *q = default_queue(p);
+    sc_queue *q = sc_default_queue(p);
     /* line 39 */
     int32_t i = 0;
     /* line 40 */
     for (i = 1; i <= 100; i++) {
         /* line 41 */
         {
-            struct add _rp = {0};
+            struct sc_add _rp = {0};
             _rp.a = &(a);
             _rp.v = i;
-            q->post(q, (void (*)(void *))add_rpc, &_rp, sizeof(_rp), 0, 0);
+            q->post(q, (void (*)(void *))sc_add_rpc, &_rp, sizeof(_rp), 0, 0);
         }
     }
     /* line 43 */

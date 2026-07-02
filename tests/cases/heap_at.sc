@@ -11,7 +11,7 @@ inc adt.sc
 @def node: {
     v: i4
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc make: node@, x: i4
@@ -24,10 +24,10 @@ inc adt.sc
     var n: i4 = 0
     while !h->is_empty()
         var kp: i4& = (h->peek_key(): i4&)
-        printf(" %d", kp[0])
+        ::printf(" %d", kp[0])
         h->pop()
         n += 1
-    printf("\n")
+    ::printf("\n")
     return n
 
 @fnc main: i4
@@ -49,16 +49,16 @@ inc adt.sc
         ha[i] = make(keys[i] * 10)
         ta.push((&keys[i]: const &), (ha[i]: *))
         i += 1
-    printf("A len=%llu empty=%d\n", ta.len(), ta.is_empty())
+    ::printf("A len=%llu empty=%d\n", ta.len(), ta.is_empty())
 
     # peek 堆顶：最小键 20，value 200（借用不改计数）
     var topk: i4& = (ta.peek_key(): i4&)
-    printf("A top_key=%d top_val=%d\n", topk[0], (ta.peek(): node&)->v)
+    ::printf("A top_key=%d top_val=%d\n", topk[0], (ta.peek(): node&)->v)
 
     # 反复 pop → 升序 20 30 40 50 60 70 80
-    printf("A drain:")
+    ::printf("A drain:")
     var cnt: i4 = drain_keys(&ta)
-    printf("A drained=%d empty=%d\n", cnt, ta.is_empty())
+    ::printf("A drained=%d empty=%d\n", cnt, ta.is_empty())
 
     # ---------- B：最大堆（min=0），同样的 key ----------
     var tb: heap
@@ -71,9 +71,9 @@ inc adt.sc
         i += 1
     # 堆顶为最大键 80
     var tbk: i4& = (tb.peek_key(): i4&)
-    printf("B top_key=%d len=%llu\n", tbk[0], tb.len())
+    ::printf("B top_key=%d len=%llu\n", tbk[0], tb.len())
     # 反复 pop → 降序 80 70 60 50 40 30 20
-    printf("B drain:")
+    ::printf("B drain:")
     drain_keys(&tb)
     tb.drop()
 
@@ -89,18 +89,18 @@ inc adt.sc
     tc.push("charlie", (hc[2]: *))
     hc[3] = make(2)
     tc.push("bravo", (hc[3]: *))
-    printf("C len=%llu top_key=%s\n", tc.len(), (tc.peek_key(): char&))  # alpha
+    ::printf("C len=%llu top_key=%s\n", tc.len(), (tc.peek_key(): char&))  # alpha
     # 弹出两个最小：alpha bravo
-    printf("C pop:")
+    ::printf("C pop:")
     var topc: char& = (tc.peek_key(): char&)
-    printf(" %s", topc)
+    ::printf(" %s", topc)
     tc.pop()
     topc = (tc.peek_key(): char&)
-    printf(" %s\n", topc)
+    ::printf(" %s\n", topc)
     tc.pop()
-    printf("C after_pop len=%llu\n", tc.len())
+    ::printf("C after_pop len=%llu\n", tc.len())
     tc.clear()                                       # 清空并 release 剩余 charlie/delta
-    printf("C after_clear len=%llu empty=%d\n", tc.len(), tc.is_empty())
+    ::printf("C after_clear len=%llu empty=%d\n", tc.len(), tc.is_empty())
     tc.drop()
     # main 退域：holder 数组逆序释放 value root → 集中析构
 

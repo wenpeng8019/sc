@@ -11,7 +11,7 @@
     bump: fnc
         this->v = this->v + 1
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 # 形参为裸 @：恢复为 node@ 后调方法 / 读成员
@@ -27,9 +27,9 @@
     t->v = 40
     var e: @ = t                      # 从 T@ 擦除（借边，t 目标 in++）
     var r: i4 = take((t: @))          # 擦除强转作实参
-    printf("d=%d e=%d r=%d\n", (d: node@)->v, (e: node@)->v, r)
+    ::printf("d=%d e=%d r=%d\n", (d: node@)->v, (e: node@)->v, r)
 
     var f: @ = nil                    # 裸 @ 声明 + nil
     f = d                             # 裸 @ 之间重绑（dtor 随 d 句柄）
-    printf("f=%d\n", (f: node@)->v)
+    ::printf("f=%d\n", (f: node@)->v)
     return 0                          # 退域：f/e/d 逐根 sc_afat_unbind，t 拆边

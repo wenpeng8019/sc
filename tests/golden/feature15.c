@@ -1,39 +1,39 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct view view;
-typedef struct dev dev;
+typedef struct sc_view sc_view;
+typedef struct sc_dev sc_dev;
 
-typedef struct view {
-    dev *_self;
+typedef struct sc_view {
+    sc_dev *_self;
     char *p;
     int32_t n;
-} view;
+} sc_view;
 
-typedef struct dev {
+typedef struct sc_dev {
     char data[64];
-    view *(*alloc)(struct dev *, int32_t off, int32_t len);
-    void (*free)(struct dev *, view *v);
-} dev;
+    sc_view *(*alloc)(struct sc_dev *, int32_t off, int32_t len);
+    void (*free)(struct sc_dev *, sc_view *v);
+} sc_dev;
 
-typedef struct dev__project {
+typedef struct sc_dev__project {
     int32_t off;
     int32_t len;
-    view *_;
-} dev__project;
+    sc_view *_;
+} sc_dev__project;
 
-static view * dev_alloc(dev *_this, int32_t off, int32_t len);
-static void dev_free(dev *_this, view *v);
-typedef struct com__project {
+static sc_view * sc_dev_alloc(sc_dev *_this, int32_t off, int32_t len);
+static void sc_dev_free(sc_dev *_this, sc_view *v);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static view * dev_alloc(dev *_this, int32_t off, int32_t len) {
+static sc_view * sc_dev_alloc(sc_dev *_this, int32_t off, int32_t len) {
     /* line 23 */
-    view *v = ((view*)(malloc(sizeof(view))));
+    sc_view *v = ((sc_view*)(malloc(sizeof(sc_view))));
     /* line 24 */
     v->p = &(_this->data[off]);
     /* line 25 */
@@ -42,7 +42,7 @@ static view * dev_alloc(dev *_this, int32_t off, int32_t len) {
     return v;
 }
 
-static void dev_free(dev *_this, view *v) {
+static void sc_dev_free(sc_dev *_this, sc_view *v) {
     /* line 29 */
     free(v);
 }
@@ -50,7 +50,7 @@ static void dev_free(dev *_this, view *v) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 32 */
-    dev d = {0};
+    sc_dev d = {0};
     /* line 33 */
     int32_t i;
     /* line 34 */
@@ -59,11 +59,11 @@ int32_t main(void) {
         d.data[i] = ('a' + i);
     }
     /* line 38 */
-    d.alloc = dev_alloc;
+    d.alloc = sc_dev_alloc;
     /* line 39 */
-    d.free = dev_free;
+    d.free = sc_dev_free;
     /* line 42 */
-    struct dev__project s = {2, 5, NULL};
+    struct sc_dev__project s = {2, 5, NULL};
     /* line 45 */
     s._ = d.alloc(&d, s.off, s.len);
     s._->_self = &d;

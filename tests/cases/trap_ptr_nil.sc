@@ -6,5 +6,5 @@
 
 @fnc main: i4
     var p: node& = nil
-    printf("%d\n", p->v)        # nil->v：--check=ptr 注入 nil 校验，命中即 abort
+    ::printf("%d\n", p->v)        # nil->v：--check=ptr 注入 nil 校验，命中即 abort
     return 0

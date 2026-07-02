@@ -13,5 +13,5 @@ mix make_counter(b)
 
 fnc main: i4
     # 直接引用宏生成的函数：bump_a / bump_b 已登记，无需 let:: 认领
-    printf("%d %d %d\n", bump_a(), bump_a(), bump_b())
+    ::printf("%d %d %d\n", bump_a(), bump_a(), bump_b())
     return 0

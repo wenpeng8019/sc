@@ -29,14 +29,14 @@ fnc main: i4
 
     #-------------- print：拼接糖 / 级别通道 / 格式覆盖 ------
     # 无括号 print ...：字符串字面量=纯文本；非字面量按静态类型自动补说明符（i4→%d, char&→%s …）
-    # 有括号 print(...)：C printf 兼容模式，首参为格式串，实参原样传递
+    # 有括号 print(...)：C ::printf 兼容模式，首参为格式串，实参原样传递
     # <chn> = 级别/通道（见 op.sc def log）：0=普通 stdout（默认）；1..6=F/E/W/I/D/V，按级别着色
     # 级别过滤 SC_LOG=F/E/W/I/D/V（默认 D）；SC_LOG_SYS 非空 → 额外写系统日志
 
     var nn: i4 = 42
     var nm: char& = "hello"
     print "print 基础输出 n=", nn, " s=", nm   # 拼接糖：i4→%d, char&→%s 自动拼接
-    print<E>("错误级别示例 code=%d", -1)         # <E> 括号 = printf 兼容模式（红色）
+    print<E>("错误级别示例 code=%d", -1)         # <E> 括号 = ::printf 兼容模式（红色）
     print<W> "警告级别示例"                       # <W> 警告（黄色）
     print<V> "详细级别（默认 SC_LOG=D 下本行不输出）"  # <V> 详尽（灰色）
     print<D> "调试级别示例"                        # <D> 调试（青色）

@@ -21,12 +21,12 @@ fnc main: i4
         ssh_free(c)
         return 1
 
-    printf("SSH 握手成功，主机密钥 SHA256: ")
+    ::printf("SSH 握手成功，主机密钥 SHA256: ")
     var i: i4 = 0
     while i < 32
-        printf("%02x", fp[i])
+        ::printf("%02x", fp[i])
         i = i + 1
-    printf("\n")
+    ::printf("\n")
 
     ssh_free(c)
     return 0

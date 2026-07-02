@@ -15,7 +15,7 @@ rpc add: i4, a: i4, b: i4
 
 # 无返回值（v）：结构体不含返回槽 _
 rpc greet: n: i4
-    printf("hello rpc x%d\n", n)
+    ::printf("hello rpc x%d\n", n)
 
 # 指针参数：标量地址用 & 指针
 rpc strlen2: i4, s: char&
@@ -39,11 +39,11 @@ rpc dot: i4, a[3]: i4, b[3]: i4
     return x * x
 
 fnc main: i4
-    printf("add(3,4) = %d\n", sync add(3, 4))
+    ::printf("add(3,4) = %d\n", sync add(3, 4))
     sync greet(2)
-    printf("strlen2 = %d\n", sync strlen2("abc"))
+    ::printf("strlen2 = %d\n", sync strlen2("abc"))
     var u[3]: i4 = [1, 2, 3]
     var v[3]: i4 = [4, 5, 6]
-    printf("dot = %d\n", sync dot(u, v))
-    printf("square(9) = %d\n", sync square(9))
+    ::printf("dot = %d\n", sync dot(u, v))
+    ::printf("square(9) = %d\n", sync square(9))
     return 0

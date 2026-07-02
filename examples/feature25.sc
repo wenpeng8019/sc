@@ -9,19 +9,19 @@
 # 多退出点：final 在 early return 与正常 return 处都执行
 @fnc pick: i4, n: i4
     final
-        printf("  [pick] final 执行\n")
+        ::printf("  [pick] final 执行\n")
     if n > 0
-        printf("  [pick] early return\n")
+        ::printf("  [pick] early return\n")
         return 1
-    printf("  [pick] 正常 return\n")
+    ::printf("  [pick] 正常 return\n")
     return 0
 
 # LIFO：两个 final 逆序执行（后注册先跑）
 @fnc lifo: i4
     final
-        printf("  [lifo] 先注册（后执行）\n")
+        ::printf("  [lifo] 先注册（后执行）\n")
     final
-        printf("  [lifo] 后注册（先执行）\n")
+        ::printf("  [lifo] 后注册（先执行）\n")
     return 0
 
 # 循环内 final：break/continue/正常落出三条路径均触发
@@ -29,7 +29,7 @@
     var i: i4 = 0
     for i = 0; i < n; i++
         final
-            printf("  [loopy] iter %d 清理\n", i)
+            ::printf("  [loopy] iter %d 清理\n", i)
         if i == 1
             continue
         if i == 2
@@ -37,11 +37,11 @@
     return 0
 
 @fnc main: i4
-    printf("== 多退出点 ==\n")
+    ::printf("== 多退出点 ==\n")
     pick(1)
     pick(0)
-    printf("== LIFO 顺序 ==\n")
+    ::printf("== LIFO 顺序 ==\n")
     lifo()
-    printf("== 循环内 final ==\n")
+    ::printf("== 循环内 final ==\n")
     loopy(4)
     return 0

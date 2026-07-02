@@ -1,27 +1,27 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct counter_m counter_m;
+typedef struct sc_counter_m sc_counter_m;
 
-typedef struct counter_m {
+typedef struct sc_counter_m {
     int32_t n;
     char *tag;
-} counter_m;
+} sc_counter_m;
 
-static void counter_m_init(counter_m *_this);
-static void counter_m_drop(counter_m *_this);
-void counter_m_bump(counter_m *_this);
-int32_t counter_m_value(counter_m *_this);
-static void counter_m_do_step(counter_m *_this);
-counter_m counter = {0};
-typedef struct com__project {
+static void sc_counter_m_init(sc_counter_m *_this);
+static void sc_counter_m_drop(sc_counter_m *_this);
+void sc_counter_m_bump(sc_counter_m *_this);
+int32_t sc_counter_m_value(sc_counter_m *_this);
+static void sc_counter_m_do_step(sc_counter_m *_this);
+sc_counter_m sc_counter = {0};
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-static void counter_m_init(counter_m *_this) {
+static void sc_counter_m_init(sc_counter_m *_this) {
     /* line 9 */
     _this->n = 100;
     /* line 10 */
@@ -30,26 +30,26 @@ static void counter_m_init(counter_m *_this) {
     return;
 }
 
-static void counter_m_drop(counter_m *_this) {
+static void sc_counter_m_drop(sc_counter_m *_this) {
     /* line 14 */
     printf("drop %s n=%d\n", _this->tag, _this->n);
     /* line 15 */
     return;
 }
 
-void counter_m_bump(counter_m *_this) {
+void sc_counter_m_bump(sc_counter_m *_this) {
     /* line 18 */
-    counter_m_do_step(_this);
+    sc_counter_m_do_step(_this);
     /* line 19 */
     return;
 }
 
-int32_t counter_m_value(counter_m *_this) {
+int32_t sc_counter_m_value(sc_counter_m *_this) {
     /* line 22 */
     return _this->n;
 }
 
-static void counter_m_do_step(counter_m *_this) {
+static void sc_counter_m_do_step(sc_counter_m *_this) {
     /* line 25 */
     _this->n = (_this->n + 1);
     /* line 26 */
@@ -58,17 +58,17 @@ static void counter_m_do_step(counter_m *_this) {
 
 int32_t main(void) {
     SC_CONSOLE_UTF8();
-    counter_m_init(&counter);
+    sc_counter_m_init(&sc_counter);
     /* line 29 */
-    counter_m_bump(&counter);
+    sc_counter_m_bump(&sc_counter);
     /* line 30 */
-    counter_m_bump(&counter);
+    sc_counter_m_bump(&sc_counter);
     /* line 31 */
-    printf("value = %d\n", counter_m_value(&counter));
+    printf("value = %d\n", sc_counter_m_value(&sc_counter));
     /* line 32 */
     {
         int32_t _ret = 0;
-        counter_m_drop(&counter);
+        sc_counter_m_drop(&sc_counter);
         return _ret;
     }
 }

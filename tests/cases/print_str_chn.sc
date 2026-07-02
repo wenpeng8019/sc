@@ -7,10 +7,10 @@ inc adt.sc
     var name: char& = "sc"
     print<s> "hello ", name, " n=", n
     print<s> " | second line"
-    # 括号兼容模式：C printf 语法
+    # 括号兼容模式：C ::printf 语法
     print<s> ("; x=%d y=%d", 7, 8)
     # 对照：普通 print 仍输出 stdout
     print "stdout still works: ", n
-    printf("collected string = [%s]\n", s.cstr())
+    ::printf("collected string = [%s]\n", s.cstr())
     s.drop()
     return 0

@@ -21,7 +21,7 @@ fnc main: i4
     var st: thread& = nil
     run server(sq), &st
     var r: i4 = sync<sq> serve(7)
-    printf("delayed response: r=%d\n", r)
+    ::printf("delayed response: r=%d\n", r)
     st->join()
     sq->drop()
     return 0

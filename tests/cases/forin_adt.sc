@@ -11,7 +11,7 @@ inc adt.sc
 @def node: {
     v: i4
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc main: i4
@@ -35,7 +35,7 @@ inc adt.sc
     for k, v in d
         dksum += (k: i4&)[0]
         dsum += (v: node&)->v
-    printf("dict ksum=%d vsum=%d\n", dksum, dsum)
+    ::printf("dict ksum=%d vsum=%d\n", dksum, dsum)
 
     # ---------- 映射协议：bst（升序 + revert 逆序 + num 截断）----------
     var t: bst
@@ -56,18 +56,18 @@ inc adt.sc
     t.put((&b1: const &), (t1: *))
     t.put((&b4: const &), (t4: *))
     t.put((&b2: const &), (t2: *))
-    printf("bst asc:")
+    ::printf("bst asc:")
     for k: i4&, v in t
-        printf(" %d=%d", k[0], (v: node&)->v)
-    printf("\n")
-    printf("bst desc:")
+        ::printf(" %d=%d", k[0], (v: node&)->v)
+    ::printf("\n")
+    ::printf("bst desc:")
     for k: i4&, v in t revert
-        printf(" %d", k[0])
-    printf("\n")
-    printf("bst first2:")
+        ::printf(" %d", k[0])
+    ::printf("\n")
+    ::printf("bst first2:")
     for k: i4&, v in t num 2
-        printf(" %d", k[0])
-    printf("\n")
+        ::printf(" %d", k[0])
+    ::printf("\n")
 
     # ---------- 映射协议：lru（MRU→LRU 顺序）----------
     var lc: lru
@@ -84,10 +84,10 @@ inc adt.sc
     lc.put((&m1: const &), (c1: *))
     lc.put((&m2: const &), (c2: *))
     lc.put((&m3: const &), (c3: *))         # MRU=9, then 8, 7=LRU
-    printf("lru mru->lru:")
+    ::printf("lru mru->lru:")
     for k: i4&, v in lc
-        printf(" %d=%d", k[0], (v: node&)->v)
-    printf("\n")
+        ::printf(" %d=%d", k[0], (v: node&)->v)
+    ::printf("\n")
 
     # ---------- 序列索引协议：list（@ 借用元素，可选索引、revert）----------
     var ls: list
@@ -101,14 +101,14 @@ inc adt.sc
     ls.push((e1: *))
     ls.push((e2: *))
     ls.push((e3: *))
-    printf("list fwd:")
+    ::printf("list fwd:")
     for v, i in ls
-        printf(" [%d]=%d", i, (v: node&)->v)
-    printf("\n")
-    printf("list rev:")
+        ::printf(" [%d]=%d", i, (v: node&)->v)
+    ::printf("\n")
+    ::printf("list rev:")
     for v in ls revert
-        printf(" %d", (v: node&)->v)
-    printf("\n")
+        ::printf(" %d", (v: node&)->v)
+    ::printf("\n")
 
     # ---------- 序列索引协议：array（元素指针，i4 值块）----------
     var ar: array
@@ -122,7 +122,7 @@ inc adt.sc
     var asum: i4 = 0
     for v in ar
         asum += (v: i4&)[0]
-    printf("array sum=%d\n", asum)
+    ::printf("array sum=%d\n", asum)
 
     # 析构：容器持有的 value retain 在 drop 时释放（dict/bst/lru/list）；array 为值块无 retain
     d.drop()

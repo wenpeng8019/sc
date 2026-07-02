@@ -4,12 +4,12 @@
     seq: i4
     init: fnc
         this->seq = 0
-        printf("[lib.init] audit ready\n")
+        ::printf("[lib.init] audit ready\n")
     note: fnc
         this->seq++
-        printf("[lib.note] #%d\n", this->seq)
+        ::printf("[lib.note] #%d\n", this->seq)
     drop: fnc
-        printf("[lib.drop] total=%d\n", this->seq)
+        ::printf("[lib.drop] total=%d\n", this->seq)
 }
 
 @var g_audit: audit

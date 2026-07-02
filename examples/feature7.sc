@@ -109,44 +109,44 @@ fnc main: i4
 
     #-------------- first/next：返回 tnode&，显式 : task& 下转 --
     var it: task& = lst.first(): task&
-    printf("正向:")
+    ::printf("正向:")
     while it != nil
-        printf(" %d", it->id)
+        ::printf(" %d", it->id)
         it = lst.next(it): task&         # 传 task&，自动转 tnode&
-    printf("\n")                         # 40 10 20 30
+    ::printf("\n")                         # 40 10 20 30
 
     #-------------- last/prev：可选反向接口 --------------------
     var rit: task& = lst.last(): task&
-    printf("反向:")
+    ::printf("反向:")
     while rit != nil
-        printf(" %d", rit->id)
+        ::printf(" %d", rit->id)
         rit = lst.prev(rit): task&
-    printf("\n")                         # 30 20 10 40
+    ::printf("\n")                         # 30 20 10 40
 
     #-------------- find：&out 传 task&&，自动转 tnode&& -------
     var found: task&
     if lst.find(&found, 20) == ok
-        printf("find 20 -> id=%d\n", found->id)
+        ::printf("find 20 -> id=%d\n", found->id)
 
     #-------------- [] 下标糖：c[key] <==> find，命中得 I&，未命中 nil --
     var hit: task& = lst[30]: task&      # 命中：返回 tnode&，: task& 下转
     if hit != nil
-        printf("lst[30] -> id=%d\n", hit->id)        # 30
+        ::printf("lst[30] -> id=%d\n", hit->id)        # 30
     var miss: task& = lst[99]: task&     # 未命中：返回 nil
     if miss == nil
-        printf("lst[99] -> nil\n")
+        ::printf("lst[99] -> nil\n")
 
     #-------------- remove：传 task&，自动转 tnode& ------------
     lst.remove(&a[1])                    # 移除 id=20
     var it2: task& = lst.first(): task&
-    printf("remove 20 后:")
+    ::printf("remove 20 后:")
     while it2 != nil
-        printf(" %d", it2->id)
+        ::printf(" %d", it2->id)
         it2 = lst.next(it2): task&
-    printf("\n")                         # 40 10 30
+    ::printf("\n")                         # 40 10 30
 
     #-------------- base：跳过注入的 tnode，取首个真实成员 id --
     var pid: i4& = base(&a[0]): i4&
-    printf("base(&a[0]) -> id=%d\n", *pid)   # 10
+    ::printf("base(&a[0]) -> id=%d\n", *pid)   # 10
 
     return 0

@@ -1,50 +1,50 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct item item;
+typedef struct sc_item sc_item;
 
-typedef struct item {
+typedef struct sc_item {
     void *_prev;
     void *_next;
     int32_t key;
     int32_t seq;
-} item;
+} sc_item;
 
-int32_t by_key_asc(void *a, void *b);
-int32_t by_key_desc(void *a, void *b);
-static void dump(char *tag, chain *l);
-static void dump_rev(char *tag, chain *l);
-static void dump_stable(char *tag, chain *l);
-typedef struct com__project {
+int32_t sc_by_key_asc(void *a, void *b);
+int32_t sc_by_key_desc(void *a, void *b);
+static void sc_dump(char *tag, sc_chain *l);
+static void sc_dump_rev(char *tag, sc_chain *l);
+static void sc_dump_stable(char *tag, sc_chain *l);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-int32_t by_key_asc(void *a, void *b) {
+int32_t sc_by_key_asc(void *a, void *b) {
     /* line 16 */
-    item *x = ((item*)(a));
+    sc_item *x = ((sc_item*)(a));
     /* line 17 */
-    item *y = ((item*)(b));
+    sc_item *y = ((sc_item*)(b));
     /* line 18 */
     return x->key - y->key;
 }
 
-int32_t by_key_desc(void *a, void *b) {
+int32_t sc_by_key_desc(void *a, void *b) {
     /* line 22 */
-    item *x = ((item*)(a));
+    sc_item *x = ((sc_item*)(a));
     /* line 23 */
-    item *y = ((item*)(b));
+    sc_item *y = ((sc_item*)(b));
     /* line 24 */
     return y->key - x->key;
 }
 
-static void dump(char *tag, chain *l) {
+static void sc_dump(char *tag, sc_chain *l) {
     /* line 27 */
     printf("%s:", tag);
     /* line 28 */
-    item *it = ((item*)(chain_first(l)));
+    sc_item *it = ((sc_item*)(sc_chain_first(l)));
     /* line 29 */
     while (it != NULL) {
         /* line 30 */
@@ -56,27 +56,27 @@ static void dump(char *tag, chain *l) {
     printf("\n");
 }
 
-static void dump_rev(char *tag, chain *l) {
+static void sc_dump_rev(char *tag, sc_chain *l) {
     /* line 36 */
     printf("%s:", tag);
     /* line 37 */
-    item *it = ((item*)(chain_last(l)));
+    sc_item *it = ((sc_item*)(sc_chain_last(l)));
     /* line 38 */
     while (it != NULL) {
         /* line 39 */
         printf(" %d", it->key);
         /* line 40 */
-        it = ((void *)chain_prev(it));
+        it = ((void *)sc_chain_prev(it));
     }
     /* line 41 */
     printf("\n");
 }
 
-static void dump_stable(char *tag, chain *l) {
+static void sc_dump_stable(char *tag, sc_chain *l) {
     /* line 45 */
     printf("%s:", tag);
     /* line 46 */
-    item *it = ((item*)(chain_first(l)));
+    sc_item *it = ((sc_item*)(sc_chain_first(l)));
     /* line 47 */
     while (it != NULL) {
         /* line 48 */
@@ -91,7 +91,7 @@ static void dump_stable(char *tag, chain *l) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 53 */
-    item n[8] = {0};
+    sc_item n[8] = {0};
     /* line 54 */
     int32_t i;
     /* line 55 */
@@ -120,58 +120,58 @@ int32_t main(void) {
         n[i].seq = i;
     }
     /* line 69 */
-    chain l = {0};
+    sc_chain l = {0};
     /* line 70 */
     for (i = 0; i < 8; i++) {
         /* line 71 */
-        chain_append(&l, &(n[i]));
+        sc_chain_append(&l, &(n[i]));
     }
     /* line 72 */
-    dump("before  ", &(l));
+    sc_dump("before  ", &(l));
     /* line 73 */
-    chain_sort(&l, by_key_asc);
+    sc_chain_sort(&l, sc_by_key_asc);
     /* line 74 */
-    dump("asc     ", &(l));
+    sc_dump("asc     ", &(l));
     /* line 75 */
-    dump_rev("asc(rev)", &(l));
+    sc_dump_rev("asc(rev)", &(l));
     /* line 76 */
-    dump_stable("stable  ", &(l));
+    sc_dump_stable("stable  ", &(l));
     /* line 79 */
-    chain_sort(&l, by_key_desc);
+    sc_chain_sort(&l, sc_by_key_desc);
     /* line 80 */
-    dump("desc    ", &(l));
+    sc_dump("desc    ", &(l));
     /* line 81 */
-    dump_rev("desc(rev", &(l));
+    sc_dump_rev("desc(rev", &(l));
     /* line 84 */
-    chain e = {0};
+    sc_chain e = {0};
     /* line 85 */
-    chain_sort(&e, by_key_asc);
+    sc_chain_sort(&e, sc_by_key_asc);
     /* line 86 */
-    printf("empty head_nil=%d\n", chain_first(&e) == NULL);
+    printf("empty head_nil=%d\n", sc_chain_first(&e) == NULL);
     /* line 89 */
-    chain s = {0};
+    sc_chain s = {0};
     /* line 90 */
-    item one = {0};
+    sc_item one = {0};
     /* line 91 */
     one.key = 42;
     /* line 92 */
     one.seq = 0;
     /* line 93 */
-    chain_append(&s, &(one));
+    sc_chain_append(&s, &(one));
     /* line 94 */
-    chain_sort(&s, by_key_asc);
+    sc_chain_sort(&s, sc_by_key_asc);
     /* line 95 */
-    item *sf = ((item*)(chain_first(&s)));
+    sc_item *sf = ((sc_item*)(sc_chain_first(&s)));
     /* line 96 */
-    item *sl = ((item*)(chain_last(&s)));
+    sc_item *sl = ((sc_item*)(sc_chain_last(&s)));
     /* line 97 */
     printf("single key=%d first==last=%d rear_next_nil=%d\n", sf->key, sf == sl, sf->_next == NULL);
     /* line 100 */
-    dump("sorted2 ", &(l));
+    sc_dump("sorted2 ", &(l));
     /* line 101 */
-    chain_sort(&l, by_key_asc);
+    sc_chain_sort(&l, sc_by_key_asc);
     /* line 102 */
-    dump("re-asc  ", &(l));
+    sc_dump("re-asc  ", &(l));
     /* line 103 */
     return 0;
 }

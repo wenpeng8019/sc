@@ -9,7 +9,7 @@
  *   macOS/BSD arc4random、Windows rand_s、Linux /dev/urandom。
  * 恒成功返回 0。用于 WS 客户端掩码键等需不可预测随机处（RFC 6455 §5.3）。
  */
-int32_t os_rand(void *buf, uint32_t n) {
+int32_t sc_os_rand(void *buf, uint32_t n) {
     P_rand_bytes(buf, (size_t)n);
     return 0;
 }

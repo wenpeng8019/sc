@@ -14,12 +14,12 @@ var sc_call_count:: i8       # extern int64_t sc_call_count; —— 可读写
 
 fnc tick: i4
     sc_call_count = sc_call_count + 1     # 写入认领的可变 C 全局
-    return abs(-7)                        # 直接调用 C 函数
+    return ::abs(-7)                        # 直接调用 C 函数
 
 fnc main: i4
     # 直接调用未在 sc 声明的 C 变参函数。
-    printf("build=%d\n", SC_BUILD_ID)     # 读取认领的 C 全局
+    ::printf("build=%d\n", SC_BUILD_ID)     # 读取认领的 C 全局
     var a: i4 = tick()
     var b: i4 = tick()
-    printf("a=%d b=%d calls=%lld\n", a, b, sc_call_count)
+    ::printf("a=%d b=%d calls=%lld\n", a, b, sc_call_count)
     return 0

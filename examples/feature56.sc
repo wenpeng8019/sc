@@ -53,21 +53,21 @@ fnc main: i4
     sig->set((5: *), 0)                      # 5→5 不变 → 抑制 → hits=1
     sig->set((5: *), 0)                      # 5→5 不变 → 抑制 → hits=1
     var h1: i8 = (hits->get(): i8)
-    printf("直赋 set(5) x3:   hits=%lld (期望 1)\n", h1)
+    ::printf("直赋 set(5) x3:   hits=%lld (期望 1)\n", h1)
 
     sig->set((7: *), 0)                      # 5→7 变更 → hits=2
     var h2: i8 = (hits->get(): i8)
-    printf("直赋 set(7):      hits=%lld (期望 2)\n", h2)
+    ::printf("直赋 set(7):      hits=%lld (期望 2)\n", h2)
 
     # ---- combine 变更检测：取峰，较小值合成不变 → 抑制 ----
     gauge->set((10: *), 0)                   # max(0,10)=10 变更 → ghits=1
     gauge->set((3: *), 0)                    # max(10,3)=10 不变 → 抑制 → ghits=1
     var g1: i8 = (ghits->get(): i8)
-    printf("combine 取峰抑制:  ghits=%lld (期望 1)\n", g1)
+    ::printf("combine 取峰抑制:  ghits=%lld (期望 1)\n", g1)
 
     # ---- modified 强制刷新：合成「不变」也传播 ----
     gauge->set((0: *), 0)                    # input==0 → combine 返回 modified → 强制传播 → ghits=2
     var g2: i8 = (ghits->get(): i8)
-    printf("modified 强制刷新: ghits=%lld (期望 2)\n", g2)
+    ::printf("modified 强制刷新: ghits=%lld (期望 2)\n", g2)
 
     return 0

@@ -7,7 +7,7 @@
 #       run note(7)                # detach：线程结束后自释放
 #   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
 #     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
-#   - 线程休眠用 platform.h 的 P_usleep(us)（默认 -I，直接 inc）
+#   - 线程休眠用 platform.h 的 ::P_usleep(us)（默认 -I，直接 inc）
 #   - cond.wait 方法：条件变量等待 c.wait(&mu[, nsec, sec])
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
 #   - pool 线程池：run<p> 目标为 pool 时任务入池排队执行
@@ -34,7 +34,7 @@ rpc work: c: ctx&, rounds: i4
 
 # detach 线程体：自释放，无需 join
 rpc note: tag: i4
-    printf("detached note: tag=%d\n", tag)
+    ::printf("detached note: tag=%d\n", tag)
 
 # tls：顶层线程局部变量，每线程独立计数
 tls hits: i4 = 0
@@ -94,24 +94,24 @@ fnc main: i4
     var t2: thread& = nil
     run work(&c, 10000), &t1
     run<stack:262144, prio:5> work(&c, 10000), &t2   # 选项块：自定义栈/优先级
-    printf("t1 id set: %d\n", t1 != nil)   # run 返回即拿到 thread 对象
+    ::printf("t1 id set: %d\n", t1 != nil)   # run 返回即拿到 thread 对象
     t1->join()         # 等待并回收（含 thread 对象本身）
     t2->join()
-    printf("threads done: n=%d\n", c.n)    # 期望 20000
+    ::printf("threads done: n=%d\n", c.n)    # 期望 20000
 
     # detach：无出参，线程结束后自释放
     run note(7)
-    P_usleep(50000)    # 等 detach 线程打印完（platform.h）
+    ::P_usleep(50000)    # 等 detach 线程打印完（platform.h）
 
     # try_lock：未占用时成功
     if c.mu.try_lock()
-        printf("try_lock ok\n")
+        ::printf("try_lock ok\n")
         c.mu.unlock()
 
     # tls：函数内 static 存储期，跨调用保持
     next_id()
     next_id()
-    printf("tls id=%d\n", next_id())       # 期望 103
+    ::printf("tls id=%d\n", next_id())       # 期望 103
 
     # tls：两线程各自独立计数，互不可见
     c.n = 0
@@ -121,7 +121,7 @@ fnc main: i4
     run bump(&c, 20000), &b2
     b1->join()
     b2->join()
-    printf("tls threads ok: %d\n", c.n)    # 期望 2
+    ::printf("tls threads ok: %d\n", c.n)    # 期望 2
 
     c.mu.drop()
 
@@ -135,13 +135,13 @@ fnc main: i4
     while s.ready == 0
         s.cv.wait(&s.mu)         # 无限等待，被 one() 唤醒
     s.mu.unlock()
-    printf("cond wait ok: ready=%d\n", s.ready)
+    ::printf("cond wait ok: ready=%d\n", s.ready)
 
     # 超时等待：无人唤醒，约 5ms（5000000 纳秒）后超时返回
     s.mu.lock()
     s.cv.wait(&s.mu, 5000000, 0)
     s.mu.unlock()
-    printf("cond timeout ok\n")
+    ::printf("cond timeout ok\n")
 
     s.cv.drop()
     s.mu.drop()
@@ -155,10 +155,10 @@ fnc main: i4
     for k = 0; k < 8; k++
         run<p> work(&c2, 1000) # 入池：与 run 独立线程同一语句
     p->join()                  # 屏障：等全部任务完成（pool 仍可用）
-    printf("pool done: n=%d\n", c2.n)      # 期望 8000
+    ::printf("pool done: n=%d\n", c2.n)      # 期望 8000
     run<p> work(&c2, 1000)     # join 后继续提交
     p->drop()                  # 析构：等任务完成后停池回收
-    printf("pool drop: n=%d\n", c2.n)      # 期望 9000
+    ::printf("pool drop: n=%d\n", c2.n)      # 期望 9000
     c2.mu.drop()
 
     # barrier：3 个线程汇合，最后到达者做收尾标记
@@ -176,7 +176,7 @@ fnc main: i4
     bt1->join()
     bt2->join()
     bt3->join()
-    printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)  # 期望 3 1
+    ::printf("barrier ok: arrived=%d serial=%d\n", bc.arrived, bc.serial)  # 期望 3 1
     bc.bar.drop()
     bc.mu.drop()
     return 0

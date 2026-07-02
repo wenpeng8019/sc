@@ -10,11 +10,11 @@ def decl_pair: pfx
 
 # 函数宏 + ` 串化：打印变量名与值
 def show: x
-    printf("%s = %d\n", `x`, x)
+    ::printf("%s = %d\n", `x`, x)
 
 # 可变参函数宏
 def sumprint: fmt, ...
-    printf(fmt, __VA_ARGS__)
+    ::printf(fmt, __VA_ARGS__)
 
 # 顶层展开：生成 g_lo / g_hi 两个全局
 mix decl_pair(g)

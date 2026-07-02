@@ -12,7 +12,7 @@ def point: {
     sum: fnc: i4, dx: i4, dy: i4
         return ((this->x + this->y) + dx) + dy
     drop: fnc
-        printf("point(%d,%d) dropped\n", this->x, this->y)
+        ::printf("point(%d,%d) dropped\n", this->x, this->y)
 }
 
 def obj: {
@@ -24,19 +24,19 @@ def obj: {
 var g_origin: point
 
 fnc main: i4
-    printf("global: x=%d y=%d\n", g_origin.x, g_origin.y)
+    ::printf("global: x=%d y=%d\n", g_origin.x, g_origin.y)
     lib_audit()
     lib_audit()
     var pt: point
-    printf("init: x=%d y=%d\n", pt.x, pt.y)
-    printf("pt.sum(3,4) = %d\n", pt.sum(3, 4))
+    ::printf("init: x=%d y=%d\n", pt.x, pt.y)
+    ::printf("pt.sum(3,4) = %d\n", pt.sum(3, 4))
     var pp: point& = &pt
-    printf("pp->sum(3,4) = %d\n", pp->sum(3, 4))
+    ::printf("pp->sum(3,4) = %d\n", pp->sum(3, 4))
     var p2: point
-    printf("op is nil (before bind): %d\n", p2.op == nil)
+    ::printf("op is nil (before bind): %d\n", p2.op == nil)
     p2.drop()
     var hp: point& = point()
-    printf("heap: sum() = %d\n", hp->sum())
+    ::printf("heap: sum() = %d\n", hp->sum())
     hp->drop()
-    free(hp)
+    ::free(hp)
     return 0

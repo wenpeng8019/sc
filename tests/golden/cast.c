@@ -1,17 +1,17 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct box box;
+typedef struct sc_box sc_box;
 
-typedef struct box {
+typedef struct sc_box {
     int32_t v;
-} box;
+} sc_box;
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 int32_t main(void) {
@@ -23,17 +23,17 @@ int32_t main(void) {
     /* line 15 */
     printf("assign=%d\n", n);
     /* line 18 */
-    box b = {0};
+    sc_box b = {0};
     /* line 19 */
     b.v = 42;
     /* line 20 */
     void *pv = &(b);
     /* line 21 */
-    printf("deref=%d\n", ((box*)(pv))->v);
+    printf("deref=%d\n", ((sc_box*)(pv))->v);
     /* line 24 */
     void *raw = malloc(8);
     /* line 25 */
-    box *pb = ((box*)(raw));
+    sc_box *pb = ((sc_box*)(raw));
     /* line 26 */
     pb->v = 7;
     /* line 27 */
@@ -41,11 +41,11 @@ int32_t main(void) {
     /* line 28 */
     free(((void*)(raw)));
     /* line 31 */
-    box *sp = &(b);
+    sc_box *sp = &(b);
     /* line 32 */
-    box **ppb = &(sp);
+    sc_box **ppb = &(sp);
     /* line 33 */
-    box **qq = ((box**)(ppb));
+    sc_box **qq = ((sc_box**)(ppb));
     /* line 34 */
     printf("pp=%d\n", qq[0]->v);
     /* line 35 */

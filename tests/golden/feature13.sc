@@ -5,15 +5,15 @@ inc mt.sc
 inc async.sc
 
 rpc greet: char&, name: char&, ms: u4
-    printf("  [%s] 睡 %u ms...\n", name, ms)
+    ::printf("  [%s] 睡 %u ms...\n", name, ms)
     await delay(ms)
-    printf("  [%s] 醒来\n", name)
+    ::printf("  [%s] 醒来\n", name)
     return name
 
 rpc both: i4, a: char&, b: char&
     var x: char& = await greet(a, 60)
     var y: char& = await greet(b, 30)
-    printf("  both 收集: %s + %s\n", x, y)
+    ::printf("  both 收集: %s + %s\n", x, y)
     return 0
 
 rpc square_worker: f: future&, n: i4
@@ -27,7 +27,7 @@ fnc bg_square: future&, n: i4
 rpc compute: i4, n: i4
     var a: i4 = await bg_square(n)
     var b: i4 = await bg_square(a)
-    printf("  compute: %d -> %d\n", n, b)
+    ::printf("  compute: %d -> %d\n", n, b)
     return b
 
 fnc main: i4
@@ -35,13 +35,13 @@ fnc main: i4
     var fa: future& = async greet("A", 80)
     var fb: future& = async greet("B", 30)
     async_loop(nil)
-    printf("fa = %s\n", (fa->get(): char&))
-    printf("fb = %s\n", (fb->get(): char&))
+    ::printf("fa = %s\n", (fa->get(): char&))
+    ::printf("fb = %s\n", (fb->get(): char&))
     var fc: future& = async both("X", "Y")
     async_loop(nil)
-    printf("both ret = %d\n", (fc->get(): i4))
+    ::printf("both ret = %d\n", (fc->get(): i4))
     var fd: future& = async compute(3)
     async_loop(nil)
-    printf("compute ret = %d\n", (fd->get(): i4))
+    ::printf("compute ret = %d\n", (fd->get(): i4))
     async_final()
     return 0

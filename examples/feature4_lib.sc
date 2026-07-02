@@ -9,12 +9,12 @@
     seq: i4
     init: fnc                              # 构造：被 sc_mod_feature4_lib_init 注入
         this->seq = 0
-        printf("[lib.init] audit ready\n")
+        ::printf("[lib.init] audit ready\n")
     note: fnc                              # 记录一次（递增计数）
         this->seq++
-        printf("[lib.note] #%d\n", this->seq)
+        ::printf("[lib.note] #%d\n", this->seq)
     drop: fnc                              # 析构：被 sc_mod_feature4_lib_drop 注入
-        printf("[lib.drop] total=%d\n", this->seq)
+        ::printf("[lib.drop] total=%d\n", this->seq)
 }
 
 # 本模块的静态全局对象 g_audit 归属本模块（@ 导出仅为让入口可见其类型，

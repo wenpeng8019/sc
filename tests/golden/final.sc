@@ -7,7 +7,7 @@
 
 @fnc pick: i4, n: i4
     final
-        printf("final A\n")
+        ::printf("final A\n")
     if n > 0
         return 1
     return 0
@@ -16,7 +16,7 @@
     var i: i4 = 0
     for i = 0; i < n; i++
         final
-            printf("iter %d\n", i)
+            ::printf("iter %d\n", i)
         if i == 1
             continue
         if i == 2
@@ -26,6 +26,6 @@
 @fnc withfat: i4
     var p: node@ = node()
     final
-        printf("v=%d\n", p->v)
+        ::printf("v=%d\n", p->v)
     p->v = 9
     return 0

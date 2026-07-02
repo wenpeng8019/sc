@@ -20,12 +20,12 @@ fnc dev_read: ret, _this: com&, data: &, size: u4&
 # 设备写：打印收到的字节，返回写出字节数。
 fnc dev_write: ret, _this: com&, buf: &, size: u4&
     var p: char& = (buf: char&)
-    printf("写出 %u 字节: ", *size)
+    ::printf("写出 %u 字节: ", *size)
     var i: u4 = 0
     while i < *size
-        printf("%c", p[i])
+        ::printf("%c", p[i])
         i = i + 1
-    printf("\n")
+    ::printf("\n")
     return (*size: i4)
 
 fnc main: i4
@@ -45,7 +45,7 @@ fnc main: i4
     var buf[6]: char
     c >> buf                       # read(&c, &buf, sizeof buf = 6)
     buf[5] = 0
-    printf("读入: %s\n", (buf: char&))
+    ::printf("读入: %s\n", (buf: char&))
 
     #-- 指针接收者 + 连续链 ----------------------------------
     var p: com& = &c
@@ -54,5 +54,5 @@ fnc main: i4
     p >> a >> b                    # 依次两次接收（指针接收者自动直传 p）
     a[2] = 0
     b[2] = 0
-    printf("a=%c%c b=%c%c\n", a[0], a[1], b[0], b[1])
+    ::printf("a=%c%c b=%c%c\n", a[0], a[1], b[0], b[1])
     return 0

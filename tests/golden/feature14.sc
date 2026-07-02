@@ -18,15 +18,15 @@ fnc main: i4
     var b: handler
     b.tag = 1
     b.op = neg
-    printf("a.op(5) = %d\n", a.op(5))
-    printf("b.op(5) = %d\n", b.op(5))
+    ::printf("a.op(5) = %d\n", a.op(5))
+    ::printf("b.op(5) = %d\n", b.op(5))
     var p: handler& = &a
-    printf("p->op(7) = %d\n", p->op(7))
+    ::printf("p->op(7) = %d\n", p->op(7))
     var c: handler
     c.tag = 0
     if c.op == nil
-        printf("c.op is nil\n")
+        ::printf("c.op is nil\n")
     c.tag = 10
     c.op = dbl
-    printf("c.op(5) = %d\n", c.op(5))
+    ::printf("c.op(5) = %d\n", c.op(5))
     return 0

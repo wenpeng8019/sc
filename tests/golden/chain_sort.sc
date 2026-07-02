@@ -16,28 +16,28 @@ def item: ~ {
     return y->key - x->key
 
 fnc dump: tag: char&, l: chain&
-    printf("%s:", tag)
+    ::printf("%s:", tag)
     var it: item& = (l->first(): item&)
     while it != nil
-        printf(" %d", it->key)
+        ::printf(" %d", it->key)
         it = it->next
-    printf("\n")
+    ::printf("\n")
 
 fnc dump_rev: tag: char&, l: chain&
-    printf("%s:", tag)
+    ::printf("%s:", tag)
     var it: item& = (l->last(): item&)
     while it != nil
-        printf(" %d", it->key)
+        ::printf(" %d", it->key)
         it = it->prev
-    printf("\n")
+    ::printf("\n")
 
 fnc dump_stable: tag: char&, l: chain&
-    printf("%s:", tag)
+    ::printf("%s:", tag)
     var it: item& = (l->first(): item&)
     while it != nil
-        printf(" %d.%d", it->key, it->seq)
+        ::printf(" %d.%d", it->key, it->seq)
         it = it->next
-    printf("\n")
+    ::printf("\n")
 
 @fnc main: i4
     var n[8]: item
@@ -67,7 +67,7 @@ fnc dump_stable: tag: char&, l: chain&
     dump_rev("desc(rev", &l)
     var e: chain
     e.sort(by_key_asc)
-    printf("empty head_nil=%d\n", e.first() == nil)
+    ::printf("empty head_nil=%d\n", e.first() == nil)
     var s: chain
     var one: item
     one.key = 42
@@ -76,7 +76,7 @@ fnc dump_stable: tag: char&, l: chain&
     s.sort(by_key_asc)
     var sf: item& = (s.first(): item&)
     var sl: item& = (s.last(): item&)
-    printf("single key=%d first==last=%d rear_next_nil=%d\n", sf->key, sf == sl, sf->next == nil)
+    ::printf("single key=%d first==last=%d rear_next_nil=%d\n", sf->key, sf == sl, sf->next == nil)
     dump("sorted2 ", &l)
     l.sort(by_key_asc)
     dump("re-asc  ", &l)

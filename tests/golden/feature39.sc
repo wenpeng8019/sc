@@ -25,7 +25,7 @@ fnc main: i4
     for i = 1; i <= 100; i++
         q << add(&a, i)
     p->join()
-    printf("pool queue: sum=%d cnt=%d\n", a.sum, a.cnt)
+    ::printf("pool queue: sum=%d cnt=%d\n", a.sum, a.cnt)
     q->drop()
     p->drop()
     return 0

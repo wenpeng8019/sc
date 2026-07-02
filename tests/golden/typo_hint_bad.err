@@ -1,2 +1,2 @@
-typo_hint_bad.sc:6: [1;31m错误[0m: 未定义的函数 'compute_sun'，是否想用 'compute_sum'？
+typo_hint_bad.sc:6: [1;31m错误[0m: 未声明的函数 'compute_sun'（sc 命名域）：若调用 C 域函数请写 '::compute_sun'，是否想用 'compute_sum'？
   |      return compute_sun(1, 2)

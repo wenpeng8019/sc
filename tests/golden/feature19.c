@@ -1,75 +1,75 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-typedef struct membuf membuf;
+typedef struct sc_membuf sc_membuf;
 
-typedef struct membuf {
+typedef struct sc_membuf {
     char data[256];
     uint32_t wpos;
     uint32_t rpos;
-    limit box;
+    sc_limit box;
     char rbuf[16];
-} membuf;
+} sc_membuf;
 
-static int32_t mb_write(com *_this, void *buf, uint32_t *size);
-static int32_t mb_read(com *_this, void *buf, uint32_t *size);
-static void * mb_data(limit *_this);
-static limit * mb_alloc(com *_this, uint32_t size, void *ending);
-static void mb_free(com *_this, limit *s);
-struct handle {
+static int32_t sc_mb_write(sc_com *_this, void *buf, uint32_t *size);
+static int32_t sc_mb_read(sc_com *_this, void *buf, uint32_t *size);
+static void * sc_mb_data(sc_limit *_this);
+static sc_limit * sc_mb_alloc(sc_com *_this, uint32_t size, void *ending);
+static void sc_mb_free(sc_com *_this, sc_limit *s);
+struct sc_handle {
     int32_t _;
     int32_t a;
     int32_t b;
 };
-static void handle_rpc(struct handle *_p);
-static inline int32_t handle(int32_t a, int32_t b) {
-    struct handle _p = {0};
+static void sc_handle_rpc(struct sc_handle *_p);
+static inline int32_t sc_handle(int32_t a, int32_t b) {
+    struct sc_handle _p = {0};
     _p.a = a;
     _p.b = b;
-    handle_rpc(&_p);
+    sc_handle_rpc(&_p);
     return _p._;
 }
 
-struct handle_buf {
+struct sc_handle_buf {
     int32_t _;
     int32_t tag;
     char *buf;
     size_t buf_size;
 };
-static void handle_buf_rpc(struct handle_buf *_p);
-static inline int32_t handle_buf(int32_t tag, char buf[8]) {
-    struct handle_buf _p = {0};
+static void sc_handle_buf_rpc(struct sc_handle_buf *_p);
+static inline int32_t sc_handle_buf(int32_t tag, char buf[8]) {
+    struct sc_handle_buf _p = {0};
     _p.tag = tag;
     _p.buf = buf;
     _p.buf_size = sizeof(char[8]);
-    handle_buf_rpc(&_p);
+    sc_handle_buf_rpc(&_p);
     return _p._;
 }
 
-typedef struct com__project {
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
-struct handle_body {
+struct sc_handle_body {
     int32_t _;
     int32_t n;
-    struct com__project body;
+    struct sc_com__project body;
 };
-static void handle_body_rpc(struct handle_body *_p);
-static inline int32_t handle_body(int32_t n, struct com__project body) {
-    struct handle_body _p = {0};
+static void sc_handle_body_rpc(struct sc_handle_body *_p);
+static inline int32_t sc_handle_body(int32_t n, struct sc_com__project body) {
+    struct sc_handle_body _p = {0};
     _p.n = n;
     _p.body = body;
-    handle_body_rpc(&_p);
+    sc_handle_body_rpc(&_p);
     return _p._;
 }
 
 
-static int32_t mb_write(com *_this, void *buf, uint32_t *size) {
+static int32_t sc_mb_write(sc_com *_this, void *buf, uint32_t *size) {
     /* line 19 */
-    membuf *m = ((membuf*)(_this->dev));
+    sc_membuf *m = ((sc_membuf*)(_this->dev));
     /* line 20 */
     char *src = ((char*)(buf));
     /* line 21 */
@@ -87,9 +87,9 @@ static int32_t mb_write(com *_this, void *buf, uint32_t *size) {
     return ((int32_t)(n));
 }
 
-static int32_t mb_read(com *_this, void *buf, uint32_t *size) {
+static int32_t sc_mb_read(sc_com *_this, void *buf, uint32_t *size) {
     /* line 29 */
-    membuf *m = ((membuf*)(_this->dev));
+    sc_membuf *m = ((sc_membuf*)(_this->dev));
     /* line 30 */
     char *dst = ((char*)(buf));
     /* line 31 */
@@ -109,50 +109,50 @@ static int32_t mb_read(com *_this, void *buf, uint32_t *size) {
     return ((int32_t)(n));
 }
 
-static void * mb_data(limit *_this) {
+static void * sc_mb_data(sc_limit *_this) {
     /* line 41 */
-    membuf *m = ((membuf*)(_this->_self->dev));
+    sc_membuf *m = ((sc_membuf*)(_this->_self->dev));
     /* line 42 */
     return &(m->rbuf[0]);
 }
 
-static limit * mb_alloc(com *_this, uint32_t size, void *ending) {
+static sc_limit * sc_mb_alloc(sc_com *_this, uint32_t size, void *ending) {
     /* line 45 */
-    membuf *m = ((membuf*)(_this->dev));
+    sc_membuf *m = ((sc_membuf*)(_this->dev));
     /* line 46 */
-    limit *s = &(m->box);
+    sc_limit *s = &(m->box);
     /* line 47 */
     s->size = size;
     /* line 48 */
     s->len = 0;
     /* line 49 */
-    s->data = mb_data;
+    s->data = sc_mb_data;
     /* line 50 */
     s->ending = ending;
     /* line 51 */
     return s;
 }
 
-static void mb_free(com *_this, limit *s) {
+static void sc_mb_free(sc_com *_this, sc_limit *s) {
     /* line 54 */
     return;
 }
 
-static void handle_rpc(struct handle *_p) {
+static void sc_handle_rpc(struct sc_handle *_p) {
     /* line 58 */
     printf("标量 rpc: a=%d b=%d\n", _p->a, _p->b);
     /* line 59 */
     _p->_ = 0; return;
 }
 
-static void handle_buf_rpc(struct handle_buf *_p) {
+static void sc_handle_buf_rpc(struct sc_handle_buf *_p) {
     /* line 63 */
     printf("数组 rpc: tag=%d buf=%s\n", _p->tag, &(_p->buf[0]));
     /* line 64 */
     _p->_ = 0; return;
 }
 
-static void handle_body_rpc(struct handle_body *_p) {
+static void sc_handle_body_rpc(struct sc_handle_body *_p) {
     /* line 68 */
     char *p = ((char*)(_p->body._->data(_p->body._)));
     /* line 69 */
@@ -175,27 +175,27 @@ static void handle_body_rpc(struct handle_body *_p) {
 int32_t main(void) {
     SC_CONSOLE_UTF8();
     /* line 78 */
-    membuf mb = {0};
+    sc_membuf mb = {0};
     /* line 79 */
     mb.wpos = 0;
     /* line 80 */
     mb.rpos = 0;
     /* line 82 */
-    com c = {0};
+    sc_com c = {0};
     /* line 83 */
-    c.read = mb_read;
+    c.read = sc_mb_read;
     /* line 84 */
-    c.write = mb_write;
+    c.write = sc_mb_write;
     /* line 85 */
-    c.alloc = mb_alloc;
+    c.alloc = sc_mb_alloc;
     /* line 86 */
-    c.free = mb_free;
+    c.free = sc_mb_free;
     /* line 87 */
     c.dev = &(mb);
     /* line 90 */
     {
         {
-            struct handle _rp = {0};
+            struct sc_handle _rp = {0};
             _rp.a = 7;
             _rp.b = 9;
             uint32_t _scsz;
@@ -206,11 +206,11 @@ int32_t main(void) {
     /* line 91 */
     {
         {
-            struct handle _rp = {0};
+            struct sc_handle _rp = {0};
             uint32_t _scsz;
             _scsz = sizeof(_rp.a); c.read(&(c), (void *)&(_rp.a), &_scsz);
             _scsz = sizeof(_rp.b); c.read(&(c), (void *)&(_rp.b), &_scsz);
-            handle_rpc(&_rp);
+            sc_handle_rpc(&_rp);
         }
     }
     /* line 94 */
@@ -224,7 +224,7 @@ int32_t main(void) {
     /* line 98 */
     {
         {
-            struct handle_buf _rp = {0};
+            struct sc_handle_buf _rp = {0};
             _rp.tag = 42;
             _rp.buf = msg;
             _rp.buf_size = sizeof(char[8]);
@@ -236,14 +236,14 @@ int32_t main(void) {
     /* line 99 */
     {
         {
-            struct handle_buf _rp = {0};
+            struct sc_handle_buf _rp = {0};
             char _rp_buf[8];
             _rp.buf = _rp_buf;
             _rp.buf_size = sizeof(char[8]);
             uint32_t _scsz;
             _scsz = sizeof(_rp.tag); c.read(&(c), (void *)&(_rp.tag), &_scsz);
             _scsz = (uint32_t)_rp.buf_size; c.read(&(c), (void *)(_rp.buf), &_scsz);
-            handle_buf_rpc(&_rp);
+            sc_handle_buf_rpc(&_rp);
         }
     }
     /* line 103 */
@@ -276,15 +276,15 @@ int32_t main(void) {
     /* line 113 */
     {
         {
-            struct handle_body _rp = {0};
+            struct sc_handle_body _rp = {0};
             _rp.body.size = 16;
             _rp.body.ending = NULL;
             uint32_t _scsz;
             _scsz = sizeof(_rp.n); c.read(&(c), (void *)&(_rp.n), &_scsz);
             _rp.body._ = c.alloc(&(c), _rp.body.size, _rp.body.ending);
             _rp.body._->_self = &(c);
-            limit_read(&(c), _rp.body._);
-            handle_body_rpc(&_rp);
+            sc_limit_read(&(c), _rp.body._);
+            sc_handle_body_rpc(&_rp);
         }
     }
     /* line 114 */

@@ -17,12 +17,12 @@ def point: {
 }
 
 fnc dump: tag: char&, l: chain&
-    printf("%s:", tag)
+    ::printf("%s:", tag)
     var it: task& = (l->first(): task&)
     while it != nil
-        printf(" %d", it->id)
+        ::printf(" %d", it->id)
         it = it->next
-    printf("\n")
+    ::printf("\n")
 
 fnc main: i4
     var l: chain
@@ -39,10 +39,10 @@ fnc main: i4
     dump("before/after", &l)
     var f: task& = (l.first(): task&)
     var b: task& = (l.last(): task&)
-    printf("first=%d last=%d head_prev_nil=%d\n", f->id, b->id, f->prev == nil)
+    ::printf("first=%d last=%d head_prev_nil=%d\n", f->id, b->id, f->prev == nil)
     l.remove(&t[2])
     var p: task& = (l.pop(): task&)
-    printf("pop=%d\n", p->id)
+    ::printf("pop=%d\n", p->id)
     dump("remove/pop", &l)
     l.revert()
     dump("revert", &l)
@@ -52,7 +52,7 @@ fnc main: i4
     dump("cut-rest", &l)
     seg.append_to(&l)
     dump("append_to", &l)
-    printf("seg empty=%d\n", seg.first() == nil)
+    ::printf("seg empty=%d\n", seg.first() == nil)
     l.cut(&t[3], &t[1], &seg)
     seg.push_to(&l)
     dump("push_to", &l)
@@ -61,7 +61,7 @@ fnc main: i4
     l.append(h)
     dump("heap", &l)
     l.remove(h)
-    free((h: void&))
+    ::free((h: void&))
     var l2: chain
     var n[3]: node
     for i = 0; i < 3; i++
@@ -70,15 +70,15 @@ fnc main: i4
     l2.append(&n[1])
     l2.append(&n[2])
     var it: node& = (l2.first(): node&)
-    printf("正向:")
+    ::printf("正向:")
     while it != nil
-        printf(" %d", it->id)
+        ::printf(" %d", it->id)
         it = it->next
-    printf("\n")
+    ::printf("\n")
     var rear: node& = (l2.last(): node&)
-    printf("反向:")
+    ::printf("反向:")
     while rear != nil
-        printf(" %d", rear->id)
+        ::printf(" %d", rear->id)
         rear = rear->prev
-    printf("\n")
+    ::printf("\n")
     return 0

@@ -29,21 +29,21 @@ fnc main: i4
     b.op = neg
 
     # 值接收者调用：自动注入 &a / &b
-    printf("a.op(5) = %d\n", a.op(5))      # dbl: 5*2+100 = 110
-    printf("b.op(5) = %d\n", b.op(5))      # neg: -5-1    = -6
+    ::printf("a.op(5) = %d\n", a.op(5))      # dbl: 5*2+100 = 110
+    ::printf("b.op(5) = %d\n", b.op(5))      # neg: -5-1    = -6
 
     # 指针接收者调用：自动注入 p
     var p: handler& = &a
-    printf("p->op(7) = %d\n", p->op(7))    # dbl: 7*2+100 = 114
+    ::printf("p->op(7) = %d\n", p->op(7))    # dbl: 7*2+100 = 114
 
     # 未绑定默认 nil：可判空
     var c: handler
     c.tag = 0
     if c.op == nil
-        printf("c.op is nil\n")
+        ::printf("c.op is nil\n")
 
     # 绑定后再调用
     c.tag = 10
     c.op = dbl
-    printf("c.op(5) = %d\n", c.op(5))      # 5*2+10 = 20
+    ::printf("c.op(5) = %d\n", c.op(5))      # 5*2+10 = 20
     return 0

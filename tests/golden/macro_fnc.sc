@@ -11,5 +11,5 @@ mix make_counter(a)
 mix make_counter(b)
 
 fnc main: i4
-    printf("%d %d %d\n", bump_a(), bump_a(), bump_b())
+    ::printf("%d %d %d\n", bump_a(), bump_a(), bump_b())
     return 0

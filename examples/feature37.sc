@@ -15,7 +15,7 @@ cls Cat: {
         this->age = 3
     # SPEAK 维度：把叫声写入出参 buf；返回 positive 表示「应答」
     dim SPEAK: tril, buf: char&, cap: i4
-        snprintf(buf, cap, "喵")
+        ::snprintf(buf, cap, "喵")
         return positive
     dim LEGS: tril, out: i4&
         *out = 4
@@ -28,7 +28,7 @@ cls Dog: {
         this->age = 5
     # 与 Cat 同名的 SPEAK —— 同一全局选择子 SC_DIM_SPEAK，多态分派
     dim SPEAK: tril, buf: char&, cap: i4
-        snprintf(buf, cap, "汪")
+        ::snprintf(buf, cap, "汪")
         return positive
     dim LEGS: tril, out: i4&
         *out = 4
@@ -76,46 +76,46 @@ var gDog: Dog
         var legs: i4 = 0
         pets[i].LEGS(&legs)
         if r == positive
-            printf("第%d只：%s（%d条腿）\n", i, &sound[0], legs)
+            ::printf("第%d只：%s（%d条腿）\n", i, &sound[0], legs)
         else
-            printf("第%d只：……不出声（%d条腿）\n", i, legs)
+            ::printf("第%d只：……不出声（%d条腿）\n", i, legs)
         i = i + 1
 
     # instanceOf：O(1) 身份判定（*o == TypeName_hyper_impl）
     if instanceOf(pets[0], Cat)
-        printf("pets[0] 是 Cat\n")
+        ::printf("pets[0] 是 Cat\n")
     if !instanceOf(pets[0], Dog)
-        printf("pets[0] 不是 Dog\n")
+        ::printf("pets[0] 不是 Dog\n")
 
     # 静态接收者直呼维度：c.OBJ_NAME(...) → Cat_hyper_impl(&c._class, SC_DIM_OBJ_NAME, ...)
     # OBJ_NAME 为保留维度，默认实现 snprintf "<类名>@<地址>"
     var nm[32]: char
     c.OBJ_NAME(&nm[0], 32)
-    printf("c 默认名前缀：%c\n", nm[0])              # 'C'（来自 "Cat@0x...")
+    ::printf("c 默认名前缀：%c\n", nm[0])              # 'C'（来自 "Cat@0x...")
 
     # RLT_KEY / RLT_NAME：与另一同类对象比对 key/name（默认实现「直接比大小」，返回三态）。
     # Item 含 obj_key/obj_name 字段 → OBJ_KEY/OBJ_NAME 默认实现自动取字段值。
     var x: Item
     var y: Item
     x.obj_key = 10
-    snprintf(&x.obj_name[0], 16, "apple")
+    ::snprintf(&x.obj_name[0], 16, "apple")
     y.obj_key = 20
-    snprintf(&y.obj_name[0], 16, "banana")
+    ::snprintf(&y.obj_name[0], 16, "banana")
     var rk: tril = x.RLT_KEY((y: object))            # 10 < 20 → negative
     var rn: tril = x.RLT_NAME((y: object))           # "apple" < "banana" → negative
     var rk2: tril = y.RLT_KEY((x: object))           # 20 > 10 → positive
     if rk == negative
-        printf("x.key < y.key（按 obj_key 字段比对）\n")
+        ::printf("x.key < y.key（按 obj_key 字段比对）\n")
     if rn == negative
-        printf("x.name < y.name（按 obj_name 字段比对）\n")
+        ::printf("x.name < y.name（按 obj_name 字段比对）\n")
     if rk2 == positive
-        printf("y.key > x.key\n")
+        ::printf("y.key > x.key\n")
 
     # 全局 cls 实例：经 object 擦除动态分派（验证 _class 在模块初始化已安装）
     var go: object = (gDog: object)
     var gsound[16]: char
     go.SPEAK(&gsound[0], 16)
-    printf("全局 gDog 叫：%s\n", &gsound[0])
+    ::printf("全局 gDog 叫：%s\n", &gsound[0])
     if instanceOf(go, Dog)
-        printf("全局 gDog 是 Dog\n")
+        ::printf("全局 gDog 是 Dog\n")
     return 0

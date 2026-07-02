@@ -28,7 +28,7 @@ fnc main: i4
 
     var r1: i4 = sync<q> compute(3, 4)       # 阻塞 → 池工作线程算 7 → 取回
     var r2: i4 = sync<q> compute(100, 23)    # 123
-    printf("pool sync: r1=%d r2=%d\n", r1, r2)
+    ::printf("pool sync: r1=%d r2=%d\n", r1, r2)
 
     q->drop()
     p->drop()
@@ -40,7 +40,7 @@ fnc main: i4
 
     var s1: i4 = sync<q2> compute(10, 20)    # 阻塞 → 消费线程算 30 → 取回
     var s2: i4 = sync<q2> compute(5, 6)      # 11
-    printf("thread sync: s1=%d s2=%d\n", s1, s2)
+    ::printf("thread sync: s1=%d s2=%d\n", s1, s2)
 
     ct->join()                               # 消费线程已处理完 2 条，回收
     q2->drop()                               # 此时无并发 pull，安全析构

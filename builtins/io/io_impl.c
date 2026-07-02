@@ -16,41 +16,41 @@
  * 常规文件恒就绪：不提供 readable/writable（NULL），异步内核据此立即执行 io。
  * ==========================================================================*/
 typedef struct sc_file_dev {
-    com   com;          /* 端点（offset 0，返回其地址即 com&） */
-    ioq   rq;           /* 读队列（read==2 启用，com.rq 指向它） */
-    ioq   wq;           /* 写队列（write==2 启用，com.wq 指向它） */
+    sc_com   com;          /* 端点（offset 0，返回其地址即 com&） */
+    sc_ioq   rq;           /* 读队列（read==2 启用，com.rq 指向它） */
+    sc_ioq   wq;           /* 写队列（write==2 启用，com.wq 指向它） */
     FILE *fp;           /* 文件句柄 */
 } sc_file_dev;
 
 /* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
-static void *sc_file_limit_data(limit *s) { return (char *)s + sizeof(limit); }
+static void *sc_file_limit_data(sc_limit *s) { return (char *)s + sizeof(sc_limit); }
 
-static limit *sc_file_alloc(com *_this, uint32_t size, void *ending) {
+static sc_limit *sc_file_alloc(sc_com *_this, uint32_t size, void *ending) {
     (void)_this;
-    limit *s = (limit *)sc_chunk0(sizeof(limit) + (size ? size : 1));
+    sc_limit *s = (sc_limit *)sc_chunk0(sizeof(sc_limit) + (size ? size : 1));
     if (!s) return NULL;
     s->size   = size;
     s->len    = 0;
     s->data   = sc_file_limit_data;
-    s->ending = (int32_t (*)(limit *))ending;
+    s->ending = (int32_t (*)(sc_limit *))ending;
     return s;
 }
 
-static void sc_file_free(com *_this, limit *s) { (void)_this; sc_recycle(s); }
+static void sc_file_free(sc_com *_this, sc_limit *s) { (void)_this; sc_recycle(s); }
 
-/* 设备读：读入至多 *size 字节，回写实读字节数；返回 0 可继续 / IO_EOF 读完 / <0 错。 */
-static int32_t sc_file_read(com *_this, void *data, uint32_t *size) {
+/* 设备读：读入至多 *size 字节，回写实读字节数；返回 0 可继续 / sc_eof 读完 / <0 错。 */
+static int32_t sc_file_read(sc_com *_this, void *data, uint32_t *size) {
     sc_file_dev *d = (sc_file_dev *)_this;
     if (!d->fp || !size) return -1;
     uint32_t want = *size;
     size_t got = fread(data, 1, want, d->fp);
     *size = (uint32_t)got;
     if (ferror(d->fp)) return -1;
-    return (got < want) ? IO_EOF : 0;
+    return (got < want) ? sc_eof : 0;
 }
 
 /* 设备写：写出 *size 字节，回写实写字节数；返回 0 成功 / <0 错（含短写）。 */
-static int32_t sc_file_write(com *_this, void *buf, uint32_t *size) {
+static int32_t sc_file_write(sc_com *_this, void *buf, uint32_t *size) {
     sc_file_dev *d = (sc_file_dev *)_this;
     if (!d->fp || !size) return -1;
     uint32_t want = *size;
@@ -59,7 +59,7 @@ static int32_t sc_file_write(com *_this, void *buf, uint32_t *size) {
     return (put == want) ? 0 : -1;
 }
 
-static int32_t sc_file_error(com *_this) {
+static int32_t sc_file_error(sc_com *_this) {
     sc_file_dev *d = (sc_file_dev *)_this;
     return (d->fp && ferror(d->fp)) ? -1 : 0;
 }
@@ -67,7 +67,7 @@ static int32_t sc_file_error(com *_this) {
 /* 随机寻址：按 whence（0=SEEK_SET/1=SEEK_CUR/2=SEEK_END）定位文件游标，
  * 回写并返回寻址后的绝对位置（>=0）；无句柄/非法 whence/寻址失败返回 <0。
  * seek(0, 1) 取当前位置。清 EOF 标志，便于 seek 后继续读。 */
-static int64_t sc_file_seek(com *_this, int64_t off, int32_t whence) {
+static int64_t sc_file_seek(sc_com *_this, int64_t off, int32_t whence) {
     sc_file_dev *d = (sc_file_dev *)_this;
     if (!d->fp) return -1;
     int w = (whence == 0) ? SEEK_SET : (whence == 1) ? SEEK_CUR
@@ -86,7 +86,7 @@ static int64_t sc_file_seek(com *_this, int64_t off, int32_t whence) {
 
 /* 关闭设备：fclose 文件并释放 sc_file_dev（含 com 及内置 ioq）。
  * 调用后 _this 失效，不得再用；返回 0 / fclose 出错返回 <0。 */
-static int32_t sc_file_close(com *_this) {
+static int32_t sc_file_close(sc_com *_this) {
     sc_file_dev *d = (sc_file_dev *)_this;
     int32_t r = 0;
     if (d->fp && fclose(d->fp) != 0) r = -1;
@@ -94,7 +94,7 @@ static int32_t sc_file_close(com *_this) {
     return r;
 }
 
-com *file(const char *name, bool txt, uint8_t read, uint8_t write) {
+sc_com *sc_file(const char *name, bool txt, uint8_t read, uint8_t write) {
     if (!name || (read == 0 && write == 0)) return NULL;
     /* 模式串：仅读→"r" / 仅写→"w" / 读写→"w+"；二进制（txt=0）追加 "b" */
     char mode[4];
@@ -139,9 +139,9 @@ com *file(const char *name, bool txt, uint8_t read, uint8_t write) {
  * close 仅释放端点结构（com + 游标），绝不释放绑定的 mem（其所有权属调用方）。
  * ==========================================================================*/
 typedef struct sc_stream_dev {
-    com      com;       /* 端点（offset 0，返回其地址即 com&） */
-    ioq      rq;        /* 读队列（read==2 启用，com.rq 指向它） */
-    ioq      wq;        /* 写队列（write==2 启用，com.wq 指向它） */
+    sc_com      com;       /* 端点（offset 0，返回其地址即 com&） */
+    sc_ioq      rq;        /* 读队列（read==2 启用，com.rq 指向它） */
+    sc_ioq      wq;        /* 写队列（write==2 启用，com.wq 指向它） */
     char    *mem;       /* 绑定的内存基址（调用方所有，close 不释放） */
     uint64_t size;      /* 绑定内存容量（字节） */
     uint64_t rpos;      /* 读游标 */
@@ -149,24 +149,24 @@ typedef struct sc_stream_dev {
 } sc_stream_dev;
 
 /* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
-static void *sc_stream_limit_data(limit *s) { return (char *)s + sizeof(limit); }
+static void *sc_stream_limit_data(sc_limit *s) { return (char *)s + sizeof(sc_limit); }
 
-static limit *sc_stream_alloc(com *_this, uint32_t size, void *ending) {
+static sc_limit *sc_stream_alloc(sc_com *_this, uint32_t size, void *ending) {
     (void)_this;
-    limit *s = (limit *)sc_chunk0(sizeof(limit) + (size ? size : 1));
+    sc_limit *s = (sc_limit *)sc_chunk0(sizeof(sc_limit) + (size ? size : 1));
     if (!s) return NULL;
     s->size   = size;
     s->len    = 0;
     s->data   = sc_stream_limit_data;
-    s->ending = (int32_t (*)(limit *))ending;
+    s->ending = (int32_t (*)(sc_limit *))ending;
     return s;
 }
 
-static void sc_stream_free(com *_this, limit *s) { (void)_this; sc_recycle(s); }
+static void sc_stream_free(sc_com *_this, sc_limit *s) { (void)_this; sc_recycle(s); }
 
 /* 设备读：从绑定内存 rpos 处拷入至多 *size 字节，回写实读字节数；
- * 返回 0 可继续 / IO_EOF 读完（rpos 抵 size，读不满）/ <0 错。 */
-static int32_t sc_stream_read(com *_this, void *data, uint32_t *size) {
+ * 返回 0 可继续 / sc_eof 读完（rpos 抵 size，读不满）/ <0 错。 */
+static int32_t sc_stream_read(sc_com *_this, void *data, uint32_t *size) {
     sc_stream_dev *d = (sc_stream_dev *)_this;
     if (!d->mem || !size) return -1;
     uint32_t want = *size;
@@ -175,12 +175,12 @@ static int32_t sc_stream_read(com *_this, void *data, uint32_t *size) {
     if (got) memcpy(data, d->mem + d->rpos, got);
     d->rpos += got;
     *size = got;
-    return (got < want) ? IO_EOF : 0;                   /* 读不满 = 触底 EOF */
+    return (got < want) ? sc_eof : 0;                   /* 读不满 = 触底 EOF */
 }
 
 /* 设备写：把 *size 字节拷入绑定内存 wpos 处，回写实写字节数；
  * 返回 0 成功 / <0 错（容量不足时短写报错）。 */
-static int32_t sc_stream_write(com *_this, void *buf, uint32_t *size) {
+static int32_t sc_stream_write(sc_com *_this, void *buf, uint32_t *size) {
     sc_stream_dev *d = (sc_stream_dev *)_this;
     if (!d->mem || !size) return -1;
     uint32_t want = *size;
@@ -192,13 +192,13 @@ static int32_t sc_stream_write(com *_this, void *buf, uint32_t *size) {
     return (put == want) ? 0 : -1;                      /* 写不下 = 短写错 */
 }
 
-static int32_t sc_stream_error(com *_this) { (void)_this; return 0; }
+static int32_t sc_stream_error(sc_com *_this) { (void)_this; return 0; }
 
 /* 随机寻址：按 whence（0=SEEK_SET/1=SEEK_CUR/2=SEEK_END）在绑定内存内定位游标，
  * 回写并返回寻址后的绝对位置（>=0）；越界/非法 whence 返回 <0。
  * 读写双开时以读游标为 SEEK_CUR 基准，并把读写游标一并置到目标位置；
  * 仅读→读游标、仅写→写游标。seek(0, 1) 取当前位置。 */
-static int64_t sc_stream_seek(com *_this, int64_t off, int32_t whence) {
+static int64_t sc_stream_seek(sc_com *_this, int64_t off, int32_t whence) {
     sc_stream_dev *d = (sc_stream_dev *)_this;
     if (!d->mem) return -1;
     uint64_t cur = (d->com.read) ? d->rpos : d->wpos;   /* SEEK_CUR 基准游标 */
@@ -215,12 +215,12 @@ static int64_t sc_stream_seek(com *_this, int64_t off, int32_t whence) {
 
 /* 关闭设备：仅释放 sc_stream_dev（含 com 及内置 ioq、游标）。
  * 绑定的 mem 归调用方所有，绝不在此释放；返回 0。 */
-static int32_t sc_stream_close(com *_this) {
+static int32_t sc_stream_close(sc_com *_this) {
     sc_recycle((sc_stream_dev *)_this);
     return 0;
 }
 
-com *stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
+sc_com *sc_stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
     if (!mem || (read == 0 && write == 0)) return NULL;
     sc_stream_dev *d = (sc_stream_dev *)sc_chunk0(sizeof(sc_stream_dev));
     if (!d) return NULL;
@@ -252,37 +252,37 @@ com *stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
  * 关闭 fd）。read/write 模式：0=禁用该方向 / 1=同步 / 2=异步。
  * 套接字非恒就绪：实现 readable/writable，经出参回填 fd（*id=fd）→ 异步内核把它注册进
  * 多路复用后端（kqueue/epoll/poll/select），由内核 O(1) 通知就绪后再 pull ioq 执行 io。
- * EAGAIN/EWOULDBLOCK → 返回 IO_AGAIN（异步挂起信号）；对端关闭（recv 返回 0）→ IO_EOF。
+ * EAGAIN/EWOULDBLOCK → 返回 sc_again（异步挂起信号）；对端关闭（recv 返回 0）→ sc_eof
  * 套接字类型/关闭/非阻塞/错误谓词统一取自 platform.h 的 socket 层（SC_WITH_SOCKET）。
  * ==========================================================================*/
 
 typedef struct sc_tcp_dev {
-    com       com;      /* 端点（offset 0，返回其地址即 com&） */
-    ioq       rq;       /* 读队列（read==2 启用，com.rq 指向它） */
-    ioq       wq;       /* 写队列（write==2 启用，com.wq 指向它） */
+    sc_com       com;      /* 端点（offset 0，返回其地址即 com&） */
+    sc_ioq       rq;       /* 读队列（read==2 启用，com.rq 指向它） */
+    sc_ioq       wq;       /* 写队列（write==2 启用，com.wq 指向它） */
     sc_sock fd;       /* 已连接套接字（设备全托管：close 负责关闭） */
 } sc_tcp_dev;
 
 /* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
-static void *sc_tcp_limit_data(limit *s) { return (char *)s + sizeof(limit); }
+static void *sc_tcp_limit_data(sc_limit *s) { return (char *)s + sizeof(sc_limit); }
 
-static limit *sc_tcp_alloc(com *_this, uint32_t size, void *ending) {
+static sc_limit *sc_tcp_alloc(sc_com *_this, uint32_t size, void *ending) {
     (void)_this;
-    limit *s = (limit *)sc_chunk0(sizeof(limit) + (size ? size : 1));
+    sc_limit *s = (sc_limit *)sc_chunk0(sizeof(sc_limit) + (size ? size : 1));
     if (!s) return NULL;
     s->size   = size;
     s->len    = 0;
     s->data   = sc_tcp_limit_data;
-    s->ending = (int32_t (*)(limit *))ending;
+    s->ending = (int32_t (*)(sc_limit *))ending;
     return s;
 }
 
-static void sc_tcp_free(com *_this, limit *s) { (void)_this; sc_recycle(s); }
+static void sc_tcp_free(sc_com *_this, sc_limit *s) { (void)_this; sc_recycle(s); }
 
 /* 设备读：recv 至多 *size 字节，回写实读字节数；
- * n>0 → 0（可继续，TCP 流短读正常）/ n==0 对端关闭 → IO_EOF /
- * EAGAIN → IO_AGAIN（未就绪，异步挂起）/ 其它 → <0。 */
-static int32_t sc_tcp_read(com *_this, void *data, uint32_t *size) {
+ * n>0 → 0（可继续，TCP 流短读正常）/ n==0 对端关闭 → sc_eof /
+ * EAGAIN → sc_again（未就绪，异步挂起）/ 其它 → <0。 */
+static int32_t sc_tcp_read(sc_com *_this, void *data, uint32_t *size) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     if (d->fd == SC_SOCK_INVALID || !size) return -1;
     uint32_t want = *size;
@@ -293,14 +293,14 @@ static int32_t sc_tcp_read(com *_this, void *data, uint32_t *size) {
     ssize_t n = recv(d->fd, data, want, 0);
 #endif
     if (n > 0) { *size = (uint32_t)n; return 0; }
-    if (n == 0) return IO_EOF;                          /* 对端正常关闭 */
-    if (sc_is_wouldblock()) return IO_AGAIN;       /* 未就绪 → 挂起等待 */
+    if (n == 0) return sc_eof;                          /* 对端正常关闭 */
+    if (sc_is_wouldblock()) return sc_again;       /* 未就绪 → 挂起等待 */
     return -1;
 }
 
 /* 设备写：send 至多 *size 字节，回写实写字节数；
- * 全部写出 → 0 / 部分写出或 EAGAIN → IO_AGAIN（剩余待重试）/ 其它 → <0。 */
-static int32_t sc_tcp_write(com *_this, void *buf, uint32_t *size) {
+ * 全部写出 → 0 / 部分写出或 EAGAIN → sc_again（剩余待重试）/ 其它 → <0。 */
+static int32_t sc_tcp_write(sc_com *_this, void *buf, uint32_t *size) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     if (d->fd == SC_SOCK_INVALID || !size) return -1;
     uint32_t want = *size;
@@ -310,22 +310,22 @@ static int32_t sc_tcp_write(com *_this, void *buf, uint32_t *size) {
 #else
     ssize_t n = send(d->fd, buf, want, MSG_NOSIGNAL);
 #endif
-    if (n >= 0) { *size = (uint32_t)n; return ((uint32_t)n == want) ? 0 : IO_AGAIN; }
-    if (sc_is_wouldblock()) return IO_AGAIN;       /* 发送缓冲满 → 挂起重试 */
+    if (n >= 0) { *size = (uint32_t)n; return ((uint32_t)n == want) ? 0 : sc_again; }
+    if (sc_is_wouldblock()) return sc_again;       /* 发送缓冲满 → 挂起重试 */
     return -1;
 }
 
-static int32_t sc_tcp_error(com *_this) { (void)_this; return 0; }
+static int32_t sc_tcp_error(sc_com *_this) { (void)_this; return 0; }
 
 /* 读就绪查询：回填 *id=fd 交多路复用后端监听（socket 支持 kqueue/epoll/poll）。
  * *id 非 nil → 返回值被异步内核忽略（见 op.sc readable 契约）。 */
-static int32_t sc_tcp_readable(com *_this, void **id) {
+static int32_t sc_tcp_readable(sc_com *_this, void **id) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     *id = (void *)(intptr_t)d->fd;
     return (d->fd == SC_SOCK_INVALID) ? -1 : 1;
 }
 
-static int32_t sc_tcp_writable(com *_this, void **id) {
+static int32_t sc_tcp_writable(sc_com *_this, void **id) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     *id = (void *)(intptr_t)d->fd;
     return (d->fd == SC_SOCK_INVALID) ? -1 : 1;
@@ -333,7 +333,7 @@ static int32_t sc_tcp_writable(com *_this, void **id) {
 
 /* 关闭设备：关闭套接字（设备托管 fd）并释放 sc_tcp_dev（含 com 及内置 ioq）。
  * 调用后 _this 失效；返回 0 / 关闭出错返回 <0。 */
-static int32_t sc_tcp_close(com *_this) {
+static int32_t sc_tcp_close(sc_com *_this) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     int32_t r = 0;
     if (d->fd != SC_SOCK_INVALID) {
@@ -344,7 +344,7 @@ static int32_t sc_tcp_close(com *_this) {
     return r;
 }
 
-com *tcp(int32_t fd, bool nonblock, uint8_t read, uint8_t write) {
+sc_com *sc_tcp(int32_t fd, bool nonblock, uint8_t read, uint8_t write) {
     if (fd < 0 || (read == 0 && write == 0)) return NULL;
 
     /* nonblock：设备全托管——置 O_NONBLOCK；并强制对应启用方向走异步（建 ioq），

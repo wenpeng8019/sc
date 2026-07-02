@@ -25,7 +25,7 @@ static void codec__crc32_build(void) {
     codec__crc32_ready = 1;
 }
 
-uint32_t codec_crc32_update(uint32_t crc, void *data, uint64_t len) {
+uint32_t sc_codec_crc32_update(uint32_t crc, void *data, uint64_t len) {
     const uint8_t *p = (const uint8_t *)data;
     uint64_t i;
     if (!codec__crc32_ready) codec__crc32_build();
@@ -35,13 +35,13 @@ uint32_t codec_crc32_update(uint32_t crc, void *data, uint64_t len) {
     return ~crc;
 }
 
-uint32_t codec_crc32(void *data, uint64_t len) {
-    return codec_crc32_update(0u, data, len);
+uint32_t sc_codec_crc32(void *data, uint64_t len) {
+    return sc_codec_crc32_update(0u, data, len);
 }
 
 /* Adler-32：a = 1 + Σbytes (mod 65521)，b = Σa (mod 65521)，结果 (b<<16)|a。
  *   每 5552 字节取模一次（uint32 不溢出的最大安全分块）。 */
-uint32_t codec_adler32_update(uint32_t adler, void *data, uint64_t len) {
+uint32_t sc_codec_adler32_update(uint32_t adler, void *data, uint64_t len) {
     const uint8_t *p = (const uint8_t *)data;
     uint32_t a = adler & 0xFFFFu, b = (adler >> 16) & 0xFFFFu;
     const uint32_t MOD = 65521u;
@@ -57,17 +57,17 @@ uint32_t codec_adler32_update(uint32_t adler, void *data, uint64_t len) {
     return (b << 16) | a;
 }
 
-uint32_t codec_adler32(void *data, uint64_t len) {
-    return codec_adler32_update(1u, data, len);
+uint32_t sc_codec_adler32(void *data, uint64_t len) {
+    return sc_codec_adler32_update(1u, data, len);
 }
 
 /* ====================== Layer 1 · 簇 3：RLE（PackBits）====================== */
 
-uint64_t codec_rle_bound(uint64_t len) {
+uint64_t sc_codec_rle_bound(uint64_t len) {
     return len + len / 128u + 1u;
 }
 
-int64_t codec_rle_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_rle_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint64_t i = 0, o = 0;
     while (i < len) {
@@ -101,7 +101,7 @@ int64_t codec_rle_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     return (int64_t)o;
 }
 
-int64_t codec_rle_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_rle_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint64_t i = 0, o = 0;
     while (i < len) {
@@ -132,13 +132,13 @@ int64_t codec_rle_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
  * 编码器为经典 PackBits 单前瞻状态机（INIT/LIT/RUN），只在 unit 内逐 unit 比较，
  * 不跨 flush 边界合并行程——调用方每逢自然边界（如 TGA 扫描行）应 flush。 */
 
-void codec_rle_enc_init(codec_rle_enc *e, int32_t unit) {
+void sc_codec_rle_enc_init(sc_codec_rle_enc *e, int32_t unit) {
     e->unit = unit;
     e->st = 0;
     e->n = 0;
 }
 
-uint64_t codec_rle_enc_bound(uint64_t nunits, int32_t unit) {
+uint64_t sc_codec_rle_enc_bound(uint64_t nunits, int32_t unit) {
     return nunits * (uint64_t)unit + (nunits / 128u + 2u) * (1u + (uint64_t)unit);
 }
 
@@ -152,7 +152,7 @@ static int64_t codec__rle_emit(uint8_t *out, int64_t op, uint64_t cap,
     return op + 1 + nbytes;
 }
 
-int64_t codec_rle_enc_feed(codec_rle_enc *e, uint8_t *in, uint64_t nunits,
+int64_t sc_codec_rle_enc_feed(sc_codec_rle_enc *e, uint8_t *in, uint64_t nunits,
                            uint8_t *out, uint64_t cap) {
     int32_t unit = e->unit;
     int64_t op = 0;
@@ -217,7 +217,7 @@ int64_t codec_rle_enc_feed(codec_rle_enc *e, uint8_t *in, uint64_t nunits,
     return op;
 }
 
-int64_t codec_rle_enc_flush(codec_rle_enc *e, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_rle_enc_flush(sc_codec_rle_enc *e, uint8_t *out, uint64_t cap) {
     int32_t unit = e->unit;
     int64_t op = 0;
     if (e->st == 1) {
@@ -232,7 +232,7 @@ int64_t codec_rle_enc_flush(codec_rle_enc *e, uint8_t *out, uint64_t cap) {
     return op;
 }
 
-void codec_rle_dec_init(codec_rle_dec *d, int32_t unit) {
+void sc_codec_rle_dec_init(sc_codec_rle_dec *d, int32_t unit) {
     d->unit = unit;
     d->phase = 0;
     d->rem = 0;
@@ -244,7 +244,7 @@ void codec_rle_dec_init(codec_rle_dec *d, int32_t unit) {
  *   下次调用续传；phase 2 的重复串发射亦可跨调用续传。故正确用法是把 cap 设为「本次期望
  *   产出上限」（如剩余总字节数），并按返回值累计——满则说明达到上限，可停止喂入。
  * 返回值 >= 0（本次产出字节数）。 */
-int64_t codec_rle_dec_feed(codec_rle_dec *d, uint8_t *in, uint64_t inlen,
+int64_t sc_codec_rle_dec_feed(sc_codec_rle_dec *d, uint8_t *in, uint64_t inlen,
                            uint8_t *out, uint64_t cap) {
     int32_t unit = d->unit;
     int64_t op = 0;
@@ -465,7 +465,7 @@ static int cd_dynamic(cd_state *s) {
     return cd_codes(s, lcount, lsym, dcount, dsym);
 }
 
-int64_t codec_inflate(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_inflate(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     cd_state s;
     int last, type, err;
     s.in = (const uint8_t *)src; s.inlen = len; s.incnt = 0;
@@ -484,7 +484,7 @@ int64_t codec_inflate(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     return (int64_t)s.outcnt;
 }
 
-int64_t codec_zlib_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_zlib_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     int cmf, flg;
     int64_t n;
@@ -494,15 +494,15 @@ int64_t codec_zlib_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     if ((cmf & 0x0f) != 8) return -1;               /* CM=8 deflate */
     if (((cmf << 8) | flg) % 31 != 0) return -1;    /* 头校验 */
     if (flg & 0x20) return -1;                      /* 不支持预置字典 */
-    n = codec_inflate((void *)(p + 2), len - 2, out, cap);
+    n = sc_codec_inflate((void *)(p + 2), len - 2, out, cap);
     if (n < 0) return n;
     want = ((uint32_t)p[len - 4] << 24) | ((uint32_t)p[len - 3] << 16)
          | ((uint32_t)p[len - 2] << 8)  |  (uint32_t)p[len - 1];
-    if (codec_adler32(out, (uint64_t)n) != want) return -1;
+    if (sc_codec_adler32(out, (uint64_t)n) != want) return -1;
     return n;
 }
 
-int64_t codec_gzip_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_gzip_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint64_t off = 10;
     int flg;
@@ -522,11 +522,11 @@ int64_t codec_gzip_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     if (flg & 0x10) { while (off < len && p[off] != 0) off++; off++; }  /* FCOMMENT */
     if (flg & 0x02) off += 2;                        /* FHCRC */
     if (off >= len) return -1;
-    n = codec_inflate((void *)(p + off), len - off, out, cap);
+    n = sc_codec_inflate((void *)(p + off), len - off, out, cap);
     if (n < 0) return n;
     crc   = (uint32_t)p[len - 8] | ((uint32_t)p[len - 7] << 8) | ((uint32_t)p[len - 6] << 16) | ((uint32_t)p[len - 5] << 24);
     isize = (uint32_t)p[len - 4] | ((uint32_t)p[len - 3] << 8) | ((uint32_t)p[len - 2] << 16) | ((uint32_t)p[len - 1] << 24);
-    if (codec_crc32(out, (uint64_t)n) != crc) return -1;
+    if (sc_codec_crc32(out, (uint64_t)n) != crc) return -1;
     if ((uint32_t)((uint64_t)n & 0xffffffffu) != isize) return -1;
     return n;
 }
@@ -560,9 +560,9 @@ typedef struct {
     uint32_t crc;              /* gzip crc running */
 } codec_zdec;
 
-uint64_t codec_zdec_size(void) { return sizeof(codec_zdec); }
+uint64_t sc_codec_zdec_size(void) { return sizeof(codec_zdec); }
 
-int32_t codec_zdec_init(void *sp, int32_t wrap) {
+int32_t sc_codec_zdec_init(void *sp, int32_t wrap) {
     codec_zdec *z = (codec_zdec *)sp;
     memset(z, 0, sizeof(*z));
     z->wrap = wrap;
@@ -572,12 +572,12 @@ int32_t codec_zdec_init(void *sp, int32_t wrap) {
     return 0;
 }
 
-void codec_zdec_free(void *sp) {
+void sc_codec_zdec_free(void *sp) {
     codec_zdec *z = (codec_zdec *)sp;
     if (z->inbuf) { free(z->inbuf); z->inbuf = 0; z->incap = 0; z->inlen = 0; }
 }
 
-int32_t codec_zdec_ended(void *sp) { return ((codec_zdec *)sp)->mode == ZM_DONE ? 1 : 0; }
+int32_t sc_codec_zdec_ended(void *sp) { return ((codec_zdec *)sp)->mode == ZM_DONE ? 1 : 0; }
 
 static int z_reserve(codec_zdec *z, uint64_t add) {
     uint64_t nc;
@@ -663,11 +663,11 @@ static void z_emit(codec_zdec *z, uint8_t *out, uint64_t *op, uint8_t b) {
         z->s1 += b; z->s2 += z->s1;
         if (++z->spend >= 5552) { z->s1 %= 65521; z->s2 %= 65521; z->spend = 0; }
     } else if (z->wrap == 2) {
-        z->crc = codec_crc32_update(z->crc, &b, 1);
+        z->crc = sc_codec_crc32_update(z->crc, &b, 1);
     }
 }
 
-int64_t codec_zdec_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_zdec_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
     codec_zdec *z = (codec_zdec *)sp;
     uint64_t op = 0;
     if (z->mode == ZM_ERR) { if (consumed) *consumed = 0; return -1; }
@@ -791,7 +791,7 @@ suspend:
  *   输出可被任何标准 zlib/gzip 解码器还原（已与本模块 inflate round-trip 验证）。
  */
 
-uint64_t codec_deflate_bound(uint64_t len) {
+uint64_t sc_codec_deflate_bound(uint64_t len) {
     /* 取固定 Huffman 膨胀上界（len*9/8）与 stored 开销之较大者，再留富余。 */
     return len + len / 8u + (len / 65535u + 1u) * 5u + 64u;
 }
@@ -903,8 +903,8 @@ static void cd_dist_sym(int dist, int *sym, int *ebits, int *eval) {
     *sym = 0; *ebits = 0; *eval = 0;
 }
 
-/* 贪心 LZ77（hash 头部，窗口 32K，最短匹配 3）：对每个 token 触发回调。head 由本函数初始化。
- * 算法确定性：同一输入两遍调用产生完全一致的 token 流（动态块据此先统计频率再写码）。 */
+/* 贪心 LZ77（hash 头部，窗口 32K，最短匹配 3）：对每个 sc_token 触发回调。head 由本函数初始化。
+ * 算法确定性：同一输入两遍调用产生完全一致的 sc_token 流（动态块据此先统计频率再写码）。 */
 typedef void (*cd_lit_cb)(void *ctx, int byte);
 typedef void (*cd_match_cb)(void *ctx, int length, int dist);
 
@@ -1091,7 +1091,7 @@ static int64_t cd_deflate_dynamic(const uint8_t *src, uint64_t len, uint8_t *out
     return (int64_t)w.cnt;
 }
 
-int64_t codec_deflate(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
+int64_t sc_codec_deflate(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
     if (level <= 0) return cd_deflate_stored((const uint8_t *)src, len, out, cap);
     if (level == 1) return cd_deflate_fixed((const uint8_t *)src, len, out, cap);
     {   /* level ≥ 2：动态 Huffman；失败（容量不足等）回退固定块。 */
@@ -1101,7 +1101,7 @@ int64_t codec_deflate(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32
     }
 }
 
-int64_t codec_zlib_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
+int64_t sc_codec_zlib_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
     uint64_t o;
     int64_t n;
     uint32_t ad;
@@ -1109,10 +1109,10 @@ int64_t codec_zlib_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, i
     out[0] = 0x78;             /* CM=8, CINFO=7（32K 窗口） */
     out[1] = 0x9c;             /* FLG：(0x789c) % 31 == 0 */
     o = 2;
-    n = codec_deflate(src, len, out + o, cap - o - 4, level);
+    n = sc_codec_deflate(src, len, out + o, cap - o - 4, level);
     if (n < 0) return -1;
     o += (uint64_t)n;
-    ad = codec_adler32(src, len);
+    ad = sc_codec_adler32(src, len);
     out[o++] = (uint8_t)((ad >> 24) & 0xff);
     out[o++] = (uint8_t)((ad >> 16) & 0xff);
     out[o++] = (uint8_t)((ad >> 8) & 0xff);
@@ -1120,7 +1120,7 @@ int64_t codec_zlib_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, i
     return (int64_t)o;
 }
 
-int64_t codec_gzip_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
+int64_t sc_codec_gzip_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t level) {
     uint64_t o;
     int64_t n;
     uint32_t crc, isize;
@@ -1129,10 +1129,10 @@ int64_t codec_gzip_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, i
     out[4] = 0; out[5] = 0; out[6] = 0; out[7] = 0;          /* MTIME=0 */
     out[8] = 0; out[9] = 0xff;                               /* XFL=0, OS=unknown */
     o = 10;
-    n = codec_deflate(src, len, out + o, cap - o - 8, level);
+    n = sc_codec_deflate(src, len, out + o, cap - o - 8, level);
     if (n < 0) return -1;
     o += (uint64_t)n;
-    crc = codec_crc32(src, len);
+    crc = sc_codec_crc32(src, len);
     out[o++] = (uint8_t)(crc & 0xff);
     out[o++] = (uint8_t)((crc >> 8) & 0xff);
     out[o++] = (uint8_t)((crc >> 16) & 0xff);
@@ -1166,7 +1166,7 @@ typedef struct {
     uint32_t crc;                  /* gzip crc running */
 } codec_zenc;
 
-uint64_t codec_zenc_size(void) { return sizeof(codec_zenc); }
+uint64_t sc_codec_zenc_size(void) { return sizeof(codec_zenc); }
 
 static int ze_grow(codec_zenc *z, uint64_t need) {
     uint64_t nc;
@@ -1180,7 +1180,7 @@ static int ze_grow(codec_zenc *z, uint64_t need) {
     return 0;
 }
 
-int32_t codec_zenc_init(void *sp, int32_t wrap, int32_t level) {
+int32_t sc_codec_zenc_init(void *sp, int32_t wrap, int32_t level) {
     codec_zenc *z = (codec_zenc *)sp;
     memset(z, 0, sizeof(*z));
     z->wrap = wrap; z->level = level;
@@ -1197,12 +1197,12 @@ int32_t codec_zenc_init(void *sp, int32_t wrap, int32_t level) {
     return 0;
 }
 
-void codec_zenc_free(void *sp) {
+void sc_codec_zenc_free(void *sp) {
     codec_zenc *z = (codec_zenc *)sp;
     if (z->ob) { free(z->ob); z->ob = 0; z->obcap = 0; z->oblen = 0; z->obpos = 0; }
 }
 
-int32_t codec_zenc_ended(void *sp) {
+int32_t sc_codec_zenc_ended(void *sp) {
     codec_zenc *z = (codec_zenc *)sp;
     return (z->final_done && z->obpos >= z->oblen) ? 1 : 0;
 }
@@ -1210,7 +1210,7 @@ int32_t codec_zenc_ended(void *sp) {
 /* 压一块（src[0..len)）为 deflate 块（BFINAL=last），产出追加进 ob。 */
 static int ze_block(codec_zenc *z, const uint8_t *src, uint64_t len, int last) {
     cd_wr w;
-    if (ze_grow(z, codec_deflate_bound(len) + 16) < 0) return -1;
+    if (ze_grow(z, sc_codec_deflate_bound(len) + 16) < 0) return -1;
     w.out = z->ob; w.cap = z->obcap; w.cnt = z->oblen;
     w.bitbuf = z->bitbuf; w.bitcnt = z->bitcnt; w.err = 0;
     if (cd_dynamic_core(&w, src, len, last) < 0) return -1;
@@ -1229,7 +1229,7 @@ static uint64_t ze_drain(codec_zenc *z, uint8_t *out, uint64_t cap) {
     return take;
 }
 
-int64_t codec_zenc_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_zenc_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, uint8_t *out, uint64_t cap) {
     codec_zenc *z = (codec_zenc *)sp;
     const uint8_t *p = (const uint8_t *)in;
     uint64_t i = 0, op = 0;
@@ -1244,7 +1244,7 @@ int64_t codec_zenc_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, 
             for (k = 0; k < take; k++) { z->s1 += p[i - take + k]; z->s2 += z->s1;
                 if (++z->spend >= 5552) { z->s1 %= 65521; z->s2 %= 65521; z->spend = 0; } }
         } else if (z->wrap == 2) {
-            z->crc = codec_crc32_update(z->crc, (void *)(p + (i - take)), take);
+            z->crc = sc_codec_crc32_update(z->crc, (void *)(p + (i - take)), take);
         }
         z->total_in += take;
         if (z->blen == ZE_BLK) { if (ze_block(z, z->blk, ZE_BLK, 0) < 0) return -1; z->blen = 0; }
@@ -1255,7 +1255,7 @@ int64_t codec_zenc_feed(void *sp, void *in, uint64_t inlen, uint64_t *consumed, 
     return (int64_t)op;
 }
 
-int64_t codec_zenc_finish(void *sp, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_zenc_finish(void *sp, uint8_t *out, uint64_t cap) {
     codec_zenc *z = (codec_zenc *)sp;
     uint64_t op = 0;
     if (!z->final_done) {
@@ -1388,18 +1388,18 @@ static void cd_huffman_codes(const uint8_t *len, int n, int maxlen, uint32_t *co
 }
 
 /* 公开原子：频率 → 限长规范码长。见 codec.sc 的 @fnc codec_huffman_build。 */
-int32_t codec_huffman_build(uint32_t *freq, int32_t n, int32_t limit, uint8_t *lengths) {
+int32_t sc_codec_huffman_build(uint32_t *freq, int32_t n, int32_t limit, uint8_t *lengths) {
     return cd_huffman_lengths(freq, n, limit, lengths);
 }
 
 /* order-0 字节 Huffman 编码输出上界：8(原长) + 128(码长表) + 每符号≤15 位 + 收尾。 */
-uint64_t codec_huffman_bound(uint64_t len) {
+uint64_t sc_codec_huffman_bound(uint64_t len) {
     return 8u + 128u + len * 2u + 16u;
 }
 
 /* order-0 字节 Huffman 编码。布局：原长(8,LE) + 256 符号码长(128,半字节打包) + 位流。
  * 返回写入字节数；cap 不足返回 -1。len==0 仅写 8 字节头。 */
-int64_t codec_huffman_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_huffman_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint32_t freq[256], codes[256];
     uint8_t lengths[256];
@@ -1424,8 +1424,8 @@ int64_t codec_huffman_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap
     return (int64_t)w.cnt;
 }
 
-/* order-0 字节 Huffman 解码（codec_huffman_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
-int64_t codec_huffman_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+/* order-0 字节 Huffman 解码（sc_codec_huffman_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
+int64_t sc_codec_huffman_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     short length[256], count[16], symbol[256];
     cd_state s;
@@ -1469,7 +1469,7 @@ int64_t codec_huffman_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap
 #define CD_RANS_HDR    (9u + 512u)       /* 8 原长 + 1 tablelog + 512 归一表 */
 
 /* 频率归一：缩放到总和恰为 2^tablelog，出现的符号至少为 1。见 codec.sc 的 @fnc。 */
-int32_t codec_rans_normalize(uint32_t *freq, int32_t n, int32_t tablelog, uint16_t *norm) {
+int32_t sc_codec_rans_normalize(uint32_t *freq, int32_t n, int32_t tablelog, uint16_t *norm) {
     uint32_t total = 0, TOTAL, sum = 0;
     int i, distinct = 0;
     if (n <= 0 || tablelog < 1 || tablelog > 16) return -1;
@@ -1501,12 +1501,12 @@ int32_t codec_rans_normalize(uint32_t *freq, int32_t n, int32_t tablelog, uint16
 }
 
 /* order-0 字节 rANS 编码输出上界：头(521) + 负载(≤ 原长 + 状态 4) + 富余。 */
-uint64_t codec_rans_bound(uint64_t len) {
+uint64_t sc_codec_rans_bound(uint64_t len) {
     return CD_RANS_HDR + len + (len >> 1) + 64u;
 }
 
 /* order-0 字节 rANS 编码。布局见上。逆序编码、负载在 scratch 内自高向低生长后顺序拷出。 */
-int64_t codec_rans_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_rans_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint32_t freq[256], cum[256];
     uint16_t norm[256];
@@ -1520,7 +1520,7 @@ int64_t codec_rans_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     if (cap < CD_RANS_HDR) return -1;
     for (s = 0; s < 256; s++) freq[s] = 0;
     for (i = 0; i < len; i++) freq[p[i]]++;
-    if (codec_rans_normalize(freq, 256, CD_RANS_TLOG, norm) <= 0) return -1;
+    if (sc_codec_rans_normalize(freq, 256, CD_RANS_TLOG, norm) <= 0) return -1;
     out[8] = (uint8_t)CD_RANS_TLOG;
     c = 0;
     for (s = 0; s < 256; s++) {           /* 累计起点 + 序列化归一表 */
@@ -1556,8 +1556,8 @@ int64_t codec_rans_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     return (int64_t)(CD_RANS_HDR + paylen);
 }
 
-/* order-0 字节 rANS 解码（codec_rans_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
-int64_t codec_rans_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+/* order-0 字节 rANS 解码（sc_codec_rans_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
+int64_t sc_codec_rans_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint32_t cum[256];
     uint16_t norm[256];
@@ -1608,7 +1608,7 @@ int64_t codec_rans_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
  * Subbotin 无进位(carryless)区间编码器：算术编码家族的第三个原子，与 Huffman（整数比特）、
  * rANS（分数比特、逆序状态）并列。区间编码以 32 位 [low, low+range) 区间逐符号细分逼近熵，
  * 正序流式、单次扫描即可编/解。low/range/code 全用 uint32_t，溢出回绕即「无进位」技巧。
- * 频率归一复用簇5 的 codec_rans_normalize（总和 = 2^14 < BOT，保证 range/total ≥ 1）。
+ * 频率归一复用簇5 的 sc_codec_rans_normalize（总和 = 2^14 < BOT，保证 range/total ≥ 1）。
  * 自描述布局与 rANS 相同：原长(8,LE) + tablelog(1) + 256×归一频次(u2,LE=512) + 区间码负载。
  */
 
@@ -1670,7 +1670,7 @@ static void cd_rc_dec_update(cd_rc *rc, uint32_t cum, uint32_t freq) {
 }
 
 /* order-0 字节区间编码。布局见上。正序编码，直接写入 out 的负载区。 */
-int64_t codec_range_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_range_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint32_t freq[256], cum[256];
     uint16_t norm[256];
@@ -1684,7 +1684,7 @@ int64_t codec_range_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) 
     if (cap < CD_RANS_HDR) return -1;
     for (s = 0; s < 256; s++) freq[s] = 0;
     for (i = 0; i < len; i++) freq[p[i]]++;
-    if (codec_rans_normalize(freq, 256, CD_RC_TLOG, norm) <= 0) return -1;
+    if (sc_codec_rans_normalize(freq, 256, CD_RC_TLOG, norm) <= 0) return -1;
     TOTAL = 1u << CD_RC_TLOG;
     out[8] = (uint8_t)CD_RC_TLOG;
     c = 0;
@@ -1705,8 +1705,8 @@ int64_t codec_range_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) 
     return (int64_t)rc.pos;
 }
 
-/* order-0 字节区间解码（codec_range_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
-int64_t codec_range_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+/* order-0 字节区间解码（sc_codec_range_encode 的逆）。返回原始字节数；失败 / cap 不足 -1。 */
+int64_t sc_codec_range_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint32_t cum[256];
     uint16_t norm[256];
@@ -1751,7 +1751,7 @@ int64_t codec_range_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) 
 }
 
 /* order-0 字节区间编码输出上界：与 rANS 同量级（头 521 + 负载 ≈ 原长 + 收尾）。 */
-uint64_t codec_range_bound(uint64_t len) {
+uint64_t sc_codec_range_bound(uint64_t len) {
     return CD_RANS_HDR + len + (len >> 1) + 64u;
 }
 
@@ -1773,13 +1773,13 @@ uint64_t codec_range_bound(uint64_t len) {
 #define CD_LZW_HSIZE   9001            /* 开放寻址哈希表大小（素数 > MAXENT） */
 
 /* LZW 编码输出上界：每符号至多 1 个 ≤12 位码（≤1.5 字节），len*2 留足余量。 */
-uint64_t codec_lzw_bound(uint64_t len) {
+uint64_t sc_codec_lzw_bound(uint64_t len) {
     return 8u + len * 2u + 16u;
 }
 
 /* LZW 编码。布局：原长(8,LE) + LZW 变长位流（首发 CLEAR、尾发 EOI）。
  * 返回写入字节数；cap 不足返回 -1。len==0 仅写 8 字节头。 */
-int64_t codec_lzw_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+int64_t sc_codec_lzw_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     int32_t *htab = NULL, *codetab = NULL;
     uint64_t i, o = 8;
@@ -1834,8 +1834,8 @@ done:
     return ret;
 }
 
-/* LZW 解码（codec_lzw_encode 的逆）。返回原始字节数；失败 / cap 不足返回 -1。 */
-int64_t codec_lzw_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
+/* LZW 解码（sc_codec_lzw_encode 的逆）。返回原始字节数；失败 / cap 不足返回 -1。 */
+int64_t sc_codec_lzw_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap) {
     const uint8_t *p = (const uint8_t *)src;
     uint16_t *pfx = NULL;
     uint8_t  *sfx = NULL, *stk = NULL;
@@ -1903,7 +1903,7 @@ done:
 
 /* ---- 裸 LZW 子流（无长度头，码宽 / 字典约定由调用方按图片容器给定）----
  *
- * 上面的 codec_lzw_* 自带 8 字节原长头、只能本模块自洽编解；图片容器（TIFF、GIF）
+ * 上面的 sc_codec_lzw_* 自带 8 字节原长头、只能本模块自洽编解；图片容器（TIFF、GIF）
  * 里的 LZW 没有这个头，靠容器另给的行/条信息定边界。本对函数即为容器准备：
  * 不写长度头，解码读到 EOI(257) 或输入耗尽即停、产物以 cap 封顶。
  *
@@ -1911,7 +1911,7 @@ done:
  * 其余约定与本模块 LZW 相同：码宽 9→12、CLEAR(256) 满表复位、EOI(257) 收尾，
  * 编码侧新增词条后按 freeent>maxcode 升宽、解码侧滞后一码读码前预升宽。
  * MSB-first + 此升宽纪律已对真实 libtiff（Pillow）输出双向验证通过。 */
-int64_t codec_lzw_raw_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t flags) {
+int64_t sc_codec_lzw_raw_encode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t flags) {
     const uint8_t *p = (const uint8_t *)src;
     int msb = flags & 1;
     int32_t *htab = NULL, *codetab = NULL;
@@ -1971,9 +1971,9 @@ done:
     return ret;
 }
 
-/* 裸 LZW 解码（codec_lzw_raw_encode 的逆）。读到 EOI 或输入耗尽即停。
+/* 裸 LZW 解码（sc_codec_lzw_raw_encode 的逆）。读到 EOI 或输入耗尽即停。
  * 返回写入字节数；cap 不足 / 码流损坏返回 -1。 */
-int64_t codec_lzw_raw_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t flags) {
+int64_t sc_codec_lzw_raw_decode(void *src, uint64_t len, uint8_t *out, uint64_t cap, int32_t flags) {
     const uint8_t *p = (const uint8_t *)src;
     int msb = flags & 1;
     uint16_t *pfx = NULL;
@@ -2052,7 +2052,7 @@ done:
  */
 
 /* 无符号 LEB128 编码。out 须有 ≥10 字节余量；返回写入字节数（1..10）。 */
-int32_t codec_varint_encode(uint64_t value, uint8_t *out) {
+int32_t sc_codec_varint_encode(uint64_t value, uint8_t *out) {
     int32_t n = 0;
     do {
         uint8_t b = (uint8_t)(value & 0x7f);
@@ -2065,7 +2065,7 @@ int32_t codec_varint_encode(uint64_t value, uint8_t *out) {
 
 /* 无符号 LEB128 解码。读 src[0..len) 的一个变长整数到 *value；
  * 返回消耗字节数（1..10）；截断 / 超过 10 字节返回 -1。 */
-int32_t codec_varint_decode(void *src, uint64_t len, uint64_t *value) {
+int32_t sc_codec_varint_decode(void *src, uint64_t len, uint64_t *value) {
     const uint8_t *p = (const uint8_t *)src;
     uint64_t v = 0;
     int32_t n = 0, shift = 0;
@@ -2080,11 +2080,11 @@ int32_t codec_varint_decode(void *src, uint64_t len, uint64_t *value) {
 }
 
 /* ZigZag 编码：有符号 → 无符号（0,-1,1,-2,2 → 0,1,2,3,4）。 */
-uint64_t codec_zigzag_encode(int64_t v) {
+uint64_t sc_codec_zigzag_encode(int64_t v) {
     return ((uint64_t)v << 1) ^ (uint64_t)(v >> 63);
 }
 
-/* ZigZag 解码：无符号 → 有符号（codec_zigzag_encode 的逆）。 */
-int64_t codec_zigzag_decode(uint64_t v) {
+/* ZigZag 解码：无符号 → 有符号（sc_codec_zigzag_encode 的逆）。 */
+int64_t sc_codec_zigzag_decode(uint64_t v) {
     return (int64_t)(v >> 1) ^ -(int64_t)(v & 1);
 }

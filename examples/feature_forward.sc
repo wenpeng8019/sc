@@ -25,5 +25,5 @@ fnc main: i4
     var y: node_b
     x.pb = &y
     y.pa = &x
-    printf("even(10)=%d odd(7)=%d\n", is_even(10), is_odd(7))
+    ::printf("even(10)=%d odd(7)=%d\n", is_even(10), is_odd(7))
     return 0

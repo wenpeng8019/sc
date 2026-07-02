@@ -37,7 +37,7 @@ rpc hammer: base: i4, rounds: i4
         counter->set((v: *), 0)
         var seen: i8 = (counter->get(): i8)     # 读路径并发参与（seqlock 无锁读）
         if seen < v
-            printf("BUG: counter regressed seen=%lld < v=%lld\n", seen, v)
+            ::printf("BUG: counter regressed seen=%lld < v=%lld\n", seen, v)
 
 fnc main: i4
     form counter, (0: *)            # 初始化 form 主
@@ -58,10 +58,10 @@ fnc main: i4
     var expect: i8 = ((T - 1): i8) * (100000: i8) + ((R - 1): i8)
     var cv: i8 = (counter->get(): i8)
     var pv: i8 = (peak->get(): i8)
-    printf("counter=%lld peak=%lld expect=%lld\n", cv, pv, expect)
+    ::printf("counter=%lld peak=%lld expect=%lld\n", cv, pv, expect)
     if cv == expect && pv == expect
-        printf("OK: MT lockless consistent\n")
+        ::printf("OK: MT lockless consistent\n")
     else
-        printf("FAIL: mismatch\n")
+        ::printf("FAIL: mismatch\n")
 
     return 0

@@ -2,29 +2,29 @@
 #include "platform.h"
 #include "builtins/adt/adt.h"
 
-static int32_t int_cmp(void *a, void *b);
-static void dump(array *a);
-typedef struct com__project {
+static int32_t sc_int_cmp(void *a, void *b);
+static void sc_dump(sc_array *a);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
 
-static int32_t int_cmp(void *a, void *b) {
+static int32_t sc_int_cmp(void *a, void *b) {
     /* line 7 */
     return ((int32_t*)(a))[0] - ((int32_t*)(b))[0];
 }
 
-static void dump(array *a) {
+static void sc_dump(sc_array *a) {
     /* line 10 */
     uint64_t i = 0;
     /* line 11 */
-    for (i = 0; i < array_len(a); i++) {
+    for (i = 0; i < sc_array_len(a); i++) {
         /* line 12 */
-        printf(" %d", ((int32_t*)(array_at(a, i)))[0]);
+        printf(" %d", ((int32_t*)(sc_array_at(a, i)))[0]);
     }
     /* line 13 */
     printf("\n");
@@ -34,89 +34,89 @@ int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     /* line 16 */
-    array a = {0};
+    sc_array a = {0};
     /* line 17 */
-    array_init(&a, 4);
+    sc_array_init(&a, 4);
     /* line 18 */
     int32_t v = 30;
     /* line 19 */
-    array_push(&a, &(v));
+    sc_array_push(&a, &(v));
     /* line 20 */
     v = 10;
     /* line 21 */
-    array_push(&a, &(v));
+    sc_array_push(&a, &(v));
     /* line 22 */
     v = 20;
     /* line 23 */
-    array_push(&a, &(v));
+    sc_array_push(&a, &(v));
     /* line 24 */
     v = 10;
     /* line 25 */
-    array_push(&a, &(v));
+    sc_array_push(&a, &(v));
     /* line 26 */
-    printf("len=%llu\n", array_len(&a));
+    printf("len=%llu\n", sc_array_len(&a));
     /* line 27 */
-    dump(&(a));
+    sc_dump(&(a));
     /* line 29 */
-    array_sort(&a, int_cmp);
+    sc_array_sort(&a, sc_int_cmp);
     /* line 30 */
     printf("sorted:");
     /* line 31 */
-    dump(&(a));
+    sc_dump(&(a));
     /* line 33 */
     int32_t key = 20;
     /* line 34 */
-    int32_t *found = array_bsearch(&a, &(key), int_cmp);
+    int32_t *found = sc_array_bsearch(&a, &(key), sc_int_cmp);
     /* line 35 */
     printf("bsearch(20)=%d\n", (found != NULL) ? found[0] : (0 - 1));
     /* line 36 */
     key = 10;
     /* line 37 */
-    int64_t _sq0 = array_find(&a, &(key), 0, int_cmp);
-    int64_t _sq1 = array_rfind(&a, &(key), int_cmp);
+    int64_t _sq0 = sc_array_find(&a, &(key), 0, sc_int_cmp);
+    int64_t _sq1 = sc_array_rfind(&a, &(key), sc_int_cmp);
     printf("find(10)=%lld rfind(10)=%lld\n", _sq0, _sq1);
     /* line 39 */
-    array b = {0};
+    sc_array b = {0};
     /* line 40 */
-    array_clone(&a, &(b));
+    sc_array_clone(&a, &(b));
     /* line 41 */
-    printf("clone equals=%d\n", array_equals(&a, &(b), int_cmp));
+    printf("clone equals=%d\n", sc_array_equals(&a, &(b), sc_int_cmp));
     /* line 42 */
-    array_reverse(&b);
+    sc_array_reverse(&b);
     /* line 43 */
     printf("reversed:");
     /* line 44 */
-    dump(&(b));
+    sc_dump(&(b));
     /* line 46 */
-    array part = {0};
+    sc_array part = {0};
     /* line 47 */
-    array_slice(&a, 1, 3, &(part));
+    sc_array_slice(&a, 1, 3, &(part));
     /* line 48 */
     printf("slice(1,3):");
     /* line 49 */
-    dump(&(part));
+    sc_dump(&(part));
     /* line 51 */
     v = 99;
     /* line 52 */
-    array_set(&a, 0, &(v));
+    sc_array_set(&a, 0, &(v));
     /* line 53 */
-    array_insert(&a, 0, &(key));
+    sc_array_insert(&a, 0, &(key));
     /* line 54 */
     printf("after set/insert:");
     /* line 55 */
-    dump(&(a));
+    sc_dump(&(a));
     /* line 57 */
-    array_erase(&a, 0, 2);
+    sc_array_erase(&a, 0, 2);
     /* line 58 */
     printf("after erase:");
     /* line 59 */
-    dump(&(a));
+    sc_dump(&(a));
     /* line 61 */
-    array_drop(&a);
+    sc_array_drop(&a);
     /* line 62 */
-    array_drop(&b);
+    sc_array_drop(&b);
     /* line 63 */
-    array_drop(&part);
+    sc_array_drop(&part);
     /* line 64 */
     {
         int32_t _ret = 0;

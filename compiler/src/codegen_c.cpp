@@ -12,7 +12,7 @@
 // ============================================================
 #include "codegen_c.h"
 #include "error.h"
-#include "tok/graph.h"   // builtins/tok/graph 图算法规范接口（编译期烘焙 dep…map 深度等图属性为生成代码常量）
+#include "graph/graph.h"   // builtins/graph 图算法规范接口（编译期烘焙 dep…map 深度等图属性为生成代码常量）
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -73,6 +73,17 @@ std::string mapBase(const std::string& n) {
     };
     auto it = m.find(n);
     return it == m.end() ? n : it->second;
+}
+
+// sc 命名域 → C 标识符：默认加 `sc_` 前缀，避免与外部 C 符号命名冲突。
+// 例外：
+//   - C 入口 `main` 保持原名（C 运行时约定）。
+//   - 已带 `sc_`/`sc__` 前缀的内部合成名（lambda/test/模块生命周期/运行时辅助）不重复加。
+// 外部 C 符号不经此函数——它们经前置 `::name`（cBridge）与 `def name::` 原样落 C。
+inline std::string scPfx(const std::string& n) {
+    if (n == "main") return n;
+    if (n.rfind("sc_", 0) == 0) return n;   // 已前缀（含内部 sc__）
+    return "sc_" + n;
 }
 
 // 无类型 var/let 声明（var x: = 初值）时，依据初值字面量推断默认类型。
@@ -311,6 +322,10 @@ struct CGen {
     std::unordered_map<std::string, std::vector<std::string>> varDimsG, varDimsL;
     // 枚举类型名集合（string 格式化按整数）
     std::unordered_set<std::string> enums;
+    // 枚举常量名集合（含各枚举的成员项）：Ident 引用处判定是否加 sc_ 前缀（sc 域常量）。
+    std::unordered_set<std::string> enumConsts;
+    // sc 域宏名集合（def NAME: / def name: 非 :: 桥接宏）：Ident/调用引用处加 sc_ 前缀。
+    std::unordered_set<std::string> macroNames;
     // 容器类型名集合（def T: <C, I> 的 C）：t[key,...] → t.find(...) 糖识别用
     std::unordered_set<std::string> adtColls;
     int forSeq = 0;             // for-in 临时变量序号（生成唯一 _fi/_fb/... 名）
@@ -366,12 +381,24 @@ struct CGen {
     // ---------------- 类型处理 ----------------
     // 解析类型引用，确定 C 中的底层类型名和指针层数
     // 默认规则：无类型无指针→char*，无类型有指针→void*
-    static void resolveType(const TypeRef& t, std::string& base, int& ptr) {
+    // sc 类型名 → C 类型标识符：
+    //   内置基本类型经 mapBase；sc 声明的聚合/别名/枚举/类/函数类型加 `sc_` 前缀；
+    //   其余（外部 C 类型，如 FILE/pthread_t 等）原样透传。
+    std::string mapType_(const std::string& n) const {
+        std::string b = mapBase(n);
+        if (b != n) return b;                       // 内置基本类型（含 object/sc_hyper/va_list）
+        if (aggrOf(n) || aliases.count(n) || enums.count(n) ||
+            classNames.count(n) || funcTypes.count(n))
+            return scPfx(n);                        // sc 声明的类型
+        return n;                                   // 外部 C 类型，原样
+    }
+
+    void resolveType(const TypeRef& t, std::string& base, int& ptr) const {
         if (t.name.empty() && !t.hasInline) {
             if (t.ptr > 0) { base = "void"; ptr = t.ptr; }
             else { base = "char"; ptr = 1; }
         } else {
-            base = mapBase(t.name);
+            base = t.cBridge ? t.name : mapType_(t.name);  // ::name → C 域类型，原样落 C 类型名（不加 sc_ 前缀）
             ptr = t.ptr;
         }
         // 类型侧 const/volatile 限定「指向对象/对象本身」，前缀到底层类型名。
@@ -392,7 +419,7 @@ struct CGen {
         // （rpc 伪形参与普通结构体成员皆可承载分身句柄，其本质即一个结构体）
         if (f.type.project) {
             if (asConst) out << "const ";
-            out << "struct " << f.type.name << "__project "
+            out << "struct " << mapType_(f.type.name) << "__project "
                 << oname(f.name == "this" ? "_this" : f.name);
             return;
         }
@@ -418,8 +445,7 @@ struct CGen {
                 // 每对象方法指针：C 类型隐式前置接收者 T*（声明/调用端隐藏接收者）
                 out << structOwnerTag << " *";
                 firstParam = false;
-            }
-            for (size_t i = 0; i < f.type.structCommon.fields.size(); i++) {
+            }            for (size_t i = 0; i < f.type.structCommon.fields.size(); i++) {
                 if (!firstParam) out << ", ";
                 firstParam = false;
                 emitDeclarator(f.type.structCommon.fields[i]);
@@ -513,7 +539,7 @@ struct CGen {
             if (!seenFwd.insert(d->name).second) continue;
             const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
             fwdOut += std::string("typedef ") + (asUnion ? "union" : "struct")
-                    + " " + d->name + " " + d->name + ";\n";
+                    + " " + mapType_(d->name) + " " + mapType_(d->name) + ";\n";
         }
         // 2) 完整定义：自包含实例（struct/union/enum/alias）
         for (auto& d : prog.decls) {
@@ -699,32 +725,33 @@ struct CGen {
             auto it = aggrs.find(tn);
             if (it == aggrs.end()) continue;
             const Decl* sd = it->second;
-            out << "static inline " << tn << " *" << tn << "__new(void) {\n"
-                << "    " << tn << " *_p = (" << tn << " *)sc_alloc(sizeof(" << tn << "));\n"
+            const std::string tc = mapType_(tn);   // C 符号名（含 sc_ 前缀）；tn 保留原名用于查表
+            out << "static inline " << tc << " *" << tc << "__new(void) {\n"
+                << "    " << tc << " *_p = (" << tc << " *)sc_alloc(sizeof(" << tc << "));\n"
                 << "    if (_p) {\n";
             if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
-                out << "        *_p = " << tn << "__default();\n";
+                out << "        *_p = " << tc << "__default();\n";
             else
-                out << "        memset(_p, 0, sizeof(" << tn << "));\n";
+                out << "        memset(_p, 0, sizeof(" << tc << "));\n";
             if (sd->isClass)
-                out << "        _p->_class = " << tn << "_hyper_impl;\n";
+                out << "        _p->_class = " << tc << "_hyper_impl;\n";
             const Decl* im = findMethod(tn, "init");
             if (im && im->structCommon.fields.empty())
-                out << "        " << im->name << "(_p"
+                out << "        " << scPfx(im->name) << "(_p"
                     << (typeHasFatMember(tn) ? ", SC_OWN_RAW" : "") << ");\n";
             out << "    }\n    return _p;\n}\n\n";
 
             // 带参堆构造 T__new_init：T(args) → T__new() 分配 + init(args) 转发
             // （仅当 init 带用户参数时生成；无参 init 的构造仍走 T__new() 自动 init）
             if (im && !im->structCommon.fields.empty()) {
-                out << "static inline " << tn << " *" << tn << "__new_init(";
+                out << "static inline " << tc << " *" << tc << "__new_init(";
                 for (size_t i = 0; i < im->structCommon.fields.size(); i++) {
                     if (i) out << ", ";
                     emitDeclarator(im->structCommon.fields[i]);
                 }
                 out << ") {\n"
-                    << "    " << tn << " *_p = " << tn << "__new();\n"
-                    << "    if (_p) " << im->name << "(_p";
+                    << "    " << tc << " *_p = " << tc << "__new();\n"
+                    << "    if (_p) " << scPfx(im->name) << "(_p";
                 for (auto& f : im->structCommon.fields)
                     out << ", " << (f.name == "this" ? "_this" : f.name);
                 if (typeHasFatMember(tn)) out << ", SC_OWN_RAW";
@@ -734,32 +761,32 @@ struct CGen {
             // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
             // _atom 参数（T<atom>() 传 SC_REF_ATOM）→ 头 flags 置原子位，引用计数走原子 RMW。
             if (fatTypeNames.count(tn)) {
-                out << "static inline " << tn << " *" << tn << "__new_ref(int32_t _atom) {\n";
+                out << "static inline " << tc << " *" << tc << "__new_ref(int32_t _atom) {\n";
                 if (g_memCheck) {
                     // --check=mem：扩块为 [头哨兵|sc_ref 头|实体|尾哨兵]，头哨兵存{魔数,实体字节数}。
                     out << "    char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof("
-                        << tn << ") + SC_CANARY);\n"
+                        << tc << ") + SC_CANARY);\n"
                         << "    if (!_b) return 0;\n"
                         << "    sc_ref *_h = (sc_ref *)(_b + SC_CANARY);\n"
                         << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom | SC_REF_CANARY;\n"
                         << "    uintptr_t _m = sc_canary_magic(_b);\n"
-                        << "    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(" << tn << ");\n"
-                        << "    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tn << ")) = _m;\n"
-                        << "    " << tn << " *_p = (" << tn << " *)(_b + SC_CANARY + SC_REF_HDR);\n";
+                        << "    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(" << tc << ");\n"
+                        << "    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tc << ")) = _m;\n"
+                        << "    " << tc << " *_p = (" << tc << " *)(_b + SC_CANARY + SC_REF_HDR);\n";
                 } else {
-                    out << "    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(" << tn << "));\n"
+                    out << "    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(" << tc << "));\n"
                         << "    if (!_h) return 0;\n"
                         << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;\n"
-                        << "    " << tn << " *_p = (" << tn << " *)((char *)_h + SC_REF_HDR);\n";
+                        << "    " << tc << " *_p = (" << tc << " *)((char *)_h + SC_REF_HDR);\n";
                 }
                 if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
-                    out << "    *_p = " << tn << "__default();\n";
+                    out << "    *_p = " << tc << "__default();\n";
                 else
-                    out << "    memset(_p, 0, sizeof(" << tn << "));\n";
+                    out << "    memset(_p, 0, sizeof(" << tc << "));\n";
                 if (sd->isClass)
-                    out << "    _p->_class = " << tn << "_hyper_impl;\n";
+                    out << "    _p->_class = " << tc << "_hyper_impl;\n";
                 if (im && im->structCommon.fields.empty())
-                    out << "    " << im->name << "(_p"
+                    out << "    " << scPfx(im->name) << "(_p"
                         << (typeHasFatMember(tn) ? ", &_h->out" : "") << ");\n";
                 out << "    return _p;\n}\n\n";
 
@@ -767,14 +794,14 @@ struct CGen {
                 // __new_ref，init 带参时其内不自动 init）+ init(args) 转发。含胖成员时
                 // self_own 取本对象真实出边 &_h->out（由 _p 回退 SC_REF_HDR 还原头）。
                 if (im && !im->structCommon.fields.empty()) {
-                    out << "static inline " << tn << " *" << tn << "__new_ref_init(";
+                    out << "static inline " << tc << " *" << tc << "__new_ref_init(";
                     for (size_t i = 0; i < im->structCommon.fields.size(); i++) {
                         if (i) out << ", ";
                         emitDeclarator(im->structCommon.fields[i]);
                     }
                     out << ", int32_t _atom) {\n"
-                        << "    " << tn << " *_p = " << tn << "__new_ref(_atom);\n"
-                        << "    if (_p) " << im->name << "(_p";
+                        << "    " << tc << " *_p = " << tc << "__new_ref(_atom);\n"
+                        << "    if (_p) " << scPfx(im->name) << "(_p";
                     for (auto& f : im->structCommon.fields)
                         out << ", " << (f.name == "this" ? "_this" : f.name);
                     if (typeHasFatMember(tn))
@@ -785,8 +812,9 @@ struct CGen {
         }
         // future<ID>(ctx?) 构造：在 future__new 基础上打 id 标签 + 可选用户上下文 ctx
         if (usesFutureId) {
-            out << "static inline future *future__new_tagged(int _id, void *_ctx) {\n"
-                << "    future *_p = future__new();\n"
+            const std::string fc = mapType_("future");
+            out << "static inline " << fc << " *" << fc << "__new_tagged(int _id, void *_ctx) {\n"
+                << "    " << fc << " *_p = " << fc << "__new();\n"
                 << "    if (_p) { _p->id = _id; _p->ctx = _ctx; }\n"
                 << "    return _p;\n}\n\n";
         }
@@ -801,18 +829,18 @@ struct CGen {
     void emitIndexHelpers() {
         for (const Decl* fm : indexHelperFinds) {
             const TypeRef& ot = fm->structCommon.fields[0].type;        // out: I&&
-            const std::string itemTy = mapBase(resolveAliasName(ot.name));
+            const std::string itemTy = mapType_(resolveAliasName(ot.name));
             auto elemPtrStars = [&]{ for (int i = 1; i < ot.ptr; i++) out << "*"; };  // _o 比 out 少一级指针
             out << "static inline " << itemTy << " ";
             elemPtrStars();
-            out << fm->name << "__idx(" << fm->methodOwner << " *_self";
+            out << scPfx(fm->name) << "__idx(" << mapType_(fm->methodOwner) << " *_self";
             for (size_t i = 1; i < fm->structCommon.fields.size(); i++) {
                 out << ", ";
                 emitDeclarator(fm->structCommon.fields[i]);
             }
             out << ") {\n    " << itemTy << " ";
             elemPtrStars();
-            out << "_o = (void *)0;\n    return (" << fm->name << "(_self, &_o";
+            out << "_o = (void *)0;\n    return (" << scPfx(fm->name) << "(_self, &_o";
             for (size_t i = 1; i < fm->structCommon.fields.size(); i++)
                 out << ", " << fm->structCommon.fields[i].name;
             out << ") == 0) ? _o : (void *)0;\n}\n\n";
@@ -912,8 +940,8 @@ struct CGen {
     std::string cTypeOf(const std::string& name, int ptr) const {
         std::string base;
         if (name.empty()) base = ptr > 0 ? "void" : "char";
-        else if (const Decl* sd = aggrOf(name)) base = sd->name;
-        else base = mapBase(resolveAliasName(name));
+        else if (const Decl* sd = aggrOf(name)) base = mapType_(sd->name);
+        else base = mapType_(resolveAliasName(name));
         std::string s = base;
         if (ptr > 0) {
             s += " ";
@@ -987,7 +1015,7 @@ struct CGen {
             if (o.first == "compact") optCompact = o.second;
             else throw CompileError{"stringify 选项未知键：'" + o.first + "'（当前仅支持 compact）", e.line};
         }
-        std::string optLit = "(stringify_t){ .compact = " + std::to_string(optCompact) + " }";
+        std::string optLit = "(sc_stringify_t){ .compact = " + std::to_string(optCompact) + " }";
         out << "stringify_" << r.key << (buf ? "_buf" : "") << "(";
         emitExpr(*e.args[0], true);
         if (buf) {
@@ -1023,23 +1051,23 @@ struct CGen {
         if (di < dims.size()) {
             // 一维 char 数组：按文本引用输出
             if (sc == 'c' && ptr == 0 && dims.size() - di == 1) {
-                pad(); out << "string_append_char(_o, '\"');\n";
-                pad(); out << "string_append_n(_o, (char *)(" << lv << "), strnlen("
+                pad(); out << "sc_string_append_char(_o, '\"');\n";
+                pad(); out << "sc_string_append_n(_o, (char *)(" << lv << "), strnlen("
                            << lv << ", (size_t)(" << dims[di] << ")));\n";
-                pad(); out << "string_append_char(_o, '\"');\n";
+                pad(); out << "sc_string_append_char(_o, '\"');\n";
                 return;
             }
             std::string iv = "_i" + std::to_string(di);
             std::string childDepth = "(" + depthC + ") + 1";
-            pad(); out << "string_append_char(_o, '[');\n";
+            pad(); out << "sc_string_append_char(_o, '[');\n";
             pad(); out << "for (size_t " << iv << " = 0; " << iv << " < (size_t)("
                        << dims[di] << "); " << iv << "++) {\n";
-            pad(); out << "    if (" << iv << ") string_append(_o, \",\");\n";
+            pad(); out << "    if (" << iv << ") sc_string_append(_o, \",\");\n";
             pad(); out << "    sc__sof_nl(_o, _opt, " << childDepth << ");\n";
             emitSofValue(lv + "[" + iv + "]", name, ptr, dims, di + 1, ind + 1, childDepth);
             pad(); out << "}\n";
             pad(); out << "if ((size_t)(" << dims[di] << ")) sc__sof_nl(_o, _opt, " << depthC << ");\n";
-            pad(); out << "string_append_char(_o, ']');\n";
+            pad(); out << "sc_string_append_char(_o, ']');\n";
             return;
         }
         if (ptr > 0) {
@@ -1053,7 +1081,7 @@ struct CGen {
                     << lv << "));\n";
             } else if (ptr == 1 && sc && sc != 'c') {
                 // 标量一级指针：&值（nil → nil）
-                out << "if (!(" << lv << ")) string_append(_o, \"nil\");\n";
+                out << "if (!(" << lv << ")) sc_string_append(_o, \"nil\");\n";
                 pad();
                 switch (sc) {
                     case 'i': out << "else sc__sof_amp_i64(_o, (long long)(*(" << lv << ")));\n"; break;
@@ -1080,40 +1108,40 @@ struct CGen {
         const Decl* sd = aggrOf(name);
         if (sd && sd->name == "string") { pad(); out << "sc__sof_str(_o, &(" << lv << "));\n"; return; }
         if (sd) { pad(); out << "sc__sof_" << sd->name << "(_o, &(" << lv << "), _opt, " << depthC << ");\n"; return; }
-        pad(); out << "string_append(_o, \"null\");\n";
+        pad(); out << "sc_string_append(_o, \"null\");\n";
     }
 
     // 聚合格式化器：{"字段": 值, ...}（JSON：键加双引号；synthetic/函数指针字段跳过）
     // compact=1 紧凑单行；否则多行美化（2 空格逐层缩进）。
     void emitSofAggrBody(const Decl& sd) {
-        out << "static void sc__sof_" << sd.name << "(string *_o, " << sd.name
-            << " *_v, stringify_t _opt, int _depth) {\n"
-            << "    string_append(_o, \"{\");\n";
+        out << "static void sc__sof_" << sd.name << "(sc_string *_o, " << mapType_(sd.name)
+            << " *_v, sc_stringify_t _opt, int _depth) {\n"
+            << "    sc_string_append(_o, \"{\");\n";
         bool any = false;
         for (auto& f : sd.structCommon.fields) {
             if (f.synthetic || f.type.fnKind != TypeRef::FncKind::None) continue;
-            if (any) out << "    string_append(_o, \",\");\n";
+            if (any) out << "    sc_string_append(_o, \",\");\n";
             out << "    sc__sof_nl(_o, _opt, _depth + 1);\n";
-            out << "    string_append(_o, _opt.compact ? \"\\\"" << f.name << "\\\":\" : \"\\\""
+            out << "    sc_string_append(_o, _opt.compact ? \"\\\"" << f.name << "\\\":\" : \"\\\""
                 << f.name << "\\\": \");\n";
-            if (f.type.hasInline) out << "    string_append(_o, \"null\");\n";
+            if (f.type.hasInline) out << "    sc_string_append(_o, \"null\");\n";
             else emitSofValue("_v->" + f.name, f.type.name, f.type.ptr,
                               f.type.arrayDims, 0, 1, "_depth + 1");
             any = true;
         }
         if (any) out << "    sc__sof_nl(_o, _opt, _depth);\n";
-        out << "    string_append(_o, \"}\");\n}\n\n";
+        out << "    sc_string_append(_o, \"}\");\n}\n\n";
     }
 
     // 顶层包装：string *stringify_KEY(T, stringify_t) —— 堆构造 string、格式化、返回指针
     //（string 为堆专属类型，调用方负责 .drop()/sc_free）
     void emitSofWrapper(const SofReq& r) {
-        out << "static string *stringify_" << r.key << "(" << r.cParam << ", stringify_t _opt) {\n"
-            << "    string *_o = string__new();\n";
+        out << "static sc_string *stringify_" << r.key << "(" << r.cParam << ", sc_stringify_t _opt) {\n"
+            << "    sc_string *_o = sc_string__new();\n";
         const Decl* sd = aggrOf(r.name);
         if (r.dims.empty() && r.ptr == 1 && sd) {
             // 聚合一级指针：解引用展开内容（nil → "nil"）
-            out << "    if (!_v) string_append(_o, \"nil\");\n";
+            out << "    if (!_v) sc_string_append(_o, \"nil\");\n";
             if (sd->name == "string") out << "    else sc__sof_str(_o, _v);\n";
             else out << "    else sc__sof_" << sd->name << "(_o, _v, _opt, 0);\n";
         } else {
@@ -1123,13 +1151,13 @@ struct CGen {
         if (!r.needBuf) return;
         // 缓存变体：char *stringify_KEY_buf(T, 缓存, 大小, stringify_t) —— 截断拷贝进缓存，返回缓存首址
         out << "static char *stringify_" << r.key << "_buf(" << r.cParam
-            << ", char *_buf, uint64_t _n, stringify_t _opt) {\n"
+            << ", char *_buf, uint64_t _n, sc_stringify_t _opt) {\n"
             << "    if (!_buf || !_n) return _buf;\n"
-            << "    string *_s = stringify_" << r.key << "(_v, _opt);\n"
+            << "    sc_string *_s = stringify_" << r.key << "(_v, _opt);\n"
             << "    uint64_t _l = _s->size < _n - 1 ? _s->size : _n - 1;\n"
             << "    if (_l && _s->data) memcpy(_buf, _s->data, (size_t)_l);\n"
             << "    _buf[_l] = 0;\n"
-            << "    string_drop(_s);\n"
+            << "    sc_string_drop(_s);\n"
             << "    sc_free(_s);\n"
             << "    return _buf;\n}\n\n";
     }
@@ -1153,44 +1181,44 @@ struct CGen {
                    "   （由生成的 .c 自动完成）。 */\n";
         }
         out << "/* ---- stringify 关键字支撑：格式化原语与按类型生成的格式化器（JSON） ---- */\n"
-            << "static inline void sc__sof_i64(string *_o, long long _v) {\n"
-            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%lld\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_u64(string *_o, unsigned long long _v) {\n"
-            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%llu\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_f64(string *_o, double _v) {\n"
-            << "    char _b[40]; snprintf(_b, sizeof(_b), \"%g\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_bool(string *_o, unsigned char _v) {\n"
-            << "    string_append(_o, _v ? \"true\" : \"false\"); }\n"
-            << "static inline void sc__sof_char(string *_o, char _v) {\n"
-            << "    string_append_char(_o, '\\''); string_append_char(_o, _v); string_append_char(_o, '\\''); }\n"
-            << "static inline void sc__sof_cstr(string *_o, const char *_v) {\n"
-            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
-            << "    string_append_char(_o, '\"'); string_append(_o, (char *)_v); string_append_char(_o, '\"'); }\n"
-            << "static inline void sc__sof_ptr(string *_o, const void *_v) {\n"
-            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
+            << "static inline void sc__sof_i64(sc_string *_o, long long _v) {\n"
+            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%lld\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_u64(sc_string *_o, unsigned long long _v) {\n"
+            << "    char _b[24]; snprintf(_b, sizeof(_b), \"%llu\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_f64(sc_string *_o, double _v) {\n"
+            << "    char _b[40]; snprintf(_b, sizeof(_b), \"%g\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_bool(sc_string *_o, unsigned char _v) {\n"
+            << "    sc_string_append(_o, _v ? \"true\" : \"false\"); }\n"
+            << "static inline void sc__sof_char(sc_string *_o, char _v) {\n"
+            << "    sc_string_append_char(_o, '\\''); sc_string_append_char(_o, _v); sc_string_append_char(_o, '\\''); }\n"
+            << "static inline void sc__sof_cstr(sc_string *_o, const char *_v) {\n"
+            << "    if (!_v) { sc_string_append(_o, \"nil\"); return; }\n"
+            << "    sc_string_append_char(_o, '\"'); sc_string_append(_o, (char *)_v); sc_string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_ptr(sc_string *_o, const void *_v) {\n"
+            << "    if (!_v) { sc_string_append(_o, \"nil\"); return; }\n"
             << "    char _b[24]; snprintf(_b, sizeof(_b), \"0x%llx\", (unsigned long long)(uintptr_t)_v);\n"
-            << "    string_append(_o, _b); }\n"
-            << "static inline void sc__sof_named_ptr(string *_o, const char *_tn, const void *_v) {\n"
-            << "    if (!_v) { string_append(_o, \"nil\"); return; }\n"
+            << "    sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_named_ptr(sc_string *_o, const char *_tn, const void *_v) {\n"
+            << "    if (!_v) { sc_string_append(_o, \"nil\"); return; }\n"
             << "    char _b[28]; snprintf(_b, sizeof(_b), \"@0x%llx\", (unsigned long long)(uintptr_t)_v);\n"
-            << "    string_append_char(_o, '\"'); string_append(_o, (char *)_tn);\n"
-            << "    string_append(_o, _b); string_append_char(_o, '\"'); }\n"
-            << "static inline void sc__sof_amp_i64(string *_o, long long _v) {\n"
-            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%lld\\\"\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_amp_u64(string *_o, unsigned long long _v) {\n"
-            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%llu\\\"\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_amp_f64(string *_o, double _v) {\n"
-            << "    char _b[44]; snprintf(_b, sizeof(_b), \"\\\"&%g\\\"\", _v); string_append(_o, _b); }\n"
-            << "static inline void sc__sof_amp_bool(string *_o, unsigned char _v) {\n"
-            << "    string_append(_o, _v ? \"\\\"&true\\\"\" : \"\\\"&false\\\"\"); }\n"
-            << "static inline void sc__sof_str(string *_o, string *_v) {\n"
-            << "    string_append_char(_o, '\"');\n"
-            << "    if (_v->data) string_append_n(_o, _v->data, _v->size);\n"
-            << "    string_append_char(_o, '\"'); }\n"
-            << "static inline void sc__sof_nl(string *_o, stringify_t _opt, int _depth) {\n"
+            << "    sc_string_append_char(_o, '\"'); sc_string_append(_o, (char *)_tn);\n"
+            << "    sc_string_append(_o, _b); sc_string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_amp_i64(sc_string *_o, long long _v) {\n"
+            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%lld\\\"\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_u64(sc_string *_o, unsigned long long _v) {\n"
+            << "    char _b[28]; snprintf(_b, sizeof(_b), \"\\\"&%llu\\\"\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_f64(sc_string *_o, double _v) {\n"
+            << "    char _b[44]; snprintf(_b, sizeof(_b), \"\\\"&%g\\\"\", _v); sc_string_append(_o, _b); }\n"
+            << "static inline void sc__sof_amp_bool(sc_string *_o, unsigned char _v) {\n"
+            << "    sc_string_append(_o, _v ? \"\\\"&true\\\"\" : \"\\\"&false\\\"\"); }\n"
+            << "static inline void sc__sof_str(sc_string *_o, sc_string *_v) {\n"
+            << "    sc_string_append_char(_o, '\"');\n"
+            << "    if (_v->data) sc_string_append_n(_o, _v->data, _v->size);\n"
+            << "    sc_string_append_char(_o, '\"'); }\n"
+            << "static inline void sc__sof_nl(sc_string *_o, sc_stringify_t _opt, int _depth) {\n"
             << "    if (_opt.compact) return;\n"
-            << "    string_append_char(_o, '\\n');\n"
-            << "    for (int _i = 0; _i < _depth; _i++) string_append(_o, \"  \"); }\n\n";
+            << "    sc_string_append_char(_o, '\\n');\n"
+            << "    for (int _i = 0; _i < _depth; _i++) sc_string_append(_o, \"  \"); }\n\n";
         // 聚合传递闭包（仅按需：按值聚合 / 一维数组元素 / 一级指针解引用）
         for (auto& kv : sofReqs) {
             const SofReq& r = kv.second;
@@ -1198,7 +1226,7 @@ struct CGen {
             else if (r.ptr <= 1) collectSofAggr(r.name);
         }
         for (auto& n : sofAggrs)
-            out << "static void sc__sof_" << n << "(string *_o, " << n << " *_v, stringify_t _opt, int _depth);\n";
+            out << "static void sc__sof_" << n << "(sc_string *_o, " << mapType_(n) << " *_v, sc_stringify_t _opt, int _depth);\n";
         if (!sofAggrs.empty()) out << "\n";
         for (auto& n : sofAggrs) emitSofAggrBody(*aggrs.at(n));
         for (auto& kv : sofReqs) emitSofWrapper(kv.second);
@@ -1273,7 +1301,7 @@ struct CGen {
         if (typeName == "object") return "(void (*)(void *))sc_obj_drop";
         const Decl* dm = findMethod(typeName, "drop");
         if (!dm) return "";
-        return "(void (*)(void *))" + dm->name;
+        return "(void (*)(void *))" + scPfx(dm->name);
     }
 
     // 发一条胖指针解绑语句：有 dtorArg 走 sc_fat_unbind_d（带目标类型析构），否则 sc_fat_unbind。
@@ -1867,8 +1895,9 @@ struct CGen {
     }
 
     // 胖指针 base 解析为裸 T*：((T*)(<base>).p)，供成员/解引用复用
+    // 类型名经 mapType_ 归一（sc 声明类型 → sc_ 前缀名），避免发出裸 sc 域类型名。
     void emitFatBaseAsRaw(const Expr& base, const std::string& tt) {
-        out << "((" << tt << " *)(";
+        out << "((" << mapType_(tt) << " *)(";
         emitExpr(base, true);
         out << ").p)";
     }
@@ -1901,7 +1930,7 @@ struct CGen {
         resolveType(p.type, base, ptr);
         if (ptr > 0 || !p.type.arrayDims.empty()) { out << "NULL"; return; }
         if (const Decl* sd = aggrOf(p.type.name)) {
-            out << "(" << sd->name << "){0}";
+            out << "(" << mapType_(sd->name) << "){0}";
             return;
         }
         out << "0";
@@ -1918,7 +1947,7 @@ struct CGen {
                 std::string pbase = resolveAliasName(param->type.name);
                 if (ad && !ad->adtItem.empty() && !pbase.empty()
                     && pbase == resolveAliasName(ad->adtItem)) {
-                    out << "(" << mapBase(pbase);
+                    out << "(" << mapType_(pbase);
                     for (int i = 0; i < param->type.ptr; i++) out << " *";
                     out << ")(";
                     emitExpr(arg, true);
@@ -2017,7 +2046,14 @@ struct CGen {
                     out << "SC_TRIL_POS";
                 else if (curRpc && rpcParams.count(e.text))
                     out << "_p->" << e.text;               // rpc 实际函数内：参数即结构体成员
-                else out << e.text;                        // true/false 由 stdbool.h 提供
+                else if (localsT.count(e.text)) out << e.text;   // 局部/参数：块作用域，不加前缀
+                else if (globalsT.count(e.text) || funcs.count(e.text) ||
+                         rpcs.count(e.text) || enumConsts.count(e.text) ||
+                         macroNames.count(e.text))
+                    out << scPfx(e.text);                  // sc 域全局/函数/rpc/枚举常量/宏：加 sc_ 前缀
+                else if (mapType_(e.text) != e.text)
+                    out << mapType_(e.text);               // sc 声明的类型名作表达式（如 mix 宏的类型实参 def_vec(Point,..)）→ 映射为 C 类型名 sc_Point
+                else out << e.text;                        // true/false（stdbool.h）、外部 C（由 ::/def 或语义层把关）
                 break;
             case Expr::Unary:
                 // --check=ptr：裸指针解引用 *p → *SC_PTRCHK(p, site)（nil 校验，胖指针走独立路径不拦）
@@ -2108,7 +2144,7 @@ struct CGen {
 
                         // base(o: T) 直接把节点首址重解释为 T*
                         auto emitBaseCast = [&](const Expr& castExpr) {
-                            out << "((" << mapBase(castExpr.text);
+                            out << "((" << mapType_(castExpr.text);
                             for (int i = 0; i < castExpr.castPtr + 1; i++) out << "*";
                             out << ")(";
                             emitRawSrc();
@@ -2146,14 +2182,14 @@ struct CGen {
                                 requireChain(e.line);
                                 if (typed) {
                                     const Expr& c = *e.args[0];
-                                    out << "((" << mapBase(c.text);
+                                    out << "((" << mapType_(c.text);
                                     for (int i = 0; i < c.castPtr + 1; i++) out << "*";
-                                    out << ")chain_prev(";
+                                    out << ")sc_chain_prev(";
                                     emitRawSrc();
                                     out << "))";
                                     break;
                                 }
-                                out << "((void *)chain_prev(";
+                                out << "((void *)sc_chain_prev(";
                                 emitRawSrc();
                                 out << "))";
                                 break;
@@ -2161,7 +2197,7 @@ struct CGen {
                             if (typed) {
                                 // next(o: T) → 读链接字段并转为 T*
                                 const Expr& c = *e.args[0];
-                                out << "((" << mapBase(c.text);
+                                out << "((" << mapType_(c.text);
                                 for (int i = 0; i < c.castPtr + 1; i++) out << "*";
                                 out << ")*(void **)((char *)(";
                                 emitRawSrc();
@@ -2185,7 +2221,7 @@ struct CGen {
                     // 既保证语义优先级又避免 if 条件直接套等式的 -Wparentheses-equality 告警。
                     out << "*(";
                     emitExpr(*e.args[0], true);
-                    out << ") == " << e.args[1]->text << "_hyper_impl";
+                    out << ") == " << mapType_(e.args[1]->text) << "_hyper_impl";
                     break;
                 }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
@@ -2196,7 +2232,7 @@ struct CGen {
                         throw CompileError("atom 标记仅用于自动指针 T@ 目标构造，"
                                            "普通堆构造 T() 不支持", e.line);
                     if (!e.futureId.empty()) {  // future<ID>(ctx?) → 打 id 标签 + 可选 ctx
-                        out << td->name << "__new_tagged(" << e.futureId << ", ";
+                        out << mapType_(td->name) << "__new_tagged(" << scPfx(e.futureId) << ", ";
                         if (e.args.empty()) out << "(void *)0";
                         else emitExpr(*e.args[0], true);
                         out << ")";
@@ -2209,14 +2245,14 @@ struct CGen {
                         if (e.args.size() != im->structCommon.fields.size())
                             throw CompileError("构造 '" + td->name +
                                 "(...)' 实参个数与 init 形参不符", e.line);
-                        out << td->name << "__new_init(";
+                        out << mapType_(td->name) << "__new_init(";
                         for (size_t i = 0; i < e.args.size(); i++) {
                             if (i) out << ", ";
                             emitMethodArg(*e.args[i], &im->structCommon.fields[i]);
                         }
                         out << ")";
                     } else
-                        out << td->name << "__new()";
+                        out << mapType_(td->name) << "__new()";
                     break;
                 }
                 // print 关键字：C 风格日志输出（io 子项目 print，未被同名定义遮蔽时）
@@ -2224,7 +2260,7 @@ struct CGen {
                     && !localsT.count("print") && !globalsT.count("print") && !funcs.count("print")) {
                     if (e.args.empty())
                         throw CompileError{"print 需要格式串实参", e.line};
-                    out << "print(";
+                    out << "sc_print(";
                     for (size_t i = 0; i < e.args.size(); i++) {
                         if (i) out << ", ";
                         emitExpr(*e.args[i], true);
@@ -2248,13 +2284,13 @@ struct CGen {
                             if (!e.args.empty())
                                 throw CompileError("标签联合变体 " + td->name + "." + vf->name +
                                                    " 无载荷，不能带实参构造", e.line);
-                            out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name << " })";
+                            out << "((" << mapType_(td->name) << "){ .tag = " << mapType_(td->name) << "__" << vf->name << " })";
                             break;
                         }
                         if (e.args.size() != 1)
                             throw CompileError("标签联合变体 " + td->name + "." + vf->name +
                                                " 需要且仅需要一个载荷实参", e.line);
-                        out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name
+                        out << "((" << mapType_(td->name) << "){ .tag = " << mapType_(td->name) << "__" << vf->name
                             << ", .u." << vf->name << " = ";
                         emitExpr(*e.args[0], true);
                         out << " })";
@@ -2272,7 +2308,7 @@ struct CGen {
                             && base.ptr == 1 && isHeapOnly(base.name)) {
                             const Decl* dm = findMethod(base.name, "drop");
                             out << "(";
-                            if (dm) { out << dm->name << "("; emitExpr(*e.a->a); out << "), "; }
+                            if (dm) { out << scPfx(dm->name) << "("; emitExpr(*e.a->a); out << "), "; }
                             out << "sc_free(";
                             emitExpr(*e.a->a);
                             out << "))";
@@ -2281,7 +2317,7 @@ struct CGen {
                         // 维度调用糖：cls 实例 o.Dim(args) → T_hyper_impl(&o._class, SC_DIM_Dim, args)
 
                         if (classNames.count(base.name) && isDimCallName(e.a->text)) {
-                            out << base.name << "_hyper_impl(&";
+                            out << mapType_(base.name) << "_hyper_impl(&";
                             if (base.fat) { out << "("; emitFatBaseAsRaw(*e.a->a, base.name); out << ")->_class"; }
                             else if (e.a->op == ".") { out << "("; emitExpr(*e.a->a); out << ")._class"; }
                             else { out << "("; emitExpr(*e.a->a); out << ")->_class"; }
@@ -2305,7 +2341,7 @@ struct CGen {
                             break;
                         }
                         if (const Decl* md = findMethod(base.name, e.a->text)) {
-                            out << md->name << "(";   // 修饰名 T_m
+                            out << scPfx(md->name) << "(";   // 修饰名 T_m
                             if (base.fat) {
                                 // 胖指针接收者：传底层堆对象指针 (T*)(recv).p（已是 T*，不取址）
                                 emitFatBaseAsRaw(*e.a->a, base.name);
@@ -2451,7 +2487,7 @@ struct CGen {
                         bool seen = false;
                         for (const Decl* h : indexHelperFinds) if (h == fm) { seen = true; break; }
                         if (!seen) indexHelperFinds.push_back(fm);
-                        out << fm->name << "__idx(";
+                        out << scPfx(fm->name) << "__idx(";
                         if (recv.ptr == 0) out << "&";                 // 值接收者自动取址
                         emitExpr(*e.a);
                         // 检索键（首键 e.b + 其余 e.args）逐一过 find 参数（自动 T&⟷I& 转换）
@@ -2504,7 +2540,7 @@ struct CGen {
                             throw CompileError("标签联合变体 " + td->name + "." + vf->name +
                                                " 带载荷，构造须写 " + td->name + "." + vf->name +
                                                "(载荷)", e.line);
-                        out << "((" << td->name << "){ .tag = " << td->name << "__" << vf->name << " })";
+                        out << "((" << mapType_(td->name) << "){ .tag = " << mapType_(td->name) << "__" << vf->name << " })";
                         break;
                     }
                 }
@@ -2524,7 +2560,7 @@ struct CGen {
                         const Decl* sd = aggrOf(base.name);
                         if (sd && sd->linked) {
                             requireChain(e.line);
-                            out << "((void *)chain_prev(";
+                            out << "((void *)sc_chain_prev(";
                             if (e.op == "->") emitExpr(*e.a);
                             else { out << "&("; emitExpr(*e.a, true); out << ")"; }
                             out << "))";
@@ -2565,7 +2601,7 @@ struct CGen {
                 out << "sizeof(";
                 // 若内层是单纯标识符且是 sc 内置类型名，做类型映射再输出
                 if (e.a && e.a->kind == Expr::Ident) {
-                    const std::string mapped = mapBase(e.a->text);
+                    const std::string mapped = mapType_(e.a->text);
                     if (mapped != e.a->text) { out << mapped; }
                     else emitExpr(*e.a, true);
                 } else {
@@ -2575,7 +2611,7 @@ struct CGen {
                 break;
             }
             case Expr::Offsetof:
-                out << "offsetof(" << e.text << ", " << e.op << ")";
+                out << "offsetof(" << mapType_(e.text) << ", " << e.op << ")";
                 break;
             case Expr::Cast: {
                 // print 格式覆盖 (expr: "%fmt") 仅能出现在 print 实参（在 emitPrintStmt
@@ -2603,7 +2639,7 @@ struct CGen {
                             if (srcFat && srcT != "object" && classNames.count(srcT)) {
                                 out << "sc_fat_as_thin_addoff(";
                                 emitExpr(*e.a, true);
-                                out << ", offsetof(" << srcT
+                                out << ", offsetof(" << mapType_(srcT)
                                     << ", _class), (void (*)(void *))sc_obj_drop)";
                                 break;
                             }
@@ -2616,7 +2652,7 @@ struct CGen {
                             if (classNames.count(e.op)) {
                                 out << "sc_thin_as_fat_suboff(";
                                 emitExpr(*e.a, true);
-                                out << ", offsetof(" << e.op
+                                out << ", offsetof(" << mapType_(e.op)
                                     << ", _class), (void (*)(void *))sc_obj_drop)";
                             } else {
                                 out << "sc_thin_as_fat(";
@@ -2647,7 +2683,7 @@ struct CGen {
                         if (srcFat && srcT != "object" && classNames.count(srcT)) {
                             out << "sc_fat_as_afat_addoff(";
                             emitExpr(*e.a, true);
-                            out << ", offsetof(" << srcT
+                            out << ", offsetof(" << mapType_(srcT)
                                 << ", _class), (void (*)(void *))sc_obj_drop)";
                             break;
                         }
@@ -2669,7 +2705,7 @@ struct CGen {
                         if (srcFat && srcT == "object" && classNames.count(e.op)) {
                             out << "sc_fat_suboff(";
                             emitExpr(*e.a, true);
-                            out << ", offsetof(" << e.op << ", _class))";
+                            out << ", offsetof(" << mapType_(e.op) << ", _class))";
                             break;
                         }
                         if (srcFat && !srcT.empty()) { out << "("; emitExpr(*e.a, true); out << ")"; break; }
@@ -2690,7 +2726,7 @@ struct CGen {
                             // 还原为具体类 T@：运行时按风味补偏移（object 风味 .p=&_class 须减偏移）。
                             out << "sc_afat_as_fat_suboff(";
                             emitExpr(*e.a, true);
-                            out << ", offsetof(" << e.op
+                            out << ", offsetof(" << mapType_(e.op)
                                 << ", _class), (void (*)(void *))sc_obj_drop)";
                             break;
                         }
@@ -2720,7 +2756,7 @@ struct CGen {
                     out << "((";
                     if (e.castConst) out << "const ";
                     if (e.castVolatile) out << "volatile ";
-                    out << (e.op.empty() ? "void" : mapBase(e.op));   // op 为空 → 裸 &/&&（void*/void**）
+                    out << (e.op.empty() ? "void" : (e.castCBridge ? e.op : mapType_(e.op)));   // op 为空 → 裸 &/&&（void*/void**）；::T → C 域类型原样
                     for (int i = 0; i < e.castPtr; i++) out << "*";
                     if (e.castRestrict) out << " restrict";
                     out << ")(";
@@ -2767,7 +2803,7 @@ struct CGen {
                 //   （rpc 延迟应答；rpc 体 return 不再自动应答，须之后 done s, result 兑现）。
                 //   经 op 内核 op_session_current() 取（顺带标记「已领取」=转延迟），零 emit mt 符号。
                 if (!e.a) {
-                    out << "op_session_current()";
+                    out << "sc_op_session_current()";
                     break;
                 }
                 if (e.b) {                           // 带队列目标：非阻塞带回复，求值为 promise&
@@ -2794,7 +2830,7 @@ struct CGen {
                     emitComBasePtr(*e.b, isPtr);
                     out << "->async(";
                     emitComBasePtr(*e.b, isPtr);
-                    out << ", (void (*)(void *))" << r->name << "_rpc, &(struct " << r->name << "){";
+                    out << ", (void (*)(void *))" << scPfx(r->name) << "_rpc, &(struct " << scPfx(r->name) << "){";
                     bool firstInit = true;
                     for (size_t i = 0; i < call.args.size(); i++) {
                         const Field& f = r->structCommon.fields[i];
@@ -2808,7 +2844,7 @@ struct CGen {
                         }
                     }
                     if (firstInit) out << "0";   // 无实参：避免空初始化列表（C 不允许 {}）
-                    out << "}, sizeof(struct " << r->name << "), ";
+                    out << "}, sizeof(struct " << scPfx(r->name) << "), ";
                     emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
                     emitOptOr0(e.syncOpts, "delay", "int64_t");
                     out << ")";
@@ -2818,7 +2854,7 @@ struct CGen {
                     throw CompileError{"无队列目标 async（事件循环 future&）不接受 <prio/delay> 选项", e.line};
                 if (e.a && e.a->kind == Expr::Call && e.a->a && e.a->a->kind == Expr::Ident) {
                     const Expr& call = *e.a;
-                    out << call.a->text << "__async(";
+                    out << scPfx(call.a->text) << "__async(";
                     emitAsyncCallArgs(call);
                     out << ")";
                 }
@@ -2857,7 +2893,7 @@ struct CGen {
                     throw CompileError{"sync<q> 的目标须为 queue 端点", e.line};
                 checkRpcOptKeys(e, true);   // <prio:N, delay:ms, timeout:ms>
                 const bool isPtr = qvt.ptr >= 1;
-                out << "({ struct " << r->name << " _rp = {0}; ";
+                out << "({ struct " << scPfx(r->name) << " _rp = {0}; ";
                 for (size_t i = 0; i < call.args.size(); i++) {
                     const Field& f = r->structCommon.fields[i];
                     out << "_rp." << f.name << " = ";
@@ -2878,7 +2914,7 @@ struct CGen {
                 emitComBasePtr(*e.b, isPtr);
                 out << "->sync(";
                 emitComBasePtr(*e.b, isPtr);
-                out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
+                out << ", (void (*)(void *))" << scPfx(r->name) << "_rpc, &_rp, sizeof(_rp), ";
                 emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
                 emitOptOr0(e.syncOpts, "delay", "int64_t"); out << ", ";
                 emitOptOr0(e.syncOpts, "timeout", "int64_t");
@@ -2960,7 +2996,7 @@ struct CGen {
                 return true;
             }
             std::string baseStr = captureExpr(*lhs.a);
-            lv = "((" + tt + " *)(" + baseStr + ").p)->" + lhs.text;
+            lv = "((" + mapType_(tt) + " *)(" + baseStr + ").p)->" + lhs.text;
             own = "&((sc_ref *)(" + baseStr + ").tar)->out";
             return true;
         }
@@ -3019,13 +3055,13 @@ struct CGen {
         // T()/T(args) → 带头分配 + 绑定（dtor 取静态类型析构）
         if (const Decl* td = typeCallee(init)) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
-            indent(); out << td->name << " *" << tmp << " = ";
+            indent(); out << mapType_(td->name) << " *" << tmp << " = ";
             if (!init.args.empty()) {
-                out << td->name << "__new_ref_init(";
+                out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
                 out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             } else {
-                out << td->name << "__new_ref(" << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                out << mapType_(td->name) << "__new_ref(" << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             }
             indent();
             if (classNames.count(td->name)) {
@@ -3048,7 +3084,7 @@ struct CGen {
                           : (classNames.count(st) && st != "object" ? "(void (*)(void *))sc_obj_drop"
                              : (fatDtorArg(st).empty() ? "(void (*)(void *))0" : fatDtorArg(st)));
             std::string pexpr = (classNames.count(st) && st != "object")
-                ? "(void *)&((" + st + " *)(" + rhs + ").p)->_class" : "(" + rhs + ").p";
+                ? "(void *)&((" + mapType_(st) + " *)(" + rhs + ").p)->_class" : "(" + rhs + ").p";
             indent();
             out << "sc_thin_bind(&" << lv << ", " << pexpr << ", (sc_ref *)("
                 << rhs << ").tar, " << d << ");\n";
@@ -3075,13 +3111,13 @@ struct CGen {
         if (const Decl* td = typeCallee(init)) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
             indent();
-            out << td->name << " *" << tmp << " = ";
+            out << mapType_(td->name) << " *" << tmp << " = ";
             if (!init.args.empty()) {
-                out << td->name << "__new_ref_init(";
+                out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
                 out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             } else {
-                out << td->name << "__new_ref("
+                out << mapType_(td->name) << "__new_ref("
                     << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             }
             indent();
@@ -3167,7 +3203,7 @@ struct CGen {
                 }
                 if (tt != "object" && classNames.count(tt)) {
                     indent();
-                    out << "sc_afat_bind(&" << lv << ", (void *)&((" << tt << " *)(" << rhs
+                    out << "sc_afat_bind(&" << lv << ", (void *)&((" << mapType_(tt) << " *)(" << rhs
                         << ").p)->_class, (sc_ref *)(" << rhs << ").tar, " << own
                         << ", (void (*)(void *))sc_obj_drop);\n";
                     return;
@@ -3182,7 +3218,7 @@ struct CGen {
             // object@ 目标：p 须为擦除的 _class 槽指针（dim 派发 / sc_obj_drop 均以之为入口）。
             //   源为具体类 T@ → &((T*)(rhs).p)->_class；源已是 object@ → 直取 (rhs).p（已是槽）。
             if (targetType == "object" && tt != "object" && classNames.count(tt))
-                pexpr = "(void *)&((" + tt + " *)(" + rhs + ").p)->_class";
+                pexpr = "(void *)&((" + mapType_(tt) + " *)(" + rhs + ").p)->_class";
             indent();
             out << "sc_fat_bind(&" << lv << ", " << pexpr << ", (sc_ref *)("
                 << rhs << ").tar, " << own << ");\n";
@@ -3208,13 +3244,13 @@ struct CGen {
         depth++;
         if (td) {
             std::string tmp = "_fat" + std::to_string(fatTmpSeq++);
-            indent(); out << td->name << " *" << tmp << " = ";
+            indent(); out << mapType_(td->name) << " *" << tmp << " = ";
             if (!init.args.empty()) {
-                out << td->name << "__new_ref_init(";
+                out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
                 out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             } else {
-                out << td->name << "__new_ref("
+                out << mapType_(td->name) << "__new_ref("
                     << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
             }
             indent(); out << "sc_fat_bind(&" << lv << ", " << tmp
@@ -3230,11 +3266,11 @@ struct CGen {
         if (td) {
             indent(); out << "(" << lv << ").p = ";
             if (!init.args.empty()) {
-                out << td->name << "__new_init(";
+                out << mapType_(td->name) << "__new_init(";
                 emitCtorInitArgs(td, init);
                 out << ");\n";
             } else {
-                out << td->name << "__new();\n";
+                out << mapType_(td->name) << "__new();\n";
             }
         } else {
             std::string rhs = captureExpr(init);
@@ -3426,13 +3462,21 @@ struct CGen {
                 out << ";\n";
                 continue;
             }
+            // 全局（非函数内、非 cBridge）变量的 C 名加 sc_ 前缀（sc 命名域）；
+            // 局部/形参为块作用域，保持原名（cname 此时等于 f.name）。注册表键仍用原名 f.name。
+            // 宏体内声明也须加前缀，与引用处（经 globalsT → scPfx，如 &ARGS_\name→&sc_ARGS_##name）
+            // 保持一致，否则声明发裸名而引用发 sc_ 名 → 与手写头文件的同名 #define 逐 token 不符，
+            // 触发 -Wmacro-redefined。唯一例外：名字以形参拼接符 `\` 开头（如 \b→##b），加前缀会
+            // 产生前导 ## 破坏预处理器替换 → 此时保持原样。
+            const bool spliceLead = inMacro && !f.name.empty() && f.name[0] == '\\';
+            const std::string cname = (inFunc || spliceLead) ? f.name : scPfx(f.name);
             // 分身/切片句柄 var s: T[a, b]：展开为 struct T__project s = {a, b, NULL};
             if (f.type.project) {
                 (inFunc ? projVarsL : projVarsG)[f.name] = f.type.name;
                 indent();
                 if (isTls) out << "static TLS ";
                 else if (isStatic) out << "static ";
-                out << "struct " << f.type.name << "__project " << f.name << " = {";
+                out << "struct " << mapType_(f.type.name) << "__project " << cname << " = {";
                 if (f.type.projectArgs)
                     for (size_t i = 0; i < f.type.projectArgs->size(); i++) {
                         if (i) out << ", ";
@@ -3467,7 +3511,7 @@ struct CGen {
             // destructor 钩子逐元素拆边（带 drop），释放其持有的系统资源。tls 为每线程存储期，
             // 单次 destructor 无法逐线程清理 → 不登记。
             if (f.type.fat && !inFunc && !isTls)
-                globalFatVars.push_back({f.name, f.type.arrayDims, fatDtorArg(f.type.name)});
+                globalFatVars.push_back({scPfx(f.name), f.type.arrayDims, fatDtorArg(f.type.name)});
             // --check=mem：函数内栈数组 → 超额分配尾哨兵 + 退域校验，捕获栈数组越界写。
             // 一维与多维均支持（多维仅外层超额若干「行」覆盖尾哨兵区，内层维度不变）；
             // 非 const/static/tls/分身/胖/内联/函数指针；尾哨兵紧贴有效元素就地拦截。
@@ -3522,17 +3566,17 @@ struct CGen {
                 indent();
                 if (isStatic) out << "static ";
                 if (dims.size() == 1) {
-                    out << elemTy << " " << f.name
+                    out << elemTy << " " << cname
                         << "[(" << d0 << ") + SC_CANARY_ELEMS(" << elemTy << ")]";
                 } else {
-                    out << elemTy << " " << f.name
+                    out << elemTy << " " << cname
                         << "[(" << d0 << ") + SC_CANARY_OUTER(" << elemTy
                         << ", " << canaryInner(dims) << ")]";
                     for (size_t i = 1; i < dims.size(); i++) out << "[" << dims[i] << "]";
                 }
                 if (f.init) { out << " = "; emitExpr(*f.init, true); }
                 out << ";\n";
-                globalCanaries.push_back({f.name, elemTy, dims, fatStackSite(f)});
+                globalCanaries.push_back({scPfx(f.name), elemTy, dims, fatStackSite(f)});
                 continue;
             }
             // 无类型 var/let（var x: = 初值）：依据初值字面量推断默认类型；
@@ -3554,8 +3598,8 @@ struct CGen {
                     if (asConst) out << "const ";
                     out << mapBase(infBase) << " ";
                     for (int i = 0; i < infPtr; i++) out << "*";
-                    out << f.name;
-                } else emitDeclarator(f, asConst);
+                    out << cname;
+                } else emitDeclarator(f, asConst, cname.c_str());
                 out << ";\n";
             }
             indent();
@@ -3565,8 +3609,8 @@ struct CGen {
                 if (asConst) out << "const ";
                 out << mapBase(infBase) << " ";
                 for (int i = 0; i < infPtr; i++) out << "*";
-                out << f.name;
-            } else emitDeclarator(f, asConst);
+                out << cname;
+            } else emitDeclarator(f, asConst, cname.c_str());
             if (f.init) {
                 out << " = ";
                 emitExpr(*f.init, true);
@@ -3575,7 +3619,7 @@ struct CGen {
                 if (sd && (sd->kind == Decl::StructD || sd->kind == Decl::UnionD)) {
                     // tls 为 static 存储期：初始化须常量表达式，不能调 __default()
                     if (!isTls && sd->kind == Decl::StructD && hasFieldDefaults(sd)) {
-                        out << " = " << sd->name << "__default()";
+                        out << " = " << mapType_(sd->name) << "__default()";
                     } else {
                         out << " = {0}";
                     }
@@ -3587,7 +3631,7 @@ struct CGen {
                 && !f.type.fat && !f.type.project && !f.type.hasInline) {
                 if (const Decl* cd = aggrOf(f.type.name); cd && cd->isClass) {
                     indent();
-                    out << f.name << "._class = " << cd->name << "_hyper_impl;\n";
+                    out << f.name << "._class = " << mapType_(cd->name) << "_hyper_impl;\n";
                 }
             }
             // 声明即构造：函数内无初值的结构变量，若类型有无参 init 方法则自动调用
@@ -3597,7 +3641,7 @@ struct CGen {
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->structCommon.fields.empty()) {
                     indent();
-                    out << im->name << "(&" << f.name
+                    out << scPfx(im->name) << "(&" << f.name
                         << (typeHasFatMember(f.type.name) ? ", SC_OWN_RAW" : "") << ");\n";
                 }
             }
@@ -3608,7 +3652,7 @@ struct CGen {
                 && !manualDropVars.count(f.name)) {
                 const Decl* dm = findMethod(f.type.name, "drop");
                 if (dm && !dropScopes.empty())
-                    dropScopes.back().push_back({f.name, dm->name});
+                    dropScopes.back().push_back({f.name, scPfx(dm->name)});
             }
             // 半自动指针 T@1（单例指针）：物理普通指针，登记退域销毁（非 nil → drop + free），
             // 并入 autoFreeVars 供赋值拦截（设新值先销旧）。manualDropVars（move）则交用户接管。
@@ -3616,7 +3660,7 @@ struct CGen {
                 && !manualDropVars.count(f.name)) {
                 std::string afBase; int afPtr; resolveType(f.type, afBase, afPtr);
                 const Decl* dm = findMethod(f.type.name, "drop");
-                AutoFreeVar v{f.name, afBase, dm ? dm->name : std::string()};
+                AutoFreeVar v{f.name, afBase, dm ? scPfx(dm->name) : std::string()};
                 if (!autoFreeScopes.empty()) autoFreeScopes.back().push_back(v);
                 autoFreeVars[f.name] = v;
             }
@@ -3896,7 +3940,7 @@ struct CGen {
             indent(); out << recvTy << " " << FR << " = ";
             if (ct.ptr == 0) out << "&";
             emitExpr(*s.forColl, true); out << ";\n";
-            indent(); out << "long " << FE << " = (long)" << mLen->name << "(" << FR << ");\n";
+            indent(); out << "long " << FE << " = (long)" << scPfx(mLen->name) << "(" << FR << ");\n";
             indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
             indent(); out << "for (long " << FI << " = ";
             if (!s.forRevert) { emitOpt(s.forOffsetE, "0"); }
@@ -3917,11 +3961,11 @@ struct CGen {
             }
             indent(); out << declTy << " " << s.forVar << " = ";
             if (cast && getFat && vPtr > 0)
-                out << "(" << declTy << ")(" << mGet->name << "(" << FR << ", " << FI << ")).p";
+                out << "(" << declTy << ")(" << scPfx(mGet->name) << "(" << FR << ", " << FI << ")).p";
             else if (cast)
-                out << "(" << declTy << ")" << mGet->name << "(" << FR << ", " << FI << ")";
+                out << "(" << declTy << ")" << scPfx(mGet->name) << "(" << FR << ", " << FI << ")";
             else
-                out << mGet->name << "(" << FR << ", " << FI << ")";
+                out << scPfx(mGet->name) << "(" << FR << ", " << FI << ")";
             out << ";\n";
             emitIdx(FI);                        // 可索引 → 真实下标 FI（revert 时倒序）
             emitForInBody(s, vBase, vPtr, vFat);
@@ -3945,14 +3989,14 @@ struct CGen {
             if (ct.ptr == 0) out << "&";
             emitExpr(*s.forColl, true); out << ";\n";
             indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
-            indent(); out << "for (int64_t " << FI << " = " << mFirst->name << "(" << FR << "); ; "
-                          << FI << " = " << mAdv->name << "(" << FR << ", " << FI << "), " << FC << "++) {\n";
+            indent(); out << "for (int64_t " << FI << " = " << scPfx(mFirst->name) << "(" << FR << "); ; "
+                          << FI << " = " << scPfx(mAdv->name) << "(" << FR << ", " << FI << "), " << FC << "++) {\n";
             depth++;
             // value 变量（forIdxVars[0]）：借用句柄（value_at 返回瘦指针则 sc_thin，否则 sc_afat），
             // 空句柄即终止；不参与作用域回收。
             const TypeRef* vrt = mVal->structCommon.type.get();
             const char* valHTy = (vrt && vrt->thin) ? "sc_thin" : "sc_afat";
-            indent(); out << valHTy << " " << s.forIdxVars[0] << " = " << mVal->name
+            indent(); out << valHTy << " " << s.forIdxVars[0] << " = " << scPfx(mVal->name)
                           << "(" << FR << ", " << FI << ");\n";
             indent(); out << "if (" << s.forIdxVars[0] << ".p == (void *)0) break;\n";
             if (hasNum) { indent(); out << "if (" << FC << " >= "; emitOpt(s.forNumE, "0"); out << ") break;\n"; }
@@ -3961,7 +4005,7 @@ struct CGen {
             if (cast) { kBase = vBase; kPtr = vPtr; kty = cTypeOf(kBase, kPtr); }
             else { kBase = ""; kPtr = 1; kty = "const void *"; }
             indent(); out << kty << " " << s.forVar << " = (" << kty << ")"
-                          << mKey->name << "(" << FR << ", " << FI << ");\n";
+                          << scPfx(mKey->name) << "(" << FR << ", " << FI << ");\n";
             // 登记两变量轻量类型 → 发体 → 还原（k=键指针、v=裸 @ 借用）。
             auto& tbl = inFunc ? localsT : globalsT;
             bool hk = tbl.count(s.forVar); VType ok; if (hk) ok = tbl[s.forVar];
@@ -3985,16 +4029,16 @@ struct CGen {
             if (ct.ptr == 0) out << "&";
             emitExpr(*s.forColl, true); out << ";\n";
             // 游标起点
-            indent(); out << "void *" << FI << " = (void *)" << mFirst->name << "(" << FR << ");\n";
+            indent(); out << "void *" << FI << " = (void *)" << scPfx(mFirst->name) << "(" << FR << ");\n";
             // 前进表达式生成器（next/prev）
             auto advExpr = [&]() {
                 if (isChain) {
                     // chain：前进读注入的 _next（偏移 sizeof(void*)，链尾为 nil）；
                     // 逆序用边界安全前驱 chain_prev（链头 _prev 指向 rear，须经契约判定 → nil）。
                     if (!s.forRevert) out << "((void *)*(void **)((char *)" << FI << " + sizeof(void *)))";
-                    else { requireChain(s.line); out << "((void *)chain_prev(" << FI << "))"; }
+                    else { requireChain(s.line); out << "((void *)sc_chain_prev(" << FI << "))"; }
                 } else {
-                    out << "((void *)" << mAdv->name << "(" << FR << ", " << FI << "))";
+                    out << "((void *)" << scPfx(mAdv->name) << "(" << FR << ", " << FI << "))";
                 }
             };
             // offset 跳过
@@ -4125,7 +4169,7 @@ struct CGen {
             if (o.target->kind == Expr::Ident && projEntityOf(o.target->text) == "com") {
                 if (o.send)
                     throw CompileError{"com[...] 句柄仅用于 >> 读流程，不支持 << 写", o.target->line};
-                indent(); out << "limit_read(";
+                indent(); out << "sc_limit_read(";
                 if (isPtr) emitExpr(base, true);
                 else { out << "&("; emitExpr(base, true); out << ")"; }
                 out << ", " << o.target->text << "._);\n";
@@ -4216,7 +4260,7 @@ struct CGen {
             if (t->args.size() > r->structCommon.fields.size())
                 throw CompileError{"rpc 实参数量超出：" + r->name, t->line};
             indent(); out << "{\n"; depth++;
-            indent(); out << "struct " << r->name << " _rp = {0};\n";
+            indent(); out << "struct " << scPfx(r->name) << " _rp = {0};\n";
             for (size_t i = 0; i < t->args.size(); i++) {
                 const Field& f = r->structCommon.fields[i];
                 indent(); out << "_rp." << f.name << " = ";
@@ -4230,7 +4274,7 @@ struct CGen {
             emitComBasePtr(base, isPtr);
             out << "->post(";
             emitComBasePtr(base, isPtr);
-            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), 0, 0);\n";
+            out << ", (void (*)(void *))" << scPfx(r->name) << "_rpc, &_rp, sizeof(_rp), 0, 0);\n";
             depth--; indent(); out << "}\n";
         }
     }
@@ -4247,7 +4291,7 @@ struct CGen {
         if (args.size() > r.structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出：" + r.name, r.line};
         indent(); out << "{\n"; depth++;
-        indent(); out << "struct " << r.name << " _rp = {0};\n";
+        indent(); out << "struct " << scPfx(r.name) << " _rp = {0};\n";
         // 装填实参（与 run 一致；数组额外填 size）
         for (size_t i = 0; i < args.size(); i++) {
             const Field& f = r.structCommon.fields[i];
@@ -4291,7 +4335,7 @@ struct CGen {
         if (r.structCommon.variadic)
             throw CompileError{"com >> rpc 暂不支持可变参数 rpc：" + r.name, r.line};
         indent(); out << "{\n"; depth++;
-        indent(); out << "struct " << r.name << " _rp = {0};\n";
+        indent(); out << "struct " << scPfx(r.name) << " _rp = {0};\n";
         // 数组后备缓冲 + com[...] 句柄上下文初始化
         for (auto& f : r.structCommon.fields) {
             if (!f.type.arrayDims.empty()) {
@@ -4332,7 +4376,7 @@ struct CGen {
                 out << ");\n";
                 indent(); out << "_rp." << f.name << "._->_self = ";
                 emitComBasePtr(base, isPtr); out << ";\n";
-                indent(); out << "limit_read(";
+                indent(); out << "sc_limit_read(";
                 emitComBasePtr(base, isPtr);
                 out << ", _rp." << f.name << "._);\n";
             } else {
@@ -4343,7 +4387,7 @@ struct CGen {
                 out << ", (void *)&(_rp." << f.name << "), &_scsz);\n";
             }
         }
-        indent(); out << r.name << "_rpc(&_rp);\n";
+        indent(); out << scPfx(r.name) << "_rpc(&_rp);\n";
         depth--; indent(); out << "}\n";
     }
 
@@ -4378,7 +4422,7 @@ struct CGen {
         if (isNil) {
             indent(); out << "if (" << s << "._) { ";
             // free 接收者 = 本体 = s._->_self
-            if (fr) out << fr->name << "(" << s << "._->_self, " << s << "._); ";
+            if (fr) out << scPfx(fr->name) << "(" << s << "._->_self, " << s << "._); ";
             else if (frF) out << s << "._->_self->free(" << s << "._->_self, " << s << "._); ";
             out << s << "._ = NULL; }\n";
             return;
@@ -4387,7 +4431,7 @@ struct CGen {
         out << s << "._ = ";
         const std::vector<Field>* alParams = al ? &al->structCommon.fields
                                           : (alF ? &alF->type.structCommon.fields : nullptr);
-        if (al) out << al->name << "(&";           // 类方法：T_alloc(&本体, ...)
+        if (al) out << scPfx(al->name) << "(&";           // 类方法：T_alloc(&本体, ...)
         else if (alF) { emitExpr(rhs, true); out << ".alloc(&"; }  // 字段：本体.alloc(&本体, ...)
         else out << "(&";
         emitExpr(rhs, true);
@@ -4969,7 +5013,7 @@ struct CGen {
             throw CompileError{"run 选项（stack/prio）不适用于 pool 目标", s.line};
         indent(); out << "{\n";
         depth++;
-        indent(); out << "struct " << r->name << " _rp = {0};\n";
+        indent(); out << "struct " << scPfx(r->name) << " _rp = {0};\n";
         for (size_t i = 0; i < call.args.size(); i++) {
             const Field& f = r->structCommon.fields[i];
             indent();
@@ -4990,11 +5034,11 @@ struct CGen {
             emitComBasePtr(*s.runTarget, poolPtr);
             out << "->run(";
             emitComBasePtr(*s.runTarget, poolPtr);
-            out << ", (void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp));\n";
+            out << ", (void (*)(void *))" << scPfx(r->name) << "_rpc, &_rp, sizeof(_rp));\n";
         } else {
-            out << "thread_run((void (*)(void *))" << r->name << "_rpc, &_rp, sizeof(_rp), ";
+            out << "sc_thread_run((void (*)(void *))" << scPfx(r->name) << "_rpc, &_rp, sizeof(_rp), ";
             if (s.forInit) {
-                out << "(thread **)(";
+                out << "(sc_thread **)(";
                 emitExpr(*s.forInit, true);
                 out << ")";
             } else out << "NULL";
@@ -5040,7 +5084,7 @@ struct CGen {
             return;
         }
         indent();
-        out << "future_done(";
+        out << "sc_future_done(";
         emitExpr(*s.expr, true);     // future&（指针）
         out << ", ";
         if (!s.forInit) {
@@ -5060,7 +5104,7 @@ struct CGen {
     //   初值须为 @；form 不带 tag，标签恒 0。
     void emitFormStmt(const Stmt& s) {
         indent();
-        out << "token_form(";
+        out << "sc_token_form(";
         emitExpr(*s.expr, true);     // tok&（句柄指针）
         out << ", ";
         emitExpr(*s.forInit, true);  // @ 初值
@@ -5068,8 +5112,8 @@ struct CGen {
         if (s.forCond) { out << "(void*)"; emitExpr(*s.forCond, true); }  // 可选侧车 ctx
         else out << "(void*)0";
         out << ", ";
-        if (s.forStep) { out << "(token_exec)"; emitExpr(*s.forStep, true); }  // 可选节点钩子 exec
-        else out << "(token_exec)0";
+        if (s.forStep) { out << "(sc_token_exec)"; emitExpr(*s.forStep, true); }  // 可选节点钩子 exec
+        else out << "(sc_token_exec)0";
         out << ");\n";
     }
 
@@ -5077,7 +5121,7 @@ struct CGen {
     //   有 seed：擦除为 *（瘦）灌入起点；无 seed：传空瘦句柄（运行时不灌种子，保留 t 当前值）。
     void emitBackStmt(const Stmt& s) {
         indent();
-        out << "token_back(";
+        out << "sc_token_back(";
         emitExpr(*s.expr, true);     // tok&（句柄指针）
         out << ", ";
         if (s.forInit) emitExpr(*s.forInit, true);   // 瘦句柄梯度种子
@@ -5093,6 +5137,14 @@ struct CGen {
         // <chn> 为 string 变量时：路由到 string_printf —— 把格式化文本「追加进该串」而非
         // 输出到 stdout（无时间戳/级别/通道修饰，等价直接调用 string 的 printf）。其余
         // 拼接糖/格式自动补全逻辑与 print 完全一致，仅调用目标不同。
+        // 通道名的 C 化：与 ident 发射一致——局部/形参原名；sc 域全局/枚举常量/宏/函数/rpc
+        // 加 sc_ 前缀（如日志级别枚举 <E> → sc_E）；数字字面量/外部 C 名原样。
+        auto chnName = [&](const std::string& c) -> std::string {
+            if (localsT.count(c)) return c;
+            if (globalsT.count(c) || funcs.count(c) || rpcs.count(c) ||
+                enumConsts.count(c) || macroNames.count(c)) return scPfx(c);
+            return c;
+        };
         std::string strChn;   // 非空=string 通道目标（已规整为 string* 实参文本）
         if (s.printChn != "0") {
             const VType* cvt = nullptr;
@@ -5100,17 +5152,18 @@ struct CGen {
               if (a != localsT.end()) cvt = &a->second;
               else { auto b = globalsT.find(s.printChn); if (b != globalsT.end()) cvt = &b->second; } }
             if (cvt && cvt->arr == 0 && resolveAliasName(cvt->name) == "string" && aggrOf("string")) {
-                if (cvt->fat)           strChn = "((string *)(" + s.printChn + ").p)";  // string@ 胖指针解 .p
-                else if (cvt->ptr >= 1) strChn = s.printChn;                            // string& 裸指针直传
-                else                    strChn = "&(" + s.printChn + ")";               // string 值取址（理论上不会出现）
+                const std::string cn = chnName(s.printChn);
+                if (cvt->fat)           strChn = "((string *)(" + cn + ").p)";  // string@ 胖指针解 .p
+                else if (cvt->ptr >= 1) strChn = cn;                            // string& 裸指针直传
+                else                    strChn = "&(" + cn + ")";               // string 值取址（理论上不会出现）
             }
         }
 
         // 括号形式 print(...) = C printf 兼容模式：实参原样传递（首参为格式串）
         if (s.printCompat) {
             indent();
-            if (!strChn.empty()) out << "string_printf(" << strChn;
-            else                 out << "print((uint8_t)(" << s.printChn << ")";
+            if (!strChn.empty()) out << "sc_string_printf(" << strChn;
+            else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << ")";
             for (auto& argp : s.printArgs) {
                 out << ", ";
                 emitExpr(*argp, true);
@@ -5153,9 +5206,9 @@ struct CGen {
             char cls = scalarClass(vt.name);
             std::string pre, post, spec, macro;
             if (vt.arr == 0 && vt.ptr == 0 && nm == "string" && aggrOf("string")) {
-                spec = "s"; pre = "string_cstr(&("; post = "))";      // adt string 值
+                spec = "s"; pre = "sc_string_cstr(&("; post = "))";      // adt string 值
             } else if (vt.arr == 0 && vt.ptr == 1 && nm == "string" && aggrOf("string")) {
-                spec = "s"; pre = "string_cstr("; post = ")";          // adt string 指针
+                spec = "s"; pre = "sc_string_cstr("; post = ")";          // adt string 指针
             } else if (cls == 'c' && (vt.ptr >= 1 || vt.arr >= 1)) {
                 spec = "s";                                            // char& / char[] 字符串
             } else if (vt.ptr >= 1 || vt.arr >= 1) {
@@ -5186,8 +5239,8 @@ struct CGen {
         if (!lit.empty() || fmtExpr.empty()) flush();
 
         indent();
-        if (!strChn.empty()) out << "string_printf(" << strChn << ", " << fmtExpr;
-        else                 out << "print((uint8_t)(" << s.printChn << "), " << fmtExpr;
+        if (!strChn.empty()) out << "sc_string_printf(" << strChn << ", " << fmtExpr;
+        else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << "), " << fmtExpr;
         for (auto& pv : pvs) {
             out << ", " << pv.pre;
             emitExpr(*pv.e, true);
@@ -5237,9 +5290,9 @@ struct CGen {
         char cls = scalarClass(vt.name);
         spec.clear(); macro.clear(); pre.clear(); post.clear();
         if (vt.arr == 0 && vt.ptr == 0 && nm == "string" && aggrOf("string")) {
-            spec = "s"; pre = "string_cstr(&("; post = "))";
+            spec = "s"; pre = "sc_string_cstr(&("; post = "))";
         } else if (vt.arr == 0 && vt.ptr == 1 && nm == "string" && aggrOf("string")) {
-            spec = "s"; pre = "string_cstr("; post = ")";
+            spec = "s"; pre = "sc_string_cstr("; post = ")";
         } else if (cls == 'c' && (vt.ptr >= 1 || vt.arr >= 1)) {
             spec = "s";
         } else if (vt.ptr >= 1 || vt.arr >= 1) {
@@ -5445,15 +5498,15 @@ struct CGen {
         if (const Decl* sDecl = aggrOf(d.projectSelf))
             if (!sDecl->external) emitAggrWithDeps(*sDecl);
         indent();
-        out << "typedef struct " << d.name << "__project {\n";
+        out << "typedef struct " << mapType_(d.name) << "__project {\n";
         depth++;
         if (alParams) for (auto& p : *alParams) {
             indent(); emitDeclarator(p); out << ";\n";
         }
-        indent(); out << d.projectSelf << " *_;\n";
+        indent(); out << mapType_(d.projectSelf) << " *_;\n";
         depth--;
         indent();
-        out << "} " << d.name << "__project;\n\n";
+        out << "} " << mapType_(d.name) << "__project;\n\n";
     }
 
     // 标签联合 def T: @( v1 / v2:payload / ... )：展开为带隐藏 tag 的安全和类型。
@@ -5461,13 +5514,13 @@ struct CGen {
     //   无载荷变体不占 union 成员；全部无载荷时省略 union（退化为带名枚举的标量）。
     void emitTaggedUnion(const Decl& d) {
         indent();
-        out << "typedef struct " << d.name << " {\n";
+        out << "typedef struct " << mapType_(d.name) << " {\n";
         depth++;
         // tag 枚举：变体常量名 T__Variant（C 枚举常量泄漏到外层作用域，供构造/解构引用）
         indent();
         out << "enum {";
         for (size_t i = 0; i < d.structCommon.fields.size(); i++)
-            out << (i ? ", " : " ") << d.name << "__" << d.structCommon.fields[i].name;
+            out << (i ? ", " : " ") << mapType_(d.name) << "__" << d.structCommon.fields[i].name;
         out << " } tag;\n";
         // 载荷 union：仅含有载荷的变体
         bool anyPayload = false;
@@ -5487,7 +5540,7 @@ struct CGen {
         }
         depth--;
         indent();
-        out << "} " << d.name << ";\n\n";
+        out << "} " << mapType_(d.name) << ";\n\n";
     }
 
     // 标签联合解构 case：先将被解构值绑定到临时量（避免重复求值），按 tag 分发，
@@ -5527,7 +5580,7 @@ struct CGen {
 
         std::string tmp = "_case" + std::to_string(fatTmpSeq++);
         indent();
-        out << tu.name << " " << tmp << " = ";
+        out << mapType_(tu.name) << " " << tmp << " = ";
         emitExpr(*s.expr, true);
         out << ";\n";
         indent();
@@ -5540,7 +5593,7 @@ struct CGen {
             } else {
                 for (auto& lab : arm.labels) {
                     indent();
-                    out << "case " << tu.name << "__" << lab->text << ":\n";
+                    out << "case " << mapType_(tu.name) << "__" << lab->text << ":\n";
                 }
             }
             indent(); out << "{\n";
@@ -5612,11 +5665,11 @@ struct CGen {
             std::ostringstream save = std::move(out); out = std::ostringstream();
             if (d.expr) emitExpr(*d.expr, true);
             std::string val = out.str(); out = std::move(save);
-            out << "#define " << d.name << " " << macroSpellToC(val) << "\n";
+            out << "#define " << scPfx(d.name) << " " << macroSpellToC(val) << "\n";
             return;
         }
         // 函数宏头部：name(p1, p2, ..., ...)
-        std::string header = "#define " + d.name + "(";
+        std::string header = "#define " + scPfx(d.name) + "(";
         bool first = true;
         for (auto& p : d.structCommon.fields) {
             if (!first) header += ", ";
@@ -5658,7 +5711,7 @@ struct CGen {
                 depth++;
                 for (size_t i = 0; i < d.structCommon.fields.size(); i++) {
                     indent();
-                    out << d.structCommon.fields[i].name;
+                    out << scPfx(d.structCommon.fields[i].name);
                     if (d.structCommon.fields[i].init) {
                         out << " = ";
                         emitExpr(*d.structCommon.fields[i].init, true);
@@ -5668,7 +5721,7 @@ struct CGen {
                 }
                 depth--;
                 indent();
-                out << "} " << d.name << ";\n\n";
+                out << "} " << mapType_(d.name) << ";\n\n";
                 break;
             case Decl::StructD:
             case Decl::UnionD:
@@ -5679,17 +5732,17 @@ struct CGen {
                 }
                 indent();
                 out << "typedef " << (d.kind == Decl::UnionD ? "union" : "struct")
-                    << " " << d.name << " {\n";
-                structOwnerTag = (d.kind == Decl::UnionD ? "union " : "struct ") + d.name;
+                    << " " << mapType_(d.name) << " {\n";
+                structOwnerTag = (d.kind == Decl::UnionD ? "union " : "struct ") + mapType_(d.name);
                 emitFieldList(d.structCommon.fields);
                 structOwnerTag.clear();
                 indent();
-                out << "} " << d.name << ";\n\n";
+                out << "} " << mapType_(d.name) << ";\n\n";
                 if (d.kind == Decl::StructD && hasFieldDefaults(&d)) {
                     indent();
-                    out << "static inline " << d.name << " " << d.name << "__default(void) {\n";
+                    out << "static inline " << mapType_(d.name) << " " << mapType_(d.name) << "__default(void) {\n";
                     depth++;
-                    indent(); out << d.name << " _v = {0};\n";
+                    indent(); out << mapType_(d.name) << " _v = {0};\n";
                     for (auto& f : d.structCommon.fields) {
                         if (!f.init) continue;
                         indent();
@@ -5711,7 +5764,7 @@ struct CGen {
                 indent();
                 out << "typedef " << base << " ";
                 for (int i = 0; i < ptr; i++) out << "*";
-                out << d.name << ";\n\n";
+                out << mapType_(d.name) << ";\n\n";
                 break;
             }
             case Decl::FuncTypeD: {
@@ -5719,7 +5772,7 @@ struct CGen {
                 indent();
                 out << "typedef ";
                 emitRetType(d);
-                out << " (*" << d.name << ")(";
+                out << " (*" << mapType_(d.name) << ")(";
                 emitParams(d.structCommon.fields, d.structCommon.variadic);
                 out << ");\n\n";
                 break;
@@ -5763,9 +5816,14 @@ struct CGen {
             sig = it->second;
         }
         emitRetType(*sig);
-        out << " " << d.name << "(";
+        // 宏体内以形参拼接构造的函数名（含 splice `\`，如 def_vec 的 Vec_\N\_push）为合成名：
+        // 编译器不入 funcs 表，外部调用点按展开后的裸名（Vec_int_push）发射；且同宏内 typedef
+        // 类型名（Vec_\N）亦裸名。故此处函数名亦须保持裸名，三者一致，避免定义 sc_ 前缀而调用/
+        // 类型裸名的错配。非宏体或无 splice 的普通函数照常加 sc_ 前缀（sc 命名域）。
+        const bool spliceFn = inMacro && d.name.find('\\') != std::string::npos;
+        out << " " << (spliceFn ? d.name : scPfx(d.name)) << "(";
         if (!d.methodOwner.empty()) {
-            out << d.methodOwner << " *_this";
+            out << mapType_(d.methodOwner) << " *_this";
             if (!sig->structCommon.fields.empty() || sig->structCommon.variadic) {
                 out << ", ";
                 emitParams(sig->structCommon.fields, sig->structCommon.variadic);
@@ -5899,9 +5957,10 @@ struct CGen {
     // _slot 指向对象内 _class 槽，container_of 回算出 _this。每个 case 自含 va_end+return。
     void emitDispatcher(const Decl& c) {
         const std::string& T = c.name;
-        out << "tril " << T << "_hyper_impl(void *_slot, uint32_t _dim, ...) {\n";
-        out << "    " << T << " *_this = (" << T << " *)((char *)_slot - offsetof("
-            << T << ", _class));\n";
+        const std::string Tc = mapType_(c.name);   // C 符号名（含 sc_ 前缀）；T 保留原名用于 SC_CLS_/查表
+        out << "tril " << Tc << "_hyper_impl(void *_slot, uint32_t _dim, ...) {\n";
+        out << "    " << Tc << " *_this = (" << Tc << " *)((char *)_slot - offsetof("
+            << Tc << ", _class));\n";
         out << "    (void)_this;\n";
         out << "    va_list _va; va_start(_va, _dim);\n";
         out << "    switch (_dim) {\n";
@@ -5913,7 +5972,7 @@ struct CGen {
             << "va_end(_va); *_h = (sc_ref *)((char *)_this - SC_REF_HDR); return SC_TRIL_POS; }\n";
         // DROP（保留）：object@ 入边归零时经派发器调本类析构（类型擦除后静态查不到 T_drop）。
         if (const Decl* dm = findMethod(T, "drop"))
-            out << "    case SC_DIM_DROP: { va_end(_va); " << dm->name
+            out << "    case SC_DIM_DROP: { va_end(_va); " << scPfx(dm->name)
                 << "(_this); return SC_TRIL_POS; }\n";
         bool hasKey = false, hasName = false, hasRltKey = false, hasRltName = false;
         auto it = classDims.find(T);
@@ -5947,7 +6006,7 @@ struct CGen {
         if (!hasRltKey)
             out << "    case SC_DIM_RLT_KEY: { object _other = va_arg(_va, object); va_end(_va); "
                 << "void *_ka = (void *)0, *_kb = (void *)0; "
-                << T << "_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); "
+                << Tc << "_hyper_impl(_slot, SC_DIM_OBJ_KEY, &_ka); "
                 << "if (_other) (*_other)(_other, SC_DIM_OBJ_KEY, &_kb); "
                 << "if ((uintptr_t)_ka < (uintptr_t)_kb) return SC_TRIL_NEG; "
                 << "if ((uintptr_t)_ka > (uintptr_t)_kb) return SC_TRIL_POS; "
@@ -5956,7 +6015,7 @@ struct CGen {
         if (!hasRltName)
             out << "    case SC_DIM_RLT_NAME: { object _other = va_arg(_va, object); va_end(_va); "
                 << "char _na[256], _nb[256]; _na[0] = 0; _nb[0] = 0; "
-                << T << "_hyper_impl(_slot, SC_DIM_OBJ_NAME, _na, (int32_t)sizeof(_na)); "
+                << Tc << "_hyper_impl(_slot, SC_DIM_OBJ_NAME, _na, (int32_t)sizeof(_na)); "
                 << "if (_other) (*_other)(_other, SC_DIM_OBJ_NAME, _nb, (int32_t)sizeof(_nb)); "
                 << "int _r = strcmp(_na, _nb); "
                 << "if (_r < 0) return SC_TRIL_NEG; if (_r > 0) return SC_TRIL_POS; "
@@ -6115,7 +6174,7 @@ struct CGen {
 
     // 同名参数结构体：返回槽 _ 为首个默认成员（C 侧可用 _ 访问）
     void emitRpcStruct(const Decl& d) {
-        out << "struct " << d.name << " {\n";
+        out << "struct " << scPfx(d.name) << " {\n";
         depth++;
         if (rpcHasRet(d)) {
             indent();
@@ -6127,9 +6186,9 @@ struct CGen {
         }
         // 异步 rpc：追加状态机隐藏字段 + 把跨 await 存活的局部提升到帧
         if (d.hasAwait) {
-            indent(); out << "future *_ret;\n";   // 本次调用的结果 future
+            indent(); out << "sc_future *_ret;\n";   // 本次调用的结果 future
             indent(); out << "int _state;\n";     // 状态机当前段
-            indent(); out << "future *_fut;\n";   // 当前正在 await 的 future
+            indent(); out << "sc_future *_fut;\n";   // 当前正在 await 的 future
         }
         for (auto& f : d.structCommon.fields) {
             if (!f.type.arrayDims.empty()) {       // 数组形参 → <T*, size> 两字段
@@ -6148,7 +6207,7 @@ struct CGen {
             // 【F】com<<>>rpc 序列化：每个 op 一个堆 rpc 参数槽（跨 await 存活）
             std::vector<const Decl*> crpcs = collectComRpcStmts(d);
             for (size_t i = 0; i < crpcs.size(); i++) {
-                indent(); out << "struct " << crpcs[i]->name << " *_crpc" << i << ";\n";
+                indent(); out << "struct " << scPfx(crpcs[i]->name) << " *_crpc" << i << ";\n";
             }
         }
         depth--;
@@ -6157,18 +6216,18 @@ struct CGen {
 
     // 实际函数签名：void name_rpc(struct name *_p)
     void emitRpcWorkerSig(const Decl& d) {
-        out << "void " << d.name << "_rpc(struct " << d.name << " *_p)";
+        out << "void " << scPfx(d.name) << "_rpc(struct " << scPfx(d.name) << " *_p)";
     }
 
     // 调用包装：装填结构体 → 执行实际函数 → 取返回槽
     void emitRpcWrapper(const Decl& d) {
         out << "static inline ";
         emitRetType(d);
-        out << " " << d.name << "(";
+        out << " " << scPfx(d.name) << "(";
         emitParams(d.structCommon.fields, d.structCommon.variadic);
         out << ") {\n";
         depth++;
-        indent(); out << "struct " << d.name << " _p = {0};\n";
+        indent(); out << "struct " << scPfx(d.name) << " _p = {0};\n";
         for (auto& f : d.structCommon.fields) {
             const std::string arg = (f.name == "this" ? "_this" : f.name);
             indent();
@@ -6180,7 +6239,7 @@ struct CGen {
                 out << ";\n";
             }
         }
-        indent(); out << d.name << "_rpc(&_p);\n";
+        indent(); out << scPfx(d.name) << "_rpc(&_p);\n";
         if (rpcHasRet(d)) { indent(); out << "return _p._;\n"; }
         depth--;
         out << "}\n\n";
@@ -6201,7 +6260,7 @@ struct CGen {
         if (d.hasAwait) {
             // 异步 rpc：无同步包装，改发启动器原型 future* X__async(参数...)
             if (workerStatic) out << "static ";
-            out << "future *" << d.name << "__async(";
+            out << "sc_future *" << scPfx(d.name) << "__async(";
             emitParams(d.structCommon.fields, d.structCommon.variadic);
             out << ");\n";
         } else {
@@ -6406,7 +6465,7 @@ struct CGen {
         if (e.kind == Expr::Call && e.a && e.a->kind == Expr::Ident) {
             auto it = rpcs.find(e.a->text);
             if (it != rpcs.end() && it->second->hasAwait) {
-                out << e.a->text << "__async(";
+                out << scPfx(e.a->text) << "__async(";   // 启动器 sc 域前缀（与定义 §6243/6791 一致）
                 emitAsyncCallArgs(e);
                 out << ")";
                 return;
@@ -6423,9 +6482,9 @@ struct CGen {
         if (ptr > 0) {
             out << "(" << base << " ";
             for (int i = 0; i < ptr; i++) out << "*";
-            out << ")future_get(_p->_fut)";
+            out << ")sc_future_get(_p->_fut)";
         } else {
-            out << "(" << base << ")(intptr_t)future_get(_p->_fut)";
+            out << "(" << base << ")(intptr_t)sc_future_get(_p->_fut)";
         }
     }
 
@@ -6435,8 +6494,8 @@ struct CGen {
                         const std::string& tBase, int tPtr, const Decl& d) {
         int st = ++asyncState;
         indent(); out << "_p->_fut = "; emitFutureExpr(futureExpr); out << ";\n";
-        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
-                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "if (sc_future_await(_p->_fut, _p, (void (*)(void *))"
+                      << scPfx(d.name) << "_rpc)) goto _s" << st << ";\n";
         indent(); out << "_p->_state = " << st << "; return;\n";
         indent(); out << "_s" << st << ": ;\n";
         if (target) {
@@ -6469,24 +6528,24 @@ struct CGen {
             if (o.send)
                 throw CompileError{"com[...] 句柄仅用于 >> 读流程，不支持 << 写", o.target->line};
             int st = ++asyncState;
-            indent(); out << "_p->_fut = com_limit_read_async(";
+            indent(); out << "_p->_fut = sc_com_limit_read_async(";
             emitComBasePtr(base, isPtr);
             out << ", "; emitExpr(*o.target, true); out << "._);\n";
-            indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
-                          << d.name << "_rpc)) goto _s" << st << ";\n";
+            indent(); out << "if (sc_future_await(_p->_fut, _p, (void (*)(void *))"
+                          << scPfx(d.name) << "_rpc)) goto _s" << st << ";\n";
             indent(); out << "_p->_state = " << st << "; return;\n";
             indent(); out << "_s" << st << ": ;\n";
             return;
         }
         // 【D】普通变量：发起 com_read_async/com_write_async，io 直接填充/读取 target
         int st = ++asyncState;
-        const char* fn = o.send ? "com_write_async" : "com_read_async";
+        const char* fn = o.send ? "sc_com_write_async" : "sc_com_read_async";
         indent(); out << "_p->_fut = " << fn << "(";
         emitComBasePtr(base, isPtr);
         out << ", (void *)&("; emitExpr(*o.target, true); out << "), sizeof(";
         emitExpr(*o.target, true); out << "));\n";
-        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
-                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "if (sc_future_await(_p->_fut, _p, (void (*)(void *))"
+                      << scPfx(d.name) << "_rpc)) goto _s" << st << ";\n";
         indent(); out << "_p->_state = " << st << "; return;\n";
         indent(); out << "_s" << st << ": ;\n";
     }
@@ -6496,12 +6555,12 @@ struct CGen {
                         const std::string& dataPtr, const std::string& sizeExpr,
                         const Decl& d) {
         int st = ++asyncState;
-        const char* fn = send ? "com_write_async" : "com_read_async";
+        const char* fn = send ? "sc_com_write_async" : "sc_com_read_async";
         indent(); out << "_p->_fut = " << fn << "(";
         emitComBasePtr(base, isPtr);
         out << ", " << dataPtr << ", " << sizeExpr << ");\n";
-        indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
-                      << d.name << "_rpc)) goto _s" << st << ";\n";
+        indent(); out << "if (sc_future_await(_p->_fut, _p, (void (*)(void *))"
+                      << scPfx(d.name) << "_rpc)) goto _s" << st << ";\n";
         indent(); out << "_p->_state = " << st << "; return;\n";
         indent(); out << "_s" << st << ": ;\n";
     }
@@ -6517,8 +6576,8 @@ struct CGen {
         if (args.size() > r.structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出：" + r.name, r.line};
         const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
-        indent(); out << rp << " = (struct " << r.name << " *)calloc(1, sizeof(struct "
-                      << r.name << "));\n";
+        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)calloc(1, sizeof(struct "
+                      << scPfx(r.name) << "));\n";
         for (size_t i = 0; i < args.size(); i++) {
             const Field& f = r.structCommon.fields[i];
             if (f.type.project)
@@ -6551,8 +6610,8 @@ struct CGen {
         if (r.structCommon.variadic)
             throw CompileError{"com >> rpc 暂不支持可变参数 rpc：" + r.name, r.line};
         const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
-        indent(); out << rp << " = (struct " << r.name << " *)calloc(1, sizeof(struct "
-                      << r.name << "));\n";
+        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)calloc(1, sizeof(struct "
+                      << scPfx(r.name) << "));\n";
         // 数组后备（堆）+ com[...] 句柄上下文初始化（无让出）
         for (auto& f : r.structCommon.fields) {
             if (!f.type.arrayDims.empty()) {
@@ -6588,11 +6647,11 @@ struct CGen {
                 indent(); out << rp << "->" << f.name << "._->_self = ";
                 emitComBasePtr(base, isPtr); out << ";\n";
                 int st = ++asyncState;
-                indent(); out << "_p->_fut = com_limit_read_async(";
+                indent(); out << "_p->_fut = sc_com_limit_read_async(";
                 emitComBasePtr(base, isPtr);
                 out << ", " << rp << "->" << f.name << "._);\n";
-                indent(); out << "if (future_await(_p->_fut, _p, (void (*)(void *))"
-                              << d.name << "_rpc)) goto _s" << st << ";\n";
+                indent(); out << "if (sc_future_await(_p->_fut, _p, (void (*)(void *))"
+                              << scPfx(d.name) << "_rpc)) goto _s" << st << ";\n";
                 indent(); out << "_p->_state = " << st << "; return;\n";
                 indent(); out << "_s" << st << ": ;\n";
             } else {
@@ -6600,7 +6659,7 @@ struct CGen {
                                "sizeof(" + rp + "->" + f.name + ")", d);
             }
         }
-        indent(); out << r.name << "_rpc(" << rp << ");\n";
+        indent(); out << scPfx(r.name) << "_rpc(" << rp << ");\n";
         for (auto& f : r.structCommon.fields)
             if (!f.type.arrayDims.empty()) { indent(); out << "free(" << rp << "->" << f.name << ");\n"; }
         indent(); out << "free(" << rp << ");\n";
@@ -6618,8 +6677,8 @@ struct CGen {
             res = ptr > 0 ? "(void *)(_p->_)" : "(void *)(intptr_t)(_p->_)";
         }
         indent();
-        out << "{ future *_r = _p->_ret; void *_res = " << res
-            << "; free(_p); future_done(_r, _res); return; }\n";
+        out << "{ sc_future *_r = _p->_ret; void *_res = " << res
+            << "; free(_p); sc_future_done(_r, _res); return; }\n";
     }
 
     // 发出异步 rpc 体（语句序列；await 点切段，支持 if/while/do-while/经典 for 内 await）。
@@ -6674,7 +6733,7 @@ struct CGen {
                     if (s.expr->a->kind == Expr::Ident) {
                         tgt = "_p->" + s.expr->a->text;
                         auto it = localsT.find(s.expr->a->text);
-                        if (it != localsT.end()) { base = mapBase(it->second.name); ptr = it->second.ptr; }
+                        if (it != localsT.end()) { base = mapType_(it->second.name); ptr = it->second.ptr; }
                     }
                     emitAwaitPoint(*s.expr->b->a, &tgt, base, ptr, d);
                 } else {                                          // 普通语句（printf 等）
@@ -6749,19 +6808,19 @@ struct CGen {
     // 启动器：future* X__async(参数...) { 建帧 + 造 _ret + 装参 + 首次驱动 → 返回 _ret }
     void emitAsyncLauncher(const Decl& d) {
         if (shouldStaticize(d)) out << "static ";
-        out << "future *" << d.name << "__async(";
+        out << "sc_future *" << scPfx(d.name) << "__async(";
         emitParams(d.structCommon.fields, d.structCommon.variadic);
         out << ") {\n";
         depth++;
-        indent(); out << "struct " << d.name << " *_p = (struct " << d.name
-                      << " *)calloc(1, sizeof(struct " << d.name << "));\n";
+        indent(); out << "struct " << scPfx(d.name) << " *_p = (struct " << scPfx(d.name)
+                      << " *)calloc(1, sizeof(struct " << scPfx(d.name) << "));\n";
         indent(); out << "_p->_state = 0;\n";
-        indent(); out << "_p->_ret = future_new();\n";
+        indent(); out << "_p->_ret = sc_future_new();\n";
         for (auto& f : d.structCommon.fields) {
             const std::string arg = (f.name == "this" ? "_this" : f.name);
             indent(); out << "_p->" << f.name << " = " << arg << ";\n";
         }
-        indent(); out << d.name << "_rpc(_p);\n";
+        indent(); out << scPfx(d.name) << "_rpc(_p);\n";
         indent(); out << "return _p->_ret;\n";
         depth--;
         out << "}\n\n";
@@ -6783,7 +6842,7 @@ struct CGen {
         emitAsyncLauncher(d);
 
         if (shouldStaticize(d)) out << "static ";
-        out << "void " << d.name << "_rpc(struct " << d.name << " *_p) {\n";
+        out << "void " << scPfx(d.name) << "_rpc(struct " << scPfx(d.name) << " *_p) {\n";
         depth++;
         int nstates = countAsyncAwaits(d) + 1;
         indent(); out << "switch (_p->_state) {\n";
@@ -6865,8 +6924,10 @@ struct CGen {
             if (!emitted.insert(d->name).second) continue;
             // 标签联合展开为 struct（带 tag + union），前向声明须与定义一致用 struct
             const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
+            // 本函数在类型注册表（aggrs）填充前即被调用，mapType_ 尚无法识别为 sc 聚合；
+            // 此处 decls 均为非外部的 sc 域聚合，直接 scPfx 加前缀。
             out << "typedef " << (asUnion ? "union" : "struct")
-                << " " << d->name << " " << d->name << ";\n";
+                << " " << scPfx(d->name) << " " << scPfx(d->name) << ";\n";
         }
         if (!emitted.empty()) out << "\n";
     }
@@ -6931,13 +6992,13 @@ struct CGen {
                     continue;
                 // 全局 cls 实例：登记 _class 安装（早于 init）。
                 if (const Decl* cd = aggrOf(f.type.name); cd && cd->isClass)
-                    gClassInstalls.push_back({f.name, cd->name});
+                    gClassInstalls.push_back({scPfx(f.name), mapType_(cd->name)});
                 const Decl* im = findMethod(f.type.name, "init");
                 if (im && im->structCommon.fields.empty())
-                    gInits.push_back({f.name, im->name,
+                    gInits.push_back({scPfx(f.name), scPfx(im->name),
                                       typeHasFatMember(f.type.name) ? "SC_OWN_RAW" : ""});
                 const Decl* dm = findMethod(f.type.name, "drop");
-                if (dm) gDrops.push_back({f.name, dm->name});
+                if (dm) gDrops.push_back({scPfx(f.name), scPfx(dm->name)});
             }
         }
         // dep 依赖关系：解析每个依赖项 id → 已绑定 tok 句柄变量名（同单元内声明序在前）。
@@ -7093,8 +7154,9 @@ struct CGen {
             any = true;
         }
         for (auto& dr : depRegs) {                       // dep follow 蹦床前向声明（main/init 引用在前）
-            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";
-            out << "static int " << tramp << "(token **, int, int, void *);\n";
+            const std::string fn = scPfx(dr.fn);
+            std::string tramp = fn.substr(0, fn.size() - 7) + "_tramp";
+            out << "static int " << tramp << "(sc_token **, int, int, void *);\n";
             any = true;
         }
         if (any) out << "\n";
@@ -7156,55 +7218,61 @@ struct CGen {
     //   注册各依赖关系（门逻辑 + follow 蹦床）。绑定先于依赖（依赖引用已绑定句柄）。
     void emitTokRegistrations(const std::string& pad) {
         for (auto& tb : tokBinds) {
-            out << pad << tb.var << " = token_bind(\"";
+            const std::string v = scPfx(tb.var);
+            out << pad << v << " = sc_token_bind(\"";
             for (char c : tb.id) {                       // 最小转义：引号 / 反斜杠
                 if (c == '"' || c == '\\') out << '\\';
                 out << c;
             }
-            out << "\", " << (tb.fn.empty() ? "NULL" : "(token_combine)" + tb.fn) << ");\n";
+            out << "\", " << (tb.fn.empty() ? "NULL" : "(sc_token_combine)" + scPfx(tb.fn)) << ");\n";
             if (tb.depth)                                // 烘焙：依赖图深度（编译期常量）写入句柄；深度 0（源/非图）省略
-                out << pad << "token_set_depth(" << tb.var << ", " << tb.depth << ");\n";
+                out << pad << "sc_token_set_depth(" << v << ", " << tb.depth << ");\n";
             if (tb.slack >= 0)                           // 烘焙：关键路径标志 + 松弛（编译期常量）；仅在 map DAG 中的 token（slack>=0）发出
-                out << pad << "token_set_crit(" << tb.var << ", " << tb.critical << ", " << tb.slack << ");\n";
+                out << pad << "sc_token_set_crit(" << v << ", " << tb.critical << ", " << tb.slack << ");\n";
             if (tb.inMap) {                              // 烘焙：map DAG 图度量（编译期常量）——扇入扇出 / 影响范围 / 波次宽度 / 支配检查点
-                out << pad << "token_set_degree(" << tb.var << ", " << tb.fanin << ", " << tb.fanout << ");\n";
-                out << pad << "token_set_reach(" << tb.var << ", " << tb.reach << ");\n";
-                out << pad << "token_set_batch(" << tb.var << ", " << tb.batchWidth << ");\n";
-                out << pad << "token_set_dom(" << tb.var << ", " << tb.checkpoint << ", " << tb.domSize << ");\n";
+                out << pad << "sc_token_set_degree(" << v << ", " << tb.fanin << ", " << tb.fanout << ");\n";
+                out << pad << "sc_token_set_reach(" << v << ", " << tb.reach << ");\n";
+                out << pad << "sc_token_set_batch(" << v << ", " << tb.batchWidth << ");\n";
+                out << pad << "sc_token_set_dom(" << v << ", " << tb.checkpoint << ", " << tb.domSize << ");\n";
             }
             if (tb.sccSize > 1)                          // 烘焙：SCC 反馈簇划分（编译期常量）写入句柄；非反馈（簇大小≤1）省略
-                out << pad << "token_set_scc(" << tb.var << ", " << tb.sccId << ", " << tb.sccSize << ");\n";
+                out << pad << "sc_token_set_scc(" << v << ", " << tb.sccId << ", " << tb.sccSize << ");\n";
         }
         for (size_t i = 0; i < depRegs.size(); ++i) {
             auto& dr = depRegs[i];
-            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";  // _follow → _tramp
+            const std::string fn = scPfx(dr.fn);
+            std::string tramp = fn.substr(0, fn.size() - 7) + "_tramp";  // _follow → _tramp
             if (dr.targetVars.empty()) {                 // 无 map 目标：原 token_depend（ABI 不变）
-                out << pad << "{ token *_deps" << i << "[] = {";
+                out << pad << "{ sc_token *_deps" << i << "[] = {";
                 for (size_t j = 0; j < dr.vars.size(); ++j)
-                    out << (j ? ", " : " ") << dr.vars[j];
-                out << " }; token_depend(_deps" << i << ", " << dr.vars.size() << ", "
+                    out << (j ? ", " : " ") << scPfx(dr.vars[j]);
+                out << " }; sc_token_depend(_deps" << i << ", " << dr.vars.size() << ", "
                     << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
             } else {                                     // map/loop：_deps = 源 ++ 目标；token_depend_map / token_depend_loop
-                out << pad << "{ token *_deps" << i << "[] = {";
+                out << pad << "{ sc_token *_deps" << i << "[] = {";
                 bool first = true;
-                for (auto& v : dr.vars)        { out << (first ? " " : ", ") << v; first = false; }
-                for (auto& v : dr.targetVars)  { out << (first ? " " : ", ") << v; first = false; }
-                out << " }; " << (dr.loop ? "token_depend_loop" : "token_depend_map")
+                for (auto& v : dr.vars)        { out << (first ? " " : ", ") << scPfx(v); first = false; }
+                for (auto& v : dr.targetVars)  { out << (first ? " " : ", ") << scPfx(v); first = false; }
+                out << " }; " << (dr.loop ? "sc_token_depend_loop" : "sc_token_depend_map")
                     << "(_deps" << i << ", " << dr.vars.size() << ", "
                     << dr.targetVars.size() << ", " << (dr.all ? 1 : 0) << ", " << tramp << ", NULL); }\n";
             }
         }
     }
 
-    // dep follow 蹦床：把运行时 token_follow 通用签名打包为 follow 体的 __scdep_in& 上下文
+    // dep follow 蹦床：把运行时 token_follow 通用签名打包为 follow 体的 dep_in& 上下文
     //   （toks=依赖项数组 / count=个数 / active=触发动作码），调用合成的 follow 函数
     //   （返回 bool→下次门逻辑）。前向声明在 emitLifecycleDecls 产出。
+    //   C 类型名经 mapType_ 由 sc 名（token/dep_in）加 sc_ 前缀，与 op.h 定义对齐。
     void emitDepTrampolines() {
+        const std::string cTok = mapType_("token");
+        const std::string cDep = mapType_("dep_in");
         for (auto& dr : depRegs) {
-            std::string tramp = dr.fn.substr(0, dr.fn.size() - 7) + "_tramp";
-            out << "static int " << tramp << "(token **_ts, int _n, int _acting, void *_ctx) {\n";
-            out << "    __scdep_in _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;\n";
-            out << "    return (int)" << dr.fn << "(&_self);\n}\n";
+            const std::string fn = scPfx(dr.fn);
+            std::string tramp = fn.substr(0, fn.size() - 7) + "_tramp";
+            out << "static int " << tramp << "(" << cTok << " **_ts, int _n, int _acting, void *_ctx) {\n";
+            out << "    " << cDep << " _self; _self.toks = _ts; _self.count = _n; _self.active = _acting; _self.ctx = _ctx;\n";
+            out << "    return (int)" << fn << "(&_self);\n}\n";
         }
         if (!depRegs.empty()) out << "\n";
     }
@@ -7316,8 +7384,11 @@ struct CGen {
             else if (d->kind == Decl::AliasD) aliases[d->name] = d->structCommon.type->name;
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
-            else if (d->kind == Decl::FuncD && !d->isRpc)
-                funcs[d->name] = d.get();  // 顶层函数（缺参补全查签名）
+            else if ((d->kind == Decl::FuncD ||
+                      (d->kind == Decl::FuncTypeD && d->cImpl)) && !d->isRpc)
+                funcs[d->name] = d.get();  // 顶层函数（含 @fnc name:: C 实现自由函数）：
+                                           // 缺参补全查签名 + 调用点走 sc 域前缀（与 emitFuncSig
+                                           // 原型、impl.c 的 sc_ 前缀一致）
             if (d->isRpc) rpcs[d->name] = d.get();  // run 语句目标查询
         }
 
@@ -7362,7 +7433,16 @@ struct CGen {
 
         // 枚举类型名集合（string 格式化按整数）
         for (auto& d : prog.decls)
-            if (d->kind == Decl::EnumD) enums.insert(d->name);
+            if (d->kind == Decl::EnumD) {
+                enums.insert(d->name);
+                for (auto& f : d->structCommon.fields) enumConsts.insert(f.name);
+            }
+
+        // sc 域宏名集合（与 emitMacroDef 发 #define 的范围一致：非 :: 桥接、非泛型模板）：
+        //   引用/调用处经 scPfx 加前缀，与其 #define 名对齐。
+        for (auto& d : prog.decls)
+            if (d->kind == Decl::MacroD && !d->cImpl && d->macroTypeParams.empty())
+                macroNames.insert(d->name);
 
         // 容器类型名集合：def T: <C, I> 的 C（含外部模块声明），供 t[key,...] → find 糖识别
         for (auto& d : prog.decls)
@@ -7431,11 +7511,11 @@ struct CGen {
         if (usesClassRt) out << "static void sc_obj_drop(void *);\n";
         // 每个 cls 的分派器原型（构造点安装 _class 指针、object 强转、dim 调用均引用之）
         for (auto* c : classDecls)
-            out << "tril " << c->name << "_hyper_impl(void *, uint32_t, ...);\n";
+            out << "tril " << mapType_(c->name) << "_hyper_impl(void *, uint32_t, ...);\n";
         // 外部（其它单元定义）cls 类：分派器在彼单元导出，本单元 extern 引用（跨单元
         //   instanceOf / dim 调用 / object 强转 / _class 安装）。
         for (auto& n : externalClassNames)
-            out << "extern tril " << n << "_hyper_impl(void *, uint32_t, ...);\n";
+            out << "extern tril " << mapType_(n) << "_hyper_impl(void *, uint32_t, ...);\n";
         if (!classDecls.empty() || !externalClassNames.empty()) out << "\n";
 
         // 第一遍：类型、全局变量、函数原型（外部模块声明不参与输出，由模块头提供）
@@ -7653,10 +7733,19 @@ struct CGen {
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
         emitForwardAggrDecls(true);
 
-        // 函数类型表与方法表（导出函数可能引用未导出的函数类型签名）
+        // 类型注册表：导出签名可能引用聚合/别名/枚举/类/函数类型（含跨模块 external 类型，
+        //   如 op 的 token）。须在发射签名前填充，令 mapType_ 正确加 sc_ 前缀——否则 external
+        //   类型走「外部 C 类型」透传落裸名（如 token），与其模块头的 sc_ 前缀定义（sc_token）
+        //   不符，消费单元编译报「unknown type name 'token'」。与 run() 的注册表填充对齐。
         for (auto& d : prog.decls) {
             if (d->kind == Decl::FuncTypeD && !d->isRpc && !d->cImpl && d->methodOwner.empty())
                 funcTypes[d->name] = d.get();
+            else if (d->kind == Decl::StructD || d->kind == Decl::UnionD)
+                aggrs[d->name] = d.get();
+            else if (d->kind == Decl::AliasD && d->structCommon.type)
+                aliases[d->name] = d->structCommon.type->name;
+            else if (d->kind == Decl::EnumD) enums.insert(d->name);
+            if (d->kind == Decl::StructD && d->isClass) classNames.insert(d->name);
             if (!d->methodOwner.empty() && !d->isRpc)
                 methods[d->methodOwner][d->methodName] = d.get();
         }
@@ -7702,7 +7791,11 @@ struct CGen {
         for (auto& f : decls) {
             indent();
             out << "extern ";
-            emitDeclarator(f, asConst);
+            // 顶层导出全局的 C 名加 sc_ 前缀（sc 命名域），与其定义（emitVarDecls 非宏体路径
+            // 亦经 scPfx）及消费单元引用（经 globalsT → scPfx）一致；cBridge（name:: T）认领
+            // C 侧既有符号，保持裸名。
+            std::string cname = f.cBridge ? f.name : scPfx(f.name);
+            emitDeclarator(f, asConst, cname.c_str());
             out << ";\n";
         }
     }
@@ -7753,11 +7846,11 @@ std::string emitFutureIdHeader(const std::vector<std::string>& ids) {
                     "#ifndef SCC_TYPE_H\n#define SCC_TYPE_H\n\n"
                     "typedef enum { /* base: int32_t */\n";
     for (size_t i = 0; i < ids.size(); i++) {
-        s += "    " + ids[i];
+        s += "    " + scPfx(ids[i]);
         if (i + 1 < ids.size()) s += ",";
         s += "\n";
     }
-    s += "} future_id;\n\n#endif\n";
+    s += "} " + scPfx("future_id") + ";\n\n#endif\n";
     return s;
 }
 

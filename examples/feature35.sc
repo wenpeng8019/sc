@@ -19,10 +19,10 @@
     # 析构函数：清理本节点持有的子成员出边（子节点归零会再递归触发其 drop）
     drop: fnc
         if this->child != nil
-            printf("drop v=%d -> 释放子节点 v=%d\n", this->v, this->child->v)
+            ::printf("drop v=%d -> 释放子节点 v=%d\n", this->v, this->child->v)
             this->child = nil            # 解绑出边：子对象 in--（归零则递归析构 + 回收）
         else
-            printf("drop v=%d（叶子）\n", this->v)
+            ::printf("drop v=%d（叶子）\n", this->v)
 }
 
 @fnc main: i4
@@ -32,5 +32,5 @@
     root->child->v = 2
     root->child->child = node()          # 孙节点
     root->child->child->v = 3
-    printf("构建链 1 -> 2 -> 3，即将退出作用域\n")
+    ::printf("构建链 1 -> 2 -> 3，即将退出作用域\n")
     return 0                             # 退域：root 拆边 in→0 → 沿 drop 递归清理整条链

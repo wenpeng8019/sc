@@ -28,7 +28,7 @@ fnc show_suffix:
     var d: = 100uw       # u2
     var e: = 5u          # u4
     var f: = 9000000000l # i8
-    printf("suffix: %d %d %u %u %u %lld\n", a, b, c, d, e, f)
+    ::printf("suffix: %d %d %u %u %u %lld\n", a, b, c, d, e, f)
 
 #-------------- ret 调用语法糖 --------------
 # 返回 ret：约定 ok(0)=成功，>0 表示告警码，<0 表示错误码
@@ -42,19 +42,19 @@ fnc classify: ret, n: i4
 fnc demo_sugar:
     # ! → 失败（非 ok）时进入；classify(-2) 返回 -1 → 进块
     ! classify(-2)
-        printf("fail branch, $=%d\n", $)
+        ::printf("fail branch, $=%d\n", $)
     # ! → classify(0) 返回 ok=0 → 不进块
     ! classify(0)
-        printf("never here\n")
+        ::printf("never here\n")
     # > → 返回值 > 0 时进入
     > classify(7)
-        printf("warn branch, $=%d\n", $)
+        ::printf("warn branch, $=%d\n", $)
     # < → 返回值 < 0 时进入
     < classify(-2)
-        printf("err branch, $=%d\n", $)
+        ::printf("err branch, $=%d\n", $)
     # !! → 失败（非 ok）即 assert(false) 中止；此处成功，继续
     !! classify(0)
-    printf("after assert, $=%d\n", $)
+    ::printf("after assert, $=%d\n", $)
 
 # 错误传播糖 ?：失败时打印并向上层 return $
 fnc check_pos: ret, n: i4
@@ -64,19 +64,19 @@ fnc check_pos: ret, n: i4
 
 fnc do_step: ret, n: i4
     ! check_pos(n) ?
-        printf("do_step: check_pos(%d) failed, $=%d, propagate up\n", n, $)
-    printf("do_step: ok n=%d\n", n)
+        ::printf("do_step: check_pos(%d) failed, $=%d, propagate up\n", n, $)
+    ::printf("do_step: ok n=%d\n", n)
     return ok
 
 fnc run_pipeline: ret
     ! do_step(5) ?           # 成功，继续
     ! do_step(-1) ?          # 失败，打印并 return $
-    printf("run_pipeline: never reached\n")
+    ::printf("run_pipeline: never reached\n")
     return ok
 
 fnc main: i4
     show_suffix()
     demo_sugar()
     var r: ret = run_pipeline()
-    printf("pipeline result = %d\n", r)
+    ::printf("pipeline result = %d\n", r)
     return 0

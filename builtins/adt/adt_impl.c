@@ -11,7 +11,7 @@
 /* ---------------- string ---------------- */
 
 /* 确保容量至少 need+1（含 NUL），按 2 倍扩容 */
-static uint8_t str_grow(string *s, uint64_t need) {
+static uint8_t str_grow(sc_string *s, uint64_t need) {
     if (s->cap > need) return 1;
     uint64_t cap = s->cap ? s->cap : 16;
     while (cap <= need) cap *= 2;
@@ -22,41 +22,41 @@ static uint8_t str_grow(string *s, uint64_t need) {
     return 1;
 }
 
-void string_init(string *_this, const char *s) {
+void sc_string_init(sc_string *_this, const char *s) {
     _this->data = NULL;
     _this->size = 0;
     _this->cap = 0;
-    if (s) string_append(_this, s);
+    if (s) sc_string_append(_this, s);
 }
 
-void string_drop(string *_this) {
+void sc_string_drop(sc_string *_this) {
     sc_free(_this->data);
-    string_init(_this, NULL);
+    sc_string_init(_this, NULL);
 }
 
-uint64_t string_len(string *_this) { return _this->size; }
+uint64_t sc_string_len(sc_string *_this) { return _this->size; }
 
-char *string_cstr(string *_this) {
+char *sc_string_cstr(sc_string *_this) {
     return _this->data ? _this->data : (char *)"";
 }
 
-void string_clear(string *_this) {
+void sc_string_clear(sc_string *_this) {
     _this->size = 0;
     if (_this->data) _this->data[0] = 0;
 }
 
-bool string_reserve(string *_this, uint64_t n) { return str_grow(_this, n); }
+bool sc_string_reserve(sc_string *_this, uint64_t n) { return str_grow(_this, n); }
 
-bool string_assign(string *_this, const char *s) {
-    string_clear(_this);
-    return string_append(_this, s);
+bool sc_string_assign(sc_string *_this, const char *s) {
+    sc_string_clear(_this);
+    return sc_string_append(_this, s);
 }
 
-bool string_append(string *_this, const char *s) {
-    return string_append_n(_this, s, s ? strlen(s) : 0);
+bool sc_string_append(sc_string *_this, const char *s) {
+    return sc_string_append_n(_this, s, s ? strlen(s) : 0);
 }
 
-bool string_append_n(string *_this, const char *s, uint64_t n) {
+bool sc_string_append_n(sc_string *_this, const char *s, uint64_t n) {
     if (!n) { /* 仍保证缓冲区存在，便于 cstr() */ }
     if (!str_grow(_this, _this->size + n)) return 0;
     if (n) memcpy(_this->data + _this->size, s, n);
@@ -65,11 +65,11 @@ bool string_append_n(string *_this, const char *s, uint64_t n) {
     return 1;
 }
 
-bool string_append_char(string *_this, char c) {
-    return string_append_n(_this, &c, 1);
+bool sc_string_append_char(sc_string *_this, char c) {
+    return sc_string_append_n(_this, &c, 1);
 }
 
-bool string_insert(string *_this, uint64_t index, const char *s) {
+bool sc_string_insert(sc_string *_this, uint64_t index, const char *s) {
     if (index > _this->size) return 0;
     uint64_t n = s ? strlen(s) : 0;
     if (!n) return 1;
@@ -81,7 +81,7 @@ bool string_insert(string *_this, uint64_t index, const char *s) {
     return 1;
 }
 
-bool string_erase(string *_this, uint64_t index, uint64_t n) {
+bool sc_string_erase(sc_string *_this, uint64_t index, uint64_t n) {
     if (index >= _this->size) return 0;
     if (n > _this->size - index) n = _this->size - index;
     memmove(_this->data + index, _this->data + index + n,
@@ -91,7 +91,7 @@ bool string_erase(string *_this, uint64_t index, uint64_t n) {
     return 1;
 }
 
-char string_at(string *_this, uint64_t index) {
+char sc_string_at(sc_string *_this, uint64_t index) {
     return index < _this->size ? _this->data[index] : 0;
 }
 
@@ -145,7 +145,7 @@ static long sc__kmp_findR(const char *hay, size_t hlen, const char *ndl,
     return -1;
 }
 
-int64_t string_find(string *_this, const char *sub, uint64_t start) {
+int64_t sc_string_find(sc_string *_this, const char *sub, uint64_t start) {
     if (!sub) return -1;
     uint64_t nlen = strlen(sub);
     if (nlen == 0) return start <= _this->size ? (int64_t)start : -1;
@@ -158,7 +158,7 @@ int64_t string_find(string *_this, const char *sub, uint64_t start) {
     return pos >= 0 ? (int64_t)(pos + (long)start) : -1;
 }
 
-int64_t string_rfind(string *_this, const char *sub) {
+int64_t sc_string_rfind(sc_string *_this, const char *sub) {
     if (!sub) return -1;
     uint64_t nlen = strlen(sub);
     if (nlen == 0) return (int64_t)_this->size;
@@ -171,8 +171,8 @@ int64_t string_rfind(string *_this, const char *sub) {
     return (int64_t)pos;
 }
 
-/* 追加 printf 格式化文本：vsnprintf 探测所需长度→扩容→重试（移植 utstring_printf_va）。 */
-bool string_printf(string *_this, const char *fmt, ...) {
+/* 追加 printf 格式化文本：vsnprintf 探测所需长度→扩容→重试（移植 utsc_string_printf_va）。 */
+bool sc_string_printf(sc_string *_this, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     uint8_t ok = 1;
@@ -191,36 +191,36 @@ bool string_printf(string *_this, const char *fmt, ...) {
     return ok;
 }
 
-bool string_equals(string *_this, const char *s) {
-    return strcmp(string_cstr(_this), s ? s : "") == 0;
+bool sc_string_equals(sc_string *_this, const char *s) {
+    return strcmp(sc_string_cstr(_this), s ? s : "") == 0;
 }
 
-bool string_starts_with(string *_this, const char *s) {
+bool sc_string_starts_with(sc_string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
-    return n <= _this->size && memcmp(string_cstr(_this), s, n) == 0;
+    return n <= _this->size && memcmp(sc_string_cstr(_this), s, n) == 0;
 }
 
-bool string_ends_with(string *_this, const char *s) {
+bool sc_string_ends_with(sc_string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
     return n <= _this->size &&
-           memcmp(string_cstr(_this) + _this->size - n, s, n) == 0;
+           memcmp(sc_string_cstr(_this) + _this->size - n, s, n) == 0;
 }
 
 /* 负索引从尾部计；区间 [start, stop)，stop 超界截断 */
-bool string_slice(string *_this, int64_t start, int64_t stop, string *out) {
+bool sc_string_slice(sc_string *_this, int64_t start, int64_t stop, sc_string *out) {
     int64_t len = (int64_t)_this->size;
     if (start < 0) start += len;
     if (stop < 0) stop += len;
     if (start < 0) start = 0;
     if (stop > len) stop = len;
-    string_clear(out);
+    sc_string_clear(out);
     if (start >= stop) return str_grow(out, 0);
-    return string_append_n(out, _this->data + start, (uint64_t)(stop - start));
+    return sc_string_append_n(out, _this->data + start, (uint64_t)(stop - start));
 }
 
-void string_strip(string *_this) {
+void sc_string_strip(sc_string *_this) {
     if (!_this->size) return;
     uint64_t b = 0, e = _this->size;
     while (b < e && isspace((unsigned char)_this->data[b])) b++;
@@ -230,28 +230,28 @@ void string_strip(string *_this) {
     _this->data[_this->size] = 0;
 }
 
-void string_lower(string *_this) {
+void sc_string_lower(sc_string *_this) {
     for (uint64_t i = 0; i < _this->size; i++)
         _this->data[i] = (char)tolower((unsigned char)_this->data[i]);
 }
 
-void string_upper(string *_this) {
+void sc_string_upper(sc_string *_this) {
     for (uint64_t i = 0; i < _this->size; i++)
         _this->data[i] = (char)toupper((unsigned char)_this->data[i]);
 }
 
-bool string_clone(string *_this, string *out) {
-    string_clear(out);
-    return string_append_n(out, _this->data, _this->size);
+bool sc_string_clone(sc_string *_this, sc_string *out) {
+    sc_string_clear(out);
+    return sc_string_append_n(out, _this->data, _this->size);
 }
 
 /* ---------------- array ---------------- */
 
 /* 第 i 个元素槽位地址 */
-static char *arr_eltptr(array *a, uint64_t i) { return a->buf + i * a->elem_sz; }
+static char *arr_eltptr(sc_array *a, uint64_t i) { return a->buf + i * a->elem_sz; }
 
 /* 确保容量至少 need 个槽位，按 2 倍扩容 */
-static uint8_t arr_grow(array *a, uint64_t need) {
+static uint8_t arr_grow(sc_array *a, uint64_t need) {
     if (a->cap >= need) return 1;
     uint64_t cap = a->cap ? a->cap : 8;
     while (cap < need) cap *= 2;
@@ -262,29 +262,29 @@ static uint8_t arr_grow(array *a, uint64_t need) {
     return 1;
 }
 
-void array_init(array *_this, uint32_t elem_sz) {
+void sc_array_init(sc_array *_this, uint32_t elem_sz) {
     _this->buf = NULL;
     _this->size = 0;
     _this->cap = 0;
     _this->elem_sz = elem_sz ? elem_sz : 1;
 }
 
-void array_drop(array *_this) {
+void sc_array_drop(sc_array *_this) {
     sc_free(_this->buf);
     _this->buf = NULL;
     _this->size = 0;
     _this->cap = 0;
 }
 
-uint64_t array_len(array *_this) { return _this->size; }
+uint64_t sc_array_len(sc_array *_this) { return _this->size; }
 
-void *array_data(array *_this) { return _this->buf; }
+void *sc_array_data(sc_array *_this) { return _this->buf; }
 
-void array_clear(array *_this) { _this->size = 0; }
+void sc_array_clear(sc_array *_this) { _this->size = 0; }
 
-bool array_reserve(array *_this, uint64_t n) { return arr_grow(_this, n); }
+bool sc_array_reserve(sc_array *_this, uint64_t n) { return arr_grow(_this, n); }
 
-bool array_resize(array *_this, uint64_t n) {
+bool sc_array_resize(sc_array *_this, uint64_t n) {
     if (n > _this->size) {
         if (!arr_grow(_this, n)) return 0;
         memset(arr_eltptr(_this, _this->size), 0,
@@ -294,12 +294,12 @@ bool array_resize(array *_this, uint64_t n) {
     return 1;
 }
 
-bool array_assign(array *_this, void *src, uint64_t n) {
+bool sc_array_assign(sc_array *_this, void *src, uint64_t n) {
     _this->size = 0;
-    return array_append(_this, src, n);
+    return sc_array_append(_this, src, n);
 }
 
-bool array_append(array *_this, void *src, uint64_t n) {
+bool sc_array_append(sc_array *_this, void *src, uint64_t n) {
     if (!n) return 1;
     if (!arr_grow(_this, _this->size + n)) return 0;
     if (src) memcpy(arr_eltptr(_this, _this->size), src, n * _this->elem_sz);
@@ -307,18 +307,18 @@ bool array_append(array *_this, void *src, uint64_t n) {
     return 1;
 }
 
-bool array_push(array *_this, void *value) {
+bool sc_array_push(sc_array *_this, void *value) {
     if (!arr_grow(_this, _this->size + 1)) return 0;
     if (value) memcpy(arr_eltptr(_this, _this->size), value, _this->elem_sz);
     _this->size++;
     return 1;
 }
 
-void *array_pop(array *_this) {
+void *sc_array_pop(sc_array *_this) {
     return _this->size ? arr_eltptr(_this, --_this->size) : NULL;
 }
 
-bool array_insert(array *_this, uint64_t index, void *value) {
+bool sc_array_insert(sc_array *_this, uint64_t index, void *value) {
     if (index > _this->size) return 0;
     if (!arr_grow(_this, _this->size + 1)) return 0;
     memmove(arr_eltptr(_this, index + 1), arr_eltptr(_this, index),
@@ -328,7 +328,7 @@ bool array_insert(array *_this, uint64_t index, void *value) {
     return 1;
 }
 
-bool array_erase(array *_this, uint64_t index, uint64_t n) {
+bool sc_array_erase(sc_array *_this, uint64_t index, uint64_t n) {
     if (index >= _this->size || !n) return index >= _this->size ? 0 : 1;
     if (index + n > _this->size) n = _this->size - index;
     memmove(arr_eltptr(_this, index), arr_eltptr(_this, index + n),
@@ -337,56 +337,56 @@ bool array_erase(array *_this, uint64_t index, uint64_t n) {
     return 1;
 }
 
-void *array_at(array *_this, uint64_t index) {
+void *sc_array_at(sc_array *_this, uint64_t index) {
     return index < _this->size ? arr_eltptr(_this, index) : NULL;
 }
 
-bool array_set(array *_this, uint64_t index, void *value) {
+bool sc_array_set(sc_array *_this, uint64_t index, void *value) {
     if (index >= _this->size) return 0;
     if (value) memcpy(arr_eltptr(_this, index), value, _this->elem_sz);
     return 1;
 }
 
-void *array_front(array *_this) {
+void *sc_array_front(sc_array *_this) {
     return _this->size ? arr_eltptr(_this, 0) : NULL;
 }
 
-void *array_back(array *_this) {
+void *sc_array_back(sc_array *_this) {
     return _this->size ? arr_eltptr(_this, _this->size - 1) : NULL;
 }
 
 /* 元素相等：cmp 非空用回调（==0 即相等），否则逐字节 memcmp */
-static int arr_eq(array *a, void *x, void *y, array_cmp cmp) {
+static int arr_eq(sc_array *a, void *x, void *y, sc_array_cmp cmp) {
     return cmp ? cmp(x, y) == 0 : memcmp(x, y, a->elem_sz) == 0;
 }
 
-int64_t array_find(array *_this, void *key, uint64_t start, array_cmp cmp) {
+int64_t sc_array_find(sc_array *_this, void *key, uint64_t start, sc_array_cmp cmp) {
     for (uint64_t i = start; i < _this->size; i++)
         if (arr_eq(_this, arr_eltptr(_this, i), key, cmp)) return (int64_t)i;
     return -1;
 }
 
-int64_t array_rfind(array *_this, void *key, array_cmp cmp) {
+int64_t sc_array_rfind(sc_array *_this, void *key, sc_array_cmp cmp) {
     for (uint64_t i = _this->size; i > 0; i--)
         if (arr_eq(_this, arr_eltptr(_this, i - 1), key, cmp)) return (int64_t)(i - 1);
     return -1;
 }
 
-bool array_equals(array *_this, array *other, array_cmp cmp) {
+bool sc_array_equals(sc_array *_this, sc_array *other, sc_array_cmp cmp) {
     if (_this->size != other->size || _this->elem_sz != other->elem_sz) return 0;
     for (uint64_t i = 0; i < _this->size; i++)
         if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
     return 1;
 }
 
-bool array_starts_with(array *_this, array *other, array_cmp cmp) {
+bool sc_array_starts_with(sc_array *_this, sc_array *other, sc_array_cmp cmp) {
     if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
     for (uint64_t i = 0; i < other->size; i++)
         if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
     return 1;
 }
 
-bool array_ends_with(array *_this, array *other, array_cmp cmp) {
+bool sc_array_ends_with(sc_array *_this, sc_array *other, sc_array_cmp cmp) {
     if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
     uint64_t off = _this->size - other->size;
     for (uint64_t i = 0; i < other->size; i++)
@@ -395,7 +395,7 @@ bool array_ends_with(array *_this, array *other, array_cmp cmp) {
 }
 
 /* 负索引从尾部计；区间 [start, stop)，stop 超界截断。out 沿用本数组 elem_sz */
-bool array_slice(array *_this, int64_t start, int64_t stop, array *out) {
+bool sc_array_slice(sc_array *_this, int64_t start, int64_t stop, sc_array *out) {
     int64_t len = (int64_t)_this->size;
     if (start < 0) start += len;
     if (stop < 0) stop += len;
@@ -404,11 +404,11 @@ bool array_slice(array *_this, int64_t start, int64_t stop, array *out) {
     out->elem_sz = _this->elem_sz;
     out->size = 0;
     if (start >= stop) return 1;
-    return array_append(out, arr_eltptr(_this, (uint64_t)start),
+    return sc_array_append(out, arr_eltptr(_this, (uint64_t)start),
                         (uint64_t)(stop - start));
 }
 
-void array_reverse(array *_this) {
+void sc_array_reverse(sc_array *_this) {
     if (_this->size < 2) return;
     /* 借栈上小缓冲交换；元素较大时退化为逐字节 */
     char tmp[64];
@@ -424,19 +424,19 @@ void array_reverse(array *_this) {
     if (heap) sc_free(heap);
 }
 
-bool array_clone(array *_this, array *out) {
+bool sc_array_clone(sc_array *_this, sc_array *out) {
     out->elem_sz = _this->elem_sz;
     out->size = 0;
-    return array_append(out, _this->buf, _this->size);
+    return sc_array_append(out, _this->buf, _this->size);
 }
 
-void array_sort(array *_this, array_cmp cmp) {
+void sc_array_sort(sc_array *_this, sc_array_cmp cmp) {
     if (!cmp || _this->size < 2) return;
     qsort(_this->buf, _this->size, _this->elem_sz,
           (int (*)(const void *, const void *))cmp);
 }
 
-void *array_bsearch(array *_this, void *key, array_cmp cmp) {
+void *sc_array_bsearch(sc_array *_this, void *key, sc_array_cmp cmp) {
     if (!cmp || !_this->size) return NULL;
     return bsearch(key, _this->buf, _this->size, _this->elem_sz,
                    (int (*)(const void *, const void *))cmp);
@@ -458,11 +458,11 @@ static uint32_t ring_pow2(uint32_t n) {
     return p;
 }
 
-static inline char *ring_slot(ring *r, uint32_t idx) {
+static inline char *ring_slot(sc_ring *r, uint32_t idx) {
     return r->buf + (size_t)(idx & r->mask) * r->elem_sz;
 }
 
-bool ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity) {
+bool sc_ring_init(sc_ring *_this, uint32_t elem_sz, uint32_t capacity) {
     uint32_t es = elem_sz ? elem_sz : 1;
     uint32_t cap = ring_pow2(capacity ? capacity : 2);
     _this->head = 0;
@@ -474,7 +474,7 @@ bool ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity) {
     return 1;
 }
 
-void ring_drop(ring *_this) {
+void sc_ring_drop(sc_ring *_this) {
     sc_free(_this->buf);
     _this->buf = NULL;
     _this->head = 0;
@@ -482,32 +482,32 @@ void ring_drop(ring *_this) {
     _this->mask = 0;
 }
 
-uint64_t ring_cap(ring *_this) {
+uint64_t sc_ring_cap(sc_ring *_this) {
     return _this->buf ? (uint64_t)_this->mask + 1 : 0;
 }
 
-uint64_t ring_len(ring *_this) {
+uint64_t sc_ring_len(sc_ring *_this) {
     uint32_t tail = sc_get_acq(&_this->tail);
     uint32_t head = sc_get_acq(&_this->head);
     return (uint64_t)(tail - head);
 }
 
-bool ring_is_empty(ring *_this) {
+bool sc_ring_is_empty(sc_ring *_this) {
     return sc_get_acq(&_this->tail) == sc_get_acq(&_this->head);
 }
 
-bool ring_is_full(ring *_this) {
+bool sc_ring_is_full(sc_ring *_this) {
     uint32_t tail = sc_get_acq(&_this->tail);
     uint32_t head = sc_get_acq(&_this->head);
     return (tail - head) > _this->mask;      /* count == mask+1 == cap → 满 */
 }
 
-void ring_clear(ring *_this) {
+void sc_ring_clear(sc_ring *_this) {
     sc_set(&_this->head, 0);
     sc_set(&_this->tail, 0);
 }
 
-bool ring_push(ring *_this, void *value) {
+bool sc_ring_push(sc_ring *_this, void *value) {
     uint32_t tail = sc_get(&_this->tail);        /* 生产者独占 tail：relaxed 读自身 */
     uint32_t head = sc_get_acq(&_this->head);    /* acquire 观测消费者已释放的槽 */
     if ((tail - head) > _this->mask) return 0;   /* 满 */
@@ -516,7 +516,7 @@ bool ring_push(ring *_this, void *value) {
     return 1;
 }
 
-bool ring_pop(ring *_this, void *out) {
+bool sc_ring_pop(sc_ring *_this, void *out) {
     uint32_t head = sc_get(&_this->head);        /* 消费者独占 head：relaxed 读自身 */
     uint32_t tail = sc_get_acq(&_this->tail);    /* acquire 观测生产者写入的数据 */
     if (tail == head) return 0;                  /* 空 */
@@ -525,7 +525,7 @@ bool ring_pop(ring *_this, void *out) {
     return 1;
 }
 
-void *ring_peek(ring *_this) {
+void *ring_peek(sc_ring *_this) {
     uint32_t head = sc_get(&_this->head);
     uint32_t tail = sc_get_acq(&_this->tail);
     if (tail == head) return NULL;
@@ -542,19 +542,19 @@ void *ring_peek(ring *_this) {
 
 #define LIST_SEG 64    /* 每段元素数（64 * sizeof(sc_thin)=64*32=2KiB，命中 mem 尺寸类） */
 
-static inline sc_thin *list_slot(list *l, uint64_t i) {
+static inline sc_thin *list_slot(sc_list *l, uint64_t i) {
     return &l->segs[i / LIST_SEG][i % LIST_SEG];
 }
 
 /* 确保总容量至少 need 个槽位（按段粒度增长，段内存来自 mem chunk0 清零）。 */
-static uint8_t list_grow(list *l, uint64_t need) {
+static uint8_t list_grow(sc_list *l, uint64_t need) {
     if (l->cap >= need) return 1;
     uint64_t want = (need + LIST_SEG - 1) / LIST_SEG;   /* 所需段数 */
-    sc_thin **t = (sc_thin **)refit(l->segs, want * sizeof(sc_thin *));
+    sc_thin **t = (sc_thin **)sc_refit(l->segs, want * sizeof(sc_thin *));
     if (!t) return 0;
     l->segs = t;
     while (l->nsegs < want) {
-        sc_thin *seg = (sc_thin *)chunk0(LIST_SEG * sizeof(sc_thin));
+        sc_thin *seg = (sc_thin *)sc_chunk0(LIST_SEG * sizeof(sc_thin));
         if (!seg) return 0;                              /* 部分增长：nsegs/cap 反映已分配段 */
         l->segs[l->nsegs++] = seg;
         l->cap = (uint32_t)((uint64_t)l->nsegs * LIST_SEG);
@@ -562,32 +562,32 @@ static uint8_t list_grow(list *l, uint64_t need) {
     return 1;
 }
 
-void list_init(list *_this) {
+void sc_list_init(sc_list *_this) {
     _this->segs = NULL;
     _this->nsegs = 0;
     _this->size = 0;
     _this->cap = 0;
 }
 
-void list_clear(list *_this) {
+void sc_list_clear(sc_list *_this) {
     for (uint64_t i = 0; i < _this->size; i++)
         sc_thin_unbind(list_slot(_this, i));            /* release 每条 retain */
     _this->size = 0;
 }
 
-void list_drop(list *_this) {
-    list_clear(_this);
+void sc_list_drop(sc_list *_this) {
+    sc_list_clear(_this);
     for (uint32_t s = 0; s < _this->nsegs; s++)
-        recycle(_this->segs[s]);
-    recycle(_this->segs);
-    list_init(_this);
+        sc_recycle(_this->segs[s]);
+    sc_recycle(_this->segs);
+    sc_list_init(_this);
 }
 
-uint64_t list_len(list *_this) { return _this->size; }
+uint64_t sc_list_len(sc_list *_this) { return _this->size; }
 
-bool list_reserve(list *_this, uint64_t n) { return list_grow(_this, n); }
+bool sc_list_reserve(sc_list *_this, uint64_t n) { return list_grow(_this, n); }
 
-bool list_push(list *_this, sc_thin value) {
+bool sc_list_push(sc_list *_this, sc_thin value) {
     if (!list_grow(_this, _this->size + 1)) return 0;
     sc_thin_bind(list_slot(_this, _this->size), value.p,
                  (sc_ref *)value.tar, value.dtor);   /* retain：目标 in++ */
@@ -595,19 +595,19 @@ bool list_push(list *_this, sc_thin value) {
     return 1;
 }
 
-bool list_pop(list *_this) {
+bool sc_list_pop(sc_list *_this) {
     if (!_this->size) return 0;
     sc_thin_unbind(list_slot(_this, --_this->size));    /* release 尾元素 */
     return 1;
 }
 
-sc_thin list_get(list *_this, uint64_t index) {
+sc_thin sc_list_get(sc_list *_this, uint64_t index) {
     if (index < _this->size) return *list_slot(_this, index);  /* 借用：原样返回，不改计数 */
     sc_thin empty; empty.p = NULL; empty.tar = NULL; empty.dtor = NULL;
     return empty;
 }
 
-bool list_set(list *_this, uint64_t index, sc_thin value) {
+bool sc_list_set(sc_list *_this, uint64_t index, sc_thin value) {
     if (index >= _this->size) return 0;
     sc_thin *slot = list_slot(_this, index);
     sc_thin old = *slot;                                /* 复制旧边记录 */
@@ -617,7 +617,7 @@ bool list_set(list *_this, uint64_t index, sc_thin value) {
     return 1;
 }
 
-bool list_insert(list *_this, uint64_t index, sc_thin value) {
+bool sc_list_insert(sc_list *_this, uint64_t index, sc_thin value) {
     if (index > _this->size) return 0;
     if (!list_grow(_this, _this->size + 1)) return 0;
     for (uint64_t i = _this->size; i > index; i--)      /* 尾→前裸搬移让位（不改计数） */
@@ -628,7 +628,7 @@ bool list_insert(list *_this, uint64_t index, sc_thin value) {
     return 1;
 }
 
-bool list_remove_at(list *_this, uint64_t index) {
+bool sc_list_remove_at(sc_list *_this, uint64_t index) {
     if (index >= _this->size) return 0;
     sc_thin_unbind(list_slot(_this, index));            /* release 该元素 */
     for (uint64_t i = index; i + 1 < _this->size; i++)  /* 后续裸搬移前移（不改计数） */
@@ -639,13 +639,13 @@ bool list_remove_at(list *_this, uint64_t index) {
     return 1;
 }
 
-int64_t list_index_of(list *_this, sc_thin value) {
+int64_t sc_list_index_of(sc_list *_this, sc_thin value) {
     for (uint64_t i = 0; i < _this->size; i++)
         if (list_slot(_this, i)->p == value.p) return (int64_t)i;
     return -1;
 }
 
-void list_reverse(list *_this) {
+void sc_list_reverse(sc_list *_this) {
     for (uint64_t i = 0, j = _this->size; i + 1 < j; i++, j--) {
         sc_thin t = *list_slot(_this, i);               /* 裸交换句柄（不改计数） */
         *list_slot(_this, i) = *list_slot(_this, j - 1);
@@ -653,16 +653,16 @@ void list_reverse(list *_this) {
     }
 }
 
-bool list_clone(list *_this, list *out) {
-    list_clear(out);
+bool sc_list_clone(sc_list *_this, sc_list *out) {
+    sc_list_clear(out);
     if (!list_grow(out, _this->size)) return 0;
     for (uint64_t i = 0; i < _this->size; i++)
-        if (!list_push(out, *list_slot(_this, i))) return 0;  /* 逐元素 retain 到 out */
+        if (!sc_list_push(out, *list_slot(_this, i))) return 0;  /* 逐元素 retain 到 out */
     return 1;
 }
 
 /* 插入排序：元素数通常不大，且保持稳定。cmp 收元素 .p（实体基址）。句柄裸搬移不改计数。 */
-void list_sort(list *_this, list_cmp cmp) {
+void sc_list_sort(sc_list *_this, sc_list_cmp cmp) {
     if (!cmp) return;
     for (uint64_t i = 1; i < _this->size; i++) {
         sc_thin v = *list_slot(_this, i);
@@ -682,14 +682,14 @@ void list_sort(list *_this, list_cmp cmp) {
 #define DICT_OCCUPIED(c) (((c) & 0x80u) == 0u)
 #define DICT_MIN_BUCKETS 8u
 
-static inline sc_thin *dict_val(dict *d, uint64_t i) {
+static inline sc_thin *dict_val(sc_dict *d, uint64_t i) {
     return (sc_thin *)(d->slots + i * (uint64_t)d->stride);
 }
-static inline void *dict_keyslot(dict *d, uint64_t i) {
+static inline void *dict_keyslot(sc_dict *d, uint64_t i) {
     return d->slots + i * (uint64_t)d->stride + sizeof(sc_thin);
 }
 /* 桶 i 处的「逻辑键」指针：定长内联取槽地址；字符串模式取槽内存的 char* 借用 */
-static inline const void *dict_logkey(dict *d, uint64_t i) {
+static inline const void *dict_logkey(sc_dict *d, uint64_t i) {
     return d->key_size > 0 ? (const void *)dict_keyslot(d, i)
                            : *(const void **)dict_keyslot(d, i);
 }
@@ -811,7 +811,7 @@ static inline uint64_t dict_hash_mur(const unsigned char *p, size_t n) {  /* Mur
 #define DICT_HASH dict_hash_fnv                    /* 默认 FNV-1a：小巧、短键分布稳 */
 #endif
 
-static uint64_t dict_hash(const dict *d, const void *key) {
+static uint64_t dict_hash(const sc_dict *d, const void *key) {
     const unsigned char *p = (const unsigned char *)key;
     size_t n = d->key_size > 0 ? (size_t)d->key_size
                                : (key ? strlen((const char *)key) : 0);
@@ -819,7 +819,7 @@ static uint64_t dict_hash(const dict *d, const void *key) {
 }
 
 
-static int dict_keyeq(dict *d, uint64_t i, const void *key) {
+static int dict_keyeq(sc_dict *d, uint64_t i, const void *key) {
     if (d->key_size > 0)
         return memcmp(dict_keyslot(d, i), key, (size_t)d->key_size) == 0;
     {
@@ -832,7 +832,7 @@ static int dict_keyeq(dict *d, uint64_t i, const void *key) {
 }
 
 /* 查找已存在键，返回桶下标；未命中 -1 */
-static int64_t dict_find(dict *d, const void *key) {
+static int64_t dict_find(sc_dict *d, const void *key) {
     uint64_t h, mask, i;
     uint8_t h7;
     uint32_t probes;
@@ -851,7 +851,7 @@ static int64_t dict_find(dict *d, const void *key) {
 }
 
 /* 为插入定位：命中已存在键则 *found=1 返其桶；否则 *found=0 返首个可用（墓碑优先于空尾）。表满 -1。 */
-static int64_t dict_find_slot(dict *d, const void *key, int *found) {
+static int64_t dict_find_slot(sc_dict *d, const void *key, int *found) {
     uint64_t h = dict_hash(d, key), mask = d->nbuckets - 1, i = h & mask;
     uint8_t h7 = (uint8_t)(h & 0x7Fu);
     int64_t tomb = -1;
@@ -868,16 +868,16 @@ static int64_t dict_find_slot(dict *d, const void *key, int *found) {
 }
 
 /* 重建为 newcap 桶（2 的幂）：占用项整体搬移（裸字节移动句柄，不改 retain），清除墓碑 */
-static uint8_t dict_rehash(dict *d, uint32_t newcap) {
-    uint8_t *nctrl = (uint8_t *)chunk(newcap);
+static uint8_t dict_rehash(sc_dict *d, uint32_t newcap) {
+    uint8_t *nctrl = (uint8_t *)sc_chunk(newcap);
     char *nslots;
     uint8_t *octrl = d->ctrl;
     char *oslots = d->slots;
     uint32_t ocap = d->nbuckets, k;
     uint64_t mask = newcap - 1;
     if (!nctrl) return 0;
-    nslots = (char *)chunk((uint64_t)newcap * d->stride);
-    if (!nslots) { recycle(nctrl); return 0; }
+    nslots = (char *)sc_chunk((uint64_t)newcap * d->stride);
+    if (!nslots) { sc_recycle(nctrl); return 0; }
     memset(nctrl, DICT_EMPTY, newcap);
     for (k = 0; k < ocap; k++) {
         uint64_t h, i;
@@ -893,8 +893,8 @@ static uint8_t dict_rehash(dict *d, uint32_t newcap) {
         memcpy(nslots + i * (uint64_t)d->stride,
                oslots + (uint64_t)k * d->stride, d->stride);
     }
-    recycle(octrl);
-    recycle(oslots);
+    sc_recycle(octrl);
+    sc_recycle(oslots);
     d->ctrl = nctrl;
     d->slots = nslots;
     d->nbuckets = newcap;
@@ -903,7 +903,7 @@ static uint8_t dict_rehash(dict *d, uint32_t newcap) {
 }
 
 /* 负载因子 7/8（按 used 含墓碑判定）；超阈值则按 size 决定扩容或同尺寸清墓碑 */
-static uint8_t dict_ensure(dict *d) {
+static uint8_t dict_ensure(sc_dict *d) {
     if (d->nbuckets == 0) return dict_rehash(d, DICT_MIN_BUCKETS);
     if ((uint64_t)(d->used + 1) * 8 >= (uint64_t)d->nbuckets * 7) {
         uint32_t newcap = d->nbuckets;
@@ -913,7 +913,7 @@ static uint8_t dict_ensure(dict *d) {
     return 1;
 }
 
-static uint8_t dict_storekey(dict *d, uint64_t i, const void *key) {
+static uint8_t dict_storekey(sc_dict *d, uint64_t i, const void *key) {
     if (d->key_size > 0) {
         memcpy(dict_keyslot(d, i), key, (size_t)d->key_size);
         return 1;
@@ -925,7 +925,7 @@ static uint8_t dict_storekey(dict *d, uint64_t i, const void *key) {
     {                                               /* key_size == -1：拷贝一份 */
         const char *s = (const char *)key;
         size_t n = s ? strlen(s) : 0;
-        char *cp = (char *)chunk(n + 1);
+        char *cp = (char *)sc_chunk(n + 1);
         if (!cp) return 0;
         if (n) memcpy(cp, s, n);
         cp[n] = 0;
@@ -933,11 +933,11 @@ static uint8_t dict_storekey(dict *d, uint64_t i, const void *key) {
         return 1;
     }
 }
-static inline void dict_freekey(dict *d, uint64_t i) {
-    if (d->key_size == -1) recycle(*(char **)dict_keyslot(d, i));
+static inline void dict_freekey(sc_dict *d, uint64_t i) {
+    if (d->key_size == -1) sc_recycle(*(char **)dict_keyslot(d, i));
 }
 
-void dict_init(dict *_this, int32_t key_size) {
+void sc_dict_init(sc_dict *_this, int32_t key_size) {
     uint32_t keylen = key_size > 0 ? (uint32_t)key_size : (uint32_t)sizeof(char *);
     uint32_t st = (uint32_t)sizeof(sc_thin) + keylen;
     _this->ctrl = NULL;
@@ -949,7 +949,7 @@ void dict_init(dict *_this, int32_t key_size) {
     _this->nbuckets = 0;
 }
 
-void dict_clear(dict *_this) {
+void sc_dict_clear(sc_dict *_this) {
     uint32_t i;
     if (!_this->nbuckets) return;
     for (i = 0; i < _this->nbuckets; i++) {
@@ -963,26 +963,26 @@ void dict_clear(dict *_this) {
     _this->used = 0;
 }
 
-void dict_drop(dict *_this) {
-    dict_clear(_this);
-    recycle(_this->ctrl);
-    recycle(_this->slots);
+void sc_dict_drop(sc_dict *_this) {
+    sc_dict_clear(_this);
+    sc_recycle(_this->ctrl);
+    sc_recycle(_this->slots);
     _this->ctrl = NULL;
     _this->slots = NULL;
     _this->nbuckets = 0;                             /* 保留 key_size/stride 以便复用 */
 }
 
-uint64_t dict_len(dict *_this) { return _this->size; }
+uint64_t sc_dict_len(sc_dict *_this) { return _this->size; }
 
-bool dict_has(dict *_this, const void *key) { return dict_find(_this, key) >= 0; }
+bool sc_dict_has(sc_dict *_this, const void *key) { return dict_find(_this, key) >= 0; }
 
-sc_thin dict_get(dict *_this, const void *key) {
+sc_thin sc_dict_get(sc_dict *_this, const void *key) {
     int64_t i = dict_find(_this, key);
     if (i >= 0) return *dict_val(_this, (uint64_t)i);
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
-bool dict_put(dict *_this, const void *key, sc_thin value) {
+bool sc_dict_put(sc_dict *_this, const void *key, sc_thin value) {
     int found;
     int64_t i;
     sc_thin *slot;
@@ -1012,7 +1012,7 @@ bool dict_put(dict *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-bool dict_remove(dict *_this, const void *key) {
+bool sc_dict_remove(sc_dict *_this, const void *key) {
     int64_t i = dict_find(_this, key);
     if (i < 0) return 0;
     sc_thin_unbind(dict_val(_this, (uint64_t)i));    /* release value */
@@ -1022,7 +1022,7 @@ bool dict_remove(dict *_this, const void *key) {
     return 1;
 }
 
-void dict_each(dict *_this, dict_each_fn fn, void *ctx) {
+void sc_dict_each(sc_dict *_this, sc_dict_each_fn fn, void *ctx) {
     uint32_t i;
     if (!fn || !_this->nbuckets) return;
     for (i = 0; i < _this->nbuckets; i++) {
@@ -1031,36 +1031,36 @@ void dict_each(dict *_this, dict_each_fn fn, void *ctx) {
     }
 }
 
-int64_t dict_first(dict *_this) {
+int64_t sc_dict_first(sc_dict *_this) {
     uint32_t i;
     for (i = 0; i < _this->nbuckets; i++)
         if (DICT_OCCUPIED(_this->ctrl[i])) return (int64_t)i;
     return -1;
 }
-int64_t dict_last(dict *_this) {
+int64_t sc_dict_last(sc_dict *_this) {
     uint32_t i;
     for (i = _this->nbuckets; i-- > 0; )
         if (DICT_OCCUPIED(_this->ctrl[i])) return (int64_t)i;
     return -1;
 }
-int64_t dict_next(dict *_this, int64_t cur) {
+int64_t sc_dict_next(sc_dict *_this, int64_t cur) {
     int64_t i;
     for (i = cur + 1; i < (int64_t)_this->nbuckets; i++)
         if (DICT_OCCUPIED(_this->ctrl[i])) return i;
     return -1;
 }
-int64_t dict_prev(dict *_this, int64_t cur) {
+int64_t sc_dict_prev(sc_dict *_this, int64_t cur) {
     int64_t i, top = cur < (int64_t)_this->nbuckets ? cur : (int64_t)_this->nbuckets;
     for (i = top - 1; i >= 0; i--)
         if (DICT_OCCUPIED(_this->ctrl[i])) return i;
     return -1;
 }
-const void *dict_key_at(dict *_this, int64_t cur) {
+const void *sc_dict_key_at(sc_dict *_this, int64_t cur) {
     if (cur < 0 || (uint64_t)cur >= _this->nbuckets || !DICT_OCCUPIED(_this->ctrl[cur]))
         return NULL;
     return dict_logkey(_this, (uint64_t)cur);
 }
-sc_thin dict_value_at(dict *_this, int64_t cur) {
+sc_thin sc_dict_value_at(sc_dict *_this, int64_t cur) {
     if (cur < 0 || (uint64_t)cur >= _this->nbuckets || !DICT_OCCUPIED(_this->ctrl[cur])) {
         sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e;
     }
@@ -1095,14 +1095,14 @@ struct bst_node {
 
 /* 键装载点（logkey）：key_size<=8 数值内联于 k.kbuf（首 cache line，与 left/right 同行）；
    key_size>8 尾随节点（n+1，自然 8 对齐）；字符串模式取 k.kptr。 */
-static inline const void *bst_logkey(bst *t, bst_node *n) {
+static inline const void *bst_logkey(sc_bst *t, bst_node *n) {
     if (t->key_size > 8) return (const void *)(n + 1);
     if (t->key_size > 0) return n->k.kbuf;
     return n->k.kptr;
 }
 
 /* 比较：返回 sign(probe - node_key)。cmp 非空走自定义；否则内置数值（有符号，按宽度装载）/字符串。 */
-static int bst_cmp_key(bst *t, const void *probe, bst_node *n) {
+static int bst_cmp_key(sc_bst *t, const void *probe, bst_node *n) {
     const void *nk = bst_logkey(t, n);
     if (t->cmp) return t->cmp(probe, nk, t->cmp_ctx);
     if (t->key_size > 0) {
@@ -1122,20 +1122,20 @@ static int bst_cmp_key(bst *t, const void *probe, bst_node *n) {
       if (a == b) return 0; if (!a) return -1; if (!b) return 1; return strcmp(a, b); }
 }
 
-static bst_node *bst_node_new(bst *t) {
+static bst_node *bst_node_new(sc_bst *t) {
     size_t extra = t->key_size > 8 ? (size_t)t->key_size : 0;   /* 仅 key_size>8 才尾随分配 */
-    return (bst_node *)chunk(sizeof(bst_node) + extra);
+    return (bst_node *)sc_chunk(sizeof(bst_node) + extra);
 }
-static uint8_t bst_storekey(bst *t, bst_node *n, const void *key) {
+static uint8_t bst_storekey(sc_bst *t, bst_node *n, const void *key) {
     if (t->key_size > 8) { memcpy((char *)(n + 1), key, (size_t)t->key_size); return 1; }  /* 大数值键尾随 */
     if (t->key_size > 0) { memcpy(n->k.kbuf, key, (size_t)t->key_size); return 1; }          /* 小数值键内联 */
     if (t->key_size == 0) { n->k.kptr = (const char *)key; return 1; }   /* 借用 */
     { const char *s = (const char *)key; size_t len = s ? strlen(s) : 0;
-      char *cp = (char *)chunk(len + 1); if (!cp) return 0;
+      char *cp = (char *)sc_chunk(len + 1); if (!cp) return 0;
       if (len) memcpy(cp, s, len); cp[len] = 0; n->k.kptr = cp; return 1; }
 }
-static inline void bst_freekey(bst *t, bst_node *n) {
-    if (t->key_size == -1) recycle((void *)n->k.kptr);
+static inline void bst_freekey(sc_bst *t, bst_node *n) {
+    if (t->key_size == -1) sc_recycle((void *)n->k.kptr);
 }
 
 /* ---------------- 旋转（内部父指针版；同时维护 weight_l） ---------------- */
@@ -1183,7 +1183,7 @@ static inline void bst_lr2(bst_node *root, bst_node *right, bst_node *rl) {  /* 
 }
 
 /* ---------------- AVL 插入维护 ---------------- */
-static void bst_avl_inserted(bst *t, bst_node *node, bst_node *parent, bst_node *mbs_parent) {
+static void bst_avl_inserted(sc_bst *t, bst_node *node, bst_node *parent, bst_node *mbs_parent) {
     bst_node *mbs_root, *up, *newroot;
     int8_t inc;
 
@@ -1233,7 +1233,7 @@ static void bst_avl_inserted(bst *t, bst_node *node, bst_node *parent, bst_node 
 }
 
 /* ---------------- 红黑 插入维护 ---------------- */
-static void bst_rb_inserted(bst *t, bst_node *node, bst_node *parent) {
+static void bst_rb_inserted(sc_bst *t, bst_node *node, bst_node *parent) {
     bst_node *root = t->root, *sup, *uncle, *rotate_parent;
     int8_t pinc, sinc;
     for (;;) {
@@ -1274,7 +1274,7 @@ static void bst_rb_inserted(bst *t, bst_node *node, bst_node *parent) {
 }
 
 /* ---------------- AVL 删除维护 ---------------- */
-static void bst_avl_removed(bst *t, bst_node *parent, int8_t inc) {
+static void bst_avl_removed(sc_bst *t, bst_node *parent, int8_t inc) {
     bst_node *rparent, *rroot, *decline;
     for (;;) {
         if (parent->balance == 0) { parent->balance = (int8_t)-inc; return; }
@@ -1317,7 +1317,7 @@ static void bst_avl_removed(bst *t, bst_node *parent, int8_t inc) {
 }
 
 /* ---------------- 红黑 删除维护（仅删黑节点时调用） ---------------- */
-static void bst_rb_removed(bst *t, bst_node *parent, int8_t inc) {
+static void bst_rb_removed(sc_bst *t, bst_node *parent, int8_t inc) {
     bst_node *sup, *sibling, *sub;
     for (;;) {
         sibling = inc < 0 ? parent->right : parent->left;
@@ -1363,7 +1363,7 @@ static void bst_rb_removed(bst *t, bst_node *parent, int8_t inc) {
 }
 
 /* ---------------- 公共接口 ---------------- */
-void bst_init(bst *_this, uint8_t red_depth, int32_t key_size, bst_cmp cmp, void *cmp_ctx) {
+void sc_bst_init(sc_bst *_this, uint8_t red_depth, int32_t key_size, sc_bst_cmp cmp, void *cmp_ctx) {
     _this->root = _this->head = _this->rear = NULL;
     _this->cmp = cmp;
     _this->cmp_ctx = cmp_ctx;
@@ -1372,30 +1372,30 @@ void bst_init(bst *_this, uint8_t red_depth, int32_t key_size, bst_cmp cmp, void
     _this->red_depth = red_depth;
 }
 
-void bst_clear(bst *_this) {
+void sc_bst_clear(sc_bst *_this) {
     bst_node *n = (bst_node *)_this->head, *nx;
     while (n) {
         nx = n->next;
         sc_thin_unbind(&n->value);                  /* release value */
         bst_freekey(_this, n);                       /* -1 模式回收 key 拷贝 */
-        recycle(n);
+        sc_recycle(n);
         n = nx;
     }
     _this->root = _this->head = _this->rear = NULL;
     _this->size = 0;
 }
 
-void bst_drop(bst *_this) { bst_clear(_this); }      /* 内部父指针设计无外置缓冲，drop 同 clear */
+void sc_bst_drop(sc_bst *_this) { sc_bst_clear(_this); }      /* 内部父指针设计无外置缓冲，drop 同 clear */
 
-uint64_t bst_len(bst *_this) { return _this->size; }
+uint64_t sc_bst_len(sc_bst *_this) { return _this->size; }
 
-bool bst_has(bst *_this, const void *key) {
+bool sc_bst_has(sc_bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root;
     while (n) { int c = bst_cmp_key(_this, key, n); if (c == 0) return 1; n = c < 0 ? n->left : n->right; }
     return 0;
 }
 
-sc_thin bst_get(bst *_this, const void *key) {
+sc_thin sc_bst_get(sc_bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root;
     while (n) {
         int c = bst_cmp_key(_this, key, n);
@@ -1405,13 +1405,13 @@ sc_thin bst_get(bst *_this, const void *key) {
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
-bool bst_put(bst *_this, const void *key, sc_thin value) {
+bool sc_bst_put(sc_bst *_this, const void *key, sc_thin value) {
     bst_node *nn, *parent, *child, *mbs_parent = NULL;
     int c;
 
     if (!_this->root) {                             /* 空树：建根 */
         if (!(nn = bst_node_new(_this))) return 0;
-        if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+        if (!bst_storekey(_this, nn, key)) { sc_recycle(nn); return 0; }
         nn->left = nn->right = nn->prev = nn->next = NULL;
         nn->parent = NULL;
         nn->weight_l = 1;
@@ -1435,7 +1435,7 @@ bool bst_put(bst *_this, const void *key, sc_thin value) {
         if (c < 0) {
             if (!(child = parent->left)) {
                 if (!(nn = bst_node_new(_this))) return 0;
-                if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+                if (!bst_storekey(_this, nn, key)) { sc_recycle(nn); return 0; }
                 parent->left = nn;
                 nn->next = parent;                  /* 中序链表插入 */
                 if ((child = parent->prev)) child->next = nn; else _this->head = nn;
@@ -1446,7 +1446,7 @@ bool bst_put(bst *_this, const void *key, sc_thin value) {
         } else {
             if (!(child = parent->right)) {
                 if (!(nn = bst_node_new(_this))) return 0;
-                if (!bst_storekey(_this, nn, key)) { recycle(nn); return 0; }
+                if (!bst_storekey(_this, nn, key)) { sc_recycle(nn); return 0; }
                 parent->right = nn;
                 nn->prev = parent;
                 if ((child = parent->next)) child->prev = nn; else _this->rear = nn;
@@ -1468,7 +1468,7 @@ bool bst_put(bst *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-bool bst_remove(bst *_this, const void *key) {
+bool sc_bst_remove(sc_bst *_this, const void *key) {
     bst_node *node, *child, *parent;
     int8_t removed_balance, inc;
 
@@ -1512,7 +1512,7 @@ bool bst_remove(bst *_this, const void *key) {
     parent = node->parent;
     if ((child = node->left) || (child = node->right)) child->parent = parent;
     removed_balance = node->balance;
-    recycle(node);                                   /* 物理回收（值/键已处置或已移出） */
+    sc_recycle(node);                                   /* 物理回收（值/键已处置或已移出） */
     _this->size--;
 
     if (!parent) {                                   /* 删的是根 */
@@ -1532,7 +1532,7 @@ bool bst_remove(bst *_this, const void *key) {
     return 1;
 }
 
-void bst_each(bst *_this, bst_each_fn fn, void *ctx) {
+void sc_bst_each(sc_bst *_this, sc_bst_each_fn fn, void *ctx) {
     bst_node *n;
     if (!fn) return;
     for (n = (bst_node *)_this->head; n; n = n->next)
@@ -1540,28 +1540,28 @@ void bst_each(bst *_this, bst_each_fn fn, void *ctx) {
 }
 
 /* 游标 = 节点指针（不透明 token，0 = 无）；遍历期间勿增删（增删可能回收节点使其失效）。 */
-int64_t bst_first(bst *_this) { return (int64_t)(intptr_t)_this->head; }
-int64_t bst_last(bst *_this)  { return (int64_t)(intptr_t)_this->rear; }
-int64_t bst_next(bst *_this, int64_t cur) {
+int64_t sc_bst_first(sc_bst *_this) { return (int64_t)(intptr_t)_this->head; }
+int64_t sc_bst_last(sc_bst *_this)  { return (int64_t)(intptr_t)_this->rear; }
+int64_t sc_bst_next(sc_bst *_this, int64_t cur) {
     bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
     return n ? (int64_t)(intptr_t)n->next : 0;
 }
-int64_t bst_prev(bst *_this, int64_t cur) {
+int64_t sc_bst_prev(sc_bst *_this, int64_t cur) {
     bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
     return n ? (int64_t)(intptr_t)n->prev : 0;
 }
-const void *bst_key_at(bst *_this, int64_t cur) {
+const void *sc_bst_key_at(sc_bst *_this, int64_t cur) {
     bst_node *n = (bst_node *)(intptr_t)cur;
     return n ? bst_logkey(_this, n) : NULL;
 }
-sc_thin bst_value_at(bst *_this, int64_t cur) {
+sc_thin sc_bst_value_at(sc_bst *_this, int64_t cur) {
     bst_node *n = (bst_node *)(intptr_t)cur; (void)_this;
     if (n) return n->value;
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
 /* key -> 0 基中序序号；未命中返回 -1 */
-int64_t bst_index_of(bst *_this, const void *key) {
+int64_t sc_bst_index_of(sc_bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root;
     int64_t i;
     if (!n) return -1;
@@ -1575,7 +1575,7 @@ int64_t bst_index_of(bst *_this, const void *key) {
 }
 
 /* 0 基中序序号 -> 游标；越界返回 0 */
-int64_t bst_at(bst *_this, uint64_t index) {
+int64_t sc_bst_at(sc_bst *_this, uint64_t index) {
     bst_node *n = (bst_node *)_this->root;
     int64_t i;
     if (!n) return 0;
@@ -1589,7 +1589,7 @@ int64_t bst_at(bst *_this, uint64_t index) {
 }
 
 /* 最接近且 <= key 的项（前驱或等于）；无返回 0 */
-int64_t bst_most(bst *_this, const void *key) {
+int64_t sc_bst_most(sc_bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root, *cand = NULL;
     while (n) {
         int c = bst_cmp_key(_this, key, n);
@@ -1600,7 +1600,7 @@ int64_t bst_most(bst *_this, const void *key) {
 }
 
 /* 最接近且 >= key 的项（后继或等于）；无返回 0 */
-int64_t bst_least(bst *_this, const void *key) {
+int64_t sc_bst_least(sc_bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root, *cand = NULL;
     while (n) {
         int c = bst_cmp_key(_this, key, n);
@@ -1623,17 +1623,17 @@ int64_t bst_least(bst *_this, const void *key) {
 
 #define HEAP_MIN_CAP 8u
 
-static inline char   *heap_slot(heap *h, uint32_t i) { return h->slots + (size_t)i * h->stride; }
-static inline sc_thin *heap_val(heap *h, uint32_t i)  { return (sc_thin *)heap_slot(h, i); }
-static inline char   *heap_keyslot(heap *h, uint32_t i) { return heap_slot(h, i) + sizeof(sc_thin); }
+static inline char   *heap_slot(sc_heap *h, uint32_t i) { return h->slots + (size_t)i * h->stride; }
+static inline sc_thin *heap_val(sc_heap *h, uint32_t i)  { return (sc_thin *)heap_slot(h, i); }
+static inline char   *heap_keyslot(sc_heap *h, uint32_t i) { return heap_slot(h, i) + sizeof(sc_thin); }
 /* 逻辑键：数值模式为键字节指针；字符串模式为存于槽内的 char* */
-static inline const void *heap_logkey(heap *h, uint32_t i) {
+static inline const void *heap_logkey(sc_heap *h, uint32_t i) {
     return h->key_size > 0 ? (const void *)heap_keyslot(h, i)
                            : *(const char **)heap_keyslot(h, i);
 }
 
 /* 比较两逻辑键：返回 sign(a - b)。cmp 非空走自定义；否则数值按宽度有符号 / 字符串 strcmp。 */
-static int heap_cmp_key(heap *h, const void *a, const void *b) {
+static int heap_cmp_key(sc_heap *h, const void *a, const void *b) {
     if (h->cmp) return h->cmp(a, b, h->cmp_ctx);
     if (h->key_size > 0) {
         switch (h->key_size) {
@@ -1653,13 +1653,13 @@ static int heap_cmp_key(heap *h, const void *a, const void *b) {
 }
 
 /* i 是否应在 j 之上（更靠近根）：最小堆 = i 键更小，最大堆 = i 键更大。 */
-static inline int heap_above(heap *h, uint32_t i, uint32_t j) {
+static inline int heap_above(sc_heap *h, uint32_t i, uint32_t j) {
     int c = heap_cmp_key(h, heap_logkey(h, i), heap_logkey(h, j));
     return h->min ? (c < 0) : (c > 0);
 }
 
 /* 交换两槽全部字节（裸搬移句柄+键，move 语义，不改计数）；分块经栈缓冲，支持任意 stride。 */
-static void heap_swap(heap *h, uint32_t i, uint32_t j) {
+static void heap_swap(sc_heap *h, uint32_t i, uint32_t j) {
     char *a = heap_slot(h, i), *b = heap_slot(h, j);
     char tmp[64];
     uint32_t n = h->stride, k;
@@ -1672,7 +1672,7 @@ static void heap_swap(heap *h, uint32_t i, uint32_t j) {
     }
 }
 
-static void heap_sift_up(heap *h, uint32_t i) {
+static void heap_sift_up(sc_heap *h, uint32_t i) {
     while (i > 0) {
         uint32_t parent = (i - 1) / 2;
         if (!heap_above(h, i, parent)) break;
@@ -1681,7 +1681,7 @@ static void heap_sift_up(heap *h, uint32_t i) {
     }
 }
 
-static void heap_sift_down(heap *h, uint32_t i) {
+static void heap_sift_down(sc_heap *h, uint32_t i) {
     uint32_t n = h->size;
     for (;;) {
         uint32_t l = 2 * i + 1, r = l + 1, best = i;
@@ -1693,30 +1693,30 @@ static void heap_sift_down(heap *h, uint32_t i) {
     }
 }
 
-static uint8_t heap_storekey(heap *h, uint32_t i, const void *key) {
+static uint8_t heap_storekey(sc_heap *h, uint32_t i, const void *key) {
     if (h->key_size > 0) { memcpy(heap_keyslot(h, i), key, (size_t)h->key_size); return 1; }
     if (h->key_size == 0) { *(const char **)heap_keyslot(h, i) = (const char *)key; return 1; }  /* 借用 */
     { const char *s = (const char *)key; size_t n = s ? strlen(s) : 0;  /* -1：拷贝一份 */
-      char *cp = (char *)chunk(n + 1); if (!cp) return 0;
+      char *cp = (char *)sc_chunk(n + 1); if (!cp) return 0;
       if (n) memcpy(cp, s, n); cp[n] = 0; *(const char **)heap_keyslot(h, i) = cp; return 1; }
 }
-static inline void heap_freekey(heap *h, uint32_t i) {
-    if (h->key_size == -1) recycle(*(char **)heap_keyslot(h, i));
+static inline void heap_freekey(sc_heap *h, uint32_t i) {
+    if (h->key_size == -1) sc_recycle(*(char **)heap_keyslot(h, i));
 }
 
 /* 扩容到至少 want 槽（几何增长）；裸字节搬移句柄，不改计数。失败返回 0。 */
-static uint8_t heap_grow(heap *h, uint32_t want) {
+static uint8_t heap_grow(sc_heap *h, uint32_t want) {
     uint32_t ncap = h->cap ? h->cap : HEAP_MIN_CAP;
     char *ns;
     while (ncap < want) ncap *= 2;
-    ns = (char *)refit(h->slots, (uint64_t)ncap * h->stride);
+    ns = (char *)sc_refit(h->slots, (uint64_t)ncap * h->stride);
     if (!ns) return 0;
     h->slots = ns;
     h->cap = ncap;
     return 1;
 }
 
-void heap_init(heap *_this, uint8_t min, int32_t key_size, heap_cmp cmp, void *cmp_ctx) {
+void sc_heap_init(sc_heap *_this, uint8_t min, int32_t key_size, sc_heap_cmp cmp, void *cmp_ctx) {
     uint32_t keylen = key_size > 0 ? (uint32_t)key_size : (uint32_t)sizeof(char *);
     uint32_t st = (uint32_t)sizeof(sc_thin) + keylen;
     _this->slots = NULL;
@@ -1729,7 +1729,7 @@ void heap_init(heap *_this, uint8_t min, int32_t key_size, heap_cmp cmp, void *c
     _this->min = min ? 1 : 0;
 }
 
-void heap_clear(heap *_this) {
+void sc_heap_clear(sc_heap *_this) {
     uint32_t i;
     for (i = 0; i < _this->size; i++) {
         sc_thin_unbind(heap_val(_this, i));         /* release value */
@@ -1738,23 +1738,23 @@ void heap_clear(heap *_this) {
     _this->size = 0;
 }
 
-void heap_drop(heap *_this) {
-    heap_clear(_this);
-    recycle(_this->slots);
+void sc_heap_drop(sc_heap *_this) {
+    sc_heap_clear(_this);
+    sc_recycle(_this->slots);
     _this->slots = NULL;
     _this->cap = 0;
 }
 
-uint64_t heap_len(heap *_this) { return _this->size; }
-bool heap_is_empty(heap *_this) { return _this->size == 0; }
+uint64_t sc_heap_len(sc_heap *_this) { return _this->size; }
+bool sc_heap_is_empty(sc_heap *_this) { return _this->size == 0; }
 
-bool heap_reserve(heap *_this, uint64_t n) {
+bool sc_heap_reserve(sc_heap *_this, uint64_t n) {
     if (n <= _this->cap) return 1;
     if (n > 0xFFFFFFFFu) return 0;
     return heap_grow(_this, (uint32_t)n);
 }
 
-bool heap_push(heap *_this, const void *key, sc_thin value) {
+bool sc_heap_push(sc_heap *_this, const void *key, sc_thin value) {
     uint32_t i = _this->size;
     if (i == _this->cap && !heap_grow(_this, i + 1)) return 0;
     if (!heap_storekey(_this, i, key)) return 0;
@@ -1764,7 +1764,7 @@ bool heap_push(heap *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-bool heap_pop(heap *_this) {
+bool sc_heap_pop(sc_heap *_this) {
     uint32_t last;
     if (!_this->size) return 0;
     sc_thin_unbind(heap_val(_this, 0));             /* release 堆顶 value */
@@ -1777,12 +1777,12 @@ bool heap_pop(heap *_this) {
     return 1;
 }
 
-sc_thin heap_peek(heap *_this) {
+sc_thin sc_heap_peek(sc_heap *_this) {
     if (_this->size) return *heap_val(_this, 0);    /* 借用，不改计数 */
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
-const void *heap_peek_key(heap *_this) {
+const void *sc_heap_peek_key(sc_heap *_this) {
     return _this->size ? heap_logkey(_this, 0) : NULL;
 }
 
@@ -1811,7 +1811,7 @@ static inline sc_thin trie_empty_afat(void) {
 }
 
 static trie_node *trie_node_new(trie_node *parent, uint8_t byte) {
-    trie_node *n = (trie_node *)chunk0(sizeof(trie_node));  /* 清零：value 空句柄、子/兄 NULL、subkeys 0、terminal 0 */
+    trie_node *n = (trie_node *)sc_chunk0(sizeof(trie_node));  /* 清零：value 空句柄、子/兄 NULL、subkeys 0、terminal 0 */
     if (!n) return NULL;
     n->parent = parent;
     n->byte = byte;
@@ -1848,7 +1848,7 @@ static void trie_unlink(trie_node *par, trie_node *n) {
 }
 
 /* 沿键走到终端节点；任一字节缺失或空树返回 NULL（空前缀返回 root） */
-static trie_node *trie_walk(trie *t, const char *key) {
+static trie_node *trie_walk(sc_trie *t, const char *key) {
     const unsigned char *p;
     trie_node *n;
     if (!key || !t->root) return NULL;
@@ -1871,7 +1871,7 @@ static void trie_free_all(trie_node *root, int release) {
         {
             trie_node *sib = n->sibling, *par = n->parent;    /* 释放前捕获去向 */
             if (release && n->terminal) sc_thin_unbind(&n->value);
-            recycle(n);
+            sc_recycle(n);
             if (sib) { n = sib; descend = 1; }                /* 转兄弟，重新下探 */
             else if (par) { n = par; descend = 0; }           /* 该层子链尽，回父：父子已尽即回收父 */
             else break;                                       /* 已释放 root */
@@ -1879,29 +1879,29 @@ static void trie_free_all(trie_node *root, int release) {
     }
 }
 
-void trie_init(trie *_this) { _this->root = NULL; _this->size = 0; }
+void sc_trie_init(sc_trie *_this) { _this->root = NULL; _this->size = 0; }
 
-void trie_clear(trie *_this) {
+void sc_trie_clear(sc_trie *_this) {
     if (_this->root) { trie_free_all((trie_node *)_this->root, 1); _this->root = NULL; }
     _this->size = 0;
 }
 
-void trie_drop(trie *_this) { trie_clear(_this); }
+void sc_trie_drop(sc_trie *_this) { sc_trie_clear(_this); }
 
-uint64_t trie_len(trie *_this) { return _this->size; }
+uint64_t sc_trie_len(sc_trie *_this) { return _this->size; }
 
-bool trie_has(trie *_this, const char *key) {
+bool sc_trie_has(sc_trie *_this, const char *key) {
     trie_node *n = trie_walk(_this, key);
     return (uint8_t)(n && n->terminal);
 }
 
-sc_thin trie_get(trie *_this, const char *key) {
+sc_thin sc_trie_get(sc_trie *_this, const char *key) {
     trie_node *n = trie_walk(_this, key);
     if (n && n->terminal) return n->value;            /* 借用，不改计数 */
     return trie_empty_afat();
 }
 
-bool trie_put(trie *_this, const char *key, sc_thin value) {
+bool sc_trie_put(sc_trie *_this, const char *key, sc_thin value) {
     const unsigned char *p;
     trie_node *n, *graft_parent = NULL, *graft_first = NULL;
     if (!key) return 0;
@@ -1916,7 +1916,7 @@ bool trie_put(trie *_this, const char *key, sc_thin value) {
         if (!c) {                                     /* OOM：回滚新建链（单条下降链） */
             if (graft_first) {
                 trie_unlink(graft_parent, graft_first);
-                while (graft_first) { trie_node *nx = graft_first->child; recycle(graft_first); graft_first = nx; }
+                while (graft_first) { trie_node *nx = graft_first->child; sc_recycle(graft_first); graft_first = nx; }
             }
             return 0;
         }
@@ -1936,7 +1936,7 @@ bool trie_put(trie *_this, const char *key, sc_thin value) {
     return 1;
 }
 
-bool trie_remove(trie *_this, const char *key) {
+bool sc_trie_remove(sc_trie *_this, const char *key) {
     trie_node *n, *u;
     n = trie_walk(_this, key);
     if (!n || !n->terminal) return 0;
@@ -1947,22 +1947,22 @@ bool trie_remove(trie *_this, const char *key) {
     while (n->parent && !n->terminal && n->child == NULL) {   /* 自下而上剪除悬挂空节点 */
         trie_node *par = n->parent;
         trie_unlink(par, n);
-        recycle(n);
+        sc_recycle(n);
         n = par;
     }
     return 1;
 }
 
-bool trie_has_prefix(trie *_this, const char *prefix) {
-    return (uint8_t)(trie_count_prefix(_this, prefix) > 0);
+bool sc_trie_has_prefix(sc_trie *_this, const char *prefix) {
+    return (uint8_t)(sc_trie_count_prefix(_this, prefix) > 0);
 }
 
-uint64_t trie_count_prefix(trie *_this, const char *prefix) {
+uint64_t sc_trie_count_prefix(sc_trie *_this, const char *prefix) {
     trie_node *n = trie_walk(_this, prefix);
     return n ? n->subkeys : 0;
 }
 
-int64_t trie_longest_prefix(trie *_this, const char *text) {
+int64_t sc_trie_longest_prefix(sc_trie *_this, const char *text) {
     const unsigned char *p;
     trie_node *n;
     int64_t best = -1, depth = 0;
@@ -1984,7 +1984,7 @@ typedef struct { char *p; uint32_t len, cap; } trie_keybuf;
 static int tkb_init(trie_keybuf *b, const char *prefix) {
     size_t n = prefix ? strlen(prefix) : 0;
     b->cap = (uint32_t)(n + 16);
-    b->p = (char *)chunk(b->cap);
+    b->p = (char *)sc_chunk(b->cap);
     if (!b->p) return 0;
     if (n) memcpy(b->p, prefix, n);
     b->len = (uint32_t)n;
@@ -1994,7 +1994,7 @@ static int tkb_init(trie_keybuf *b, const char *prefix) {
 static int tkb_push(trie_keybuf *b, uint8_t c) {
     if (b->len + 1 >= b->cap) {
         uint32_t nc = b->cap * 2;
-        char *np = (char *)refit(b->p, nc);
+        char *np = (char *)sc_refit(b->p, nc);
         if (!np) return 0;
         b->p = np; b->cap = nc;
     }
@@ -2003,9 +2003,9 @@ static int tkb_push(trie_keybuf *b, uint8_t c) {
     return 1;
 }
 static void tkb_pop(trie_keybuf *b) { if (b->len) { b->p[--b->len] = 0; } }
-static void tkb_drop(trie_keybuf *b) { recycle(b->p); b->p = NULL; }
+static void tkb_drop(trie_keybuf *b) { sc_recycle(b->p); b->p = NULL; }
 
-void trie_each_prefix(trie *_this, const char *prefix, trie_each_fn fn, void *ctx) {
+void sc_trie_each_prefix(sc_trie *_this, const char *prefix, sc_trie_each_fn fn, void *ctx) {
     trie_node *start, *cur;
     trie_keybuf buf;
     if (!fn) return;
@@ -2034,8 +2034,8 @@ void trie_each_prefix(trie *_this, const char *prefix, trie_each_fn fn, void *ct
     tkb_drop(&buf);
 }
 
-void trie_each(trie *_this, trie_each_fn fn, void *ctx) {
-    trie_each_prefix(_this, "", fn, ctx);
+void sc_trie_each(sc_trie *_this, sc_trie_each_fn fn, void *ctx) {
+    sc_trie_each_prefix(_this, "", fn, ctx);
 }
 
 /* ==================================================================== */
@@ -2064,12 +2064,12 @@ static inline sc_thin lru_node_handle(lru_node *n) {
     sc_thin h; h.p = n; h.tar = NULL; h.dtor = NULL; return h;
 }
 
-static lru_node *lru_node_new(lru *l, const void *key, sc_thin value) {
+static lru_node *lru_node_new(sc_lru *l, const void *key, sc_thin value) {
     size_t extra = 0;
     lru_node *n;
     if (l->key_size > 0) extra = (size_t)l->key_size;
     else if (l->key_size == -1) { const char *s = (const char *)key; extra = (s ? strlen(s) : 0) + 1; }
-    n = (lru_node *)chunk0(sizeof(lru_node) + extra);
+    n = (lru_node *)sc_chunk0(sizeof(lru_node) + extra);
     if (!n) return NULL;
     if (l->key_size > 0) {
         memcpy(n + 1, key, extra);
@@ -2088,84 +2088,84 @@ static lru_node *lru_node_new(lru *l, const void *key, sc_thin value) {
 /* 释放节点：先 release value（caller 已确保从链表/字典摘除），再回收（键尾随随之回收） */
 static void lru_node_free(lru_node *n) {
     sc_thin_unbind(&n->value);
-    recycle(n);
+    sc_recycle(n);
 }
 
-static void lru_link_front(lru *l, lru_node *n) {
+static void lru_link_front(sc_lru *l, lru_node *n) {
     n->prev = NULL;
     n->next = (lru_node *)l->head;
     if (l->head) ((lru_node *)l->head)->prev = n;
     l->head = n;
     if (!l->tail) l->tail = n;
 }
-static void lru_unlink(lru *l, lru_node *n) {
+static void lru_unlink(sc_lru *l, lru_node *n) {
     if (n->prev) n->prev->next = n->next; else l->head = n->next;
     if (n->next) n->next->prev = n->prev; else l->tail = n->prev;
     n->prev = n->next = NULL;
 }
-static void lru_move_front(lru *l, lru_node *n) {
+static void lru_move_front(sc_lru *l, lru_node *n) {
     if ((lru_node *)l->head == n) return;
     lru_unlink(l, n);
     lru_link_front(l, n);
 }
 /* 淘汰队尾（LRU）：摘链 + 删字典 + 释放节点 */
-static void lru_evict_tail(lru *l) {
+static void lru_evict_tail(sc_lru *l) {
     lru_node *n = (lru_node *)l->tail;
     if (!n) return;
     lru_unlink(l, n);
-    dict_remove(&l->map, n->key);                   /* 借用句柄解绑无副作用 */
+    sc_dict_remove(&l->map, n->key);                   /* 借用句柄解绑无副作用 */
     lru_node_free(n);                               /* release value + 回收 */
 }
 
-void lru_init(lru *_this, int32_t key_size, uint64_t cap) {
-    dict_init(&_this->map, key_size > 0 ? key_size : 0);  /* 字符串两态走引用模式借用节点键 */
+void sc_lru_init(sc_lru *_this, int32_t key_size, uint64_t cap) {
+    sc_dict_init(&_this->map, key_size > 0 ? key_size : 0);  /* 字符串两态走引用模式借用节点键 */
     _this->head = NULL;
     _this->tail = NULL;
     _this->cap = cap;
     _this->key_size = key_size;
 }
 
-void lru_clear(lru *_this) {
+void sc_lru_clear(sc_lru *_this) {
     lru_node *n = (lru_node *)_this->head, *nx;
     while (n) { nx = n->next; lru_node_free(n); n = nx; }  /* 逐节点 release value + 回收 */
     _this->head = NULL;
     _this->tail = NULL;
-    dict_clear(&_this->map);                        /* 清空字典槽（借用句柄无副作用） */
+    sc_dict_clear(&_this->map);                        /* 清空字典槽（借用句柄无副作用） */
 }
 
-void lru_drop(lru *_this) {
-    lru_clear(_this);
-    dict_drop(&_this->map);                         /* 回收字典桶/控制块 */
+void sc_lru_drop(sc_lru *_this) {
+    sc_lru_clear(_this);
+    sc_dict_drop(&_this->map);                         /* 回收字典桶/控制块 */
 }
 
-uint64_t lru_len(lru *_this) { return dict_len(&_this->map); }
-bool lru_is_empty(lru *_this) { return _this->head == NULL; }
-uint64_t lru_cap(lru *_this) { return _this->cap; }
+uint64_t sc_lru_len(sc_lru *_this) { return sc_dict_len(&_this->map); }
+bool sc_lru_is_empty(sc_lru *_this) { return _this->head == NULL; }
+uint64_t sc_lru_cap(sc_lru *_this) { return _this->cap; }
 
-void lru_set_cap(lru *_this, uint64_t cap) {
+void sc_lru_set_cap(sc_lru *_this, uint64_t cap) {
     _this->cap = cap;
-    if (cap) while (dict_len(&_this->map) > cap) lru_evict_tail(_this);
+    if (cap) while (sc_dict_len(&_this->map) > cap) lru_evict_tail(_this);
 }
 
-bool lru_has(lru *_this, const void *key) {
-    return (uint8_t)(dict_get(&_this->map, key).p != NULL);
+bool sc_lru_has(sc_lru *_this, const void *key) {
+    return (uint8_t)(sc_dict_get(&_this->map, key).p != NULL);
 }
 
-sc_thin lru_get(lru *_this, const void *key) {
-    sc_thin got = dict_get(&_this->map, key);
+sc_thin sc_lru_get(sc_lru *_this, const void *key) {
+    sc_thin got = sc_dict_get(&_this->map, key);
     if (!got.p) return lru_empty_afat();
     lru_move_front(_this, (lru_node *)got.p);       /* 触顶 */
     return ((lru_node *)got.p)->value;              /* 借用 */
 }
 
-sc_thin lru_peek(lru *_this, const void *key) {
-    sc_thin got = dict_get(&_this->map, key);
+sc_thin sc_lru_peek(sc_lru *_this, const void *key) {
+    sc_thin got = sc_dict_get(&_this->map, key);
     if (!got.p) return lru_empty_afat();
     return ((lru_node *)got.p)->value;              /* 借用，不触顶 */
 }
 
-bool lru_put(lru *_this, const void *key, sc_thin value) {
-    sc_thin got = dict_get(&_this->map, key);
+bool sc_lru_put(sc_lru *_this, const void *key, sc_thin value) {
+    sc_thin got = sc_dict_get(&_this->map, key);
     lru_node *n;
     if (got.p) {                                    /* 命中：替换 value（先 retain 新、再 release 旧）+ 触顶 */
         sc_thin old;
@@ -2178,34 +2178,34 @@ bool lru_put(lru *_this, const void *key, sc_thin value) {
     }
     n = lru_node_new(_this, key, value);            /* 新建（已 retain value） */
     if (!n) return 0;
-    if (!dict_put(&_this->map, n->key, lru_node_handle(n))) {  /* 索引：key → 节点借用句柄 */
+    if (!sc_dict_put(&_this->map, n->key, lru_node_handle(n))) {  /* 索引：key → 节点借用句柄 */
         lru_node_free(n);                           /* 失败回滚（release + 回收） */
         return 0;
     }
     lru_link_front(_this, n);
-    if (_this->cap && dict_len(&_this->map) > _this->cap) lru_evict_tail(_this);  /* 超容淘汰 LRU */
+    if (_this->cap && sc_dict_len(&_this->map) > _this->cap) lru_evict_tail(_this);  /* 超容淘汰 LRU */
     return 1;
 }
 
-bool lru_remove(lru *_this, const void *key) {
-    sc_thin got = dict_get(&_this->map, key);
+bool sc_lru_remove(sc_lru *_this, const void *key) {
+    sc_thin got = sc_dict_get(&_this->map, key);
     lru_node *n;
     if (!got.p) return 0;
     n = (lru_node *)got.p;
     lru_unlink(_this, n);
-    dict_remove(&_this->map, n->key);
+    sc_dict_remove(&_this->map, n->key);
     lru_node_free(n);                               /* release value + 回收 */
     return 1;
 }
 
-const void *lru_mru_key(lru *_this) {
+const void *sc_lru_mru_key(sc_lru *_this) {
     return _this->head ? ((lru_node *)_this->head)->key : NULL;
 }
-const void *lru_lru_key(lru *_this) {
+const void *sc_lru_lru_key(sc_lru *_this) {
     return _this->tail ? ((lru_node *)_this->tail)->key : NULL;
 }
 
-void lru_each(lru *_this, lru_each_fn fn, void *ctx) {
+void sc_lru_each(sc_lru *_this, sc_lru_each_fn fn, void *ctx) {
     lru_node *n;
     if (!fn) return;
     for (n = (lru_node *)_this->head; n; n = n->next)   /* MRU → LRU */
@@ -2215,21 +2215,21 @@ void lru_each(lru *_this, lru_each_fn fn, void *ctx) {
 /* 游标双向遍历（游标 = 不透明节点 token；空集/越界返回 0）。MRU → LRU（first=MRU、last=LRU），
  * 只读借用、不触顶（不 move_front）；value_at 无效返回空句柄。put/remove/淘汰会回收节点使游标
  * 失效，遍历期间勿增删。供 for k, v in lru 映射协议降解。 */
-int64_t lru_first(lru *_this) { return (int64_t)(intptr_t)_this->head; }   /* MRU 端 */
-int64_t lru_last(lru *_this)  { return (int64_t)(intptr_t)_this->tail; }   /* LRU 端 */
-int64_t lru_next(lru *_this, int64_t cur) {
+int64_t sc_lru_first(sc_lru *_this) { return (int64_t)(intptr_t)_this->head; }   /* MRU 端 */
+int64_t sc_lru_last(sc_lru *_this)  { return (int64_t)(intptr_t)_this->tail; }   /* LRU 端 */
+int64_t sc_lru_next(sc_lru *_this, int64_t cur) {
     lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
     return n ? (int64_t)(intptr_t)n->next : 0;     /* MRU → LRU 方向 */
 }
-int64_t lru_prev(lru *_this, int64_t cur) {
+int64_t sc_lru_prev(sc_lru *_this, int64_t cur) {
     lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
     return n ? (int64_t)(intptr_t)n->prev : 0;
 }
-const void *lru_key_at(lru *_this, int64_t cur) {
+const void *sc_lru_key_at(sc_lru *_this, int64_t cur) {
     lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
     return n ? n->key : NULL;
 }
-sc_thin lru_value_at(lru *_this, int64_t cur) {
+sc_thin sc_lru_value_at(sc_lru *_this, int64_t cur) {
     lru_node *n = (lru_node *)(intptr_t)cur; (void)_this;
     return n ? n->value : lru_empty_afat();         /* 借用，不改计数 */
 }

@@ -61,21 +61,21 @@ fnc fill_raw: dst: char&
     return
 
 rpc greet: i4, a: i4, b: i4
-    printf("  标量 rpc: a=%d b=%d\n", a, b)
+    ::printf("  标量 rpc: a=%d b=%d\n", a, b)
     return 0
 
 rpc greet_buf: i4, tag: i4, buf[8]: char
-    printf("  数组 rpc: tag=%d buf=%s\n", tag, &buf[0])
+    ::printf("  数组 rpc: tag=%d buf=%s\n", tag, &buf[0])
     return 0
 
 rpc greet_body: i4, n: i4, body: com[16, nil]
     var p: char& = (body._->data(): char&)
-    printf("  句柄 rpc: n=%d body(%u)=", n, body._->len)
+    ::printf("  句柄 rpc: n=%d body(%u)=", n, body._->len)
     var k: i4 = 0
     while (k: u4) < body._->len
-        printf("%c", p[k])
+        ::printf("%c", p[k])
         k = (k + 1)
-    printf("\n")
+    ::printf("\n")
     return 0
 
 rpc serve: ret, c: com&
@@ -109,6 +109,6 @@ fnc main: i4
     c.dev = &mb
     var f: future& = async serve(&c)
     async_loop(nil)
-    printf("done\n")
+    ::printf("done\n")
     async_final()
     return 0

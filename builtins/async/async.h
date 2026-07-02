@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 /* delay —— 叶子异步原语（单调时钟定时器，实现在 op_impl.c） */
-future  *delay(uint32_t ms);            /* 启动 ms 毫秒定时器，立即返回 future */
+sc_future  *sc_delay(uint32_t ms);            /* 启动 ms 毫秒定时器，立即返回 future */
 
 #ifdef __cplusplus
 }

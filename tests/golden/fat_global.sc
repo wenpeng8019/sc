@@ -3,7 +3,7 @@
 @def node: {
     v: i4
     drop: fnc
-        printf("drop v=%d\n", this->v)
+        ::printf("drop v=%d\n", this->v)
 }
 
 var g: node@
@@ -21,5 +21,5 @@ var grid[2][2]: node@
         arr[i]->v = (i * 10)
     grid[0][0] = node()
     grid[0][0]->v = 99
-    printf("%d %d %d\n", g->v, arr[2]->v, grid[0][0]->v)
+    ::printf("%d %d %d\n", g->v, arr[2]->v, grid[0][0]->v)
     return 0

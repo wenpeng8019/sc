@@ -13,14 +13,14 @@
 #   - 编译器仍零 emit mt 符号：选项经协议指针透传 q->post/sync/async 的 prio/delay 形参。
 #   - 有限超时 sync 与循环死锁替代为后续架构升级阶段（需 per-thread 端口 + 影子会话）。
 #
-#   本例用 nil 宿主队列 + 主线程顺序 pull：消费在单线程内逐条进行，故 printf 的输出
+#   本例用 nil 宿主队列 + 主线程顺序 pull：消费在单线程内逐条进行，故 ::printf 的输出
 #   顺序即「消费顺序」，可确定性观测优先级/延迟的排序效果。
 #
 inc mt.sc
 
 # rpc 即消息处理体；首类型 i4 = 返回类型。执行时打印自身 tag —— 输出顺序即消费顺序。
 rpc serve: i4, tag: i4, info: i4
-    printf("  served tag=%d (%d)\n", tag, info)
+    ::printf("  served tag=%d (%d)\n", tag, info)
     return tag
 
 fnc main: i4
@@ -30,7 +30,7 @@ fnc main: i4
     var a1: promise& = async<q, prio:1> serve(1, 1)     # 最低优先级
     var a2: promise& = async<q, prio:5> serve(2, 5)     # 最高优先级
     var a3: promise& = async<q, prio:3> serve(3, 3)
-    printf("priority order (expect tag 2,3,1):\n")
+    ::printf("priority order (expect tag 2,3,1):\n")
     q->pull(-1)                                          # 取 prio5 → tag2
     q->pull(-1)                                          # 取 prio3 → tag3
     q->pull(-1)                                          # 取 prio1 → tag1
@@ -47,7 +47,7 @@ fnc main: i4
     var d1: promise& = async<q2, delay:60> serve(100, 60)   # 60ms 后成熟
     var d2: promise& = async<q2, delay:20> serve(200, 20)   # 20ms（最早）
     var d3: promise& = async<q2, delay:40> serve(300, 40)   # 40ms
-    printf("delay order (expect tag 200,300,100):\n")
+    ::printf("delay order (expect tag 200,300,100):\n")
     q2->pull(-1)                                        # 阻塞至 20ms 成熟 → tag200
     q2->pull(-1)                                        # 阻塞至 40ms 成熟 → tag300
     q2->pull(-1)                                        # 阻塞至 60ms 成熟 → tag100

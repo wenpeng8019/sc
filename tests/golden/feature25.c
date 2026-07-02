@@ -1,17 +1,17 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
 
-int32_t pick(int32_t n);
-int32_t lifo(void);
-int32_t loopy(int32_t n);
-typedef struct com__project {
+int32_t sc_pick(int32_t n);
+int32_t sc_lifo(void);
+int32_t sc_loopy(int32_t n);
+typedef struct sc_com__project {
     uint32_t size;
     void *ending;
-    limit *_;
-} com__project;
+    sc_limit *_;
+} sc_com__project;
 
 
-int32_t pick(int32_t n) {
+int32_t sc_pick(int32_t n) {
     /* line 11 */
     /* line 13 */
     if (n > 0) {
@@ -40,7 +40,7 @@ int32_t pick(int32_t n) {
     }
 }
 
-int32_t lifo(void) {
+int32_t sc_lifo(void) {
     /* line 21 */
     /* line 23 */
     /* line 25 */
@@ -58,7 +58,7 @@ int32_t lifo(void) {
     }
 }
 
-int32_t loopy(int32_t n) {
+int32_t sc_loopy(int32_t n) {
     /* line 29 */
     int32_t i = 0;
     /* line 30 */
@@ -96,17 +96,17 @@ int32_t main(void) {
     /* line 40 */
     printf("== 多退出点 ==\n");
     /* line 41 */
-    pick(1);
+    sc_pick(1);
     /* line 42 */
-    pick(0);
+    sc_pick(0);
     /* line 43 */
     printf("== LIFO 顺序 ==\n");
     /* line 44 */
-    lifo();
+    sc_lifo();
     /* line 45 */
     printf("== 循环内 final ==\n");
     /* line 46 */
-    loopy(4);
+    sc_loopy(4);
     /* line 47 */
     return 0;
 }

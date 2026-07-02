@@ -23,13 +23,13 @@ fnc main: i4
     opt->track_linear(fc)
 
     var loss: f8 = train_linear(fc, opt, x, t, 100)
-    printf("final loss=%.6f\n", loss)
+    ::printf("final loss=%.6f\n", loss)
 
     # 推理
     var xi: val& = nn_input(x)
     var y: val& = fc->forward(xi)
     var yv: tensor& = y->value()
-    printf("y=[%.4f, %.4f]\n", yv->at(0), yv->at(1))
+    ::printf("y=[%.4f, %.4f]\n", yv->at(0), yv->at(1))
     yv->drop()
     nn_tape_clear()
 

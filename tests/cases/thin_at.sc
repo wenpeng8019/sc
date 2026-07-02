@@ -10,7 +10,7 @@
     bump: fnc
         this->v = this->v + 1
     drop: fnc
-        printf("drop %d\n", this->v)
+        ::printf("drop %d\n", this->v)
 }
 
 @fnc take: i4, p: node*
@@ -26,6 +26,6 @@
     b->v = 40
     var e: @ = b                      # 瘦 → 裸 @ 互转
     var r: i4 = take(b)
-    printf("a=%d c=%d r=%d\n", a->v, c->v, r)
+    ::printf("a=%d c=%d r=%d\n", a->v, c->v, r)
     t = nil                           # 瘦解绑（a 目标 in--）
     return 0                          # 退域：c/a/b 逐根拆边触发 drop

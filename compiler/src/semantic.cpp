@@ -17,7 +17,7 @@
 // ============================================================
 #include "semantic.h"
 #include "error.h"
-#include "tok/graph.h"   // builtins/tok/graph 图算法规范接口（dep…map 环检测等编译期预计算）
+#include "graph/graph.h"   // builtins/graph 图算法规范接口（dep…map 环检测等编译期预计算）
 
 #include <algorithm>
 #include <cstdlib>
@@ -344,6 +344,11 @@ struct Checker {
     std::unordered_map<std::string, const Decl*> funcSigs;  // 非方法函数名 → 声明（实参检查取签名）
     std::unordered_set<std::string> enumConsts;             // 枚举常量名（作为标识符已知）
     std::unordered_set<std::string> declNames;              // 所有顶层声明名（catch-all：类型/全局/外部模块符号）
+    // 严格命名域（Model A）：sc 命名域名字（本地声明 或 sc 模块 origin=*.sc 合并）。
+    //   bare 引用只允许 sc 域名字；C 域符号（libc / platform.h / 外部 C 头 / external 且非 .sc）
+    //   须以 :: 前置（cBridge），否则报错并提示。scNames 是 bare 合法性的唯一裁决集。
+    std::unordered_set<std::string> scNames;                // sc 域可 bare 引用的名字（值/函数/类型/枚举常量/宏）
+    std::unordered_set<std::string> scNamesFromMix;         // 顶层 mix 展开登记的 sc 域名字（同上，动态补充）
     std::unordered_map<std::string, std::unordered_set<std::string>> structMethods;  // 结构名 → 成员函数名集
     std::unordered_map<std::string, const Decl*> macros;    // 宏名 → 宏定义（供顶层 mix 展开登记声明）
     // 放宽门控：存在「未枚举的额外 C 头」或 add 外部实现/库 → 可能引入未知符号，
@@ -384,6 +389,16 @@ struct Checker {
             name = al->second;
         }
         return name;
+    }
+
+    // 声明是否属 sc 命名域（可 bare 引用）：本地声明（external=false）或 sc 模块 origin=*.sc 合并。
+    //   external 同时用于 sc 模块与 C 头合并的符号，故用 origin 后缀区分：*.sc → sc 域；其余 → C 域。
+    static bool isScOrigin(const Decl& d) {
+        return !d.external || endsWithSc(d.origin);
+    }
+    // 名字是否为 sc 命名域可 bare 引用的名字。
+    bool isScDomainName(const std::string& nm) const {
+        return scNames.count(nm) || scNamesFromMix.count(nm);
     }
 
     // ---- 类型名校验 ----
@@ -429,6 +444,7 @@ struct Checker {
     void checkTypeName(const TypeRef& t, int line) const {
         if (t.hasInline) return;                          // 内联 {..}/(..)：无具名基类型
         if (t.fnKind != TypeRef::FncKind::None) return;   // 函数指针类型：单独承载签名
+        if (t.cBridge) return;                            // ::name：C 域类型，放行（原样落 C 类型名）
         const std::string& n = t.name;
         if (n == "void") {
             if (t.ptr == 0 && t.arrayDims.empty())
@@ -445,9 +461,11 @@ struct Checker {
                 err(line, "堆专属类型 '" + n + "' 不能作值类型使用（def " + n +
                           "& 定义）：请用指针 '" + n + "&' 或自动指针 '" + n + "@'");
         }
-        if (lenientCalls) return;                         // 存在未枚举 C 头 / add：可能引入未知类型
-        if (!isKnownTypeName(n))
-            err(line, "未定义的类型 '" + n + "'" + hintTypeName(n));
+        // 严格命名域（Model A）：类型名须为内置基本类型或 sc 域声明的类型；
+        //   C 域类型（FILE/size_t/外部 C 头 typedef 等）须以 :: 前置。
+        if (!isPrimitiveType(n) && !isScDomainName(n))
+            err(line, "未声明的类型 '" + n + "'（sc 命名域）"
+                      "：若引用 C 域类型请写 '::" + n + "'" + hintTypeName(n));
     }
 
     // ---- 按值递归包含检测 ----
@@ -628,14 +646,20 @@ struct Checker {
                 if (e.text == "ok" && locals.find("ok") == locals.end()
                     && globals.find("ok") == globals.end())
                     return Ty{"ret", 0, 0, true, false};  // ADT 接口成功返回码（= 0）
+                if (e.text == "main" && locals.find("main") == locals.end()
+                    && globals.find("main") == globals.end() && !scNames.count("main"))
+                    return Ty{};                          // queue 宿主哨兵：当前/主线程（语言内建）
                 auto it = locals.find(e.text);
                 if (it != locals.end()) return it->second;
                 it = globals.find(e.text);
                 if (it != globals.end()) return it->second;
-                // 既非局部也非全局：若非已知标识符（函数/类型/枚举常量/libc/外部符号）则报未定义
-                if (!lenientCalls && !isKnownIdent(e.text, locals))
-                    err(e.line, "未定义的标识符 '" + e.text + "'" + hintIdent(e.text, locals));
-                return Ty{};  // 已知但类型未跟踪（如 C 宏/外部符号）→ 跳过后续检查
+                // 严格命名域（Model A）：既非局部/全局，也非 sc 域声明名 → 报未声明，
+                //   并提示：若引用 C 域符号须以 :: 前置（cBridge），否则视为拼写错误。
+                if (!isScDomainName(e.text))
+                    err(e.line, "未声明的符号 '" + e.text + "'（sc 命名域）"
+                                "：若引用 C 域符号请写 '::" + e.text + "'"
+                                + hintIdent(e.text, locals));
+                return Ty{};  // sc 域已知但类型未跟踪（如宏）→ 跳过后续检查
             }
             // -- 一元运算：* 解引用 → ptr/arr-1; & 取地址 → ptr+1 ----------------
             case Expr::Unary: {
@@ -788,8 +812,13 @@ struct Checker {
                         return inlRetType(*iit->second);
                     }
                     const bool known = isKnownCallable(nm, locals);
-                    if (!known && !lenientCalls)
-                        err(e.line, "未定义的函数 '" + nm + "'" + hintCallable(nm, locals));
+                    // 严格命名域（Model A）：bare 调用只允许 sc 域名字（含函数指针变量）；
+                    //   C 域函数须以 :: 前置。known 仍用于实参校验（仅对有签名者查）。
+                    const bool scOk = isScDomainName(nm) || locals.count(nm) || globals.count(nm);
+                    if (!scOk)
+                        err(e.line, "未声明的函数 '" + nm + "'（sc 命名域）"
+                                    "：若调用 C 域函数请写 '::" + nm + "'"
+                                    + hintCallable(nm, locals));
                     // 遍历实参（检查其内部表达式），收集类型供个数/类型校验
                     std::vector<Ty> ats;
                     ats.reserve(e.args.size());
@@ -1615,20 +1644,28 @@ struct Checker {
                 if (!d.methodOwner.empty())
                     structMethods[d.methodOwner].insert(
                         d.methodName.empty() ? nm : d.methodName);
-                else
+                else {
                     funcSigs.emplace(nm, &d);
+                    scNamesFromMix.insert(nm);        // sc 宏展开出的自由函数：sc 域可 bare
+                }
                 declNames.insert(nm);
                 break;
             case Decl::EnumD:
                 declNames.insert(nm);
+                scNamesFromMix.insert(nm);
                 for (auto& it : d.structCommon.fields)
-                    if (!it.name.empty()) enumConsts.insert(substMacroSpelling(it.name, pm));
+                    if (!it.name.empty()) {
+                        enumConsts.insert(substMacroSpelling(it.name, pm));
+                        scNamesFromMix.insert(substMacroSpelling(it.name, pm));
+                    }
                 break;
             case Decl::MacroD:
                 macros[nm] = &d;       // 宏定义出的宏：纳入索引，供后续 mix 展开
+                scNamesFromMix.insert(nm);
                 break;
             default:
                 declNames.insert(nm);  // struct/union/alias 等：catch-all 放宽未定义诊断
+                scNamesFromMix.insert(nm);
                 break;
         }
     }
@@ -1660,6 +1697,7 @@ struct Checker {
                         std::string nm = substMacroSpelling(f.name, pm);
                         if (nm.empty()) continue;
                         declNames.insert(nm);
+                        scNamesFromMix.insert(nm);       // sc 宏展开出的全局变量：sc 域可 bare
                         Ty t = fromTypeRef(f.type);
                         if (t.valid && !(t.name.empty() && t.ptr == 0 && t.arr == 0))
                             globals.emplace(nm, t);
@@ -1695,6 +1733,31 @@ struct Checker {
                 structs[d->name] = d.get();
             if (d->kind == Decl::AliasD)
                 aliases[d->name] = d->structCommon.type->name;
+        }
+
+        // 严格命名域：登记 sc 域可 bare 引用的名字（本地声明 或 sc 模块合并）。
+        //   C 头 / libc / platform.h / external 且非 .sc 的符号一律不入此集 —— 须 :: 前置。
+        //   方法名不入（按 obj.m() 调用，走成员检查）；枚举常量名单独收。
+        for (auto& d : prog.decls) {
+            if (!isScOrigin(*d)) continue;
+            switch (d->kind) {
+                case Decl::FuncD:
+                case Decl::FuncTypeD:
+                    if (d->methodOwner.empty() && !d->name.empty()) scNames.insert(d->name);
+                    break;
+                case Decl::EnumD:
+                    if (!d->name.empty()) scNames.insert(d->name);
+                    for (auto& it : d->structCommon.fields)
+                        if (!it.name.empty()) scNames.insert(it.name);   // sc 枚举常量：可 bare
+                    break;
+                case Decl::VarD: case Decl::LetD: case Decl::TlsD:
+                    for (auto& f : d->structCommon.fields)
+                        if (!f.name.empty()) scNames.insert(f.name);     // sc 全局变量/常量
+                    break;
+                default:
+                    if (!d->name.empty()) scNames.insert(d->name);       // struct/union/alias/macro 等
+                    break;
+            }
         }
 
         // 容器映射 C → I（def T: <C, I>）：下标糖 t[key] 推导 find 结果类型 I&

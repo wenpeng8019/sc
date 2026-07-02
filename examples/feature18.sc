@@ -77,13 +77,13 @@ fnc main: i4
     s = c                               # 分身构造：c.alloc(&c, 256, http_ending)
     c >> s                              # 框架读流程：limit_read(&c, s._)
 
-    printf("收到一行（%u 字节）: ", s._->len)
+    ::printf("收到一行（%u 字节）: ", s._->len)
     var p: char& = (s._->data(): char&)
     var k: i4 = 0
     while (k: u4) < s._->len
-        printf("%c", p[k])
+        ::printf("%c", p[k])
         k = k + 1
-    printf("\n")                        # GET /index
+    ::printf("\n")                        # GET /index
 
     s = nil                             # 分身析构：c.free(&c, s._)
     return 0

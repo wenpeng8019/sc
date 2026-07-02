@@ -12,11 +12,11 @@ fnc async_proc: i4, id: future_id, f: future&
     var s: sess& = (f->ctx(): sess&)
     case id:
         conn:
-            printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v)
+            ::printf("派发 conn[%s#%d]: v=%d\n", s->name, s->seq, v)
         data:
-            printf("派发 data[%s#%d]: v=%d\n", s->name, s->seq, v)
+            ::printf("派发 data[%s#%d]: v=%d\n", s->name, s->seq, v)
         term:
-            printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v)
+            ::printf("派发 term[%s#%d]: v=%d（终止事件，停循环）\n", s->name, s->seq, v)
             return -1
     return 0
 

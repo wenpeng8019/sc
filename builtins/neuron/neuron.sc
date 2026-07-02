@@ -20,15 +20,9 @@
 #
 # 用法：`inc neuron.sc`，dep 体内仅需 `edge_step(this, 下游token)` + `return false`。
 # 激活种类用枚举裸名常量 AK_*（跨模块可引用）。
-# 依赖 libm：expf/tanhf/logf/powf/sqrtf（macOS 随 libSystem 自动链接；Linux 须 -lm）。
+# 依赖 libm：expf/tanhf/logf/powf/sqrtf —— 属 C 域标准库函数，直接以 ::name 桥接调用
+# （原型由 platform.h 的 <math.h> 提供；macOS 随 libSystem 自动链接，Linux 须 -lm）。
 # ============================================================
-
-# ---- libm（标量超越函数）----
-@fnc expf:: f4, x: f4
-@fnc logf:: f4, x: f4
-@fnc tanhf:: f4, x: f4
-@fnc powf:: f4, base: f4, ex: f4
-@fnc sqrtf:: f4, x: f4
 
 # ---- 激活种类（跨模块裸名枚举常量；与 neuron.akind 字段约定一致）----
 @def act_kind: [
@@ -52,9 +46,9 @@
             return z
         return 0.01f * z
     if k == AK_SIGMOID
-        return 1.0f / (1.0f + expf(0.0f - z))
+        return 1.0f / (1.0f + ::expf(0.0f - z))
     if k == AK_TANH
-        return tanhf(z)
+        return ::tanhf(z)
     return z                        # AK_IDENT
 
 @fnc act_bwd: f4, pre: f4, k: i4
@@ -67,10 +61,10 @@
             return 1.0f
         return 0.01f
     if k == AK_SIGMOID
-        var s: f4 = 1.0f / (1.0f + expf(0.0f - pre))
+        var s: f4 = 1.0f / (1.0f + ::expf(0.0f - pre))
         return s * (1.0f - s)
     if k == AK_TANH
-        var t: f4 = tanhf(pre)
+        var t: f4 = ::tanhf(pre)
         return 1.0f - t * t
     return 1.0f                     # AK_IDENT
 
@@ -130,19 +124,19 @@
     # Adam 一步：一阶矩 vw、二阶矩 sw 指数滑动 + 偏差校正（t = 当前步数，从 1 起）。
     #   常用超参 beta1=0.9 beta2=0.999 eps=1e-8。
     adam: fnc: neuron&, lr: f4, beta1: f4, beta2: f4, eps: f4, t: i4
-        var bc1: f4 = 1.0f - powf(beta1, (t: f4))
-        var bc2: f4 = 1.0f - powf(beta2, (t: f4))
+        var bc1: f4 = 1.0f - ::powf(beta1, (t: f4))
+        var bc2: f4 = 1.0f - ::powf(beta2, (t: f4))
         for i in this->nin
             this->vw[i] = beta1 * this->vw[i] + (1.0f - beta1) * this->gw[i]
             this->sw[i] = beta2 * this->sw[i] + (1.0f - beta2) * this->gw[i] * this->gw[i]
             var mh: f4 = this->vw[i] / bc1
             var vh: f4 = this->sw[i] / bc2
-            this->w[i] = this->w[i] - lr * mh / (sqrtf(vh) + eps)
+            this->w[i] = this->w[i] - lr * mh / (::sqrtf(vh) + eps)
         this->vbias = beta1 * this->vbias + (1.0f - beta1) * this->gbias
         this->sbias = beta2 * this->sbias + (1.0f - beta2) * this->gbias * this->gbias
         var mhb: f4 = this->vbias / bc1
         var vhb: f4 = this->sbias / bc2
-        this->bias = this->bias - lr * mhb / (sqrtf(vhb) + eps)
+        this->bias = this->bias - lr * mhb / (::sqrtf(vhb) + eps)
         return this
 
     # MSE 反向播种：grad = ∂MSE/∂pred = 2(act-target)（输出层任意激活皆适用）。
@@ -156,9 +150,9 @@
 # ============================================================
 # 把每条 dep 的样板（前向触发级联 / active=-4 反传）收成一行。
 # 用法：dep 体内仅需 `edge_step(this, c)` + `return false`。
-#   d    —— follow 上下文（this，__scdep_in&）：toks/count/active；
+#   d    —— follow 上下文（this，dep_in&）：toks/count/active；
 #   down —— 本束的下游目标神经元 token（map c:"…" 的 c）。
-@fnc edge_step: d: __scdep_in&, down: token&
+@fnc edge_step: d: dep_in&, down: token&
     var dn: neuron& = (down->ctx(): neuron&)
     if d->active == 0 - 4
         dn->backward(d->toks, d->count - 1)
@@ -185,11 +179,11 @@
             mx = outs[i]->act
     var s: f4 = 0.0f
     for i in n
-        s = s + expf(outs[i]->act - mx)
+        s = s + ::expf(outs[i]->act - mx)
     for i in n
-        var sm: f4 = expf(outs[i]->act - mx) / s
+        var sm: f4 = ::expf(outs[i]->act - mx) / s
         outs[i]->grad = sm
     var dn: neuron& = outs[target]
     dn->grad = dn->grad - 1.0f
-    var smt: f4 = expf(outs[target]->act - mx) / s
-    return 0.0f - logf(smt)
+    var smt: f4 = ::expf(outs[target]->act - mx) / s
+    return 0.0f - ::logf(smt)

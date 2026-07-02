@@ -18,6 +18,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>      /* libm 标量超越函数（expf/tanhf/logf/powf/sqrtf 等）：::libm C 域桥接用 */
 #include <time.h>
 #include <assert.h>     /* assert：ret 调用语法糖 !! func() 的失败中止 */
 #include <inttypes.h>   /* PRId64 / PRIu64：64 位整数 printf 说明符跨平台适配（print 关键字用） */
@@ -135,12 +136,10 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #   include <unistd.h>
 #   include <errno.h>
 #endif
-#if !P_WIN
-#   include <pthread.h>          /* 互斥/条件变量/线程：POSIX 后端 */
-#   if P_LINUX
-#       include <sys/syscall.h>  /* SYS_gettid（线程 id） */
-#   endif
-#endif
+/* 注：POSIX 线程头 <pthread.h> / <sys/syscall.h> 不在此引入——
+ * 互斥/条件变量/线程/屏障层已移至文末 P_MT_IMPL 延迟展开块（见文件底部），
+ * 仅由 opt-in 的 builtins 实现 TU（mt_impl.c / op_impl.c）在包含本头前
+ * #define P_MT_IMPL 触发，普通生成单元不引入线程层。 */
 
 /* POSIX（Linux, macOS, BSD 等），该宏依赖 unistd.h */
 #if defined(_POSIX_VERSION)
@@ -584,123 +583,12 @@ static inline void P_usleep(uint64_t us) {
 #endif
 }
 
-/* ---------------- 互斥 / 条件变量 / 线程 ---------------- */
-/* 跨平台薄包装（POSIX pthread ↔ Windows Win32），供 builtins 内 m / op 等模块
- * 共用，避免各处散落 #ifdef。互斥与条件变量均为无全局态的句柄包装，适合 header。 */
-
-#if P_WIN
-typedef CRITICAL_SECTION sc_mutex_t;
-#define sc_mutex_init(pm)    InitializeCriticalSection(pm)
-#define sc_mutex_final(pm)   DeleteCriticalSection(pm)
-#define sc_mutex_lock(pm)    EnterCriticalSection(pm)
-#define sc_mutex_unlock(pm)  LeaveCriticalSection(pm)
-#define sc_mutex_try(pm)     (TryEnterCriticalSection(pm) ? 1 : 0)   /* 成功 1 / 否则 0 */
-
-typedef CONDITION_VARIABLE sc_cond_t;
-#define sc_cond_init(pc)     InitializeConditionVariable(pc)
-#define sc_cond_final(pc)    ((void)0)                               /* Win 条件变量无需销毁 */
-#define sc_cond_one(pc)      WakeConditionVariable(pc)
-#define sc_cond_all(pc)      WakeAllConditionVariable(pc)
-#else
-typedef pthread_mutex_t sc_mutex_t;
-#define sc_mutex_init(pm)    pthread_mutex_init(pm, NULL)
-#define sc_mutex_final(pm)   pthread_mutex_destroy(pm)
-#define sc_mutex_lock(pm)    pthread_mutex_lock(pm)
-#define sc_mutex_unlock(pm)  pthread_mutex_unlock(pm)
-#define sc_mutex_try(pm)     (pthread_mutex_trylock(pm) == 0 ? 1 : 0) /* 成功 1 / 否则 0 */
-
-typedef pthread_cond_t sc_cond_t;
-#define sc_cond_init(pc)     pthread_cond_init(pc, NULL)
-#define sc_cond_final(pc)    pthread_cond_destroy(pc)
-#define sc_cond_one(pc)      pthread_cond_signal(pc)
-#define sc_cond_all(pc)      pthread_cond_broadcast(pc)
-#endif
-
-/* 条件等待：nsec/sec 全 0 → 无限等待；否则相对超时（sec 秒 + nsec 纳秒）。
- * 调用前须持有 pm。返回 0=被唤醒 / 1=超时 / -1=错误。 */
-static inline int sc_cond_wait(sc_cond_t* pc, sc_mutex_t* pm, uint64_t nsec, uint64_t sec) {
-#if P_WIN
-    if (!nsec && !sec)
-        return SleepConditionVariableCS(pc, pm, INFINITE) ? 0 : -1;
-    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
-    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
-    return SleepConditionVariableCS(pc, pm, ms) ? 0
-         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
-#else
-    if (!nsec && !sec)
-        return pthread_cond_wait(pc, pm) == 0 ? 0 : -1;
-    int ret;
-#if P_DARWIN
-    /* macOS 提供相对超时接口，无需转绝对时间 */
-    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
-                            (long)(nsec % 1000000000ULL) };
-    ret = pthread_cond_timedwait_relative_np(pc, pm, &rel);
-#else
-    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
-    struct timespec abs_time;
-    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
-    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
-    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
-    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
-    ret = pthread_cond_timedwait(pc, pm, &abs_time);
-#endif
-    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
-#endif
-}
-
-/* 当前线程的内核级 id（mach tid / gettid / GetCurrentThreadId；其余回退 pthread_self） */
-static inline uint64_t sc_thread_id(void) {
-#if P_WIN
-    return (uint64_t)GetCurrentThreadId();
-#elif P_DARWIN
-    return (uint64_t)pthread_mach_thread_np(pthread_self());
-#elif P_LINUX
-    return (uint64_t)syscall(SYS_gettid);
-#else
-    return (uint64_t)(uintptr_t)pthread_self();
-#endif
-}
-
-/* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
- * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */
-typedef struct {
-    sc_mutex_t mu;
-    sc_cond_t  cv;
-    uint32_t   total;    /* 需汇合的线程数 */
-    uint32_t   count;    /* 本代已到达数 */
-    uint32_t   phase;    /* 代际，每满一轮翻转 */
-} sc_barrier_t;
-
-static inline void sc_barrier_init(sc_barrier_t* b, uint32_t n) {
-    sc_mutex_init(&b->mu);
-    sc_cond_init(&b->cv);
-    b->total = n ? n : 1;
-    b->count = 0;
-    b->phase = 0;
-}
-
-static inline void sc_barrier_final(sc_barrier_t* b) {
-    sc_mutex_final(&b->mu);
-    sc_cond_final(&b->cv);
-}
-
-/* 汇合点：阻塞至 total 个线程全部到达。返回非 0 表示本线程为最后到达者
- * （对应 PTHREAD_BARRIER_SERIAL_THREAD，可用于选一个线程做收尾工作）。 */
-static inline int sc_barrier_wait(sc_barrier_t* b) {
-    sc_mutex_lock(&b->mu);
-    uint32_t ph = b->phase;
-    if (++b->count == b->total) {
-        b->phase++;                 /* 进入下一代 */
-        b->count = 0;
-        sc_cond_all(&b->cv);        /* 放行全部 */
-        sc_mutex_unlock(&b->mu);
-        return 1;                   /* serial thread */
-    }
-    while (ph == b->phase)          /* 等代际翻转，抗虚假唤醒/跨轮抢用 */
-        sc_cond_wait(&b->cv, &b->mu, 0, 0);
-    sc_mutex_unlock(&b->mu);
-    return 0;
-}
+/* ---------------- 互斥 / 条件变量 / 线程 / 屏障 ---------------- */
+/* 该跨平台层（类型 sc_mutex_t / sc_cond_t / sc_barrier_t + 操作 P_mutex_* /
+ * P_cond_* / P_cond_wait / P_thread_id / P_barrier_*）已移出主 guard，改为文末
+ * P_MT_IMPL 延迟展开块（与 socket 的 SC_WITH_SOCKET 同款做法）。仅 opt-in 的
+ * builtins 实现 TU（mt_impl.c / op_impl.c）在包含本头前 #define P_MT_IMPL 才展开，
+ * 不给普通生成单元凭空拉入 <pthread.h> 等线程头。见文件底部 "P_MT_IMPL" 块。 */
 
 //------------------  原子操作（operand 指令的 C 侧实现：sc_*）  ----------------
 // 优先使用 C11 stdatomic.h，否则使用平台特定实现。命名直接采用 op.sc 的 operand
@@ -1134,6 +1022,144 @@ static inline void P_rand_bytes(void *buf, size_t len) {
 #include "op.h"
 
 #endif /* SC_PLATFORM_H */
+
+///////////////////////////////////////////////////////////////////////////////
+// 互斥 / 条件变量 / 线程 / 屏障（延迟展开，置于主 include guard 之外）
+///////////////////////////////////////////////////////////////////////////////
+// 仅当 TU 在包含本头前定义了 P_MT_IMPL 时展开（mt_impl.c / op_impl.c 等 builtins
+// 实现 opt-in），避免给不用线程的普通生成单元凭空拉入 <pthread.h> 等线程头。与 socket
+// 的 SC_WITH_SOCKET、系统日志的 P_LOG_SYS_IMPL 同款做法。一次性守卫 SC_PLATFORM_MT_DONE，
+// 独立于 SC_PLATFORM_H；依赖的平台判定宏（P_WIN/P_DARWIN/P_LINUX/...）由主体首次包含时
+// 已定义并留存。
+//
+// 命名：类型为 sc_mutex_t / sc_cond_t / sc_barrier_t（不与任何 sc 命名域符号冲突）；
+// 操作一律 P_ 前缀（平台适配层，非 sc 命名域）——sc 命名域的 mutex/cond/barrier 方法
+// 由 mt 模块（mt.h / mt_impl.c）以 sc_mutex_* 等薄包装转调本层 P_* 提供。
+#if defined(P_MT_IMPL) && !defined(SC_PLATFORM_MT_DONE)
+#define SC_PLATFORM_MT_DONE
+
+#if !P_WIN
+#   include <pthread.h>          /* 互斥/条件变量/线程：POSIX 后端 */
+#   if P_LINUX
+#       include <sys/syscall.h>  /* SYS_gettid（线程 id） */
+#   endif
+#endif
+
+#if P_WIN
+typedef CRITICAL_SECTION sc_mutex_t;
+#define P_mutex_init(pm)    InitializeCriticalSection(pm)
+#define P_mutex_final(pm)   DeleteCriticalSection(pm)
+#define P_mutex_lock(pm)    EnterCriticalSection(pm)
+#define P_mutex_unlock(pm)  LeaveCriticalSection(pm)
+#define P_mutex_try(pm)     (TryEnterCriticalSection(pm) ? 1 : 0)   /* 成功 1 / 否则 0 */
+
+typedef CONDITION_VARIABLE sc_cond_t;
+#define P_cond_init(pc)     InitializeConditionVariable(pc)
+#define P_cond_final(pc)    ((void)0)                               /* Win 条件变量无需销毁 */
+#define P_cond_one(pc)      WakeConditionVariable(pc)
+#define P_cond_all(pc)      WakeAllConditionVariable(pc)
+#else
+typedef pthread_mutex_t sc_mutex_t;
+#define P_mutex_init(pm)    pthread_mutex_init(pm, NULL)
+#define P_mutex_final(pm)   pthread_mutex_destroy(pm)
+#define P_mutex_lock(pm)    pthread_mutex_lock(pm)
+#define P_mutex_unlock(pm)  pthread_mutex_unlock(pm)
+#define P_mutex_try(pm)     (pthread_mutex_trylock(pm) == 0 ? 1 : 0) /* 成功 1 / 否则 0 */
+
+typedef pthread_cond_t sc_cond_t;
+#define P_cond_init(pc)     pthread_cond_init(pc, NULL)
+#define P_cond_final(pc)    pthread_cond_destroy(pc)
+#define P_cond_one(pc)      pthread_cond_signal(pc)
+#define P_cond_all(pc)      pthread_cond_broadcast(pc)
+#endif
+
+/* 条件等待：nsec/sec 全 0 → 无限等待；否则相对超时（sec 秒 + nsec 纳秒）。
+ * 调用前须持有 pm。返回 0=被唤醒 / 1=超时 / -1=错误。 */
+static inline int P_cond_wait(sc_cond_t* pc, sc_mutex_t* pm, uint64_t nsec, uint64_t sec) {
+#if P_WIN
+    if (!nsec && !sec)
+        return SleepConditionVariableCS(pc, pm, INFINITE) ? 0 : -1;
+    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
+    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
+    return SleepConditionVariableCS(pc, pm, ms) ? 0
+         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
+#else
+    if (!nsec && !sec)
+        return pthread_cond_wait(pc, pm) == 0 ? 0 : -1;
+    int ret;
+#if P_DARWIN
+    /* macOS 提供相对超时接口，无需转绝对时间 */
+    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
+                            (long)(nsec % 1000000000ULL) };
+    ret = pthread_cond_timedwait_relative_np(pc, pm, &rel);
+#else
+    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
+    struct timespec abs_time;
+    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
+    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
+    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
+    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
+    ret = pthread_cond_timedwait(pc, pm, &abs_time);
+#endif
+    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
+#endif
+}
+
+/* 当前线程的内核级 id（mach tid / gettid / GetCurrentThreadId；其余回退 pthread_self） */
+static inline uint64_t P_thread_id(void) {
+#if P_WIN
+    return (uint64_t)GetCurrentThreadId();
+#elif P_DARWIN
+    return (uint64_t)pthread_mach_thread_np(pthread_self());
+#elif P_LINUX
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
+#endif
+}
+
+/* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
+ * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */
+typedef struct {
+    sc_mutex_t mu;
+    sc_cond_t  cv;
+    uint32_t   total;    /* 需汇合的线程数 */
+    uint32_t   count;    /* 本代已到达数 */
+    uint32_t   phase;    /* 代际，每满一轮翻转 */
+} sc_barrier_t;
+
+static inline void P_barrier_init(sc_barrier_t* b, uint32_t n) {
+    P_mutex_init(&b->mu);
+    P_cond_init(&b->cv);
+    b->total = n ? n : 1;
+    b->count = 0;
+    b->phase = 0;
+}
+
+static inline void P_barrier_final(sc_barrier_t* b) {
+    P_mutex_final(&b->mu);
+    P_cond_final(&b->cv);
+}
+
+/* 汇合点：阻塞至 total 个线程全部到达。返回非 0 表示本线程为最后到达者
+ * （对应 PTHREAD_BARRIER_SERIAL_THREAD，可用于选一个线程做收尾工作）。 */
+static inline int P_barrier_wait(sc_barrier_t* b) {
+    P_mutex_lock(&b->mu);
+    uint32_t ph = b->phase;
+    if (++b->count == b->total) {
+        b->phase++;                 /* 进入下一代 */
+        b->count = 0;
+        P_cond_all(&b->cv);        /* 放行全部 */
+        P_mutex_unlock(&b->mu);
+        return 1;                   /* serial thread */
+    }
+    while (ph == b->phase)          /* 等代际翻转，抗虚假唤醒/跨轮抢用 */
+        P_cond_wait(&b->cv, &b->mu, 0, 0);
+    P_mutex_unlock(&b->mu);
+    return 0;
+}
+
+#endif /* P_MT_IMPL && !SC_PLATFORM_MT_DONE */
 
 ///////////////////////////////////////////////////////////////////////////////
 // 系统日志实现（延迟展开，置于主 include guard 之外）

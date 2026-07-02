@@ -22,9 +22,9 @@ fnc main: i4
     form report, (0: @)
     form clean, (0: @)
     form raw, (0: @)
-    printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
+    ::printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
     raw->set((0 - 5: @), 0)
-    printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
+    ::printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
     raw->set((21: @), 0)
-    printf("raw=21: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
+    ::printf("raw=21: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
     return 0

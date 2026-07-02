@@ -47,20 +47,20 @@ fnc main: i4
     Vec_int_push(&vi, 10)
     Vec_int_push(&vi, 20)
     Vec_int_push(&vi, 30)
-    printf("Vec_int: %d %d %d\n", Vec_int_get(&vi, 0), Vec_int_get(&vi, 1), Vec_int_get(&vi, 2))
+    ::printf("Vec_int: %d %d %d\n", Vec_int_get(&vi, 0), Vec_int_get(&vi, 1), Vec_int_get(&vi, 2))
 
     var vd: Vec_dbl
     vd.len = 0
     Vec_dbl_push(&vd, 1.5)
     Vec_dbl_push(&vd, 2.5)
-    printf("Vec_dbl: %g %g\n", Vec_dbl_get(&vd, 0), Vec_dbl_get(&vd, 1))
+    ::printf("Vec_dbl: %g %g\n", Vec_dbl_get(&vd, 0), Vec_dbl_get(&vd, 1))
 
     var vp: Vec_pt
     vp.len = 0
     var p0: Point = {3, 4}
     Vec_pt_push(&vp, p0)
     var got: Point = Vec_pt_get(&vp, 0)
-    printf("Vec_pt[0]: (%d, %d)\n", got.x, got.y)
+    ::printf("Vec_pt[0]: (%d, %d)\n", got.x, got.y)
 
-    printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5))
+    ::printf("max_i(3,7)=%d  max_d(1.5,0.5)=%g\n", max_i(3, 7), max_d(1.5, 0.5))
     return 0

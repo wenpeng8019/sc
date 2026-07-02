@@ -10,7 +10,7 @@ inc feature30_mod.sc
 }
 
 @fnc app_report: m: metric
-    printf("[report] %s = %d\n", m.tag, m.value)
+    ::printf("[report] %s = %d\n", m.tag, m.value)
 
 fnc main: i4
     sensor_sample("temp", 21)

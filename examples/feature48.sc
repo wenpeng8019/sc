@@ -42,12 +42,12 @@ fnc main: i4
     form raw,    (0: *)
 
     # 深度分层（编译期烘焙的常量，O(1) 查表）：raw=0 → clean=1 → report=2
-    printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
+    ::printf("depth: raw=%d clean=%d report=%d\n", raw->depth(), clean->depth(), report->depth())
 
     raw->set(((0 - 5): *), 0)            # -5 → clean 归零 0 → report 0
-    printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
+    ::printf("raw=-5: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
 
     raw->set((21: *), 0)                 # 21 → clean 21 → report 42
-    printf("raw=21: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
+    ::printf("raw=21: clean=%lld report=%lld\n", (clean->get(): i8), (report->get(): i8))
 
     return 0
