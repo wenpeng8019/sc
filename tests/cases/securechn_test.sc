@@ -1,5 +1,5 @@
 # securechn 单元测试：自通讯加密信道端到端闭环 + codec 辅助
-#   在单进程里用 net_socketpair 跑「发起方 + 响应方」两个 async rpc，事件循环驱动：
+#   在单进程里用 sock_socketpair 跑「发起方 + 响应方」两个 async rpc，事件循环驱动：
 #     · PSK 快路握手 → 双向加密收发 → 明文一致
 #     · PSK + X25519 临时握手（前向保密）→ 同上
 #     · 被篡改的密文帧被 AEAD 认证拒绝（SEC_EAUTH）
@@ -10,7 +10,7 @@
 
 inc async.sc
 inc io.sc
-inc os.sc
+inc sys.sc
 inc crypto.sc
 inc ../../templates/utils/securechn.sc
 
@@ -131,7 +131,7 @@ fnc run_loop: i4, mode: i4
     t_srv_hs = -1
     t_cli_hs = -1
     var fds[2]: i4
-    if net_socketpair(fds) < 0
+    if sock_socketpair(fds) < 0
         return 0
     var srv: com& = tcp(fds[0], true, 2, 2)
     var cli: com& = tcp(fds[1], true, 2, 2)
@@ -161,7 +161,7 @@ tst "PSK + X25519 临时握手端到端（前向保密）"
 tst "篡改密文帧被 AEAD 认证拒绝"
     t_tamper = -100
     var fds[2]: i4
-    assert net_socketpair(fds) == 0, "socketpair"
+    assert sock_socketpair(fds) == 0, "socketpair"
     var srv: com& = tcp(fds[0], true, 2, 2)
     var cli: com& = tcp(fds[1], true, 2, 2)
     async_init()

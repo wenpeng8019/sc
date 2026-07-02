@@ -3,6 +3,7 @@
  * stream：以一块绑定内存为后端的 com 通讯设备（无分配，读写直接落在该内存上）。
  * （print 日志输出已下沉至语言内核 op.sc/op.h/op_impl.c）
  */
+#define SC_WITH_SOCKET   /* tcp 设备用 platform.h 的 socket 跨平台层 */
 #include "platform.h"
 #include "io.h"
 
@@ -93,7 +94,7 @@ static int32_t sc_file_close(com *_this) {
     return r;
 }
 
-com *file(const char *name, uint8_t txt, uint8_t read, uint8_t write) {
+com *file(const char *name, bool txt, uint8_t read, uint8_t write) {
     if (!name || (read == 0 && write == 0)) return NULL;
     /* 模式串：仅读→"r" / 仅写→"w" / 读写→"w+"；二进制（txt=0）追加 "b" */
     char mode[4];
@@ -252,30 +253,14 @@ com *stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
  * 套接字非恒就绪：实现 readable/writable，经出参回填 fd（*id=fd）→ 异步内核把它注册进
  * 多路复用后端（kqueue/epoll/poll/select），由内核 O(1) 通知就绪后再 pull ioq 执行 io。
  * EAGAIN/EWOULDBLOCK → 返回 IO_AGAIN（异步挂起信号）；对端关闭（recv 返回 0）→ IO_EOF。
+ * 套接字类型/关闭/非阻塞/错误谓词统一取自 platform.h 的 socket 层（SC_WITH_SOCKET）。
  * ==========================================================================*/
-#if P_WIN
-#  include <winsock2.h>
-typedef SOCKET sc_sock_t;
-#  define SC_SOCK_INVALID  INVALID_SOCKET
-#  define sc_sock_eagain() (WSAGetLastError() == WSAEWOULDBLOCK)
-#else
-#  include <sys/socket.h>
-#  include <unistd.h>
-#  include <fcntl.h>
-#  include <errno.h>
-typedef int sc_sock_t;
-#  define SC_SOCK_INVALID  (-1)
-#  define sc_sock_eagain() (errno == EAGAIN || errno == EWOULDBLOCK)
-#  ifndef MSG_NOSIGNAL
-#    define MSG_NOSIGNAL 0
-#  endif
-#endif
 
 typedef struct sc_tcp_dev {
     com       com;      /* 端点（offset 0，返回其地址即 com&） */
     ioq       rq;       /* 读队列（read==2 启用，com.rq 指向它） */
     ioq       wq;       /* 写队列（write==2 启用，com.wq 指向它） */
-    sc_sock_t fd;       /* 已连接套接字（设备全托管：close 负责关闭） */
+    sc_sock fd;       /* 已连接套接字（设备全托管：close 负责关闭） */
 } sc_tcp_dev;
 
 /* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
@@ -309,7 +294,7 @@ static int32_t sc_tcp_read(com *_this, void *data, uint32_t *size) {
 #endif
     if (n > 0) { *size = (uint32_t)n; return 0; }
     if (n == 0) return IO_EOF;                          /* 对端正常关闭 */
-    if (sc_sock_eagain()) return IO_AGAIN;              /* 未就绪 → 挂起等待 */
+    if (sc_is_wouldblock()) return IO_AGAIN;       /* 未就绪 → 挂起等待 */
     return -1;
 }
 
@@ -326,7 +311,7 @@ static int32_t sc_tcp_write(com *_this, void *buf, uint32_t *size) {
     ssize_t n = send(d->fd, buf, want, MSG_NOSIGNAL);
 #endif
     if (n >= 0) { *size = (uint32_t)n; return ((uint32_t)n == want) ? 0 : IO_AGAIN; }
-    if (sc_sock_eagain()) return IO_AGAIN;              /* 发送缓冲满 → 挂起重试 */
+    if (sc_is_wouldblock()) return IO_AGAIN;       /* 发送缓冲满 → 挂起重试 */
     return -1;
 }
 
@@ -352,37 +337,27 @@ static int32_t sc_tcp_close(com *_this) {
     sc_tcp_dev *d = (sc_tcp_dev *)_this;
     int32_t r = 0;
     if (d->fd != SC_SOCK_INVALID) {
-#if P_WIN
-        if (closesocket(d->fd) != 0) r = -1;
-#else
-        if (close(d->fd) != 0) r = -1;
-#endif
+        if (sc_close(d->fd) != 0) r = -1;
         d->fd = SC_SOCK_INVALID;
     }
     sc_recycle(d);
     return r;
 }
 
-com *tcp(int32_t fd, uint8_t nonblock, uint8_t read, uint8_t write) {
+com *tcp(int32_t fd, bool nonblock, uint8_t read, uint8_t write) {
     if (fd < 0 || (read == 0 && write == 0)) return NULL;
 
     /* nonblock：设备全托管——置 O_NONBLOCK；并强制对应启用方向走异步（建 ioq），
      * 否则非阻塞 fd 配同步读会忙等空转。 */
     if (nonblock) {
-#if P_WIN
-        u_long on = 1;
-        if (ioctlsocket((SOCKET)fd, FIONBIO, &on) != 0) return NULL;
-#else
-        int fl = fcntl(fd, F_GETFL, 0);
-        if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) < 0) return NULL;
-#endif
+        if (sc_nonblock((sc_sock)fd, true) != 0) return NULL;
         if (read)  read  = 2;
         if (write) write = 2;
     }
 
     sc_tcp_dev *d = (sc_tcp_dev *)sc_chunk0(sizeof(sc_tcp_dev));
     if (!d) return NULL;
-    d->fd = (sc_sock_t)fd;
+    d->fd = (sc_sock)fd;
 
     d->com.dev      = d;
     d->com.alloc    = sc_tcp_alloc;

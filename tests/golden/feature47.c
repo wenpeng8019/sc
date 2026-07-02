@@ -4,7 +4,7 @@
 static sc_thin __sctok_sensor_level_combine(__sctok_in *_this);
 static token *level = {0};
 static token *alert = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -30,7 +30,7 @@ static sc_thin __sctok_sensor_level_combine(__sctok_in *_this) {
     return ((sc_thin){(void *)(intptr_t)(m), (int32_t *)0, (void (*)(void *))0});
 }
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 31 */
     token *l = _this->toks[0];
     /* line 32 */

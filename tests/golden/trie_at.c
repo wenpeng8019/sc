@@ -10,8 +10,8 @@ typedef struct node {
 
 void node_drop(node *_this);
 sc_fat make(int32_t x);
-uint8_t print_key(const char *key, sc_thin value, void *ctx);
-uint8_t dump_kv(const char *key, sc_thin value, void *ctx);
+bool print_key(const char *key, sc_thin value, void *ctx);
+bool dump_kv(const char *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -57,14 +57,14 @@ sc_fat make(int32_t x) {
     }
 }
 
-uint8_t print_key(const char *key, sc_thin value, void *ctx) {
+bool print_key(const char *key, sc_thin value, void *ctx) {
     /* line 24 */
     printf(" %s", key);
     /* line 25 */
     return true;
 }
 
-uint8_t dump_kv(const char *key, sc_thin value, void *ctx) {
+bool dump_kv(const char *key, sc_thin value, void *ctx) {
     /* line 29 */
     int64_t *cnt = ((int64_t*)(ctx));
     /* line 30 */
@@ -116,10 +116,10 @@ int32_t main(void) {
     /* line 51 */
     printf("A len=%llu\n", trie_len(&tt));
     /* line 52 */
-    uint8_t _sq0 = trie_has(&tt, "car");
-    uint8_t _sq1 = trie_has(&tt, "ca");
-    uint8_t _sq2 = trie_has(&tt, "dog");
-    uint8_t _sq3 = trie_has(&tt, "xyz");
+    bool _sq0 = trie_has(&tt, "car");
+    bool _sq1 = trie_has(&tt, "ca");
+    bool _sq2 = trie_has(&tt, "dog");
+    bool _sq3 = trie_has(&tt, "xyz");
     printf("A has: car=%d ca=%d dog=%d xyz=%d\n", _sq0, _sq1, _sq2, _sq3);
     /* line 54 */
     printf("A get card=%d\n", ((node*)((trie_get(&tt, "card")).p))->v);
@@ -133,9 +133,9 @@ int32_t main(void) {
     uint64_t _sq5 = trie_len(&tt);
     printf("A replace car=%d len=%llu\n", _sq4, _sq5);
     /* line 62 */
-    uint8_t _sq6 = trie_has_prefix(&tt, "ca");
-    uint8_t _sq7 = trie_has_prefix(&tt, "car");
-    uint8_t _sq8 = trie_has_prefix(&tt, "xy");
+    bool _sq6 = trie_has_prefix(&tt, "ca");
+    bool _sq7 = trie_has_prefix(&tt, "car");
+    bool _sq8 = trie_has_prefix(&tt, "xy");
     printf("B has_prefix: ca=%d car=%d xy=%d\n", _sq6, _sq7, _sq8);
     /* line 64 */
     uint64_t _sq9 = trie_count_prefix(&tt, "ca");
@@ -174,20 +174,20 @@ int32_t main(void) {
     /* line 82 */
     trie_put(&tt, "", sc_fat_as_thin(hempty, (void (*)(void *))node_drop));
     /* line 83 */
-    uint8_t _sq16 = trie_has(&tt, "");
+    bool _sq16 = trie_has(&tt, "");
     int32_t _sq17 = ((node*)((trie_get(&tt, "")).p))->v;
     uint64_t _sq18 = trie_count_prefix(&tt, "");
     int64_t _sq19 = trie_longest_prefix(&tt, "zzz");
     printf("C empty: has=%d get=%d all=%llu lp_zzz=%lld\n", _sq16, _sq17, _sq18, _sq19);
     /* line 87 */
-    uint8_t _sq20 = trie_remove(&tt, "card");
-    uint8_t _sq21 = trie_remove(&tt, "card");
-    uint8_t _sq22 = trie_remove(&tt, "nope");
+    bool _sq20 = trie_remove(&tt, "card");
+    bool _sq21 = trie_remove(&tt, "card");
+    bool _sq22 = trie_remove(&tt, "nope");
     printf("C remove card=%d again=%d miss=%d\n", _sq20, _sq21, _sq22);
     /* line 89 */
-    uint8_t _sq23 = trie_has(&tt, "card");
-    uint8_t _sq24 = trie_has(&tt, "car");
-    uint8_t _sq25 = trie_has(&tt, "cart");
+    bool _sq23 = trie_has(&tt, "card");
+    bool _sq24 = trie_has(&tt, "car");
+    bool _sq25 = trie_has(&tt, "cart");
     uint64_t _sq26 = trie_count_prefix(&tt, "car");
     uint64_t _sq27 = trie_len(&tt);
     printf("C after_remove: has_card=%d has_car=%d has_cart=%d count_car=%llu len=%llu\n", _sq23, _sq24, _sq25, _sq26, _sq27);
@@ -195,7 +195,7 @@ int32_t main(void) {
     trie_clear(&tt);
     /* line 93 */
     uint64_t _sq28 = trie_len(&tt);
-    uint8_t _sq29 = trie_has(&tt, "car");
+    bool _sq29 = trie_has(&tt, "car");
     printf("C after_clear len=%llu has_car=%d\n", _sq28, _sq29);
     /* line 94 */
     trie_drop(&tt);

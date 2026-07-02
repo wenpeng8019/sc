@@ -117,7 +117,7 @@ int32_t main(void) {
     }
     /* line 52 */
     uint64_t _sq0 = heap_len(&ta);
-    uint8_t _sq1 = heap_is_empty(&ta);
+    bool _sq1 = heap_is_empty(&ta);
     printf("A len=%llu empty=%d\n", _sq0, _sq1);
     /* line 55 */
     int32_t *topk = ((int32_t*)(heap_peek_key(&ta)));
@@ -207,7 +207,7 @@ int32_t main(void) {
     heap_clear(&tc);
     /* line 103 */
     uint64_t _sq4 = heap_len(&tc);
-    uint8_t _sq5 = heap_is_empty(&tc);
+    bool _sq5 = heap_is_empty(&tc);
     printf("C after_clear len=%llu empty=%d\n", _sq4, _sq5);
     /* line 104 */
     heap_drop(&tc);

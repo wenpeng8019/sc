@@ -36,7 +36,7 @@ void mutex_unlock(mutex *_this) {
     sc_mutex_unlock(m);
 }
 
-uint8_t mutex_try_lock(mutex *_this) {
+bool mutex_try_lock(mutex *_this) {
     mtx_state *m = (mtx_state *)_this->h;
     if (!m) return 0;
     return (uint8_t)sc_mutex_try(m);
@@ -96,7 +96,7 @@ void barrier_drop(barrier *_this) {
     _this->h = NULL;
 }
 
-uint8_t barrier_wait(barrier *_this) {
+bool barrier_wait(barrier *_this) {
     sc_barrier_t *b = (sc_barrier_t *)_this->h;
     if (!b) return 0;
     return (uint8_t)(sc_barrier_wait(b) ? 1 : 0);

@@ -26,7 +26,7 @@ typedef struct node {
     point *link;
     int32_t *ref;
     double score;
-    uint8_t ok;
+    bool ok;
     char *tag;
 } node;
 

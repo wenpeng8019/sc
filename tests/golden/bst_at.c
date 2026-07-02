@@ -15,7 +15,7 @@ typedef struct acc {
     int32_t cnt;
 } acc;
 
-uint8_t sum_each(const void *key, sc_thin value, void *ctx);
+bool sum_each(const void *key, sc_thin value, void *ctx);
 int32_t dump_keys(bst *t);
 sc_fat make(int32_t x);
 typedef struct com__project {
@@ -49,7 +49,7 @@ void node_drop(node *_this) {
     printf("drop %d\n", _this->v);
 }
 
-uint8_t sum_each(const void *key, sc_thin value, void *ctx) {
+bool sum_each(const void *key, sc_thin value, void *ctx) {
     /* line 26 */
     acc *a = ((acc*)(ctx));
     /* line 27 */
@@ -144,8 +144,8 @@ int32_t main(void) {
     /* line 74 */
     int32_t k99 = 99;
     /* line 75 */
-    uint8_t _sq0 = bst_has(&ta, ((const void*)(&(k40))));
-    uint8_t _sq1 = bst_has(&ta, ((const void*)(&(k99))));
+    bool _sq0 = bst_has(&ta, ((const void*)(&(k40))));
+    bool _sq1 = bst_has(&ta, ((const void*)(&(k99))));
     int32_t _sq2 = ((node*)((bst_get(&ta, ((const void*)(&(k40))))).p))->v;
     printf("A has40=%d miss99=%d get40=%d\n", _sq0, _sq1, _sq2);
     /* line 80 */
@@ -218,10 +218,10 @@ int32_t main(void) {
     /* line 121 */
     int32_t k70 = 70;
     /* line 122 */
-    uint8_t _sq5 = bst_remove(&ta, ((const void*)(&(k50))));
-    uint8_t _sq6 = bst_remove(&ta, ((const void*)(&(k20))));
-    uint8_t _sq7 = bst_remove(&ta, ((const void*)(&(k70))));
-    uint8_t _sq8 = bst_remove(&ta, ((const void*)(&(k99))));
+    bool _sq5 = bst_remove(&ta, ((const void*)(&(k50))));
+    bool _sq6 = bst_remove(&ta, ((const void*)(&(k20))));
+    bool _sq7 = bst_remove(&ta, ((const void*)(&(k70))));
+    bool _sq8 = bst_remove(&ta, ((const void*)(&(k99))));
     uint64_t _sq9 = bst_len(&ta);
     printf("A rm50=%d rm20=%d rm70=%d rmmiss=%d len=%llu\n", _sq5, _sq6, _sq7, _sq8, _sq9);
     /* line 125 */
@@ -324,7 +324,7 @@ int32_t main(void) {
     printf("\n");
     /* line 177 */
     int32_t _sq12 = ((node*)((bst_get(&tc, ((const void*)("charlie")))).p))->v;
-    uint8_t _sq13 = bst_has(&tc, ((const void*)("zzz")));
+    bool _sq13 = bst_has(&tc, ((const void*)("zzz")));
     printf("C get_charlie=%d has_x=%d\n", _sq12, _sq13);
     /* line 179 */
     bst_remove(&tc, ((const void*)("alpha")));

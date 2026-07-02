@@ -1210,3 +1210,181 @@ static void P_log_sys(int level, const char *tag, const char *text) {
 }
 
 #endif /* P_LOG_SYS_IMPL && !SC_PLATFORM_LOG_SYS_DONE */
+
+///////////////////////////////////////////////////////////////////////////////
+// Socket 跨平台层（延迟展开，置于主 include guard 之外；参考 stdc 网络段）
+///////////////////////////////////////////////////////////////////////////////
+// 仅当 TU 在包含本头前定义了 SC_WITH_SOCKET 时展开（io/ssh 等套接字模块 opt-in），
+// 避免给不用网络的普通生成单元凭空拉入 winsock2 等重头文件。一次性守卫 SC_SOCKET_DONE，
+// 独立于 SC_PLATFORM_H：主体首次包含时已定义 P_WIN/P_DARWIN/... 并留存，此处直接复用。
+//
+// 命名统一 sc_ 前缀；返回约定为 sc 风格：
+//   · 选项设置/close/nonblock → int（0=成功 / -1=失败）
+//   · 错误谓词                → bool
+// bind/listen/accept/connect/send/recv 等各平台同名同义，直接用，只统一类型即可。
+// 仅提供 socket 原语适配；host:port 解析建连（getaddrinfo）等 compound 逻辑属应用层，见 sys 模块。
+// 说明：不移植 stdc 的 WSASendMsg/sendmsg 封装（头内 extern 定义会致多 TU 重定义，
+//       且 io/ssh 未用）与 recv/send 循环（依赖 stdc 专有错误码 E_*）。
+#if defined(SC_WITH_SOCKET) && !defined(SC_SOCKET_DONE)
+#define SC_SOCKET_DONE
+
+#if P_WIN
+/* <windows.h> 已由主体在 P_WIN 下带入（WIN32_LEAN_AND_MEAN，未拉 winsock1），
+ * 此处再引 winsock2/ws2tcpip，顺序正确不冲突。 */
+#   include <winsock2.h>
+#   include <ws2tcpip.h>
+#   if defined(_MSC_VER)
+#       pragma comment(lib, "ws2_32.lib")   /* MSVC 自动链接；MinGW 需 -lws2_32 */
+#   endif
+typedef SOCKET sc_sock;
+#   define SC_SOCK_INVALID  INVALID_SOCKET
+#   define SC_SOCK_ERROR    SOCKET_ERROR
+#   if defined(_MSC_VER) && !defined(_SSIZE_T_DEFINED)
+typedef intptr_t ssize_t;            /* MSVC 无 ssize_t（MinGW 自带） */
+#       define _SSIZE_T_DEFINED
+#   endif
+#else
+#   include <sys/socket.h>
+#   include <sys/types.h>
+#   include <netinet/in.h>
+#   include <netinet/tcp.h>
+#   include <arpa/inet.h>
+#   include <netdb.h>
+#   include <fcntl.h>
+#   include <unistd.h>
+#   include <errno.h>
+typedef int sc_sock;
+#   define SC_SOCK_INVALID  (-1)
+#   define SC_SOCK_ERROR    (-1)
+#   ifndef MSG_NOSIGNAL
+#       define MSG_NOSIGNAL 0        /* macOS/BSD 无此标志（改用 SO_NOSIGPIPE），置 0 兜底 */
+#   endif
+#endif
+
+/* 网络子系统初始化/清理（仅 Windows WSAStartup 需要；POSIX 为空操作，幂等）。 */
+static inline int sc_net_init(void) {
+#if P_WIN
+    static int s_done = 0;
+    if (s_done) return 0;
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return -1;
+    s_done = 1;
+#endif
+    return 0;
+}
+static inline void sc_net_cleanup(void) {
+#if P_WIN
+    WSACleanup();
+#endif
+}
+
+/* 最近一次套接字错误码（Win=WSAGetLastError / POSIX=errno）。 */
+static inline int sc_errno(void) {
+#if P_WIN
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+/* 错误谓词：非阻塞连接进行中 / 暂无数据(缓冲满) / 连接被重置 / 被信号中断。 */
+static inline bool sc_is_inprogress(void) {
+#if P_WIN
+    int e = WSAGetLastError();
+    return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
+#else
+    return errno == EINPROGRESS || errno == EWOULDBLOCK;
+#endif
+}
+static inline bool sc_is_wouldblock(void) {
+#if P_WIN
+    return WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+#endif
+}
+static inline bool sc_is_connreset(void) {
+#if P_WIN
+    return WSAGetLastError() == WSAECONNRESET;
+#else
+    return errno == ECONNRESET;
+#endif
+}
+static inline bool sc_is_interrupted(void) {
+#if P_WIN
+    return WSAGetLastError() == WSAEINTR;
+#else
+    return errno == EINTR;
+#endif
+}
+
+/* 关闭套接字（Win=closesocket / POSIX=close）。0=成功 / -1=失败。 */
+static inline int sc_close(sc_sock s) {
+    if (s == SC_SOCK_INVALID) return -1;
+#if P_WIN
+    return closesocket(s) == 0 ? 0 : -1;
+#else
+    return close(s) == 0 ? 0 : -1;
+#endif
+}
+
+/* 设置非阻塞模式。0=成功 / -1=失败。 */
+static inline int sc_nonblock(sc_sock s, bool enable) {
+    if (s == SC_SOCK_INVALID) return -1;
+#if P_WIN
+    u_long mode = enable ? 1u : 0u;
+    return ioctlsocket(s, FIONBIO, &mode) == 0 ? 0 : -1;
+#else
+    int fl = fcntl(s, F_GETFL, 0);
+    if (fl < 0) return -1;
+    if (enable) fl |= O_NONBLOCK;
+    else        fl &= ~O_NONBLOCK;
+    return fcntl(s, F_SETFL, fl) == 0 ? 0 : -1;
+#endif
+}
+
+/* 套接字选项（全部 0=成功 / -1=失败）。setsockopt 值指针在 Win 需 (const char*)。 */
+static inline int sc_reuseaddr(sc_sock s, bool on) {
+    int opt = on ? 1 : 0;
+    return setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof opt) == 0 ? 0 : -1;
+}
+#if !P_WIN
+static inline int sc_reuseport(sc_sock s, bool on) {   /* 仅 POSIX 有 SO_REUSEPORT */
+    int opt = on ? 1 : 0;
+    return setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof opt) == 0 ? 0 : -1;
+}
+#endif
+static inline int sc_nodelay(sc_sock s, bool on) {     /* 禁用 Nagle */
+    int opt = on ? 1 : 0;
+    return setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&opt, sizeof opt) == 0 ? 0 : -1;
+}
+static inline int sc_keepalive(sc_sock s, bool on) {
+    int opt = on ? 1 : 0;
+    return setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, (const char *)&opt, sizeof opt) == 0 ? 0 : -1;
+}
+static inline int sc_sndtimeo(sc_sock s, int ms) {
+#if P_WIN
+    DWORD tv = (DWORD)ms;
+    return setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof tv) == 0 ? 0 : -1;
+#else
+    struct timeval tv; tv.tv_sec = ms / 1000; tv.tv_usec = (ms % 1000) * 1000;
+    return setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv) == 0 ? 0 : -1;
+#endif
+}
+static inline int sc_rcvtimeo(sc_sock s, int ms) {
+#if P_WIN
+    DWORD tv = (DWORD)ms;
+    return setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof tv) == 0 ? 0 : -1;
+#else
+    struct timeval tv; tv.tv_sec = ms / 1000; tv.tv_usec = (ms % 1000) * 1000;
+    return setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv) == 0 ? 0 : -1;
+#endif
+}
+static inline int sc_sndbuf(sc_sock s, int size) {
+    return setsockopt(s, SOL_SOCKET, SO_SNDBUF, (const char *)&size, sizeof size) == 0 ? 0 : -1;
+}
+static inline int sc_rcvbuf(sc_sock s, int size) {
+    return setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char *)&size, sizeof size) == 0 ? 0 : -1;
+}
+
+#endif /* SC_WITH_SOCKET && !SC_SOCKET_DONE */

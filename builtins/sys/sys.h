@@ -101,74 +101,64 @@ void arg_def_st_init(arg_def_st* _this);
 /* 选项定义宏：各自声明「具体类型」的全局 ARGS_<name>（值即 app 属性），并构造描述符
  * ARGS_DEF_<name>，其 slot 为指向该全局的 void*。已去 union——故各宏独立、不再共用一个
  * 通用 ARGS_DEF。无默认值的整型/浮点/布尔取静态零初值；指针型取 NULL。 */
-#define ARGS_B(req, name, s_cmd, l_cmd, desc)                                  \
-extern bool ARGS_##name; bool ARGS_##name = false;                            \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_BOOL, s_cmd, l_cmd, req, &ARGS_##name, NULL              \
-}
-#define ARGS_I(req, name, s_cmd, l_cmd, desc)                                  \
-extern int64_t ARGS_##name; int64_t ARGS_##name = 0;                          \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_INT, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
-}
-#define ARGS_F(req, name, s_cmd, l_cmd, desc)                                  \
-extern double ARGS_##name; double ARGS_##name = 0;                            \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_FLOAT, s_cmd, l_cmd, req, &ARGS_##name, NULL             \
-}
-#define ARGS_S(req, name, s_cmd, l_cmd, desc)                                  \
-extern const char* ARGS_##name; const char* ARGS_##name = NULL;               \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_STR, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
-}
-#define ARGS_D(req, name, s_cmd, l_cmd, desc)                                  \
-extern const char* ARGS_##name; const char* ARGS_##name = NULL;               \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_DIR, s_cmd, l_cmd, req, &ARGS_##name, NULL               \
-}
-#define ARGS_L(req, name, s_cmd, l_cmd, desc)                                  \
-extern const char** ARGS_##name; const char** ARGS_##name = NULL;             \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_LS, s_cmd, l_cmd, req, &ARGS_##name, NULL                \
-}
+/* 注意：以下宏体须与 sys.sc 中同名 `def` 的转译产物「逐 token 一致」——sys 单元自身
+ * 编译时既 #include 本头、又内联转译出同名 #define，二者若有 token 差异即触发
+ * -Wmacro-redefined。C 侧从不直接调用这些宏（sc 侧经 def 展开，纯 C 用 stdc.h），
+ * 故此处以 codegen 形态为准；改动 sys.sc 的 def 需同步此处。 */
+#define ARGS_B(req, name, s_cmd, l_cmd, desc) \
+    extern bool ARGS_##name; \
+    bool ARGS_##name = false; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_BOOL, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
+#define ARGS_I(req, name, s_cmd, l_cmd, desc) \
+    extern int64_t ARGS_##name; \
+    int64_t ARGS_##name = 0; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_INT, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
+#define ARGS_F(req, name, s_cmd, l_cmd, desc) \
+    extern double ARGS_##name; \
+    double ARGS_##name = 0; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_FLOAT, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
+#define ARGS_S(req, name, s_cmd, l_cmd, desc) \
+    extern const char *ARGS_##name; \
+    const char *ARGS_##name = NULL; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_STR, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
+#define ARGS_D(req, name, s_cmd, l_cmd, desc) \
+    extern const char *ARGS_##name; \
+    const char *ARGS_##name = NULL; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_DIR, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
+#define ARGS_L(req, name, s_cmd, l_cmd, desc) \
+    extern const char **ARGS_##name; \
+    const char **ARGS_##name = NULL; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_LS, s_cmd, l_cmd, req, &(ARGS_##name), NULL};
 
 /* 带默认值变体：default 即属性初值。 */
-#define ARGS_Bv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern bool ARGS_##name; bool ARGS_##name = (dft);                            \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_BOOL, s_cmd, l_cmd, false, &ARGS_##name, NULL            \
-}
-#define ARGS_Iv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern int64_t ARGS_##name; int64_t ARGS_##name = (dft);                      \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_INT, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
-}
-#define ARGS_Fv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern double ARGS_##name; double ARGS_##name = (dft);                        \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_FLOAT, s_cmd, l_cmd, false, &ARGS_##name, NULL           \
-}
-#define ARGS_Sv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern const char* ARGS_##name; const char* ARGS_##name = (dft);              \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_STR, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
-}
-#define ARGS_Dv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern const char* ARGS_##name; const char* ARGS_##name = (dft);              \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_DIR, s_cmd, l_cmd, false, &ARGS_##name, NULL             \
-}
-#define ARGS_Lv(dft, name, s_cmd, l_cmd, desc)                                 \
-extern const char** ARGS_##name; const char** ARGS_##name = (dft);            \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_LS, s_cmd, l_cmd, false, &ARGS_##name, NULL              \
-}
+#define ARGS_Bv(dft, name, s_cmd, l_cmd, desc) \
+    extern bool ARGS_##name; \
+    bool ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_BOOL, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
+#define ARGS_Iv(dft, name, s_cmd, l_cmd, desc) \
+    extern int64_t ARGS_##name; \
+    int64_t ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_INT, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
+#define ARGS_Fv(dft, name, s_cmd, l_cmd, desc) \
+    extern double ARGS_##name; \
+    double ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_FLOAT, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
+#define ARGS_Sv(dft, name, s_cmd, l_cmd, desc) \
+    extern const char *ARGS_##name; \
+    const char *ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_STR, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
+#define ARGS_Dv(dft, name, s_cmd, l_cmd, desc) \
+    extern const char *ARGS_##name; \
+    const char *ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_DIR, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
+#define ARGS_Lv(dft, name, s_cmd, l_cmd, desc) \
+    extern const char **ARGS_##name; \
+    const char **ARGS_##name = dft; \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_LS, s_cmd, l_cmd, false, &(ARGS_##name), NULL};
 
 /* 预处理回调：无值全局，回调地址直接存入 slot（void*）。 */
-#define ARGS_PRE(cb_pre, name, s_cmd, l_cmd, desc)                             \
-static arg_def_st ARGS_DEF_##name = {                                         \
-	#name, desc, ARG_PRE, s_cmd, l_cmd, false, (void*)cb_pre, NULL            \
-}
+#define ARGS_PRE(cb_pre, name, s_cmd, l_cmd, desc) \
+    static arg_def_st ARGS_DEF_##name = {#name, desc, ARG_PRE, s_cmd, l_cmd, false, ((void*)(cb_pre)), NULL};
 
 /**
  * 设置命令行帮助信息
@@ -234,6 +224,21 @@ int32_t sys_exe_file(char *buf, uint32_t size);
 int32_t sys_tmp_file(char *buf, uint32_t size);
 
 ///////////////////////////////////////////////////////////////////////////////
+// 应用网络（socket）：程序拿来建连/收发的 TCP 套接字。底层跨平台原语见
+// builtins/platform.h（sc_* / SC_WITH_SOCKET），host:port 解析建连等 compound 逻辑在此。
+
+/* sock_socketpair：建一对已连接本地套接字，填 fds[0]/fds[1]；成功 0 / 失败 -1。
+ * POSIX 用 socketpair(AF_UNIX)；Windows 用 127.0.0.1 回环 listen/connect/accept 模拟。 */
+int32_t sock_socketpair(int32_t *fds);
+
+/* sock_connect：对外建立 TCP 连接（阻塞）。getaddrinfo 解析 host:port（IPv4/IPv6 通吃），
+ * 逐候选 socket+connect，成功返回已连接阻塞 fd（调用方可 io.tcp(fd,0,1,1) 包成同步 com，
+ * 或叠 ssl_com 做 TLS 客户端）；全部失败返回 -1。port ∈ 1..65535。 */
+int32_t sock_connect(const char *host, int32_t port);
+
+/* sock_close：跨平台关闭套接字 fd（POSIX close / Windows closesocket）；成功 0 / 失败 -1。
+ * 供上层（如 ssh）跨平台关闭 sock_connect 返回的 fd。 */
+int32_t sock_close(int32_t fd);
 
 #ifdef __cplusplus
 }

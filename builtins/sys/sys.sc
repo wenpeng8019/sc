@@ -213,3 +213,21 @@ def ARGS_PRE: cb_pre, name, s_cmd, l_cmd, desc
 # 在系统临时目录创建一个唯一的空临时文件，返回其路径。
 # 注意：会真实创建文件（避免命名竞争），调用方用完应自行删除。
 @fnc sys_tmp_file:: ret, buf: char&, size: u4
+
+# ---------------- 应用网络（socket，C 实现接口）----------------
+# 程序拿来建连/收发的 TCP 套接字。底层跨平台原语见 builtins/platform.h（sc_* / SC_WITH_SOCKET）；
+# host:port 解析建连等 compound 逻辑在 sys_impl.c 实现。
+
+# sock_socketpair：建一对已连接本地套接字，填 fds[0]/fds[1]，返回 0 / 失败 -1。
+#   POSIX：socketpair(AF_UNIX, SOCK_STREAM)。
+#   Windows：127.0.0.1 回环 listen/connect/accept 模拟（语义等价）。
+# 两端各可 io.tcp(fd, true, 2, 2) 包成 com 设备，在单进程内驱动异步收发闭环。
+@fnc sock_socketpair:: i4, fds: i4&
+
+# sock_connect：对外建立 TCP 连接（阻塞）。getaddrinfo 解析 host:port（IPv4/IPv6 通吃），
+# 逐候选 socket+connect；成功返回已连接阻塞 fd（可 io.tcp(fd,false,1,1) 包同步 com，
+# 或叠 ssl_com 做 TLS 客户端），失败 -1。
+@fnc sock_connect:: i4, host: const char&, port: i4
+
+# sock_close：跨平台关闭套接字（POSIX close / Windows closesocket）；成功 0 / 失败 -1。
+@fnc sock_close:: i4, fd: i4

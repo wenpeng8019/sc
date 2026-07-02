@@ -28,7 +28,7 @@ typedef struct obj {
     int32_t id;
     struct {
         int32_t tag;
-        uint8_t flag;
+        bool flag;
     } meta;
 } obj;
 
@@ -161,9 +161,9 @@ int32_t main(void) {
     /* line 152 */
     printf("name0 = %s\n", name[0]);
     /* line 156 */
-    uint8_t ok = true;
+    bool ok = true;
     /* line 157 */
-    uint8_t no = false;
+    bool no = false;
     /* line 158 */
     printf("ok=%d no=%d\n", ok, no);
     /* line 161 */

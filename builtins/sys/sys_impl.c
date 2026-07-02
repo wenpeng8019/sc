@@ -8,6 +8,7 @@
  *   - tmp_file：两端统一“真实创建唯一空文件”语义（Win 用 GetTempFileNameA）
  */
 #include "sys.h"
+#define SC_WITH_SOCKET   /* 应用网络：sock_* 依赖 platform.h 的 socket 跨平台层 */
 #include "platform.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -545,4 +546,84 @@ int32_t sys_tmp_file(char *buf, uint32_t size) {
     close(fd);
 #endif
     return SYS_OK;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// 应用网络（socket）实现：底层跨平台原语取自 platform.h（sc_* / SC_WITH_SOCKET），
+// 此处实现 host:port 解析建连、本地套接字对、关闭等应用层 compound 逻辑。
+
+/* sock_socketpair：一对已连接本地套接字。
+ *   POSIX：socketpair(AF_UNIX, SOCK_STREAM) 直接给全双工对。
+ *   Windows：无 socketpair，用 127.0.0.1 回环 listen→connect→accept 模拟等价语义。 */
+#if P_WIN
+int32_t sock_socketpair(int32_t *fds) {
+    if (sc_net_init() != 0) return -1;
+    sc_sock lst = socket(AF_INET, SOCK_STREAM, 0);
+    if (lst == SC_SOCK_INVALID) return -1;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;  /* 任选端口 */
+
+    int alen = (int)sizeof(addr);
+    if (bind(lst, (struct sockaddr *)&addr, alen) != 0 ||
+        getsockname(lst, (struct sockaddr *)&addr, &alen) != 0 ||
+        listen(lst, 1) != 0) {
+        sc_close(lst);
+        return -1;
+    }
+
+    sc_sock cli = socket(AF_INET, SOCK_STREAM, 0);
+    if (cli == SC_SOCK_INVALID) { sc_close(lst); return -1; }
+    if (connect(cli, (struct sockaddr *)&addr, alen) != 0) {
+        sc_close(cli); sc_close(lst);
+        return -1;
+    }
+    sc_sock srv = accept(lst, NULL, NULL);
+    sc_close(lst);
+    if (srv == SC_SOCK_INVALID) { sc_close(cli); return -1; }
+
+    fds[0] = (int32_t)srv;
+    fds[1] = (int32_t)cli;
+    return 0;
+}
+#else
+int32_t sock_socketpair(int32_t *fds) {
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;
+    fds[0] = sv[0];
+    fds[1] = sv[1];
+    return 0;
+}
+#endif
+
+/* sock_connect：TCP 客户端连接 host:port（getaddrinfo 解析，IPv4/IPv6 通吃，逐候选
+ * socket+connect 直到连上）；内部确保网络子系统已初始化（Windows WSAStartup 幂等）。
+ * 成功返回已连接阻塞 fd（需非阻塞用 sc_nonblock），失败 -1。 */
+int32_t sock_connect(const char *host, int32_t port) {
+    if (!host || sc_net_init() != 0) return -1;
+    char portbuf[16];
+    snprintf(portbuf, sizeof portbuf, "%d", (int)port);
+    struct addrinfo hints, *res = NULL, *ai;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family   = AF_UNSPEC;      /* IPv4/IPv6 皆可 */
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, portbuf, &hints, &res) != 0) return -1;
+    sc_sock fd = SC_SOCK_INVALID;
+    for (ai = res; ai; ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd == SC_SOCK_INVALID) continue;
+        if (connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) break;
+        sc_close(fd);
+        fd = SC_SOCK_INVALID;
+    }
+    freeaddrinfo(res);
+    return (fd == SC_SOCK_INVALID) ? -1 : (int32_t)fd;
+}
+
+/* sock_close：跨平台关闭套接字（POSIX close / Windows closesocket）；成功 0 / 失败 -1。 */
+int32_t sock_close(int32_t fd) {
+    return sc_close((sc_sock)fd);
 }

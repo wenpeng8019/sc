@@ -1,6 +1,6 @@
 # sec_demo —— securechn 自通讯加密信道示例 + socketpair 单进程自测
 #
-# 用 templates/utils/securechn.sc 组件，在单进程里用 os.sc 的 net_socketpair 同时跑
+# 用 templates/utils/securechn.sc 组件，在单进程里用 sys.sc 的 sock_socketpair 同时跑
 # 「发起方 + 响应方」两个 async rpc，事件循环驱动一次完整闭环：
 #   握手（PSK 或 PSK+X25519 临时）→ 双向加密收发明文 → 篡改帧被拒。
 #
@@ -8,12 +8,12 @@
 #   期望：两种模式各自 srv 收到 "ping from initiator"、cli 收到 "pong from responder"，
 #   且篡改的密文被 SEC_EAUTH 拒绝 → 末行 SELFTEST PASS。
 #
-# 真实部署时把 net_socketpair 换成 listen/accept（或 connect）得到的已连接 fd，对端各
+# 真实部署时把 sock_socketpair 换成 listen/accept（或 connect）得到的已连接 fd，对端各
 # `async sec_responder(tcp(fd, true, 2, 2), ...)` / `async sec_initiator(...)` 即可。
 
 inc async.sc
 inc io.sc
-inc os.sc
+inc sys.sc
 inc crypto.sc
 inc ../utils/securechn.sc
 
@@ -106,7 +106,7 @@ fnc run_mode: i4, mode: i4, label: char&
     g_srv_hs = -1
     g_cli_hs = -1
     var fds[2]: i4
-    var r: i4 = net_socketpair(fds)
+    var r: i4 = sock_socketpair(fds)
     if r < 0
         print "socketpair fail\n"
         return 0
@@ -134,7 +134,7 @@ fnc run_tamper: i4, mode: i4
     g_tamper = -1
     g_srv_hs = -1
     var fds[2]: i4
-    var r: i4 = net_socketpair(fds)
+    var r: i4 = sock_socketpair(fds)
     if r < 0
         return 0
     var srv: com& = tcp(fds[0], true, 2, 2)

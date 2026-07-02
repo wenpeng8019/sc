@@ -9,7 +9,7 @@ typedef struct com__project {
     limit *_;
 } com__project;
 
-uint8_t ARGS_verbose = false;
+bool ARGS_verbose = false;
 static arg_def_st ARGS_DEF_verbose = {"verbose", "Enable verbose output", ARG_BOOL, 'v', "verbose", false, &(ARGS_verbose), NULL};
 int64_t ARGS_count = 0;
 static arg_def_st ARGS_DEF_count = {"count", "Number of iterations", ARG_INT, 'n', "count", false, &(ARGS_count), NULL};

@@ -15,7 +15,7 @@ typedef struct acc {
     int32_t cnt;
 } acc;
 
-uint8_t sum_each(const void *key, sc_thin value, void *ctx);
+bool sum_each(const void *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -47,7 +47,7 @@ void node_drop(node *_this) {
     printf("drop %d\n", _this->v);
 }
 
-uint8_t sum_each(const void *key, sc_thin value, void *ctx) {
+bool sum_each(const void *key, sc_thin value, void *ctx) {
     /* line 22 */
     acc *a = ((acc*)(ctx));
     /* line 23 */
@@ -98,8 +98,8 @@ int32_t main(void) {
     /* line 45 */
     printf("A len=%llu\n", dict_len(&da));
     /* line 46 */
-    uint8_t _sq0 = dict_has(&da, ((const void*)(&(k2))));
-    uint8_t _sq1 = dict_has(&da, ((const void*)(&(k3))));
+    bool _sq0 = dict_has(&da, ((const void*)(&(k2))));
+    bool _sq1 = dict_has(&da, ((const void*)(&(k3))));
     printf("A has22=%d has99=%d\n", _sq0, _sq1);
     /* line 47 */
     int32_t kx = 99;
@@ -162,8 +162,8 @@ int32_t main(void) {
     /* line 79 */
     printf("A fwd sum=%d cnt=%d  bwd sum=%d cnt=%d\n", fs, fc, bs, bc);
     /* line 82 */
-    uint8_t _sq4 = dict_remove(&da, ((const void*)(&(k1))));
-    uint8_t _sq5 = dict_remove(&da, ((const void*)(&(kx))));
+    bool _sq4 = dict_remove(&da, ((const void*)(&(k1))));
+    bool _sq5 = dict_remove(&da, ((const void*)(&(kx))));
     uint64_t _sq6 = dict_len(&da);
     printf("A rm11=%d rm99=%d len=%llu\n", _sq4, _sq5, _sq6);
     /* line 85 */
@@ -193,8 +193,8 @@ int32_t main(void) {
     /* line 97 */
     uint64_t _sq7 = dict_len(&db);
     int32_t _sq8 = ((node*)((dict_get(&db, "beta")).p))->v;
-    uint8_t _sq9 = dict_has(&db, "alpha");
-    uint8_t _sq10 = dict_has(&db, "zzz");
+    bool _sq9 = dict_has(&db, "alpha");
+    bool _sq10 = dict_has(&db, "zzz");
     printf("B len=%llu get_beta=%d has_alpha=%d has_x=%d\n", _sq7, _sq8, _sq9, _sq10);
     /* line 99 */
     dict_remove(&db, "alpha");
@@ -227,8 +227,8 @@ int32_t main(void) {
     /* line 114 */
     buf[0] = 'X';
     /* line 115 */
-    uint8_t _sq11 = dict_has(&dc, ((const void*)(&(buf[0]))));
-    uint8_t _sq12 = dict_has(&dc, ((const void*)("key")));
+    bool _sq11 = dict_has(&dc, ((const void*)(&(buf[0]))));
+    bool _sq12 = dict_has(&dc, ((const void*)("key")));
     printf("C has_key=%d get_key=%d\n", _sq11, _sq12);
     /* line 117 */
     printf("C lookup=%d\n", ((node*)((dict_get(&dc, ((const void*)("key")))).p))->v);

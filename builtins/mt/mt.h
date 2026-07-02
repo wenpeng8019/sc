@@ -88,7 +88,7 @@ void    mutex_init(mutex *_this);
 void    mutex_drop(mutex *_this);
 void    mutex_lock(mutex *_this);
 void    mutex_unlock(mutex *_this);
-uint8_t mutex_try_lock(mutex *_this);     /* 1 成功 / 0 已被占用 */
+bool     mutex_try_lock(mutex *_this);     /* 1 成功 / 0 已被占用 */
 
 /* ---------------- cond：条件变量 ---------------- */
 
@@ -114,7 +114,7 @@ typedef struct barrier {
 
 void    barrier_init(barrier *_this, uint32_t n);  /* n 方汇合（0 视为 1） */
 void    barrier_drop(barrier *_this);
-uint8_t barrier_wait(barrier *_this);     /* 阻塞至全部到达；最后到达者返回 1，其余 0 */
+bool     barrier_wait(barrier *_this);     /* 阻塞至全部到达；最后到达者返回 1，其余 0 */
 
 #ifdef __cplusplus
 }

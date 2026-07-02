@@ -1,9 +1,9 @@
-# ssl_https —— TLS 客户端端到端示例：net_connect → tcp 同步 com → ssl_com → HTTPS GET。
+# ssl_https —— TLS 客户端端到端示例：sock_connect → tcp 同步 com → ssl_com → HTTPS GET。
 # 验证 ssl com 适配层叠在阻塞 tcp com 之上，完成握手 + 加解密收发。
 # 需用 OpenSSL（或 mbedTLS）后端构建的 scc（CMake -DSCC_SSL_BACKEND=openssl）；none 后端会握手失败。
 # 需联网。运行：scc examples/ssl_https.sc
 
-inc os.sc
+inc sys.sc
 inc io.sc
 inc ssl.sc
 
@@ -17,7 +17,7 @@ fnc slen: u4, s: char&
 fnc main: i4
     var host: char& = "example.com"
 
-    var fd: i4 = net_connect(host, 443)
+    var fd: i4 = sock_connect(host, 443)
     if fd < 0
         print "FAIL: connect %s:443\n", host
         return 1

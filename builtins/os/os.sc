@@ -4,18 +4,6 @@
 #
 # 用法：inc os.sc
 
-# ---------------- net_socketpair：建一对已连接本地套接字 ----------------
-# 全双工已连接套接字对，填 fds[0]/fds[1]，返回 0 / 失败 -1。
-#   POSIX：socketpair(AF_UNIX, SOCK_STREAM)。
-#   Windows：127.0.0.1 回环 listen/connect/accept 模拟（语义等价）。
-# 两端各可 io.tcp(fd, true, 2, 2) 包成 com 设备，在单进程内驱动异步收发闭环。
-@fnc net_socketpair:: i4, fds: i4&
-
-# ---------------- net_connect：对外建立 TCP 连接（阻塞）----------------
-# getaddrinfo 解析 host:port（IPv4/IPv6 通吃），逐候选 socket+connect；
-# 成功返回已连接阻塞 fd（可 io.tcp(fd,false,1,1) 包同步 com，或叠 ssl_com 做 TLS 客户端），失败 -1。
-@fnc net_connect:: i4, host: const char&, port: i4
-
 # ---------------- os_rand：密码学强随机字节 ----------------
 # 填充 n 字节随机到 buf，返回 0。转发 platform.h 的 P_rand_bytes（CSPRNG）：
 # macOS/BSD arc4random、Windows rand_s、Linux /dev/urandom。

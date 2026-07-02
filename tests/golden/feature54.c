@@ -6,12 +6,12 @@ static token *a = {0};
 static token *b = {0};
 static token *c = {0};
 static token *t = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
-static uint8_t __scdep_1_follow(__scdep_in *_this);
-static uint8_t __scdep_2_follow(__scdep_in *_this);
-static uint8_t __scdep_3_follow(__scdep_in *_this);
-static uint8_t __scdep_4_follow(__scdep_in *_this);
-static uint8_t __scdep_5_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_1_follow(__scdep_in *_this);
+static bool __scdep_2_follow(__scdep_in *_this);
+static bool __scdep_3_follow(__scdep_in *_this);
+static bool __scdep_4_follow(__scdep_in *_this);
+static bool __scdep_5_follow(__scdep_in *_this);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -26,7 +26,7 @@ static int __scdep_3_tramp(token **, int, int, void *);
 static int __scdep_4_tramp(token **, int, int, void *);
 static int __scdep_5_tramp(token **, int, int, void *);
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 19 */
     token *s = _this->toks[0];
     /* line 19 */
@@ -35,7 +35,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_1_follow(__scdep_in *_this) {
+static bool __scdep_1_follow(__scdep_in *_this) {
     /* line 21 */
     token *s = _this->toks[0];
     /* line 21 */
@@ -44,7 +44,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_2_follow(__scdep_in *_this) {
+static bool __scdep_2_follow(__scdep_in *_this) {
     /* line 23 */
     token *s = _this->toks[0];
     /* line 23 */
@@ -53,7 +53,7 @@ static uint8_t __scdep_2_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_3_follow(__scdep_in *_this) {
+static bool __scdep_3_follow(__scdep_in *_this) {
     /* line 25 */
     token *s = _this->toks[0];
     /* line 25 */
@@ -62,7 +62,7 @@ static uint8_t __scdep_3_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_4_follow(__scdep_in *_this) {
+static bool __scdep_4_follow(__scdep_in *_this) {
     /* line 27 */
     token *s = _this->toks[0];
     /* line 27 */
@@ -71,7 +71,7 @@ static uint8_t __scdep_4_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_5_follow(__scdep_in *_this) {
+static bool __scdep_5_follow(__scdep_in *_this) {
     /* line 29 */
     token *s = _this->toks[0];
     /* line 29 */

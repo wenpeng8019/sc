@@ -88,8 +88,8 @@ int32_t main(void) {
     ring_init(&r, sizeof(x), 3);
     /* line 35 */
     uint64_t _sq0 = ring_cap(&r);
-    uint8_t _sq1 = ring_is_empty(&r);
-    uint8_t _sq2 = ring_is_full(&r);
+    bool _sq1 = ring_is_empty(&r);
+    bool _sq2 = ring_is_full(&r);
     printf("cap=%llu empty=%d full=%d\n", _sq0, _sq1, _sq2);
     /* line 37 */
     x = 10;
@@ -109,8 +109,8 @@ int32_t main(void) {
     ring_push(&r, &(x));
     /* line 45 */
     uint64_t _sq3 = ring_len(&r);
-    uint8_t _sq4 = ring_is_full(&r);
-    uint8_t _sq5 = ring_push(&r, &(x));
+    bool _sq4 = ring_is_full(&r);
+    bool _sq5 = ring_push(&r, &(x));
     printf("len=%llu full=%d push_when_full=%d\n", _sq3, _sq4, _sq5);
     /* line 47 */
     int32_t *pk = ((int32_t*)(ring_peek(&r)));
@@ -124,9 +124,9 @@ int32_t main(void) {
         printf("pop=%d\n", v);
     }
     /* line 53 */
-    uint8_t _sq6 = ring_is_empty(&r);
+    bool _sq6 = ring_is_empty(&r);
     uint64_t _sq7 = ring_len(&r);
-    uint8_t _sq8 = ring_pop(&r, &(v));
+    bool _sq8 = ring_pop(&r, &(v));
     printf("drained empty=%d len=%llu pop_when_empty=%d\n", _sq6, _sq7, _sq8);
     /* line 57 */
     x = 100;
@@ -179,7 +179,7 @@ int32_t main(void) {
     /* line 78 */
     printf("concurrent got=%d sum=%lld expect=%lld ok=%d\n", s.got, s.sum, expect, s.sum == expect);
     /* line 80 */
-    uint8_t _sq9 = ring_is_empty(&s.q);
+    bool _sq9 = ring_is_empty(&s.q);
     uint64_t _sq10 = ring_cap(&s.q);
     printf("final empty=%d cap=%llu\n", _sq9, _sq10);
     /* line 81 */

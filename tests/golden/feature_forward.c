@@ -12,8 +12,8 @@ typedef struct node_b {
     node_a *pa;
 } node_b;
 
-uint8_t is_even(int32_t n);
-uint8_t is_odd(int32_t n);
+bool is_even(int32_t n);
+bool is_odd(int32_t n);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -21,7 +21,7 @@ typedef struct com__project {
 } com__project;
 
 
-uint8_t is_even(int32_t n) {
+bool is_even(int32_t n) {
     /* line 14 */
     if (n == 0) {
         /* line 15 */
@@ -31,7 +31,7 @@ uint8_t is_even(int32_t n) {
     return is_odd(n - 1);
 }
 
-uint8_t is_odd(int32_t n) {
+bool is_odd(int32_t n) {
     /* line 19 */
     if (n == 0) {
         /* line 20 */
@@ -52,8 +52,8 @@ int32_t main(void) {
     /* line 27 */
     y.pa = &(x);
     /* line 28 */
-    uint8_t _sq0 = is_even(10);
-    uint8_t _sq1 = is_odd(7);
+    bool _sq0 = is_even(10);
+    bool _sq1 = is_odd(7);
     printf("even(10)=%d odd(7)=%d\n", _sq0, _sq1);
     /* line 29 */
     return 0;

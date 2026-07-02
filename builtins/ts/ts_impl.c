@@ -216,7 +216,7 @@ static void tel_set(tensor *t, int64_t logical, double v) {
     el_set(t->store->data, t->dtype, phys_off(t, logical), v);
 }
 
-uint8_t tensor_is_contiguous(tensor *_this) {
+bool tensor_is_contiguous(tensor *_this) {
     if (_this->offset != 0) return 0;
     int64_t s = 1;
     for (int d = _this->ndim - 1; d >= 0; d--) {
@@ -388,7 +388,7 @@ int32_t tensor_dim(tensor *_this, int32_t axis) {
     return _this->shape[axis];
 }
 
-uint8_t tensor_is_same_shape(tensor *_this, tensor *o) {
+bool tensor_is_same_shape(tensor *_this, tensor *o) {
     if (!o || _this->ndim != o->ndim) return 0;
     for (int i = 0; i < _this->ndim; i++)
         if (_this->shape[i] != o->shape[i]) return 0;
@@ -407,7 +407,7 @@ double tensor_at(tensor *_this, int64_t idx) {
     return (idx >= 0 && idx < _this->numel) ? tel_get(_this, idx) : 0.0;
 }
 
-uint8_t tensor_set_at(tensor *_this, int64_t idx, double v) {
+bool tensor_set_at(tensor *_this, int64_t idx, double v) {
     if (idx < 0 || idx >= _this->numel) return 0;
     tel_set(_this, idx, v);
     return 1;
@@ -429,7 +429,7 @@ double tensor_at_nd(tensor *_this, int32_t *idx) {
     return el_get(_this->store->data, _this->dtype, nd_off(_this, idx));
 }
 
-uint8_t tensor_set_nd(tensor *_this, int32_t *idx, double v) {
+bool tensor_set_nd(tensor *_this, int32_t *idx, double v) {
     if (!_this->store) return 0;
     el_set(_this->store->data, _this->dtype, nd_off(_this, idx), v);
     return 1;
@@ -458,7 +458,7 @@ tensor *tensor_astype(tensor *_this, int32_t dtype) {
     return r;
 }
 
-uint8_t tensor_copy_from(tensor *_this, tensor *o) {
+bool tensor_copy_from(tensor *_this, tensor *o) {
     if (!o || _this->numel != o->numel) return 0;
     for (int64_t i = 0; i < _this->numel; i++) tel_set(_this, i, tel_get(o, i));
     return 1;
@@ -701,7 +701,7 @@ tensor *tensor_gather(tensor *_this, int32_t axis, tensor *index) {
 }
 
 /* 沿 axis 按 index 原地写入 src（torch.scatter_）。 */
-uint8_t tensor_scatter_(tensor *_this, int32_t axis, tensor *index, tensor *src) {
+bool tensor_scatter_(tensor *_this, int32_t axis, tensor *index, tensor *src) {
     if (!index || !src) return 0;
     if (axis < 0) axis += _this->ndim;
     if (axis < 0 || axis >= _this->ndim) return 0;
@@ -915,10 +915,10 @@ tensor *tensor_logical_not(tensor *_this) {
     return r;
 }
 
-uint8_t tensor_add_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_add); }
-uint8_t tensor_sub_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_sub); }
-uint8_t tensor_mul_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_mul); }
-uint8_t tensor_div_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_div); }
+bool tensor_add_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_add); }
+bool tensor_sub_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_sub); }
+bool tensor_mul_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_mul); }
+bool tensor_div_(tensor *_this, tensor *o) { return ts_bin_(_this, o, op_div); }
 
 /* 标量二元（新张量 / 原地） */
 static tensor *ts_scalar(tensor *t, double s, ts_binop f) {
@@ -936,10 +936,10 @@ tensor *tensor_sub_scalar(tensor *_this, double s) { return ts_scalar(_this, s, 
 tensor *tensor_mul_scalar(tensor *_this, double s) { return ts_scalar(_this, s, op_mul); }
 tensor *tensor_div_scalar(tensor *_this, double s) { return ts_scalar(_this, s, op_div); }
 
-uint8_t tensor_add_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_add); }
-uint8_t tensor_sub_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_sub); }
-uint8_t tensor_mul_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_mul); }
-uint8_t tensor_div_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_div); }
+bool tensor_add_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_add); }
+bool tensor_sub_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_sub); }
+bool tensor_mul_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_mul); }
+bool tensor_div_scalar_(tensor *_this, double s) { return ts_scalar_(_this, s, op_div); }
 
 /* where(cond, a, b)：三方广播（先 cond⊕a 再 ⊗b），物化。 */
 tensor *where(tensor *cond, tensor *a, tensor *b) {
@@ -985,7 +985,7 @@ static int reduce_out_dt(tensor *t, int kind) {
     return t->dtype;
 }
 
-static tensor *ts_reduce(tensor *t, int32_t axis, int kind, uint8_t keepdim) {
+static tensor *ts_reduce(tensor *t, int32_t axis, int kind, bool keepdim) {
     int out_dt = reduce_out_dt(t, kind);
     if (axis < 0 && axis != -1) axis += t->ndim;  /* allow -1 = full; other negatives normalized below */
     /* 全规约：axis == -1（约定） */
@@ -1083,17 +1083,17 @@ static tensor *ts_reduce(tensor *t, int32_t axis, int kind, uint8_t keepdim) {
     return r;
 }
 
-tensor *tensor_sum(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_SUM, keepdim); }
-tensor *tensor_mean(tensor *_this, int32_t axis, uint8_t keepdim)   { return ts_reduce(_this, axis, RD_MEAN, keepdim); }
-tensor *tensor_prod(tensor *_this, int32_t axis, uint8_t keepdim)   { return ts_reduce(_this, axis, RD_PROD, keepdim); }
-tensor *tensor_max(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_MAX, keepdim); }
-tensor *tensor_min(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_MIN, keepdim); }
-tensor *tensor_argmax(tensor *_this, int32_t axis, uint8_t keepdim) { return ts_reduce(_this, axis, RD_ARGMAX, keepdim); }
-tensor *tensor_argmin(tensor *_this, int32_t axis, uint8_t keepdim) { return ts_reduce(_this, axis, RD_ARGMIN, keepdim); }
-tensor *tensor_std(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_STD, keepdim); }
-tensor *tensor_var(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_VAR, keepdim); }
-tensor *tensor_any(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_ANY, keepdim); }
-tensor *tensor_all(tensor *_this, int32_t axis, uint8_t keepdim)    { return ts_reduce(_this, axis, RD_ALL, keepdim); }
+tensor *tensor_sum(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_SUM, keepdim); }
+tensor *tensor_mean(tensor *_this, int32_t axis, bool keepdim)   { return ts_reduce(_this, axis, RD_MEAN, keepdim); }
+tensor *tensor_prod(tensor *_this, int32_t axis, bool keepdim)   { return ts_reduce(_this, axis, RD_PROD, keepdim); }
+tensor *tensor_max(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_MAX, keepdim); }
+tensor *tensor_min(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_MIN, keepdim); }
+tensor *tensor_argmax(tensor *_this, int32_t axis, bool keepdim) { return ts_reduce(_this, axis, RD_ARGMAX, keepdim); }
+tensor *tensor_argmin(tensor *_this, int32_t axis, bool keepdim) { return ts_reduce(_this, axis, RD_ARGMIN, keepdim); }
+tensor *tensor_std(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_STD, keepdim); }
+tensor *tensor_var(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_VAR, keepdim); }
+tensor *tensor_any(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_ANY, keepdim); }
+tensor *tensor_all(tensor *_this, int32_t axis, bool keepdim)    { return ts_reduce(_this, axis, RD_ALL, keepdim); }
 
 /* 累积（形状不变，沿 axis 前缀聚合）。 */
 static tensor *ts_cum(tensor *t, int32_t axis, int is_prod) {
@@ -1175,7 +1175,7 @@ static double quantile_sorted(double *buf, int n, double q01) {
 }
 
 /* 沿 axis 取分位数（q01∈[0,1]）。axis==-1 → 全数据标量。 */
-static tensor *ts_quantile(tensor *t, double q01, int32_t axis, uint8_t keepdim) {
+static tensor *ts_quantile(tensor *t, double q01, int32_t axis, bool keepdim) {
     if (axis < 0) {
         double *buf = (double *)sc_alloc((size_t)(t->numel > 0 ? t->numel : 1) * sizeof(double));
         if (!buf) return NULL;
@@ -1225,8 +1225,8 @@ static tensor *ts_quantile(tensor *t, double q01, int32_t axis, uint8_t keepdim)
     return r;
 }
 
-tensor *tensor_median(tensor *_this, int32_t axis, uint8_t keepdim) { return ts_quantile(_this, 0.5, axis, keepdim); }
-tensor *tensor_percentile(tensor *_this, double q, int32_t axis, uint8_t keepdim) { return ts_quantile(_this, q / 100.0, axis, keepdim); }
+tensor *tensor_median(tensor *_this, int32_t axis, bool keepdim) { return ts_quantile(_this, 0.5, axis, keepdim); }
+tensor *tensor_percentile(tensor *_this, double q, int32_t axis, bool keepdim) { return ts_quantile(_this, q / 100.0, axis, keepdim); }
 double tensor_median_all(tensor *_this) {
     tensor *r = ts_quantile(_this, 0.5, -1, 0); if (!r) return 0.0;
     double v = tel_get(r, 0); tensor_drop(r); sc_free(r); return v;
@@ -1604,7 +1604,7 @@ tensor *tensor_cholesky(tensor *_this) {
 }
 
 /* QR（修正 Gram-Schmidt），_this 为 [m,n]，m>=n：out[0]=Q[m,n]，out[1]=R[n,n]。 */
-uint8_t tensor_qr(tensor *_this, void *out_) {
+bool tensor_qr(tensor *_this, void *out_) {
     tensor **out = (tensor **)out_;
     if (_this->ndim != 2) return 0;
     int m = _this->shape[0], n = _this->shape[1];
@@ -1654,7 +1654,7 @@ uint8_t tensor_qr(tensor *_this, void *out_) {
 }
 
 /* 对称特征分解（Jacobi 旋转），_this 为 [n,n] 对称：out[0]=vals[n] 升序，out[1]=vecs[n,n]（列为特征向量）。 */
-uint8_t tensor_eigh(tensor *_this, void *out_) {
+bool tensor_eigh(tensor *_this, void *out_) {
     tensor **out = (tensor **)out_;
     if (_this->ndim != 2 || _this->shape[0] != _this->shape[1]) return 0;
     int n = _this->shape[0];
@@ -1725,7 +1725,7 @@ uint8_t tensor_eigh(tensor *_this, void *out_) {
 }
 
 /* 瘦 SVD（经 AᵀA 的对称特征分解），_this 为 [m,n]：out[0]=U[m,r]，out[1]=S[r]，out[2]=V[n,r]，r=min(m,n)。 */
-uint8_t tensor_svd(tensor *_this, void *out_) {
+bool tensor_svd(tensor *_this, void *out_) {
     tensor **out = (tensor **)out_;
     if (_this->ndim != 2) return 0;
     int m = _this->shape[0], n = _this->shape[1];
@@ -1803,7 +1803,7 @@ tensor *tensor_relu(tensor *_this)    { return ts_unary(_this, un_relu); }
 tensor *tensor_sigmoid(tensor *_this) { return ts_unary(_this, un_sigmoid); }
 tensor *tensor_tanh(tensor *_this)    { return ts_unary(_this, un_tanh); }
 
-uint8_t tensor_relu_(tensor *_this) {
+bool tensor_relu_(tensor *_this) {
     for (int64_t i = 0; i < _this->numel; i++) {
         double v = tel_get(_this, i);
         if (v < 0.0) tel_set(_this, i, 0.0);
@@ -2642,7 +2642,7 @@ tensor *tensor_layer_norm(tensor *_this, int32_t axis, double eps) {
     return r;
 }
 
-tensor *tensor_dropout(tensor *_this, double p, uint8_t train) {
+tensor *tensor_dropout(tensor *_this, double p, bool train) {
     if (!_this) return NULL;
     if (!train || p <= 0.0) return materialize(_this);
     if (p >= 1.0) {
@@ -2673,7 +2673,7 @@ tensor *tensor_dropout_mask(tensor *_this, double p) {
 /* scaled dot-product attention（前向）：
  * Q:[B,T,D], K:[B,S,D], V:[B,S,Dv] -> O:[B,T,Dv]
  * causal=1 时，对每个 t 屏蔽 s>t。 */
-tensor *tensor_sdpa(tensor *_this, tensor *k, tensor *v, uint8_t causal) {
+tensor *tensor_sdpa(tensor *_this, tensor *k, tensor *v, bool causal) {
     if (!_this || !k || !v) return NULL;
     if (_this->ndim != 3 || k->ndim != 3 || v->ndim != 3) return NULL;
     int32_t B = _this->shape[0], T = _this->shape[1], D = _this->shape[2];
@@ -3084,14 +3084,14 @@ tensor *tensor_roll(tensor *_this, int64_t shift, int32_t axis) {
  * 16. 比较 / 杂项 / 打印
  * ============================================================ */
 
-uint8_t tensor_equal(tensor *_this, tensor *o) {
+bool tensor_equal(tensor *_this, tensor *o) {
     if (!tensor_is_same_shape(_this, o)) return 0;
     for (int64_t i = 0; i < _this->numel; i++)
         if (tel_get(_this, i) != tel_get(o, i)) return 0;
     return 1;
 }
 
-uint8_t tensor_allclose(tensor *_this, tensor *o, double rtol, double atol) {
+bool tensor_allclose(tensor *_this, tensor *o, double rtol, double atol) {
     if (!tensor_is_same_shape(_this, o)) return 0;
     for (int64_t i = 0; i < _this->numel; i++) {
         double a = tel_get(_this, i), b = tel_get(o, i);
@@ -3182,7 +3182,7 @@ tensor *permutation(int32_t n, int32_t dtype) {
     return r;
 }
 
-uint8_t tensor_shuffle_(tensor *_this) {
+bool tensor_shuffle_(tensor *_this) {
     if (_this->ndim < 1) return 0;
     int32_t n = _this->shape[0];
     if (n <= 1) return 1;
@@ -3219,7 +3219,7 @@ tensor *tri(int32_t n, int32_t m, int32_t k, int32_t dtype) {
 /* meshgrid：N 个 1D 坐标 arr[0..n-1] → N 个 N 维网格 out[0..n-1]。
  * indexing 0=ij（out[k] 沿轴 k 变化，形状 (len0,len1,…,lenN-1)）；
  * indexing 1=xy（仅交换前两轴：形状 (len1,len0,len2,…)，out[0] 沿轴 1、out[1] 沿轴 0、其余沿轴 k）。 */
-uint8_t meshgrid(void *arr_, int32_t n, int32_t indexing, void *out_) {
+bool meshgrid(void *arr_, int32_t n, int32_t indexing, void *out_) {
     tensor **arr = (tensor **)arr_;
     tensor **out = (tensor **)out_;
     if (n <= 0 || n > TS_MAXD) return 0;
@@ -3431,7 +3431,7 @@ static tensor *ts_load_npy(FILE *f) {
     return r;
 }
 
-uint8_t tensor_save(tensor *_this, const char *path) {
+bool tensor_save(tensor *_this, const char *path) {
     /* 新写入统一采用 NumPy .npy（C-order） */
     return tensor_save_npy(_this, path);
 }

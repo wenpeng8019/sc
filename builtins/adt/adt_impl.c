@@ -45,18 +45,18 @@ void string_clear(string *_this) {
     if (_this->data) _this->data[0] = 0;
 }
 
-uint8_t string_reserve(string *_this, uint64_t n) { return str_grow(_this, n); }
+bool string_reserve(string *_this, uint64_t n) { return str_grow(_this, n); }
 
-uint8_t string_assign(string *_this, const char *s) {
+bool string_assign(string *_this, const char *s) {
     string_clear(_this);
     return string_append(_this, s);
 }
 
-uint8_t string_append(string *_this, const char *s) {
+bool string_append(string *_this, const char *s) {
     return string_append_n(_this, s, s ? strlen(s) : 0);
 }
 
-uint8_t string_append_n(string *_this, const char *s, uint64_t n) {
+bool string_append_n(string *_this, const char *s, uint64_t n) {
     if (!n) { /* 仍保证缓冲区存在，便于 cstr() */ }
     if (!str_grow(_this, _this->size + n)) return 0;
     if (n) memcpy(_this->data + _this->size, s, n);
@@ -65,11 +65,11 @@ uint8_t string_append_n(string *_this, const char *s, uint64_t n) {
     return 1;
 }
 
-uint8_t string_append_char(string *_this, char c) {
+bool string_append_char(string *_this, char c) {
     return string_append_n(_this, &c, 1);
 }
 
-uint8_t string_insert(string *_this, uint64_t index, const char *s) {
+bool string_insert(string *_this, uint64_t index, const char *s) {
     if (index > _this->size) return 0;
     uint64_t n = s ? strlen(s) : 0;
     if (!n) return 1;
@@ -81,7 +81,7 @@ uint8_t string_insert(string *_this, uint64_t index, const char *s) {
     return 1;
 }
 
-uint8_t string_erase(string *_this, uint64_t index, uint64_t n) {
+bool string_erase(string *_this, uint64_t index, uint64_t n) {
     if (index >= _this->size) return 0;
     if (n > _this->size - index) n = _this->size - index;
     memmove(_this->data + index, _this->data + index + n,
@@ -172,7 +172,7 @@ int64_t string_rfind(string *_this, const char *sub) {
 }
 
 /* 追加 printf 格式化文本：vsnprintf 探测所需长度→扩容→重试（移植 utstring_printf_va）。 */
-uint8_t string_printf(string *_this, const char *fmt, ...) {
+bool string_printf(string *_this, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     uint8_t ok = 1;
@@ -191,17 +191,17 @@ uint8_t string_printf(string *_this, const char *fmt, ...) {
     return ok;
 }
 
-uint8_t string_equals(string *_this, const char *s) {
+bool string_equals(string *_this, const char *s) {
     return strcmp(string_cstr(_this), s ? s : "") == 0;
 }
 
-uint8_t string_starts_with(string *_this, const char *s) {
+bool string_starts_with(string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
     return n <= _this->size && memcmp(string_cstr(_this), s, n) == 0;
 }
 
-uint8_t string_ends_with(string *_this, const char *s) {
+bool string_ends_with(string *_this, const char *s) {
     if (!s) return 0;
     uint64_t n = strlen(s);
     return n <= _this->size &&
@@ -209,7 +209,7 @@ uint8_t string_ends_with(string *_this, const char *s) {
 }
 
 /* 负索引从尾部计；区间 [start, stop)，stop 超界截断 */
-uint8_t string_slice(string *_this, int64_t start, int64_t stop, string *out) {
+bool string_slice(string *_this, int64_t start, int64_t stop, string *out) {
     int64_t len = (int64_t)_this->size;
     if (start < 0) start += len;
     if (stop < 0) stop += len;
@@ -240,7 +240,7 @@ void string_upper(string *_this) {
         _this->data[i] = (char)toupper((unsigned char)_this->data[i]);
 }
 
-uint8_t string_clone(string *_this, string *out) {
+bool string_clone(string *_this, string *out) {
     string_clear(out);
     return string_append_n(out, _this->data, _this->size);
 }
@@ -282,9 +282,9 @@ void *array_data(array *_this) { return _this->buf; }
 
 void array_clear(array *_this) { _this->size = 0; }
 
-uint8_t array_reserve(array *_this, uint64_t n) { return arr_grow(_this, n); }
+bool array_reserve(array *_this, uint64_t n) { return arr_grow(_this, n); }
 
-uint8_t array_resize(array *_this, uint64_t n) {
+bool array_resize(array *_this, uint64_t n) {
     if (n > _this->size) {
         if (!arr_grow(_this, n)) return 0;
         memset(arr_eltptr(_this, _this->size), 0,
@@ -294,12 +294,12 @@ uint8_t array_resize(array *_this, uint64_t n) {
     return 1;
 }
 
-uint8_t array_assign(array *_this, void *src, uint64_t n) {
+bool array_assign(array *_this, void *src, uint64_t n) {
     _this->size = 0;
     return array_append(_this, src, n);
 }
 
-uint8_t array_append(array *_this, void *src, uint64_t n) {
+bool array_append(array *_this, void *src, uint64_t n) {
     if (!n) return 1;
     if (!arr_grow(_this, _this->size + n)) return 0;
     if (src) memcpy(arr_eltptr(_this, _this->size), src, n * _this->elem_sz);
@@ -307,7 +307,7 @@ uint8_t array_append(array *_this, void *src, uint64_t n) {
     return 1;
 }
 
-uint8_t array_push(array *_this, void *value) {
+bool array_push(array *_this, void *value) {
     if (!arr_grow(_this, _this->size + 1)) return 0;
     if (value) memcpy(arr_eltptr(_this, _this->size), value, _this->elem_sz);
     _this->size++;
@@ -318,7 +318,7 @@ void *array_pop(array *_this) {
     return _this->size ? arr_eltptr(_this, --_this->size) : NULL;
 }
 
-uint8_t array_insert(array *_this, uint64_t index, void *value) {
+bool array_insert(array *_this, uint64_t index, void *value) {
     if (index > _this->size) return 0;
     if (!arr_grow(_this, _this->size + 1)) return 0;
     memmove(arr_eltptr(_this, index + 1), arr_eltptr(_this, index),
@@ -328,7 +328,7 @@ uint8_t array_insert(array *_this, uint64_t index, void *value) {
     return 1;
 }
 
-uint8_t array_erase(array *_this, uint64_t index, uint64_t n) {
+bool array_erase(array *_this, uint64_t index, uint64_t n) {
     if (index >= _this->size || !n) return index >= _this->size ? 0 : 1;
     if (index + n > _this->size) n = _this->size - index;
     memmove(arr_eltptr(_this, index), arr_eltptr(_this, index + n),
@@ -341,7 +341,7 @@ void *array_at(array *_this, uint64_t index) {
     return index < _this->size ? arr_eltptr(_this, index) : NULL;
 }
 
-uint8_t array_set(array *_this, uint64_t index, void *value) {
+bool array_set(array *_this, uint64_t index, void *value) {
     if (index >= _this->size) return 0;
     if (value) memcpy(arr_eltptr(_this, index), value, _this->elem_sz);
     return 1;
@@ -372,21 +372,21 @@ int64_t array_rfind(array *_this, void *key, array_cmp cmp) {
     return -1;
 }
 
-uint8_t array_equals(array *_this, array *other, array_cmp cmp) {
+bool array_equals(array *_this, array *other, array_cmp cmp) {
     if (_this->size != other->size || _this->elem_sz != other->elem_sz) return 0;
     for (uint64_t i = 0; i < _this->size; i++)
         if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
     return 1;
 }
 
-uint8_t array_starts_with(array *_this, array *other, array_cmp cmp) {
+bool array_starts_with(array *_this, array *other, array_cmp cmp) {
     if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
     for (uint64_t i = 0; i < other->size; i++)
         if (!arr_eq(_this, arr_eltptr(_this, i), arr_eltptr(other, i), cmp)) return 0;
     return 1;
 }
 
-uint8_t array_ends_with(array *_this, array *other, array_cmp cmp) {
+bool array_ends_with(array *_this, array *other, array_cmp cmp) {
     if (other->size > _this->size || _this->elem_sz != other->elem_sz) return 0;
     uint64_t off = _this->size - other->size;
     for (uint64_t i = 0; i < other->size; i++)
@@ -395,7 +395,7 @@ uint8_t array_ends_with(array *_this, array *other, array_cmp cmp) {
 }
 
 /* 负索引从尾部计；区间 [start, stop)，stop 超界截断。out 沿用本数组 elem_sz */
-uint8_t array_slice(array *_this, int64_t start, int64_t stop, array *out) {
+bool array_slice(array *_this, int64_t start, int64_t stop, array *out) {
     int64_t len = (int64_t)_this->size;
     if (start < 0) start += len;
     if (stop < 0) stop += len;
@@ -424,7 +424,7 @@ void array_reverse(array *_this) {
     if (heap) sc_free(heap);
 }
 
-uint8_t array_clone(array *_this, array *out) {
+bool array_clone(array *_this, array *out) {
     out->elem_sz = _this->elem_sz;
     out->size = 0;
     return array_append(out, _this->buf, _this->size);
@@ -462,7 +462,7 @@ static inline char *ring_slot(ring *r, uint32_t idx) {
     return r->buf + (size_t)(idx & r->mask) * r->elem_sz;
 }
 
-uint8_t ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity) {
+bool ring_init(ring *_this, uint32_t elem_sz, uint32_t capacity) {
     uint32_t es = elem_sz ? elem_sz : 1;
     uint32_t cap = ring_pow2(capacity ? capacity : 2);
     _this->head = 0;
@@ -492,11 +492,11 @@ uint64_t ring_len(ring *_this) {
     return (uint64_t)(tail - head);
 }
 
-uint8_t ring_is_empty(ring *_this) {
+bool ring_is_empty(ring *_this) {
     return sc_get_acq(&_this->tail) == sc_get_acq(&_this->head);
 }
 
-uint8_t ring_is_full(ring *_this) {
+bool ring_is_full(ring *_this) {
     uint32_t tail = sc_get_acq(&_this->tail);
     uint32_t head = sc_get_acq(&_this->head);
     return (tail - head) > _this->mask;      /* count == mask+1 == cap → 满 */
@@ -507,7 +507,7 @@ void ring_clear(ring *_this) {
     sc_set(&_this->tail, 0);
 }
 
-uint8_t ring_push(ring *_this, void *value) {
+bool ring_push(ring *_this, void *value) {
     uint32_t tail = sc_get(&_this->tail);        /* 生产者独占 tail：relaxed 读自身 */
     uint32_t head = sc_get_acq(&_this->head);    /* acquire 观测消费者已释放的槽 */
     if ((tail - head) > _this->mask) return 0;   /* 满 */
@@ -516,7 +516,7 @@ uint8_t ring_push(ring *_this, void *value) {
     return 1;
 }
 
-uint8_t ring_pop(ring *_this, void *out) {
+bool ring_pop(ring *_this, void *out) {
     uint32_t head = sc_get(&_this->head);        /* 消费者独占 head：relaxed 读自身 */
     uint32_t tail = sc_get_acq(&_this->tail);    /* acquire 观测生产者写入的数据 */
     if (tail == head) return 0;                  /* 空 */
@@ -585,9 +585,9 @@ void list_drop(list *_this) {
 
 uint64_t list_len(list *_this) { return _this->size; }
 
-uint8_t list_reserve(list *_this, uint64_t n) { return list_grow(_this, n); }
+bool list_reserve(list *_this, uint64_t n) { return list_grow(_this, n); }
 
-uint8_t list_push(list *_this, sc_thin value) {
+bool list_push(list *_this, sc_thin value) {
     if (!list_grow(_this, _this->size + 1)) return 0;
     sc_thin_bind(list_slot(_this, _this->size), value.p,
                  (sc_ref *)value.tar, value.dtor);   /* retain：目标 in++ */
@@ -595,7 +595,7 @@ uint8_t list_push(list *_this, sc_thin value) {
     return 1;
 }
 
-uint8_t list_pop(list *_this) {
+bool list_pop(list *_this) {
     if (!_this->size) return 0;
     sc_thin_unbind(list_slot(_this, --_this->size));    /* release 尾元素 */
     return 1;
@@ -607,7 +607,7 @@ sc_thin list_get(list *_this, uint64_t index) {
     return empty;
 }
 
-uint8_t list_set(list *_this, uint64_t index, sc_thin value) {
+bool list_set(list *_this, uint64_t index, sc_thin value) {
     if (index >= _this->size) return 0;
     sc_thin *slot = list_slot(_this, index);
     sc_thin old = *slot;                                /* 复制旧边记录 */
@@ -617,7 +617,7 @@ uint8_t list_set(list *_this, uint64_t index, sc_thin value) {
     return 1;
 }
 
-uint8_t list_insert(list *_this, uint64_t index, sc_thin value) {
+bool list_insert(list *_this, uint64_t index, sc_thin value) {
     if (index > _this->size) return 0;
     if (!list_grow(_this, _this->size + 1)) return 0;
     for (uint64_t i = _this->size; i > index; i--)      /* 尾→前裸搬移让位（不改计数） */
@@ -628,7 +628,7 @@ uint8_t list_insert(list *_this, uint64_t index, sc_thin value) {
     return 1;
 }
 
-uint8_t list_remove_at(list *_this, uint64_t index) {
+bool list_remove_at(list *_this, uint64_t index) {
     if (index >= _this->size) return 0;
     sc_thin_unbind(list_slot(_this, index));            /* release 该元素 */
     for (uint64_t i = index; i + 1 < _this->size; i++)  /* 后续裸搬移前移（不改计数） */
@@ -653,7 +653,7 @@ void list_reverse(list *_this) {
     }
 }
 
-uint8_t list_clone(list *_this, list *out) {
+bool list_clone(list *_this, list *out) {
     list_clear(out);
     if (!list_grow(out, _this->size)) return 0;
     for (uint64_t i = 0; i < _this->size; i++)
@@ -974,7 +974,7 @@ void dict_drop(dict *_this) {
 
 uint64_t dict_len(dict *_this) { return _this->size; }
 
-uint8_t dict_has(dict *_this, const void *key) { return dict_find(_this, key) >= 0; }
+bool dict_has(dict *_this, const void *key) { return dict_find(_this, key) >= 0; }
 
 sc_thin dict_get(dict *_this, const void *key) {
     int64_t i = dict_find(_this, key);
@@ -982,7 +982,7 @@ sc_thin dict_get(dict *_this, const void *key) {
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
-uint8_t dict_put(dict *_this, const void *key, sc_thin value) {
+bool dict_put(dict *_this, const void *key, sc_thin value) {
     int found;
     int64_t i;
     sc_thin *slot;
@@ -1012,7 +1012,7 @@ uint8_t dict_put(dict *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-uint8_t dict_remove(dict *_this, const void *key) {
+bool dict_remove(dict *_this, const void *key) {
     int64_t i = dict_find(_this, key);
     if (i < 0) return 0;
     sc_thin_unbind(dict_val(_this, (uint64_t)i));    /* release value */
@@ -1389,7 +1389,7 @@ void bst_drop(bst *_this) { bst_clear(_this); }      /* 内部父指针设计无
 
 uint64_t bst_len(bst *_this) { return _this->size; }
 
-uint8_t bst_has(bst *_this, const void *key) {
+bool bst_has(bst *_this, const void *key) {
     bst_node *n = (bst_node *)_this->root;
     while (n) { int c = bst_cmp_key(_this, key, n); if (c == 0) return 1; n = c < 0 ? n->left : n->right; }
     return 0;
@@ -1405,7 +1405,7 @@ sc_thin bst_get(bst *_this, const void *key) {
     { sc_thin e; e.p = NULL; e.tar = NULL; e.dtor = NULL; return e; }
 }
 
-uint8_t bst_put(bst *_this, const void *key, sc_thin value) {
+bool bst_put(bst *_this, const void *key, sc_thin value) {
     bst_node *nn, *parent, *child, *mbs_parent = NULL;
     int c;
 
@@ -1468,7 +1468,7 @@ uint8_t bst_put(bst *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-uint8_t bst_remove(bst *_this, const void *key) {
+bool bst_remove(bst *_this, const void *key) {
     bst_node *node, *child, *parent;
     int8_t removed_balance, inc;
 
@@ -1746,15 +1746,15 @@ void heap_drop(heap *_this) {
 }
 
 uint64_t heap_len(heap *_this) { return _this->size; }
-uint8_t  heap_is_empty(heap *_this) { return _this->size == 0; }
+bool heap_is_empty(heap *_this) { return _this->size == 0; }
 
-uint8_t heap_reserve(heap *_this, uint64_t n) {
+bool heap_reserve(heap *_this, uint64_t n) {
     if (n <= _this->cap) return 1;
     if (n > 0xFFFFFFFFu) return 0;
     return heap_grow(_this, (uint32_t)n);
 }
 
-uint8_t heap_push(heap *_this, const void *key, sc_thin value) {
+bool heap_push(heap *_this, const void *key, sc_thin value) {
     uint32_t i = _this->size;
     if (i == _this->cap && !heap_grow(_this, i + 1)) return 0;
     if (!heap_storekey(_this, i, key)) return 0;
@@ -1764,7 +1764,7 @@ uint8_t heap_push(heap *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-uint8_t heap_pop(heap *_this) {
+bool heap_pop(heap *_this) {
     uint32_t last;
     if (!_this->size) return 0;
     sc_thin_unbind(heap_val(_this, 0));             /* release 堆顶 value */
@@ -1890,7 +1890,7 @@ void trie_drop(trie *_this) { trie_clear(_this); }
 
 uint64_t trie_len(trie *_this) { return _this->size; }
 
-uint8_t trie_has(trie *_this, const char *key) {
+bool trie_has(trie *_this, const char *key) {
     trie_node *n = trie_walk(_this, key);
     return (uint8_t)(n && n->terminal);
 }
@@ -1901,7 +1901,7 @@ sc_thin trie_get(trie *_this, const char *key) {
     return trie_empty_afat();
 }
 
-uint8_t trie_put(trie *_this, const char *key, sc_thin value) {
+bool trie_put(trie *_this, const char *key, sc_thin value) {
     const unsigned char *p;
     trie_node *n, *graft_parent = NULL, *graft_first = NULL;
     if (!key) return 0;
@@ -1936,7 +1936,7 @@ uint8_t trie_put(trie *_this, const char *key, sc_thin value) {
     return 1;
 }
 
-uint8_t trie_remove(trie *_this, const char *key) {
+bool trie_remove(trie *_this, const char *key) {
     trie_node *n, *u;
     n = trie_walk(_this, key);
     if (!n || !n->terminal) return 0;
@@ -1953,7 +1953,7 @@ uint8_t trie_remove(trie *_this, const char *key) {
     return 1;
 }
 
-uint8_t trie_has_prefix(trie *_this, const char *prefix) {
+bool trie_has_prefix(trie *_this, const char *prefix) {
     return (uint8_t)(trie_count_prefix(_this, prefix) > 0);
 }
 
@@ -2139,7 +2139,7 @@ void lru_drop(lru *_this) {
 }
 
 uint64_t lru_len(lru *_this) { return dict_len(&_this->map); }
-uint8_t  lru_is_empty(lru *_this) { return _this->head == NULL; }
+bool lru_is_empty(lru *_this) { return _this->head == NULL; }
 uint64_t lru_cap(lru *_this) { return _this->cap; }
 
 void lru_set_cap(lru *_this, uint64_t cap) {
@@ -2147,7 +2147,7 @@ void lru_set_cap(lru *_this, uint64_t cap) {
     if (cap) while (dict_len(&_this->map) > cap) lru_evict_tail(_this);
 }
 
-uint8_t lru_has(lru *_this, const void *key) {
+bool lru_has(lru *_this, const void *key) {
     return (uint8_t)(dict_get(&_this->map, key).p != NULL);
 }
 
@@ -2164,7 +2164,7 @@ sc_thin lru_peek(lru *_this, const void *key) {
     return ((lru_node *)got.p)->value;              /* 借用，不触顶 */
 }
 
-uint8_t lru_put(lru *_this, const void *key, sc_thin value) {
+bool lru_put(lru *_this, const void *key, sc_thin value) {
     sc_thin got = dict_get(&_this->map, key);
     lru_node *n;
     if (got.p) {                                    /* 命中：替换 value（先 retain 新、再 release 旧）+ 触顶 */
@@ -2187,7 +2187,7 @@ uint8_t lru_put(lru *_this, const void *key, sc_thin value) {
     return 1;
 }
 
-uint8_t lru_remove(lru *_this, const void *key) {
+bool lru_remove(lru *_this, const void *key) {
     sc_thin got = dict_get(&_this->map, key);
     lru_node *n;
     if (!got.p) return 0;

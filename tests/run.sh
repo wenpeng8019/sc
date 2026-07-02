@@ -209,7 +209,8 @@ GRAPH_UNIT=(
 
 pass=0 fail=0 upd=0
 TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
+TMPERR="$(mktemp)"
+trap 'rm -f "$TMP" "$TMPERR"' EXIT
 
 # 归一化错误输出：去掉源文件路径前缀（绝对/相对差异 → 仅留 文件名.sc）
 norm_err() { sed -E 's#^([^ ]*/)?([A-Za-z0-9_]+\.sc):#\2:#'; }
@@ -242,39 +243,41 @@ snapshot() {
     fi
 }
 
+# 采集正向产物快照：要求 scc 退出码 0 且【stderr 为空】。
+# 正向用例的编译期 stderr 本应干净——任何告警（宏重定义 / conflicting types …）
+# 都在此暴露为失败，杜绝历史上 “2>/dev/null 吞掉告警、回归照绿” 的隐患。
+# $1=标签  $2=黄金文件  其后=传给 scc 的参数
+emit_snapshot() {
+    local label=$1 gold=$2; shift 2
+    local out rc
+    out="$("$SCC" "$@" 2>"$TMPERR")"; rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "  ✗ ${label}：scc 失败"; fail=$((fail + 1)); return
+    fi
+    if [ -s "$TMPERR" ]; then
+        echo "  ✗ ${label}：编译期 stderr 非空（疑似被吞的告警）："
+        sed 's/^/      /' "$TMPERR"; fail=$((fail + 1)); return
+    fi
+    snapshot "$label" "$gold" "$out"
+}
+
 cd "$ROOT"
 [ "$UPDATE" = 1 ] && echo "==> 回归：更新黄金快照" || echo "==> 回归：黄金快照比对"
 
 for src in "${POSITIVE[@]}"; do
     name="$(basename "$src" .sc)"
-    if c="$("$SCC" "$src" --emit-c 2>/dev/null)"; then
-        snapshot "$name (emit-c)" "$GOLDEN/$name.c" "$c"
-    else
-        echo "  ✗ $name (emit-c)：scc 失败"; fail=$((fail + 1))
-    fi
-    if s="$("$SCC" "$src" --emit-sc 2>/dev/null)"; then
-        snapshot "$name (emit-sc)" "$GOLDEN/$name.sc" "$s"
-    else
-        echo "  ✗ $name (emit-sc)：scc 失败"; fail=$((fail + 1))
-    fi
+    emit_snapshot "$name (emit-c)" "$GOLDEN/$name.c" "$src" --emit-c
+    emit_snapshot "$name (emit-sc)" "$GOLDEN/$name.sc" "$src" --emit-sc
 done
 
 for src in "${CHECKMEM[@]}"; do
     name="$(basename "$src" .sc)"
-    if c="$("$SCC" "$src" --emit-c --check=mem 2>/dev/null)"; then
-        snapshot "$name (emit-c --check=mem)" "$GOLDEN/$name.mem.c" "$c"
-    else
-        echo "  ✗ $name (emit-c --check=mem)：scc 失败"; fail=$((fail + 1))
-    fi
+    emit_snapshot "$name (emit-c --check=mem)" "$GOLDEN/$name.mem.c" "$src" --emit-c --check=mem
 done
 
 for src in "${CHECKPTR[@]}"; do
     name="$(basename "$src" .sc)"
-    if c="$("$SCC" "$src" --emit-c --check=ptr 2>/dev/null)"; then
-        snapshot "$name (emit-c --check=ptr)" "$GOLDEN/$name.ptr.c" "$c"
-    else
-        echo "  ✗ $name (emit-c --check=ptr)：scc 失败"; fail=$((fail + 1))
-    fi
+    emit_snapshot "$name (emit-c --check=ptr)" "$GOLDEN/$name.ptr.c" "$src" --emit-c --check=ptr
 done
 
 for src in "${NEGATIVE[@]}"; do
@@ -309,11 +312,15 @@ done
 # 程序结构依赖图：--graph=unit 导出 JSON，归一化绝对路径后比对 .graph.json 黄金。
 for src in "${GRAPH_UNIT[@]}"; do
     name="$(basename "$src" .sc)"
-    if g="$("$SCC" "$src" --graph=unit 2>/dev/null)"; then
+    g="$("$SCC" "$src" --graph=unit 2>"$TMPERR")"; rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "  ✗ $name (graph=unit)：scc 失败"; fail=$((fail + 1))
+    elif [ -s "$TMPERR" ]; then
+        echo "  ✗ $name (graph=unit)：编译期 stderr 非空（疑似被吞的告警）："
+        sed 's/^/      /' "$TMPERR"; fail=$((fail + 1))
+    else
         g="$(printf '%s' "$g" | norm_graph)"
         snapshot "$name (graph=unit)" "$GOLDEN/$name.graph.json" "$g"
-    else
-        echo "  ✗ $name (graph=unit)：scc 失败"; fail=$((fail + 1))
     fi
 done
 

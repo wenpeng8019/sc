@@ -14,11 +14,11 @@ static token *h1 = {0};
 static token *h2 = {0};
 static token *o0 = {0};
 static token *loss = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
-static uint8_t __scdep_1_follow(__scdep_in *_this);
-static uint8_t __scdep_2_follow(__scdep_in *_this);
-static uint8_t __scdep_3_follow(__scdep_in *_this);
-static uint8_t __scdep_4_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_1_follow(__scdep_in *_this);
+static bool __scdep_2_follow(__scdep_in *_this);
+static bool __scdep_3_follow(__scdep_in *_this);
+static bool __scdep_4_follow(__scdep_in *_this);
 static neuron IN[2] = {0};
 static neuron HID[3] = {0};
 static neuron OUT[1] = {0};
@@ -44,7 +44,7 @@ static int __scdep_2_tramp(token **, int, int, void *);
 static int __scdep_3_tramp(token **, int, int, void *);
 static int __scdep_4_tramp(token **, int, int, void *);
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 25 */
     token *a = _this->toks[0];
     /* line 25 */
@@ -57,7 +57,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_1_follow(__scdep_in *_this) {
+static bool __scdep_1_follow(__scdep_in *_this) {
     /* line 29 */
     token *a = _this->toks[0];
     /* line 29 */
@@ -70,7 +70,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_2_follow(__scdep_in *_this) {
+static bool __scdep_2_follow(__scdep_in *_this) {
     /* line 33 */
     token *a = _this->toks[0];
     /* line 33 */
@@ -83,7 +83,7 @@ static uint8_t __scdep_2_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_3_follow(__scdep_in *_this) {
+static bool __scdep_3_follow(__scdep_in *_this) {
     /* line 37 */
     token *a = _this->toks[0];
     /* line 37 */
@@ -98,7 +98,7 @@ static uint8_t __scdep_3_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_4_follow(__scdep_in *_this) {
+static bool __scdep_4_follow(__scdep_in *_this) {
     /* line 41 */
     token *p = _this->toks[0];
     /* line 41 */

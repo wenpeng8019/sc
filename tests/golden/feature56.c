@@ -6,8 +6,8 @@ static sc_thin __sctok_cd_gauge_combine(__sctok_in *_this);
 static token *gauge = {0};
 static token *hits = {0};
 static token *ghits = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
-static uint8_t __scdep_1_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_1_follow(__scdep_in *_this);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -37,7 +37,7 @@ static sc_thin __sctok_cd_gauge_combine(__sctok_in *_this) {
     return ((sc_thin){(void *)(intptr_t)(b), (int32_t *)0, (void (*)(void *))0});
 }
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 32 */
     token *s = _this->toks[0];
     /* line 33 */
@@ -51,7 +51,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_1_follow(__scdep_in *_this) {
+static bool __scdep_1_follow(__scdep_in *_this) {
     /* line 39 */
     token *g = _this->toks[0];
     /* line 40 */

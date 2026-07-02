@@ -1,12 +1,12 @@
 # ssh_demo —— SSH 客户端示例：建连 + 握手 + 打印服务器主机密钥指纹。
-# 验证 sc → ssh_glue.c → libssh2 → mbedTLS → 网络 整条链路。
+# 验证 sc → libssh2 → mbedTLS → 网络 整条链路（ssh.sc 为纯 sc 实现，直接调 libssh2）。
 # 需联网。首次运行前先生成自包含静态库：
 #   sh templates/utils/build_libssh2.sh
-# 运行：scc examples/ssh_demo.sc
+# 运行：scc templates/demo/ssh_demo.sc
 #
 # 连 github.com:22（真实 SSH 服务器，仅握手、无需认证）。
 
-inc ../templates/utils/ssh.sc
+inc ../utils/ssh.sc
 
 fnc main: i4
     var host: char& = "github.com"

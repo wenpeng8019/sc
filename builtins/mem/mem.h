@@ -90,14 +90,14 @@ typedef struct shm {
  * flags 见 SHM_* 位（0 为默认）。区不存在则创建并定容；已存在则附着
  * （要求其容量 >= 申请页数，且 shm_size 回报其真实容量）。
  * 成功 1 并完成映射（shm_data 可用）；失败 0（_this->h 置 NULL）。 */
-uint8_t  shm_make(shm *_this, const char *name, uint64_t size, uint32_t flags);
+bool     shm_make(shm *_this, const char *name, uint64_t size, uint32_t flags);
 
 void*    shm_data(shm *_this);   /* 映射首地址；未映射/失败 NULL */
 uint64_t shm_size(shm *_this);   /* 实际映射字节数（附着时为底层区真实容量）；未映射 0 */
 void     shm_drop(shm *_this);   /* 解除映射 + 关闭句柄（不删除命名）；可重复调用 */
 
 /* 删除命名区（POSIX shm_unlink）；Windows 无显式删除，返回 1。成功 1 / 失败 0。 */
-uint8_t  shm_remove(const char *name);
+bool     shm_remove(const char *name);
 
 #ifdef __cplusplus
 }

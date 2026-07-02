@@ -49,6 +49,14 @@ int binPrec(const std::string& op) {
     return it == m.end() ? -1 : it->second;
 }
 
+// 既可作前缀一元、又可作二元的歧义运算符：* & + -
+// （前缀一元集见文件头 parseUnary 注释：! ~ - + * & ++ --；其中这四个亦有二元优先级）
+// 出现在缩进块首行时应视为「新语句的一元前缀」（如 *p = v 解引用赋值、-x），
+// 而非 if/while 条件的续行二元运算符——否则会把块体首句吞进条件表达式。
+bool isUnaryAlsoBinOp(const std::string& op) {
+    return op == "*" || op == "&" || op == "+" || op == "-";
+}
+
 // 判断是否为赋值类运算符（在 parseExpr 中与普通二元运算分开处理，右结合）
 bool isAssignOp(const std::string& op) {
     return op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" ||
@@ -1863,9 +1871,11 @@ struct Parser {
         expect(Tok::Newline, "换行");
         expect(Tok::Indent, "缩进块");
 
-        // 支持多行条件续行：行首为二元运算符时（如 &&、||）视为同一条件的延续
+        // 支持多行条件续行：行首为二元运算符时（如 &&、||）视为同一条件的延续。
+        // 但排除既可作前缀一元的歧义运算符（* & + -）：块体首句可能以它们开头
+        // （如 *p = v 解引用赋值），此时应作为新语句而非条件续行。
         while (cur().kind == Tok::Op && binPrec(cur().text) >= 0 &&
-               !(atOp("-") && peek().kind == Tok::Newline)) {
+               !isUnaryAlsoBinOp(cur().text)) {
 
             auto b = mk(Expr::Binary);
             b->op = advance().text;         // 解析二元运算符

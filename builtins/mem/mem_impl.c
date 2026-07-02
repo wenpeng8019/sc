@@ -652,7 +652,7 @@ static void shm_posix_name(const char *in, char *out, size_t cap) {
 }
 #endif
 
-uint8_t shm_make(shm *self, const char *name, uint64_t size, uint32_t flags) {
+bool shm_make(shm *self, const char *name, uint64_t size, uint32_t flags) {
     if (!self || !name) return 0;
     self->h = NULL;
 
@@ -772,7 +772,7 @@ void shm_drop(shm *self) {
     self->h = NULL;
 }
 
-uint8_t shm_remove(const char *name) {
+bool shm_remove(const char *name) {
     if (!name) return 0;
 #if P_WIN
     (void)name;                                        /* 内核对象随最后句柄关闭自动销毁 */

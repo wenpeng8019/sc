@@ -10,8 +10,8 @@ typedef struct node {
 
 void node_drop(node *_this);
 sc_fat make(int32_t x);
-uint8_t dump_str(const void *key, sc_thin value, void *ctx);
-uint8_t dump_int(const void *key, sc_thin value, void *ctx);
+bool dump_str(const void *key, sc_thin value, void *ctx);
+bool dump_int(const void *key, sc_thin value, void *ctx);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -57,14 +57,14 @@ sc_fat make(int32_t x) {
     }
 }
 
-uint8_t dump_str(const void *key, sc_thin value, void *ctx) {
+bool dump_str(const void *key, sc_thin value, void *ctx) {
     /* line 24 */
     printf(" %s=%d", ((char*)(key)), ((node*)((value).p))->v);
     /* line 25 */
     return true;
 }
 
-uint8_t dump_int(const void *key, sc_thin value, void *ctx) {
+bool dump_int(const void *key, sc_thin value, void *ctx) {
     /* line 29 */
     int32_t *kp = ((int32_t*)(key));
     /* line 30 */
@@ -118,8 +118,8 @@ int32_t main(void) {
     /* line 55 */
     lru_put(&ca, "d", sc_fat_as_thin(ha[3], (void (*)(void *))node_drop));
     /* line 56 */
-    uint8_t _sq9 = lru_has(&ca, "b");
-    uint8_t _sq10 = lru_has(&ca, "d");
+    bool _sq9 = lru_has(&ca, "b");
+    bool _sq10 = lru_has(&ca, "d");
     uint64_t _sq11 = lru_len(&ca);
     printf("A after_put_d: has_b=%d has_d=%d len=%llu\n", _sq9, _sq10, _sq11);
     /* line 58 */
@@ -180,12 +180,12 @@ int32_t main(void) {
     /* line 88 */
     uint64_t _sq14 = lru_len(&cb);
     uint64_t _sq15 = lru_cap(&cb);
-    uint8_t _sq16 = lru_is_empty(&cb);
+    bool _sq16 = lru_is_empty(&cb);
     printf("B len=%llu cap=%llu mru=%d lru=%d empty=%d\n", _sq14, _sq15, mk[0], lk[0], _sq16);
     /* line 92 */
-    uint8_t _sq17 = lru_remove(&cb, ((const void*)(&(keys[1]))));
-    uint8_t _sq18 = lru_remove(&cb, ((const void*)(&(keys[1]))));
-    uint8_t _sq19 = lru_has(&cb, ((const void*)(&(keys[1]))));
+    bool _sq17 = lru_remove(&cb, ((const void*)(&(keys[1]))));
+    bool _sq18 = lru_remove(&cb, ((const void*)(&(keys[1]))));
+    bool _sq19 = lru_has(&cb, ((const void*)(&(keys[1]))));
     uint64_t _sq20 = lru_len(&cb);
     printf("B remove20=%d miss=%d has20=%d len=%llu\n", _sq17, _sq18, _sq19, _sq20);
     /* line 97 */
@@ -195,7 +195,7 @@ int32_t main(void) {
     /* line 99 */
     uint64_t _sq21 = lru_cap(&cb);
     uint64_t _sq22 = lru_len(&cb);
-    uint8_t _sq23 = lru_has(&cb, ((const void*)(&(keys[0]))));
+    bool _sq23 = lru_has(&cb, ((const void*)(&(keys[0]))));
     printf("B after_set_cap2: cap=%llu len=%llu has10=%d lru=%d\n", _sq21, _sq22, _sq23, lk2[0]);
     /* line 101 */
     printf("B each:");

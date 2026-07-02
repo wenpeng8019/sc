@@ -63,7 +63,7 @@ std::string mapBase(const std::string& n) {
         {"i1", "int8_t"},  {"i2", "int16_t"}, {"i4", "int32_t"}, {"i8", "int64_t"},
         {"u1", "uint8_t"}, {"u2", "uint16_t"}, {"u4", "uint32_t"}, {"u8", "uint64_t"},
         {"f4", "float"},   {"f8", "double"},
-        {"bool", "uint8_t"},  // 布尔：u1 的语义别名（true/false 即 1/0）
+        {"bool", "bool"},     // 布尔：透传 C99 bool（每个单元自动含 stdbool.h，true/false 亦源于此）
         {"char", "char"},     // 字符：与 C 字符串字面量/接口互操作用（区别于 i1/u1）
         {"ret", "int32_t"},   // ADT 接口返回码：i4 的语义别名（ok=0 表成功，非 0 表失败）
         {"tril", "int8_t"},   // 三态：negative/-1 unknown/0 positive/+1（维度 dim 应答状态）

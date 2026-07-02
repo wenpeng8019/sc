@@ -6,10 +6,10 @@ static token *m1 = {0};
 static token *m2 = {0};
 static token *leaf1 = {0};
 static token *leaf2 = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
-static uint8_t __scdep_1_follow(__scdep_in *_this);
-static uint8_t __scdep_2_follow(__scdep_in *_this);
-static uint8_t __scdep_3_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_1_follow(__scdep_in *_this);
+static bool __scdep_2_follow(__scdep_in *_this);
+static bool __scdep_3_follow(__scdep_in *_this);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -22,7 +22,7 @@ static int __scdep_1_tramp(token **, int, int, void *);
 static int __scdep_2_tramp(token **, int, int, void *);
 static int __scdep_3_tramp(token **, int, int, void *);
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 18 */
     token *s = _this->toks[0];
     /* line 18 */
@@ -31,7 +31,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_1_follow(__scdep_in *_this) {
+static bool __scdep_1_follow(__scdep_in *_this) {
     /* line 20 */
     token *s = _this->toks[0];
     /* line 20 */
@@ -40,7 +40,7 @@ static uint8_t __scdep_1_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_2_follow(__scdep_in *_this) {
+static bool __scdep_2_follow(__scdep_in *_this) {
     /* line 22 */
     token *s = _this->toks[0];
     /* line 22 */
@@ -49,7 +49,7 @@ static uint8_t __scdep_2_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_3_follow(__scdep_in *_this) {
+static bool __scdep_3_follow(__scdep_in *_this) {
     /* line 24 */
     token *s = _this->toks[0];
     /* line 24 */

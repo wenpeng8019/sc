@@ -3,8 +3,8 @@
 
 static token *a = {0};
 static token *b = {0};
-static uint8_t __scdep_0_follow(__scdep_in *_this);
-static uint8_t __scdep_1_follow(__scdep_in *_this);
+static bool __scdep_0_follow(__scdep_in *_this);
+static bool __scdep_1_follow(__scdep_in *_this);
 typedef struct com__project {
     uint32_t size;
     void *ending;
@@ -15,7 +15,7 @@ typedef struct com__project {
 static int __scdep_0_tramp(token **, int, int, void *);
 static int __scdep_1_tramp(token **, int, int, void *);
 
-static uint8_t __scdep_0_follow(__scdep_in *_this) {
+static bool __scdep_0_follow(__scdep_in *_this) {
     /* line 19 */
     token *x = _this->toks[0];
     /* line 19 */
@@ -31,7 +31,7 @@ static uint8_t __scdep_0_follow(__scdep_in *_this) {
     return false;
 }
 
-static uint8_t __scdep_1_follow(__scdep_in *_this) {
+static bool __scdep_1_follow(__scdep_in *_this) {
     /* line 26 */
     token *p = _this->toks[0];
     /* line 26 */

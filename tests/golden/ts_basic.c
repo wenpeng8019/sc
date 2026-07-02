@@ -217,7 +217,7 @@ int32_t main(void) {
     /* line 129 */
     tensor *ssrc = ones(2, gidx, DT_F8);
     /* line 130 */
-    uint8_t sc0r = tensor_scatter_(sc0, 1, gi, ssrc);
+    bool sc0r = tensor_scatter_(sc0, 1, gi, ssrc);
     /* line 131 */
     double _sq50 = tensor_at(sc0, 0);
     double _sq51 = tensor_at(sc0, 2);
@@ -373,7 +373,7 @@ int32_t main(void) {
     /* line 224 */
     void *eout[2];
     /* line 225 */
-    uint8_t eok = tensor_eigh(M, ((void*)(eout)));
+    bool eok = tensor_eigh(M, ((void*)(eout)));
     /* line 226 */
     tensor *evals = ((tensor*)(eout[0]));
     /* line 227 */
@@ -385,7 +385,7 @@ int32_t main(void) {
     /* line 231 */
     void *qout[2];
     /* line 232 */
-    uint8_t qok = tensor_qr(M, ((void*)(qout)));
+    bool qok = tensor_qr(M, ((void*)(qout)));
     /* line 233 */
     tensor *Qm = ((tensor*)(qout[0]));
     /* line 234 */
@@ -553,7 +553,7 @@ int32_t main(void) {
     /* line 313 */
     void *mout[2];
     /* line 314 */
-    uint8_t mgok = meshgrid(((void*)(marr)), 2, 0, ((void*)(mout)));
+    bool mgok = meshgrid(((void*)(marr)), 2, 0, ((void*)(mout)));
     /* line 315 */
     tensor *gx = ((tensor*)(mout[0]));
     /* line 316 */
@@ -583,11 +583,11 @@ int32_t main(void) {
     /* line 329 */
     tensor *shf = arange(0.0, 6.0, 1.0, DT_F8);
     /* line 330 */
-    uint8_t shfok = tensor_shuffle_(shf);
+    bool shfok = tensor_shuffle_(shf);
     /* line 331 */
     printf("shuffle ok=%d sum=%g\n", ((int32_t)(shfok)), tensor_sum_all(shf));
     /* line 334 */
-    uint8_t svok = tensor_save(b2, "/tmp/ts_basic.npy");
+    bool svok = tensor_save(b2, "/tmp/ts_basic.npy");
     /* line 335 */
     tensor *ld = ts_load("/tmp/ts_basic.npy");
     /* line 336 */

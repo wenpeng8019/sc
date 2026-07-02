@@ -90,7 +90,7 @@ int32_t main(void) {
     printf("s=%s len=%llu\n", _sq0, _sq1);
     /* line 36 */
     int64_t _sq2 = string_find(s, "sc", 0);
-    uint8_t _sq3 = string_starts_with(s, "Hello");
+    bool _sq3 = string_starts_with(s, "Hello");
     printf("find \"sc\"=%lld starts_with(Hello)=%d\n", _sq2, _sq3);
     /* line 38 */
     string *part = string__new();
