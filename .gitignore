@@ -1,4 +1,5 @@
 # 构建产物
+/build/
 compiler/build/
 compiler/build-uv/
 compiler/build-dist/
