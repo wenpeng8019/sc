@@ -7,7 +7,7 @@ BUILD_DIR="$ROOT/compiler/build"
 PREFIX="${PREFIX:-/usr/local}"
 EXT_BASE="$HOME/.vscode/extensions"
 # 插件目录:安装名
-EXTS=("vscode-sc:sc-lang-0.1.0" "vscode-sc-ast:sc-ast-view-0.1.0")
+EXTS=("vscode-sc:sc-lang-0.1.0" "vscode-sg:sg-lang-0.1.0" "vscode-ast:sc-ast-view-0.1.0")
 
 # ssh 组件自包含静态库（libssh2 + mbedTLS）—— git 忽略的本地产物
 SSH_LIB="$ROOT/templates/utils/libssh2.a"
@@ -165,7 +165,7 @@ do_install() {
     else
         echo "    跳过：未找到 code CLI，请在 VSCode 中手动安装 'Markdown Preview Enhanced'"
     fi
-    echo "==> 安装完成（重启 VSCode 后 .sc 文件生效高亮与 AST 视图）"
+    echo "==> 安装完成（重启 VSCode 后 .sc/.sg 文件生效高亮与 AST 视图）"
 }
 
 do_uninstall() {

@@ -41,7 +41,7 @@
 
 ## P5 · 增强（可选，按需）
 - [ ] 模块间 / 模块内 两层视图切换（在 Decl 级图上按 module 折叠）。
-- [ ] VS Code `vscode-sc-ast` 插件内嵌 Webview（点节点跳转源码、hover 签名）。
+- [ ] VS Code `vscode-ast` 插件内嵌 Webview（点节点跳转源码、hover 签名）。
 - [ ] 「谁依赖我」反向查询 API / CLI 子命令。
 - [ ] 增量/缓存；大图性能优化（分层/聚类/虚拟化渲染）。
 

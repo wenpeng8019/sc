@@ -322,7 +322,7 @@ class EmitSrcProvider {
     }
 
     uriFor(doc) {
-        const name = path.basename(doc.fileName).replace(/\.sc$/, '') + this.suffix;
+        const name = path.basename(doc.fileName).replace(/\.(sc|sg)$/, '') + this.suffix;
         return vscode.Uri.parse(`${this.scheme}:/${name}`);
     }
 
@@ -354,7 +354,7 @@ async function toggleEmitView(provider) {
         }
     }
     if (!currentDoc) {
-        vscode.window.showInformationMessage('请先打开一个 .sc 文件');
+        vscode.window.showInformationMessage('请先打开一个 .sc/.sg 文件');
         return;
     }
     const doc = await vscode.workspace.openTextDocument(provider.uriFor(currentDoc));
@@ -419,14 +419,14 @@ function activate(context) {
     // 实时刷新：编辑（防抖）与切换编辑器
     let timer = null;
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
-        if (e.document.languageId !== 'sc') return;
+        if (!isScLang(e.document.languageId)) return;
         if (vscode.window.activeTextEditor &&
             vscode.window.activeTextEditor.document !== e.document) return;
         clearTimeout(timer);
         timer = setTimeout(() => ast.refresh(e.document), 300);
     }));
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(ed => {
-        if (ed && ed.document.languageId === 'sc' &&
+        if (ed && isScLang(ed.document.languageId) &&
             ed.document.uri.scheme !== TREE_SRC_SCHEME) {
             ast.refresh(ed.document);
         }
@@ -435,9 +435,15 @@ function activate(context) {
     ast.refresh(activeScDoc());
 }
 
+// sc 前端语言（含 .sg 着色器方言）：AST 视图对二者一视同仁
+// —— .sg 经 scc 以 shaderMode 解析（stdin + --from *.sg 触发）。
+function isScLang(id) {
+    return id === 'sc' || id === 'sg';
+}
+
 function activeScDoc() {
     const ed = vscode.window.activeTextEditor;
-    return ed && ed.document.languageId === 'sc' ? ed.document : null;
+    return ed && isScLang(ed.document.languageId) ? ed.document : null;
 }
 
 function deactivate() {}

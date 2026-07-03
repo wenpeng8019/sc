@@ -2440,13 +2440,35 @@ int main(int argc, char** argv) {
 
     // ---- .sg 着色器源：GPU/着色器扩展（syntax-g）子管线 ----
     // 与 sc→C 管线并列而非交织：lex(shaderMode) → parse → codegen_glsl。
-    if (input != "-" && endsWith(input, ".sg")) {
-        std::string outDir;
-        if (!output.empty()) {
-            std::filesystem::path op(output);
-            outDir = op.has_parent_path() ? op.parent_path().string() : ".";
+    //   · --ast / --emit-sc：以 shaderMode 解析后复用通用 AST/源码再生器，
+    //     使 sc-ast 视图插件同样能在 .sg 上工作（stage 为 FuncD、I/O 为 def）。
+    //     该模式支持 stdin（'-' + --from *.sg），故 AST 视图可实时渲染未保存编辑。
+    //   · 其余模式（默认/build/emit-c/run）：走 codegen_glsl 产 GLSL + 反射清单，
+    //     仅接受真实文件输入。
+    {
+        const std::string sgPath = (input != "-") ? input : fromPath;
+        const bool isSg = endsWith(sgPath, ".sg");
+        if (isSg && (mode == "ast" || mode == "sc")) {
+            try {
+                Program sgprog = parse(lex(src), /*shaderMode*/ true);
+                std::string out = (mode == "ast") ? emitAstJson(sgprog) : emitSc(sgprog);
+                if (output.empty()) std::cout << out;
+                else if (!writeTextFile(output, out)) return 1;
+                return 0;
+            } catch (const CompileError& e) {
+                std::cerr << (sgPath.empty() ? "sg" : sgPath) << ":" << e.line
+                          << ": 错误: " << e.msg << "\n";
+                return 1;
+            }
         }
-        return compileShaderSource(src, input, outDir);
+        if (input != "-" && isSg) {
+            std::string outDir;
+            if (!output.empty()) {
+                std::filesystem::path op(output);
+                outDir = op.has_parent_path() ? op.parent_path().string() : ".";
+            }
+            return compileShaderSource(src, input, outDir);
+        }
     }
 
     // ---- 3. 编译流水线 + 输出 ----

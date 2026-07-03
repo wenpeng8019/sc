@@ -67,6 +67,41 @@ std::string nodeExt(const std::string& k, const std::string& n, const std::strin
 std::string declNode(const Decl& d);
 std::string declNodeCore(const Decl& d);
 
+// ---- 着色器（syntax-g）属性 → 可读 detail 附加文本 ----
+// AST 视图对 .sg 显示 stage 类型（vert/frag/comp）与资源/位置绑定。
+const char* shaderStageWord(ShaderStage s) {
+    switch (s) {
+        case ShaderStage::Vert: return "vert";
+        case ShaderStage::Frag: return "frag";
+        case ShaderStage::Comp: return "comp";
+        default: return "";
+    }
+}
+
+// 字段级：位置/内建语义（loc N / builtin X）
+std::string shaderFieldTag(const Field& f) {
+    std::string t;
+    if (!f.shaderAttr) return t;
+    if (f.shaderAttr->loc >= 0) t += " loc " + std::to_string(f.shaderAttr->loc);
+    if (!f.shaderAttr->builtin.empty()) t += " builtin " + f.shaderAttr->builtin;
+    return t;
+}
+
+// 声明级：资源类别与集合/绑定（uniform|storage|push [set S binding B]）
+std::string shaderDeclTag(const Decl& d) {
+    std::string t;
+    if (!d.shaderAttr) return t;
+    switch (d.shaderAttr->res) {
+        case ShaderDeclAttr::Uniform: t = " uniform"; break;
+        case ShaderDeclAttr::Storage: t = " storage"; break;
+        case ShaderDeclAttr::Push:    t = " push";    break;
+        default: break;
+    }
+    if (d.shaderAttr->set >= 0)     t += " set " + std::to_string(d.shaderAttr->set);
+    if (d.shaderAttr->binding >= 0) t += " binding " + std::to_string(d.shaderAttr->binding);
+    return t;
+}
+
 std::string stmtNode(const Stmt& s) {
     switch (s.kind) {
         case Stmt::ExprS:
@@ -245,13 +280,14 @@ std::string declNodeCore(const Decl& d) {
         case Decl::UnionD: {
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
-                c.push_back(node("field", f.name, fieldDetail(f, true), f.line));
+                c.push_back(node("field", f.name, fieldDetail(f, true) + shaderFieldTag(f), f.line));
             std::string sd = X;
             if (d.heapOnly) sd += "&";   // 堆专属类型 def/cls NAME&
             if (d.tagged) sd += "@";
             else if (d.linked) sd += "~";
             else if (!d.adtItem.empty()) sd += "<" + d.adtColl + ", " + d.adtItem + ">";
             else if (!d.projectSelf.empty()) sd += "<" + d.projectSelf + ">";
+            sd += shaderDeclTag(d);      // 着色器资源绑定（uniform/storage/push set/binding）
             return nodeExt(d.kind == Decl::StructD ? (d.isClass ? "cls" : "struct") : "union",
                            d.name, sd, d.line, d.external, d.origin, d.used, c);
         }
@@ -283,8 +319,12 @@ std::string declNodeCore(const Decl& d) {
                 std::string ret = typeToStr(d.structCommon.type);
                 if (!ret.empty()) detail = ": " + ret;
             }
+            // 着色阶段入口：detail 前缀标出 vert/frag/comp（供 .sg 的 AST 视图辨识）
+            const std::string stagePfx =
+                d.shaderStage != ShaderStage::None
+                    ? std::string(shaderStageWord(d.shaderStage)) + " " : "";
             const std::string n = d.methodOwner.empty() ? d.name : d.methodOwner + "::" + d.methodName;
-            const std::string dtail = d.methodOwner.empty() ? (X + detail)
+            const std::string dtail = d.methodOwner.empty() ? (X + stagePfx + detail)
                                                            : (X + d.methodOwner + "::" + detail);
             return nodeExt(d.isRpc ? "rpc" : d.isDim ? "dim" : "fnc", n, dtail, d.line, d.external, d.origin, d.used, c);
         }
@@ -297,9 +337,9 @@ std::string declNodeCore(const Decl& d) {
             }
             std::vector<std::string> c;
             for (auto& f : d.structCommon.fields)
-                c.push_back(node("item", f.name, fieldDetail(f, true), f.line));
+                c.push_back(node("item", f.name, fieldDetail(f, true) + shaderFieldTag(f), f.line));
             return nodeExt(d.kind == Decl::VarD ? "var"
-                         : d.kind == Decl::LetD ? "let" : "tls", "", X, d.line,
+                         : d.kind == Decl::LetD ? "let" : "tls", "", X + shaderDeclTag(d), d.line,
                            d.external, d.origin, d.used, c);
         }
         case Decl::TestD: {

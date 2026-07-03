@@ -1,0 +1,235 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "sg",
+    "scopeName": "source.sg",
+    "patterns": [
+        { "include": "#comment" },
+        { "include": "#inc-decl" },
+        { "include": "#export-prefix" },
+        { "include": "#stage-decl" },
+        { "include": "#def-decl" },
+        { "include": "#fnc-decl" },
+        { "include": "#var-decl" },
+        { "include": "#label-decl" },
+        { "include": "#shader-attributes" },
+        { "include": "#qualified-type" },
+        { "include": "#keywords" },
+        { "include": "#shader-builtins" },
+        { "include": "#shader-vars" },
+        { "include": "#builtins" },
+        { "include": "#constants" },
+        { "include": "#shader-types" },
+        { "include": "#types" },
+        { "include": "#strings" },
+        { "include": "#chars" },
+        { "include": "#numbers" },
+        { "include": "#function-call" },
+        { "include": "#meta-suffix" },
+        { "include": "#operators" }
+    ],
+    "repository": {
+        "comment": {
+            "name": "comment.line.number-sign.sg",
+            "match": "#.*$"
+        },
+        "inc-decl": {
+            "match": "^\\s*(inc)\\s+(\\S+)",
+            "captures": {
+                "1": { "name": "keyword.control.import.sg" },
+                "2": { "name": "string.unquoted.include.sg" }
+            }
+        },
+        "export-prefix": {
+            "name": "storage.modifier.export.sg",
+            "match": "^\\s*(@)(?=inc|def|fnc|var|let|tls|vert|frag|comp)"
+        },
+        "stage-decl": {
+            "match": "^\\s*(vert|frag|comp)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.stage.sg" },
+                "2": { "name": "entity.name.function.sg" }
+            }
+        },
+        "def-decl": {
+            "begin": "\\b(def)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "beginCaptures": {
+                "1": { "name": "keyword.declaration.def.sg" },
+                "2": { "name": "entity.name.type.sg" }
+            },
+            "end": "(?=[{(\\[<~=]|->|$)",
+            "patterns": [
+                { "include": "#comment" },
+                {
+                    "name": "variable.parameter.sg",
+                    "match": "[A-Za-z_][A-Za-z0-9_]*"
+                },
+                {
+                    "name": "punctuation.separator.parameter.sg",
+                    "match": "[:,]"
+                }
+            ]
+        },
+        "fnc-decl": {
+            "match": "\\b(fnc)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.function.sg" },
+                "2": { "name": "entity.name.function.sg" }
+            }
+        },
+        "var-decl": {
+            "match": "\\b(var|let|tls)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "keyword.declaration.var.sg" },
+                "2": { "name": "variable.other.declaration.sg" }
+            }
+        },
+        "label-decl": {
+            "match": "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*:(?=\\s*(#.*)?$)",
+            "captures": {
+                "1": { "name": "entity.name.label.sg" }
+            }
+        },
+        "shader-attributes": {
+            "patterns": [
+                {
+                    "name": "storage.modifier.resource.sg",
+                    "match": "\\b(uniform|storage|push)\\b"
+                },
+                {
+                    "name": "keyword.other.attribute.sg",
+                    "match": "\\b(loc|builtin|set|binding)\\b"
+                }
+            ]
+        },
+        "qualified-type": {
+            "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*((?:const|volatile)(?:\\s+(?:const|volatile))*)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+            "captures": {
+                "1": { "name": "storage.modifier.qualifier.sg" },
+                "2": { "name": "entity.name.type.annotated.sg" }
+            }
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.stage.sg",
+                    "match": "\\b(vert|frag|comp)\\b"
+                },
+                {
+                    "name": "keyword.control.sg",
+                    "match": "\\b(if|else|while|do|for|case|through|as|goto|return|break|continue)\\b"
+                },
+                {
+                    "name": "keyword.declaration.sg",
+                    "match": "\\b(def|fnc|var|let|tls|inc)\\b"
+                },
+                {
+                    "name": "storage.modifier.qualifier.sg",
+                    "match": "\\b(const|volatile)\\b"
+                },
+                {
+                    "name": "keyword.control.io.sg",
+                    "match": "\\b(sizeof|offsetof)\\b"
+                }
+            ]
+        },
+        "shader-builtins": {
+            "name": "support.function.builtin.sg",
+            "match": "\\b(texture|textureLod|textureProj|textureGrad|texelFetch|textureSize|normalize|length|distance|dot|cross|reflect|refract|faceforward|pow|exp|log|exp2|log2|sqrt|inversesqrt|abs|sign|floor|ceil|round|trunc|fract|mod|modf|min|max|clamp|mix|step|smoothstep|isnan|isinf|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|radians|degrees|transpose|inverse|determinant|outerProduct|matrixCompMult|dFdx|dFdy|fwidth|all|any|not|lessThan|greaterThan|equal|notEqual|packHalf2x16|unpackHalf2x16)\\b(?=\\s*\\()"
+        },
+        "shader-vars": {
+            "patterns": [
+                {
+                    "name": "support.variable.builtin.sg",
+                    "match": "\\bgl_[A-Za-z_][A-Za-z0-9_]*\\b"
+                },
+                {
+                    "name": "support.constant.semantic.sg",
+                    "match": "(?<=\\bbuiltin\\s)\\s*(position|frag_coord|frag_depth|vertex_id|instance_id|point_size|local_id|global_id|workgroup_id)\\b"
+                }
+            ]
+        },
+        "builtins": {
+            "patterns": [
+                {
+                    "name": "support.function.builtin.sg",
+                    "match": "\\b(sizeof|offsetof)\\b"
+                }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                {
+                    "name": "constant.language.sg",
+                    "match": "\\b(true|false)\\b"
+                }
+            ]
+        },
+        "shader-types": {
+            "name": "storage.type.primitive.sg",
+            "match": "\\b(vec[234]|[iub]vec[234]|dvec[234]|mat[234](x[234])?|dmat[234]|sampler[123]D|samplerCube|sampler2DArray|sampler2DShadow|samplerCubeShadow|isampler[123]D|usampler[123]D|isamplerCube|usamplerCube|image[123]D|imageCube|texture[123]D|atomic_uint)\\b"
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "storage.type.primitive.sg",
+                    "match": "\\b(i1|i2|i4|i8|u1|u2|u4|u8|bool|char|f4|f8|void)\\b"
+                },
+                {
+                    "name": "entity.name.type.annotated.sg",
+                    "match": "(?<=[A-Za-z0-9_&)\\]]:)\\s*\\b([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*[:(])"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.sg",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                { "name": "constant.character.escape.sg", "match": "\\\\." }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.sg",
+            "begin": "'",
+            "end": "'",
+            "patterns": [
+                { "name": "constant.character.escape.sg", "match": "\\\\." }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                { "name": "constant.numeric.hex.sg", "match": "\\b0[xX][0-9a-fA-F]+[uUlL]*\\b" },
+                { "name": "constant.numeric.float.sg", "match": "\\b[0-9]+\\.[0-9]+[fFlL]?\\b" },
+                { "name": "constant.numeric.integer.sg", "match": "\\b[0-9]+[uUlL]*\\b" }
+            ]
+        },
+        "function-call": {
+            "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+            "captures": { "1": { "name": "entity.name.function.call.sg" } }
+        },
+        "meta-suffix": {
+            "patterns": [
+                {
+                    "name": "storage.modifier.array.sg",
+                    "match": "(?<=[A-Za-z0-9_])\\[[0-9A-Za-z_]*\\]"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.arrow.sg",
+                    "match": "->"
+                },
+                {
+                    "name": "punctuation.definition.ellipsis.sg",
+                    "match": "\\.\\.\\."
+                },
+                {
+                    "name": "keyword.operator.sg",
+                    "match": "(<<=|>>=|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|<<|>>|\\+\\+|--|[+\\-*/%<>=!&|^~?])"
+                }
+            ]
+        }
+    }
+}

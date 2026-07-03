@@ -1,13 +1,13 @@
 {
     "name": "sc-ast-view",
-    "displayName": "sc AST View",
-    "description": "实时显示 sc 源码的 AST 结构树，并可切换查看基于树结构再生成的源码",
+    "displayName": "SC/SG AST View",
+    "description": "实时显示 sc / sg 源码的 AST 结构树，并可切换查看基于树结构再生成的源码",
     "version": "0.1.0",
     "publisher": "sc-lang",
     "engines": { "vscode": "^1.75.0" },
     "categories": ["Programming Languages", "Visualization"],
     "main": "./extension.js",
-    "activationEvents": ["onLanguage:sc"],
+    "activationEvents": ["onLanguage:sc", "onLanguage:sg"],
     "contributes": {
         "views": {
             "explorer": [

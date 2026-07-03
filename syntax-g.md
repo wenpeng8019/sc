@@ -298,7 +298,7 @@ shader 内置函数映射到各后端的原生内置（由 codegen 转名，SPIR
 1. **语义分析层（`shader_sema`）**：在 stage 函数体内做子集检查——遇到禁用构造（堆/指针/
    递归/rpc/…）即报错，报错文案对齐主手册「零误报」风格，明确指出「shader 方言不支持」。
    向量/矩阵/资源类型的类型检查、swizzle 合法性、stage I/O 配对、binding 冲突检测均在此。
-2. **语法插件（vscode-sc / vscode-sc-ast）**：在 shader 上下文中高亮 stage 关键字、
+2. **语法插件（vscode-sg / vscode-ast）**：在 shader 上下文中高亮 stage 关键字、
    向量类型、内建变量，并对禁用构造给出编辑期提示（与编译期一致，早失败）。
 
 ---

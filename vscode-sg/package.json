@@ -1,0 +1,47 @@
+{
+    "name": "sg-lang",
+    "displayName": "sc Shader (sg)",
+    "description": "sc 图形着色方言（.sg）语法高亮、补全与编译诊断",
+    "version": "0.1.0",
+    "publisher": "sc-lang",
+    "engines": { "vscode": "^1.75.0" },
+    "categories": ["Programming Languages"],
+    "main": "./extension.js",
+    "activationEvents": ["onLanguage:sg"],
+    "contributes": {
+        "languages": [
+            {
+                "id": "sg",
+                "aliases": ["sg", "sc-shader"],
+                "extensions": [".sg"],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icons/sg-icon-dark.svg",
+                    "dark": "./icons/sg-icon.svg"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "sg",
+                "scopeName": "source.sg",
+                "path": "./syntaxes/sg.tmLanguage.json"
+            }
+        ],
+        "configuration": {
+            "title": "SC Shader (sg)",
+            "properties": {
+                "sg.sccPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "用于诊断的 scc 可执行文件路径；留空则自动探测工作区 compiler/build/scc，再退回 PATH 中的 scc。"
+                },
+                "sg.diagnostics": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "编辑/保存时调用 scc 编译 .sg 并把错误显示为诊断。"
+                }
+            }
+        }
+    }
+}
