@@ -1952,13 +1952,18 @@ struct Parser {
         a->res = kw == "uniform" ? ShaderDeclAttr::Uniform
                : kw == "storage" ? ShaderDeclAttr::Storage
                                  : ShaderDeclAttr::Push;
+        parseShaderSetBinding(*a);
+        d.shaderAttr = std::move(a);
+    }
+
+    // 消费可选的 set S binding B（顺序不限），写入 attr。
+    void parseShaderSetBinding(ShaderDeclAttr& a) {
         while (at(Tok::Ident) && (cur().text == "set" || cur().text == "binding")) {
             std::string k2 = advance().text;
             if (!at(Tok::Int)) err(std::string(k2 == "set" ? "set" : "binding") + " 后期望整数");
             int v = std::stoi(advance().text);
-            if (k2 == "set") a->set = v; else a->binding = v;
+            if (k2 == "set") a.set = v; else a.binding = v;
         }
-        d.shaderAttr = std::move(a);
     }
 
     // 解析条件表达式 + 缩进块（if/while 共用）
@@ -2735,7 +2740,20 @@ struct Parser {
                             : cur().kind == Tok::KwLet ? Decl::LetD : Decl::TlsD;
                     d->exported = exported;
                     advance();
-                    parseVarList(d->structCommon.fields);  // 解析一项或多项（逗号或多行）
+                    // GPU/着色器扩展：.sg 顶层 var 作为全局着色资源（sampler/image 等）：
+                    //   var albedo: sampler2D set 0 binding 1 —— 单项 + 可选 set/binding。
+                    if (shaderMode && d->kind == Decl::VarD) {
+                        d->structCommon.fields.push_back(parseVarItem());
+                        if (at(Tok::Ident) && (cur().text == "set" || cur().text == "binding")) {
+                            auto a = std::make_shared<ShaderDeclAttr>();
+                            a->res = ShaderDeclAttr::Uniform;   // 采样器等按 uniform 资源发射
+                            parseShaderSetBinding(*a);
+                            d->shaderAttr = std::move(a);
+                        }
+                        expect(Tok::Newline, "换行");
+                    } else {
+                        parseVarList(d->structCommon.fields);  // 解析一项或多项（逗号或多行）
+                    }
                     prog.decls.push_back(std::move(d));
                     break;
                 }
