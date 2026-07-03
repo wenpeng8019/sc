@@ -287,11 +287,7 @@ static int32_t sc_tcp_read(sc_com *_this, void *data, uint32_t *size) {
     if (d->fd == SC_SOCK_INVALID || !size) return -1;
     uint32_t want = *size;
     *size = 0;
-#if P_WIN
-    int n = recv(d->fd, (char *)data, (int)want, 0);
-#else
-    ssize_t n = recv(d->fd, data, want, 0);
-#endif
+    ssize_t n = sc_recv(d->fd, data, want);
     if (n > 0) { *size = (uint32_t)n; return 0; }
     if (n == 0) return sc_eof;                          /* 对端正常关闭 */
     if (sc_is_wouldblock()) return sc_again;       /* 未就绪 → 挂起等待 */
@@ -305,11 +301,7 @@ static int32_t sc_tcp_write(sc_com *_this, void *buf, uint32_t *size) {
     if (d->fd == SC_SOCK_INVALID || !size) return -1;
     uint32_t want = *size;
     *size = 0;
-#if P_WIN
-    int n = send(d->fd, (const char *)buf, (int)want, 0);
-#else
-    ssize_t n = send(d->fd, buf, want, MSG_NOSIGNAL);
-#endif
+    ssize_t n = sc_send(d->fd, buf, want);
     if (n >= 0) { *size = (uint32_t)n; return ((uint32_t)n == want) ? 0 : sc_again; }
     if (sc_is_wouldblock()) return sc_again;       /* 发送缓冲满 → 挂起重试 */
     return -1;

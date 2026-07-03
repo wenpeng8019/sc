@@ -588,7 +588,7 @@ int32_t sc_sock_socketpair(int32_t *fds) {
 
     sc_sock cli = socket(AF_INET, SOCK_STREAM, 0);
     if (cli == SC_SOCK_INVALID) { sc_close(lst); return -1; }
-    if (connect(cli, (struct sockaddr *)&addr, alen) != 0) {
+    if (sc_connect(cli, (struct sockaddr *)&addr, (socklen_t)alen) != 0) {
         sc_close(cli); sc_close(lst);
         return -1;
     }
@@ -626,7 +626,7 @@ int32_t sc_sock_connect(const char *host, int32_t port) {
     for (ai = res; ai; ai = ai->ai_next) {
         fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (fd == SC_SOCK_INVALID) continue;
-        if (connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) break;
+        if (sc_connect(fd, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) break;
         sc_close(fd);
         fd = SC_SOCK_INVALID;
     }

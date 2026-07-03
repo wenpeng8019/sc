@@ -105,7 +105,9 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 
 /* ---------------- 路径分隔符 ---------------- */
 
-#if P_POSIX_LIKE
+/* 用 !P_WIN 而非 P_POSIX_LIKE：后者在本行之下方才定义（依赖 unistd.h 引入的
+ * _POSIX_VERSION），此处尚不可见；P_WIN 已在上方平台判定中定型，与 P_IS_SEP 一致。 */
+#if !P_WIN
 #define P_SEP '/'
 #else
 #define P_SEP '\\'
@@ -1142,12 +1144,15 @@ static inline int P_barrier_wait(barrier_t* b) {
 // 独立于 SC_PLATFORM_H：主体首次包含时已定义 P_WIN/P_DARWIN/... 并留存，此处直接复用。
 //
 // 命名统一 sc_ 前缀；返回约定为 sc 风格：
-//   · 选项设置/close/nonblock → int（0=成功 / -1=失败）
-//   · 错误谓词                → bool
-// bind/listen/accept/connect/send/recv 等各平台同名同义，直接用，只统一类型即可。
+//   · 选项设置/close/nonblock/connect → int（0=成功 / -1=失败）
+//   · 错误谓词                        → bool
+//   · 单次收发 recv/send             → ssize_t（实收发字节数；recv 返回 0=对端关闭；-1=失败）
+//   · 满额非阻塞收发 recv/send_nonblock → int 状态（0=已满额 / 1=未就绪待重试 / -1=错误 / -2=对端关闭）
+//   · 分散发送 sendmsg               → ssize_t（已发送字节数 / -1=失败）
+// bind/listen/accept/getaddrinfo 等各平台同名同义，直接用，只统一类型即可。
 // 仅提供 socket 原语适配；host:port 解析建连（getaddrinfo）等 compound 逻辑属应用层，见 sys 模块。
-// 说明：不移植 stdc 的 WSASendMsg/sendmsg 封装（头内 extern 定义会致多 TU 重定义，
-//       且 io/ssh 未用）与 recv/send 循环（依赖 stdc 专有错误码 E_*）。
+// 说明：sendmsg 封装用函数内 static 惰性缓存 WSASendMsg 扩展指针（各 TU 各持一份，天然免重定义，
+//       不再需 stdc 那样的头内 extern 定义）；非阻塞满额收发用自洽状态码，不依赖 stdc 专有 E_*。
 #if defined(SC_WITH_SOCKET) && !defined(SC_SOCKET_DONE)
 #define SC_SOCKET_DONE
 
@@ -1156,6 +1161,7 @@ static inline int P_barrier_wait(barrier_t* b) {
  * 此处再引 winsock2/ws2tcpip，顺序正确不冲突。 */
 #   include <winsock2.h>
 #   include <ws2tcpip.h>
+#   include <mswsock.h>                 /* WSASendMsg / WSAID_WSASENDMSG（sc_sendmsg 用） */
 #   if defined(_MSC_VER)
 #       pragma comment(lib, "ws2_32.lib")   /* MSVC 自动链接；MinGW 需 -lws2_32 */
 #   endif
@@ -1308,6 +1314,111 @@ static inline int sc_sndbuf(sc_sock s, int size) {
 }
 static inline int sc_rcvbuf(sc_sock s, int size) {
     return setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char *)&size, sizeof size) == 0 ? 0 : -1;
+}
+
+/* 发起连接：0=已连接 / -1=失败。非阻塞套接字连接进行中亦返回 -1，
+ * 用 sc_is_inprogress() 甄别（随后 writable 即表示连接完成/失败）。 */
+static inline int sc_connect(sc_sock s, const struct sockaddr *addr, socklen_t len) {
+    return connect(s, addr, len) == 0 ? 0 : -1;
+}
+
+/* 单次收发：屏蔽 Win 的 char* / int 形参差异与 POSIX 的 SIGPIPE（MSG_NOSIGNAL）。
+ * 返回实际收发字节数；recv 返回 0 表示对端正常关闭；-1=失败（码见 sc_errno / 谓词）。 */
+static inline ssize_t sc_recv(sc_sock s, void *buf, size_t len) {
+#if P_WIN
+    return recv(s, (char *)buf, (int)len, 0);
+#else
+    return recv(s, buf, len, 0);
+#endif
+}
+static inline ssize_t sc_send(sc_sock s, const void *buf, size_t len) {
+#if P_WIN
+    return send(s, (const char *)buf, (int)len, 0);
+#else
+    return send(s, buf, len, MSG_NOSIGNAL);
+#endif
+}
+
+/* 非阻塞满额收：循环 recv 直至读满 *r_sz 或缓冲耗尽；EINTR 自动重试。
+ * 入参 *r_sz=期望字节数，返回前回填为实读字节数。返回：
+ *   0  = 已读满期望字节数
+ *   1  = 未就绪（EWOULDBLOCK，尚未读满，稍后就绪时以剩余量续读）
+ *  -1  = 出错
+ *  -2  = 对端关闭且一字节未读到（读到部分后关闭则回填 *r_sz 并返回 1）*/
+static inline int sc_recv_nonblock(sc_sock s, void *buf, size_t *r_sz) {
+    size_t want = *r_sz; *r_sz = 0;
+    while (*r_sz < want) {
+        ssize_t n = sc_recv(s, (char *)buf + *r_sz, want - *r_sz);
+        if (n == 0) return *r_sz > 0 ? 1 : -2;      /* 对端关闭 */
+        if (n < 0) {
+            if (sc_is_interrupted()) continue;
+            if (sc_is_wouldblock())  return 1;
+            return -1;
+        }
+        *r_sz += (size_t)n;
+    }
+    return 0;
+}
+
+/* 非阻塞满额发：循环 send 直至写完 *w_sz 或缓冲满；EINTR 自动重试。
+ * 入参 *w_sz=待发字节数，返回前回填为实发字节数。返回：
+ *   0  = 已全部发出
+ *   1  = 未就绪（EWOULDBLOCK，尚有剩余，稍后就绪时以剩余量续发）
+ *  -1  = 出错 */
+static inline int sc_send_nonblock(sc_sock s, const void *buf, size_t *w_sz) {
+    size_t want = *w_sz; *w_sz = 0;
+    while (*w_sz < want) {
+        ssize_t n = sc_send(s, (const char *)buf + *w_sz, want - *w_sz);
+        if (n < 0) {
+            if (sc_is_interrupted()) continue;
+            if (sc_is_wouldblock())  return 1;
+            return -1;
+        }
+        *w_sz += (size_t)n;
+    }
+    return 0;
+}
+
+/* 分散发送（scatter/gather）：跨平台统一 iovec 抽象，addr 可为 NULL（已连接套接字）
+ * 或指向目标地址（无连接 UDP 语义）。POSIX=struct iovec+sendmsg，Win=WSABUF+WSASendMsg。
+ * Windows 首次调用惰性解析 WSASendMsg 扩展函数指针（函数内 static 缓存，各 TU 各持一份，
+ * 天然免多 TU 重定义）。返回已发送字节数 / -1=失败。 */
+#if P_WIN
+typedef WSABUF sc_iovec;
+static inline void sc_iovec_set(sc_iovec *v, const void *buf, size_t len) {
+    v->buf = (char *)buf; v->len = (ULONG)len;
+}
+#else
+typedef struct iovec sc_iovec;
+static inline void sc_iovec_set(sc_iovec *v, const void *buf, size_t len) {
+    v->iov_base = (void *)buf; v->iov_len = len;
+}
+#endif
+static inline ssize_t sc_sendmsg(sc_sock s, const sc_iovec *iov, size_t n,
+                                 const struct sockaddr *addr, socklen_t addrlen) {
+#if P_WIN
+    static LPFN_WSASENDMSG fn = NULL;
+    if (!fn) {
+        GUID guid = WSAID_WSASENDMSG; DWORD bytes = 0;
+        if (WSAIoctl(s, SIO_GET_EXTENSION_FUNCTION_POINTER,
+                     &guid, sizeof guid, &fn, sizeof fn, &bytes, NULL, NULL) != 0)
+            return -1;
+    }
+    WSAMSG mh = {0};
+    mh.name          = (LPSOCKADDR)addr;
+    mh.namelen       = addrlen;
+    mh.lpBuffers     = (LPWSABUF)iov;
+    mh.dwBufferCount = (DWORD)n;
+    DWORD sent = 0;
+    return fn(s, &mh, 0, &sent, NULL, NULL) == 0 ? (ssize_t)sent : -1;
+#else
+    struct msghdr mh = {0};
+    mh.msg_name    = (void *)addr;
+    mh.msg_namelen = addrlen;
+    mh.msg_iov     = (struct iovec *)iov;
+    mh.msg_iovlen  = n;
+    return sendmsg(s, &mh, MSG_NOSIGNAL);
+#endif
 }
 
 #endif /* SC_WITH_SOCKET && !SC_SOCKET_DONE */
