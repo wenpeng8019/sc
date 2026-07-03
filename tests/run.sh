@@ -102,6 +102,7 @@ POSITIVE=(
     tests/cases/heap_at.sc
     tests/cases/trie_at.sc
     tests/cases/lru_at.sc
+    tests/cases/proto_at.sc
     tests/cases/print_str_chn.sc
     tests/cases/forin_adt.sc
     tests/cases/chain_sort.sc
