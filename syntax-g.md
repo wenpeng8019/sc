@@ -149,6 +149,10 @@ host 侧编成 C 结构体、shader 侧编成 GLSL block，编译期校验 std14
 | `frag` | 片元着色 | Fragment | `.frag` |
 | `comp` | 计算着色 | GLCompute | `.comp` |
 
+> **另有顶层指令 `tar`**（与 stage 关键字平级）声明该 `.sg` 的 GPU 目标与版本，如
+> `tar vulkan@450` 或 `tar gles@100, gles@300`；它同时驱动 codegen 输出形态与 sema 能力
+> 裁剪（源码内声明而非 CLI，以支撑编辑期诊断与整体构建），详见 §13.1。
+
 阶段入口形似函数，但语义受限（无副作用堆操作、参数即阶段 I/O）：
 
 ```
@@ -361,10 +365,11 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
 按优先级排列，前置依赖关系为：**P0 编译器侧（版本/能力）** 先行，**P1/P2 主机侧模块** 随后
 （后两者合起来正是要替换掉 demo 里手写的 C + glfw + Vulkan 样板）。
 
-### 13.1 GL 语言版本适配与能力裁剪（P0，最高优先级）
+### 13.1 GL 语言版本适配与能力裁剪（P0，最高优先级；已实现）
 
-**现状**：`codegen_glsl` 硬编码 `#version 450`（Vulkan-GLSL），产物只能被 Vulkan/glslang 消费。
-目标平台一旦变（桌面 OpenGL、OpenGL ES、WebGL），产物即不可用。
+**现状**：`tar <api>@<version>` 顶层指令声明转义目标；`shader_caps.h` 统一维护能力表
+（能力 × api/version），`shader_sema` 按契约门控，`codegen_glsl` 按目标发射对应
+`#version`、profile、precision、绑定语法与（多目标）产物命名。
 
 **要做的**：让「输出什么 GL 版本 / profile」成为一个**目标（target）参数**，贯穿 codegen 与 sema。
 
@@ -396,14 +401,62 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
   - 各版本内建函数集差异（如 `textureLod` 在 ES2 顶点阶段的限制）。
   - 校验应产出**明确的版本相关报错**：「target `gles300` 不支持 storage buffer（需 ES≥3.1）」。
 
-- **接口设计（待定）**：
-  - CLI：`scc x.sg --target vulkan` / `--target gl-core --glsl 430` / `--target gles --glsl 300`。
-  - 或 `.sg` 内 pragma：`#pragma target gles 310`（与 sc 的 `#` 注释区分待定）。
-  - 允许一次产出多 target（同一 `.sg` 编出 Vulkan + GLES 两套），反射清单标注各自 target。
-  - 反射清单 JSON 增 `"target"` 字段；低版本 target 的 resources 需带 `"name"` 供按名绑定。
+- **目标声明（已定稿）——源码内 `tar` 指令，不走 CLI**：
 
-- **落点**：`codegen_glsl` 引入 `struct GlslTarget { enum Api{Vulkan,GLCore,GLES,WebGL}; int version; }`，
-  `emitStage`/`emitResources`/`builtinGlsl` 均接收它；`shader_sema` 接收同一 target 做能力门控。
+  目标是**构建契约**而非命令行临时参数。三条理由决定它必须内嵌源码：
+  ① 编辑期语法插件解析源码即得目标，才能给出目标相关的**实时诊断**（CLI 传参插件看不到 →
+  报不了错，开发实用性掉一个量级）；② `.sg` 作为 `.sc` 依赖**整体构建**时，源码自描述、免透传
+  flag；③ 避开与**交叉编译 target** 的语义歧义（`.sg` 内的 `tar` 作用域隔离，专指 GPU 目标）。
+
+  语法（`.sg` 顶部，`tar` 是与 `vert`/`frag`/`comp` 平级的顶层指令）：
+
+  ```
+  tar vulkan@450                 # 单目标
+  tar gles@100, gles@300         # 多目标（逗号分隔，可同 api 多版本）
+  ```
+
+  - `<api>@<version>`：**版本必须显式指定，无默认**；`@N` 为**精确锚定**，codegen 直接发
+    `#version N`，能力判定按「该 api 起始支持版本 ≤ N」。
+  - api 取值：`vulkan` / `glcore` / `gles` / `webgl`。
+  - **多目标 = 兼容性契约**：声明的每个目标都必须支持所用能力，任一不满足即**硬报错**
+    （不降级、不静默跳过）；codegen 逐目标各出一份产物。
+  - 共享：一期只支持**每文件声明**（将来再加 inc 共享 / 项目级默认，见 §15）。
+  - 反射清单 JSON 增 `"target": {"api","version"}`；无显式 binding 的低版本目标，resources
+    项保留 `"name"` 供运行时按名绑定。
+
+- **能力表架构（单一事实源，sema 与 codegen 共用）**：
+
+  用一张二维表取代散落各处的版本 `if` 判断——**行 = sg 能力全集（含方言构造）**，
+  **列 = API 族**，格值 = 该能力在该 api 的**起始支持版本**（`-1` = 永不支持）。
+  新增能力加一行、新增目标加一列，天然不易漏、易扩展。
+
+  ```cpp
+  // shader_caps.h（新，独立头）—— sg 能力 × 目标 的版本矩阵
+  enum class Cap { StorageBuffer, ComputeStage, PushConstant, DoubleType,
+                   DescriptorSet, ExplicitBinding, /* … */ CapCount };
+  struct CapRow { const char* name; int vulkan, glcore, gles, webgl; };  // 起始版本；-1=不支持
+  static const CapRow CAP_TABLE[(int)Cap::CapCount] = {
+      /*StorageBuffer*/ {"storage 缓冲",  450, 430, 310, -1},
+      /*ComputeStage */ {"comp 计算着色", 450, 430, 310, -1},
+      /*PushConstant */ {"push 常量",     450,  -1,  -1, -1},   // 仅 Vulkan
+      /*DoubleType   */ {"f8 双精度",     450, 400,  -1, -1},
+      /*DescriptorSet*/ {"set 描述符集",  450,  -1,  -1, -1},   // 仅 Vulkan
+      /*ExplicitBind */ {"binding 限定",  450, 420, 310, -1},
+      /* … 随实现补全 */
+  };
+  bool capSupported(Cap c, GlslTarget t);   // t.api 对应列 != -1 且 <= t.version
+  ```
+
+  - **sema 用法**：遍历 AST 收集「已用能力集」（`storage` 属性→StorageBuffer、出现 `comp`
+    →ComputeStage、用到 `f8`→DoubleType…），对**每个声明目标**查表，不满足即报错并点名
+    「能力 × 目标 × 需要版本」，如「target `gles@300` 不支持 storage 缓冲（需 ES≥310）」。
+  - **codegen 用法**：查「策略类能力」（DescriptorSet/ExplicitBinding/精度/内建名）决定**怎么发**
+    ——同一份 AST，vulkan 发 `set=/binding=`、glcore@410 省 `set` 只留名字绑定等。
+
+- **落点**：新增独立 `shader_caps.*`（能力表）；`codegen_glsl` 引入
+  `struct GlslTarget { enum class Api{Vulkan,GLCore,GLES,WebGL}; Api api; int version; }`，
+  `emitStage`/`emitResources`/`builtinGlsl`/`#version` 头均接收它；`shader_sema` 接收同一目标
+  列表、查同一张 `CAP_TABLE` 做能力门控；`lexer`/`parser` 在 shaderMode 识别 `tar` 顶层指令。
 
 ### 13.2 GL/EGL 上下文环境模块（P1）——类 glfw 的「上下文/表面」层
 

@@ -45,13 +45,14 @@ std::string mapType(const std::string& n) {
     return n;   // vec2/3/4、ivec*、mat*、sampler2D 及自定义类型原样保留
 }
 
-// 内建语义名（sc 标注）→ GLSL 内建变量。区分输入侧 / 输出侧。
-std::string builtinGlsl(const std::string& sem, bool asOutput) {
+// 内建语义名（sc 标注）→ GLSL 内建变量。区分输入侧 / 输出侧、以及目标 API：
+// Vulkan 用 gl_VertexIndex/gl_InstanceIndex；GL/ES 用 gl_VertexID/gl_InstanceID。
+std::string builtinGlsl(const std::string& sem, bool asOutput, const GlslTarget& t) {
     if (sem == "position")    return asOutput ? "gl_Position" : "gl_FragCoord";
     if (sem == "frag_coord")  return "gl_FragCoord";
     if (sem == "frag_depth")  return "gl_FragDepth";
-    if (sem == "vertex_id")   return "gl_VertexIndex";
-    if (sem == "instance_id") return "gl_InstanceIndex";
+    if (sem == "vertex_id")   return t.isVulkan() ? "gl_VertexIndex"   : "gl_VertexID";
+    if (sem == "instance_id") return t.isVulkan() ? "gl_InstanceIndex" : "gl_InstanceID";
     return "gl_" + sem;       // 兜底：原样加前缀（未知语义）
 }
 
@@ -268,20 +269,23 @@ Model buildModel(const Program& prog) {
 }
 
 // 资源块 GLSL（对所有阶段一致发射；未用者对编译无害）。
-std::string emitResources(const Model& m) {
+std::string emitResources(const Model& m, const GlslTarget& t) {
+    const bool useSet  = t.useSetQualifier();                 // 仅 Vulkan 有 set= 限定
+    const bool explicitBind = capSupported(Cap::ExplicitBinding, t);
     std::string out;
     for (const Decl* r : m.resources) {
         auto* a = r->shaderAttr.get();
         std::string bind;
         auto add = [&](const std::string& s) { bind += (bind.empty() ? "" : ", ") + s; };
-        if (a->res == ShaderDeclAttr::Push) bind = "push_constant";
+        if (a->res == ShaderDeclAttr::Push) bind = "push_constant";   // 仅 Vulkan 抵达（已语义门控）
         else {
-            if (a->set >= 0)     add("set=" + std::to_string(a->set));
-            if (a->binding >= 0) add("binding=" + std::to_string(a->binding));
+            if (useSet && a->set >= 0)          add("set=" + std::to_string(a->set));
+            if (explicitBind && a->binding >= 0) add("binding=" + std::to_string(a->binding));
         }
         if (r->kind == Decl::VarD) {                       // sampler / image 全局
             const Field& f = r->structCommon.fields.front();
-            out += "layout(" + bind + ") uniform " + mapType(f.type.name) + " " + f.name + ";\n";
+            std::string pfx = bind.empty() ? "" : ("layout(" + bind + ") ");
+            out += pfx + "uniform " + mapType(f.type.name) + " " + f.name + ";\n";
             continue;
         }
         bool std430 = a->res == ShaderDeclAttr::Storage;   // uniform / storage / push 块
@@ -317,7 +321,8 @@ std::string emitHelper(const Decl& d) {
 }
 
 // 发射单个阶段：装配 in/out 接口 + main() 体（含 I/O 改写）。
-std::string emitStage(const Decl& stage, const Model& m, const std::string& prelude) {
+std::string emitStage(const Decl& stage, const Model& m, const std::string& prelude,
+                      const GlslTarget& t) {
     const bool isVert = stage.shaderStage == ShaderStage::Vert;
     std::unordered_map<std::string, std::string> memberMap;
     std::unordered_set<std::string> outAggVars;
@@ -336,7 +341,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
         for (const auto& f : it->second->structCommon.fields) {
             std::string sem = f.shaderAttr ? f.shaderAttr->builtin : "";
             if (!sem.empty()) {
-                memberMap[p.name + "." + f.name] = builtinGlsl(sem, /*out*/false);
+                memberMap[p.name + "." + f.name] = builtinGlsl(sem, /*out*/false, t);
                 continue;
             }
             int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoInLoc++;
@@ -361,7 +366,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
             std::string sem = f.shaderAttr ? f.shaderAttr->builtin : "";
             std::string target;
             if (!sem.empty()) {
-                target = builtinGlsl(sem, /*out*/true);   // gl_Position / gl_FragDepth
+                target = builtinGlsl(sem, /*out*/true, t);   // gl_Position / gl_FragDepth
             } else {
                 int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoOutLoc++;
                 std::string g = isVert ? ("v_" + f.name) : ("f_" + f.name);
@@ -378,8 +383,12 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
 
     // —— 装配 ——
     std::ostringstream out;
-    out << "#version 450\n";
-    out << "// generated from " << stage.name << " (" << stageExt(stage.shaderStage) << ")\n\n";
+    out << "#version " << t.version;
+    if (const char* prof = t.profileWord(); prof && *prof) out << " " << prof;
+    out << "\n";
+    out << "// generated from " << stage.name << " (" << stageExt(stage.shaderStage)
+        << ") target " << glTargetTag(t) << "\n\n";
+    if (t.isES()) out << "precision highp float;\nprecision highp int;\n\n";
     out << prelude;
     if (!ioDecls.empty()) out << ioDecls << "\n";
 
@@ -395,9 +404,9 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
 
 } // namespace
 
-std::vector<GlslUnit> emitGlsl(const Program& prog) {
+std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target) {
     Model m = buildModel(prog);
-    std::string prelude = emitResources(m);
+    std::string prelude = emitResources(m, target);
     for (const auto& d : prog.decls)   // 辅助函数放在资源之后、各 main 之前
         if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None)
             prelude += emitHelper(*d);
@@ -405,16 +414,22 @@ std::vector<GlslUnit> emitGlsl(const Program& prog) {
     std::vector<GlslUnit> units;
     for (const auto& d : prog.decls) {
         if (!d || d->kind != Decl::FuncD || d->shaderStage == ShaderStage::None) continue;
-        std::string text = emitStage(*d, m, prelude);
+        std::string text = emitStage(*d, m, prelude, target);
         units.push_back(GlslUnit{d->shaderStage, d->name, stageExt(d->shaderStage), text});
     }
     return units;
 }
 
-std::string emitReflectionJson(const Program& prog) {
+std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
     Model m = buildModel(prog);
+    const bool useSet = target.useSetQualifier();
+    const bool explicitBind = capSupported(Cap::ExplicitBinding, target);
     std::ostringstream j;
-    j << "{\n  \"stages\": [\n";
+    j << "{\n";
+    j << "  \"target\": {\"api\": " << jstr(glApiName(target.api))
+      << ", \"version\": " << target.version
+      << ", \"explicitBinding\": " << (explicitBind ? "true" : "false") << "},\n";
+    j << "  \"stages\": [\n";
 
     bool firstStage = true;
     for (const auto& d : prog.decls) {
@@ -476,20 +491,22 @@ std::string emitReflectionJson(const Program& prog) {
     bool firstRes = true;
     for (const Decl* r : m.resources) {
         auto* a = r->shaderAttr.get();
+        int rset  = useSet ? a->set : -1;              // 仅 Vulkan 发射 set=
+        int rbind = explicitBind ? a->binding : -1;    // 低版本无显式 binding → 按名绑定
         if (!firstRes) j << ",\n";
         firstRes = false;
         if (r->kind == Decl::VarD) {
             const Field& f = r->structCommon.fields.front();
             j << "    {\"name\": " << jstr(f.name)
               << ", \"kind\": \"sampler\", \"type\": " << jstr(mapType(f.type.name))
-              << ", \"set\": " << a->set << ", \"binding\": " << a->binding << "}";
+              << ", \"set\": " << rset << ", \"binding\": " << rbind << "}";
             continue;
         }
         const char* kind = a->res == ShaderDeclAttr::Storage ? "storage"
                          : a->res == ShaderDeclAttr::Push ? "push" : "uniform";
         bool std430 = a->res == ShaderDeclAttr::Storage;
         j << "    {\"name\": " << jstr(r->name) << ", \"kind\": " << jstr(kind)
-          << ", \"set\": " << a->set << ", \"binding\": " << a->binding
+          << ", \"set\": " << rset << ", \"binding\": " << rbind
           << ", \"layout\": " << jstr(std430 ? "std430" : "std140") << ",\n";
         j << "     \"members\": [";
         int off = 0; bool firstMem = true;
@@ -511,35 +528,51 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
-        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查（syntax-g §9）
-        auto units = emitGlsl(prog);
-        std::string reflect = emitReflectionJson(prog);
+        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查 + 能力门控（syntax-g §9/§13.1）
 
-        if (units.empty()) {
-            std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+        if (prog.shaderTargets.empty()) {       // GLSL 生成必须声明目标（无 CLI 默认）
+            std::fprintf(stderr, "sg: %s 未声明转义目标（需顶部 `tar`，如 `tar vulkan@450`）\n",
+                         srcPath.c_str());
             return 1;
         }
 
         std::string stem = std::filesystem::path(srcPath).stem().string();
+        const bool multi = prog.shaderTargets.size() > 1;
 
-        if (outDir.empty()) {
-            for (const auto& u : units)
-                std::printf("// ===== %s.%s =====\n%s\n", u.entry.c_str(), u.ext.c_str(), u.text.c_str());
-            std::printf("// ===== %s.reflect.json =====\n%s\n", stem.c_str(), reflect.c_str());
-        } else {
-            std::error_code ec;
-            std::filesystem::create_directories(outDir, ec);
-            auto write = [&](const std::string& path, const std::string& data) -> bool {
-                FILE* f = std::fopen(path.c_str(), "wb");
-                if (!f) { std::fprintf(stderr, "sg: 无法写入 %s\n", path.c_str()); return false; }
-                std::fwrite(data.data(), 1, data.size(), f);
-                std::fclose(f);
-                std::fprintf(stderr, "sg: 生成 %s\n", path.c_str());
-                return true;
-            };
-            for (const auto& u : units)
-                if (!write(outDir + "/" + u.entry + "." + u.ext, u.text)) return 1;
-            if (!write(outDir + "/" + stem + ".reflect.json", reflect)) return 1;
+        std::error_code ec;
+        if (!outDir.empty()) std::filesystem::create_directories(outDir, ec);
+        auto write = [&](const std::string& path, const std::string& data) -> bool {
+            FILE* f = std::fopen(path.c_str(), "wb");
+            if (!f) { std::fprintf(stderr, "sg: 无法写入 %s\n", path.c_str()); return false; }
+            std::fwrite(data.data(), 1, data.size(), f);
+            std::fclose(f);
+            std::fprintf(stderr, "sg: 生成 %s\n", path.c_str());
+            return true;
+        };
+
+        for (const auto& target : prog.shaderTargets) {
+            auto units = emitGlsl(prog, target);
+            std::string reflect = emitReflectionJson(prog, target);
+
+            if (units.empty()) {
+                std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                return 1;
+            }
+
+            // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.gles300.reflect.json）。
+            std::string tag = multi ? ("." + glTargetTag(target)) : "";
+
+            if (outDir.empty()) {
+                for (const auto& u : units)
+                    std::printf("// ===== %s%s.%s =====\n%s\n",
+                                u.entry.c_str(), tag.c_str(), u.ext.c_str(), u.text.c_str());
+                std::printf("// ===== %s%s.reflect.json =====\n%s\n",
+                            stem.c_str(), tag.c_str(), reflect.c_str());
+            } else {
+                for (const auto& u : units)
+                    if (!write(outDir + "/" + u.entry + tag + "." + u.ext, u.text)) return 1;
+                if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
+            }
         }
         return 0;
     } catch (const CompileError& e) {

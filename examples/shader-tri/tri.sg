@@ -2,6 +2,8 @@
 # 无顶点缓冲、无 uniform：三个顶点的位置与颜色写在常量数组里，
 # 由内建 vertex_id 索引。运行时 host 只需空 draw(3)。
 
+tar vulkan@450
+
 @def VsIn: {
     vid: i4 builtin vertex_id
 }

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 // ============================================================
 // shader_sema 实现（syntax-g 一期）
@@ -54,6 +55,8 @@ bool illegalSwizzle(const std::string& m) {
 }
 
 struct Checker {
+    int f8Line = 0;   // 首次出现 f8(double) 类型的行号（0 = 未用）；供能力门控查表。
+
     void expr(const Expr* e) {
         if (!e) return;
         switch (e->kind) {
@@ -87,6 +90,7 @@ struct Checker {
         if (t.fat)       bad(line, t.thin ? "瘦指针 T*" : "自动指针 T@");
         if (t.autoFree)  bad(line, "单例指针 T@1");
         if (t.fnKind != TypeRef::FncKind::None) bad(line, "函数指针字段");
+        if (t.name == "f8" && !f8Line) f8Line = line;   // f8 双精度：能力门控用（见 shaderSemaCheck）
     }
 
     void stmt(const Stmt* s) {
@@ -157,6 +161,13 @@ void shaderSemaCheck(const Program& prog) {
     // 资源绑定冲突检测：同一 (set,binding) 不可重复占用。
     std::unordered_set<std::string> seenBind;
 
+    // 已用能力集（Cap + 首次出现行号）：供后续按声明目标查能力表门控。
+    std::vector<std::pair<Cap, int>> usedCaps;
+    auto useCap = [&](Cap cap, int line) {
+        for (auto& u : usedCaps) if (u.first == cap) return;   // 每种能力只记首次
+        usedCaps.push_back({cap, line});
+    };
+
     for (const auto& d : prog.decls) {
         if (!d) continue;
 
@@ -164,20 +175,48 @@ void shaderSemaCheck(const Program& prog) {
         if (d->kind == Decl::StructD || d->kind == Decl::UnionD) {
             for (const auto& f : d->structCommon.fields)
                 c.checkType(f.type, f.line ? f.line : d->line);
+        }
 
-            if (d->shaderAttr && d->shaderAttr->res != ShaderDeclAttr::Push &&
-                d->shaderAttr->set >= 0 && d->shaderAttr->binding >= 0) {
-                std::string key = std::to_string(d->shaderAttr->set) + ":" +
-                                  std::to_string(d->shaderAttr->binding);
-                if (!seenBind.insert(key).second)
-                    throw CompileError{"资源绑定冲突：(set=" +
-                        std::to_string(d->shaderAttr->set) + ", binding=" +
-                        std::to_string(d->shaderAttr->binding) + ") 已被占用", d->line};
+        // 资源块 / 全局资源（结构体或 var）的绑定冲突 + 能力采集
+        if (d->kind == Decl::StructD || d->kind == Decl::UnionD || d->kind == Decl::VarD) {
+            if (d->shaderAttr) {
+                const auto* a = d->shaderAttr.get();
+                if (a->res != ShaderDeclAttr::Push &&
+                    a->set >= 0 && a->binding >= 0) {
+                    std::string key = std::to_string(a->set) + ":" +
+                                      std::to_string(a->binding);
+                    if (!seenBind.insert(key).second)
+                        throw CompileError{"资源绑定冲突：(set=" +
+                            std::to_string(a->set) + ", binding=" +
+                            std::to_string(a->binding) + ") 已被占用", d->line};
+                }
+                if (a->res == ShaderDeclAttr::Storage) useCap(Cap::StorageBuffer, d->line);
+                if (a->res == ShaderDeclAttr::Push)    useCap(Cap::PushConstant, d->line);
+                if (a->set >= 1)                       useCap(Cap::DescriptorSet, d->line);
             }
         }
 
         // 所有函数（阶段入口 + 辅助函数）走子集检查
-        if (d->kind == Decl::FuncD)
+        if (d->kind == Decl::FuncD) {
             c.func(*d);
+            if (d->shaderStage == ShaderStage::Comp) useCap(Cap::ComputeStage, d->line);
+        }
+    }
+
+    if (c.f8Line) useCap(Cap::DoubleType, c.f8Line);   // f8 双精度（由 checkType 捕获）
+
+    // ---- 能力门控（syntax-g §13.1）----
+    // 契约制：声明的每个目标都必须支持所用能力，任一不满足即硬报错。
+    for (const auto& t : prog.shaderTargets) {
+        for (const auto& u : usedCaps) {
+            if (capSupported(u.first, t)) continue;
+            int mn = capMinVersion(u.first, t.api);
+            std::string need = mn < 0
+                ? std::string(glApiName(t.api)) + " 永不支持"
+                : std::string(glApiName(t.api)) + "≥" + std::to_string(mn);
+            throw CompileError{"目标 " + std::string(glApiName(t.api)) + "@" +
+                std::to_string(t.version) + " 不支持 " + capRow(u.first).name +
+                "（需 " + need + "）", u.second};
+        }
     }
 }

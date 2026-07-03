@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include "shader_ast.h"   // ShaderStage（GPU/着色器扩展；仅为 Decl 增加一个阶段标记）
+#include "shader_caps.h"  // GlslTarget（GPU/着色器扩展；tar 声明的转义目标与版本）
 
 // ============================================================
 // AST（抽象语法树）—— 整个编译器的核心数据结构
@@ -615,6 +616,10 @@ struct Program {
                                             // 非空时由解析器合成 future_id 枚举插入 decls 首部，转译工程写出 type.h。
     bool isRoot = false;                    // 头部含 @@ 标记：本单元为显式根模块（全局前奏提供者），
                                             // 其 @导出 默认注入到所有依赖单元，供编译期对接语法插件静态发现。
+
+    // GPU/着色器扩展（syntax-g §13.1）：.sg 顶层 tar 指令声明的转义目标列表
+    // （每目标 API+版本）。空 = 未声明（仅 --ast/--emit-sc 允许；GLSL 代码生成必须声明）。
+    std::vector<GlslTarget> shaderTargets;
 };
 
 // ---------- 诊断信息 ----------

@@ -24,6 +24,7 @@ const KEYWORDS = [
     ['var', '定义变量（或资源全局，如 sampler）'],
     ['let', '定义常量（含常量数组，如 let a[3]: vec2 = {..}）'],
     ['inc', '引入依赖'],
+    ['tar', '声明转义目标与版本（tar vulkan@450，可逗号分隔多个）'],
     ['return', '从阶段/函数返回'],
     ['if', '条件分支'], ['else', '否则分支'],
     ['while', 'while 循环'], ['do', 'do-while 循环'], ['for', 'for 循环'],
@@ -64,6 +65,14 @@ const TYPES = [
     ['mat2', '2x2 矩阵'], ['mat3', '3x3 矩阵'], ['mat4', '4x4 矩阵'],
     ['sampler2D', '2D 采样器'], ['sampler3D', '3D 采样器'], ['samplerCube', '立方体采样器'],
     ['sampler2DArray', '2D 数组采样器'],
+];
+
+const TARGETS = [
+    ['vulkan', 'Vulkan-GLSL（set= + binding=；GLSL≥450）'],
+    ['glcore', '桌面 OpenGL core（gl 为别名）'],
+    ['gl', 'glcore 别名'],
+    ['gles', 'OpenGL ES（precision + gl_VertexID）'],
+    ['webgl', 'WebGL（GLSL ES 子集）'],
 ];
 
 const BUILTIN_FNS = [
@@ -123,6 +132,11 @@ function provideCompletions(doc, pos) {
     const K = vscode.CompletionItemKind;
     const line = doc.lineAt(pos.line).text;
     const prefix = line.slice(0, pos.character);
+
+    // tar 目标上下文（tar / , 之后）：只给转义目标 API 名
+    if (/^\s*tar\b[^@]*$/.test(prefix)) {
+        return TARGETS.map(([n, d]) => makeItem(n, K.EnumMember, d, '0' + n));
+    }
 
     // 类型上下文（冒号后）：只给类型 + 本文件 def 名
     if (/:\s*[A-Za-z_]*$/.test(prefix)) {

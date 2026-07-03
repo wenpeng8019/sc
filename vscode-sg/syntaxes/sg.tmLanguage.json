@@ -5,6 +5,7 @@
     "patterns": [
         { "include": "#comment" },
         { "include": "#inc-decl" },
+        { "include": "#tar-decl" },
         { "include": "#export-prefix" },
         { "include": "#stage-decl" },
         { "include": "#def-decl" },
@@ -38,6 +39,32 @@
                 "1": { "name": "keyword.control.import.sg" },
                 "2": { "name": "string.unquoted.include.sg" }
             }
+        },
+        "tar-decl": {
+            "begin": "^\\s*(tar)\\b",
+            "beginCaptures": {
+                "1": { "name": "keyword.control.target.sg" }
+            },
+            "end": "$",
+            "patterns": [
+                { "include": "#comment" },
+                {
+                    "name": "support.constant.target.api.sg",
+                    "match": "\\b(vulkan|glcore|gl|gles|webgl)\\b"
+                },
+                {
+                    "name": "keyword.operator.target.version.sg",
+                    "match": "@"
+                },
+                {
+                    "name": "constant.numeric.integer.sg",
+                    "match": "\\b[0-9]+\\b"
+                },
+                {
+                    "name": "punctuation.separator.target.sg",
+                    "match": ","
+                }
+            ]
         },
         "export-prefix": {
             "name": "storage.modifier.export.sg",

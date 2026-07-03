@@ -1966,6 +1966,29 @@ struct Parser {
         }
     }
 
+    // GPU/着色器扩展（syntax-g §13.1）：顶层 `tar` 指令 —— 声明转义目标与版本。
+    // 版本必须显式指定（无默认），一行可逗号分隔多个目标：
+    //   tar vulkan@450
+    //   tar gles@100, gles@300
+    void parseShaderTargets(Program& prog) {
+        advance();                                  // 跳过 tar
+        do {
+            if (!at(Tok::Ident))
+                err("tar 后期望目标 API 名（vulkan/glcore/gles/webgl）");
+            std::string api = advance().text;
+            GlslTarget t;
+            if (!parseGlApi(api, t.api))
+                err("未知目标 API '" + api + "'（vulkan/glcore/gles/webgl）");
+            if (!(at(Tok::Op) && cur().text == "@"))
+                err("目标须显式指定版本，如 " + api + "@450");
+            advance();                              // 跳过 @
+            if (!at(Tok::Int)) err("@ 后期望 GLSL 版本整数");
+            t.version = std::stoi(advance().text);
+            prog.shaderTargets.push_back(t);
+        } while (accept(Tok::Comma));
+        expect(Tok::Newline, "换行");
+    }
+
     // 解析条件表达式 + 缩进块（if/while 共用）
     // + 支持多行条件：后续行以二元运算符开头时作为条件续行
     //   '-' 分隔符区分续行条件与语句体
@@ -2776,6 +2799,12 @@ struct Parser {
                     // vert/frag/comp 仍作为普通标识符词法化（保护 .sc 方言与全部回归），
                     // 仅在 shader 模式下、位于顶层时才升格为阶段声明。
                     if (shaderMode && at(Tok::Ident)) {
+                        // tar：顶层转义目标声明（syntax-g §13.1）。
+                        if (cur().text == "tar") {
+                            if (exported) err("tar 不支持 @ 导出");
+                            parseShaderTargets(prog);
+                            break;
+                        }
                         ShaderStage st = cur().text == "vert" ? ShaderStage::Vert
                                        : cur().text == "frag" ? ShaderStage::Frag
                                        : cur().text == "comp" ? ShaderStage::Comp

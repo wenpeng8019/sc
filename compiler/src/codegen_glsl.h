@@ -23,12 +23,13 @@ struct GlslUnit {
     std::string text;       // 生成的 GLSL 源文本
 };
 
-// 将已按 shaderMode 解析的 Program 中所有阶段入口发射为 GLSL 文本。
-std::vector<GlslUnit> emitGlsl(const Program& prog);
+// 将已按 shaderMode 解析的 Program 中所有阶段入口发射为 GLSL 文本（按目标 target）。
+std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target);
 
-// 生成反射清单 JSON（syntax-g §10）：阶段、入口、顶点属性 location、
-// varying 配对、uniform/storage/sampler 的 set/binding 与 std140/std430 字段偏移。
-std::string emitReflectionJson(const Program& prog);
+// 生成反射清单 JSON（syntax-g §10）：目标（api/version）、阶段、入口、顶点属性
+// location、varying 配对、uniform/storage/sampler 的 set/binding 与 std140/std430
+// 字段偏移。低版本目标（无显式 binding）resources 项保留 name 供运行时按名绑定。
+std::string emitReflectionJson(const Program& prog, const GlslTarget& target);
 
 // .sg 源到 GLSL 的端到端驱动：lex → parse(shaderMode=true) → shader_sema → emitGlsl。
 // outDir 为空 → 打印到 stdout（各阶段带分隔头 + 反射清单）；否则写入
