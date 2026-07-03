@@ -1,6 +1,7 @@
 #include "codegen_glsl.h"
 #include "lexer.h"
 #include "parser.h"
+#include "shader_sema.h"
 #include "error.h"
 
 #include <cstdio>
@@ -168,6 +169,7 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
+        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查（syntax-g §9）
         auto units = emitGlsl(prog);
 
         if (units.empty()) {

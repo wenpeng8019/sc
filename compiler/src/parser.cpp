@@ -345,6 +345,7 @@ struct Parser {
                 f.type = std::move(ty);
             }
         }
+        if (shaderMode) parseShaderFieldAttrs(f);   // GPU/着色器扩展：字段后缀属性 loc/builtin
         return f;
     }
 
@@ -761,6 +762,7 @@ struct Parser {
                 d->structCommon.fields.insert(d->structCommon.fields.begin() + at, std::move(f));
             }
 
+            if (shaderMode) parseShaderDeclAttrs(*d);   // GPU/着色器扩展：结构体后缀 uniform/storage/push
             expect(Tok::Newline, "换行");
             return d;
         }
@@ -1909,11 +1911,54 @@ struct Parser {
         advance();                                  // 跳过 vert/frag/comp 阶段标识符
         if (!at(Tok::Ident)) err("着色阶段入口后期望名字");
         d->name = advance().text;
-        // 着色器入口无返回值：返回类型 void
-        d->structCommon.type = std::make_shared<TypeRef>();
-        d->structCommon.type->name = "void";
+        // 可选签名：vert NAME: RetType, param: Type ...（复用普通函数签名解析）。
+        // 返回类型 = 阶段输出（varying/片元色），形参 = 阶段输入（顶点属性/varying）。
+        if (accept(Tok::Colon)) {
+            if (!at(Tok::Newline)) parseFncVars(d->structCommon);
+        }
+        if (!d->structCommon.type) {                // 无显式返回类型 → void
+            d->structCommon.type = std::make_shared<TypeRef>();
+            d->structCommon.type->name = "void";
+        }
         parseBlock(d->body);                        // \n Indent stmts... Dedent
         return d;
+    }
+
+    // GPU/着色器扩展（syntax-g §5）：字段级后缀属性（仅 shader 模式，且属性词出现时才消费）。
+    //   loc N        → 顶点属性 / varying 位置
+    //   builtin X    → 内建变量语义（position/frag_coord/...）
+    void parseShaderFieldAttrs(Field& f) {
+        while (at(Tok::Ident) && (cur().text == "loc" || cur().text == "builtin")) {
+            std::string kw = advance().text;
+            if (!f.shaderAttr) f.shaderAttr = std::make_shared<ShaderFieldAttr>();
+            if (kw == "loc") {
+                if (!at(Tok::Int)) err("loc 后期望位置整数");
+                f.shaderAttr->loc = std::stoi(advance().text);
+            } else {
+                if (!at(Tok::Ident)) err("builtin 后期望内建语义名");
+                f.shaderAttr->builtin = advance().text;
+            }
+        }
+    }
+
+    // GPU/着色器扩展（syntax-g §6）：结构体级资源绑定后缀属性（仅 shader 模式）。
+    //   uniform|storage set S binding B   |   push
+    void parseShaderDeclAttrs(Decl& d) {
+        if (!(at(Tok::Ident) &&
+              (cur().text == "uniform" || cur().text == "storage" || cur().text == "push")))
+            return;
+        auto a = std::make_shared<ShaderDeclAttr>();
+        std::string kw = advance().text;
+        a->res = kw == "uniform" ? ShaderDeclAttr::Uniform
+               : kw == "storage" ? ShaderDeclAttr::Storage
+                                 : ShaderDeclAttr::Push;
+        while (at(Tok::Ident) && (cur().text == "set" || cur().text == "binding")) {
+            std::string k2 = advance().text;
+            if (!at(Tok::Int)) err(std::string(k2 == "set" ? "set" : "binding") + " 后期望整数");
+            int v = std::stoi(advance().text);
+            if (k2 == "set") a->set = v; else a->binding = v;
+        }
+        d.shaderAttr = std::move(a);
     }
 
     // 解析条件表达式 + 缩进块（if/while 共用）

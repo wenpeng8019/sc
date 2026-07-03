@@ -179,6 +179,10 @@ struct Field {
                                         // + 认领一个 C 侧已定义的全局符号，转 C 生成 extern T name;
                                         //   不分配存储、无初值；仅把名字与类型登记进 sc 符号表。
 
+    // GPU/着色器扩展（syntax-g）：字段级绑定属性（loc N / builtin X），仅 .sg 解析。
+    // 用 shared_ptr 保持 Field 可默认拷贝，非 shader 场景为空指针零开销。
+    std::shared_ptr<ShaderFieldAttr> shaderAttr;
+
     int         line = 0;               // 声明所在行号
 };
 
@@ -590,6 +594,9 @@ struct Decl {
     // 解析时由 parser 置位；None 即普通 sc 函数。shader 专属语义/代码生成在
     // shader_sema.* / codegen_glsl.*。
     ShaderStage shaderStage = ShaderStage::None;
+
+    // GPU/着色器扩展（syntax-g）：结构体级资源绑定属性（uniform/storage/push），仅 .sg。
+    std::shared_ptr<ShaderDeclAttr> shaderAttr;
 
     //---------
 
