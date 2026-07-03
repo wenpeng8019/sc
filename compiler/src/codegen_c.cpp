@@ -758,25 +758,38 @@ struct CGen {
                 out << ");\n    return _p;\n}\n\n";
             }
 
-            // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）
-            // _atom 参数（T<atom>() 传 SC_REF_ATOM）→ 头 flags 置原子位，引用计数走原子 RMW。
+            // 胖目标 T@：带 sc_ref 头的堆构造 T__new_ref（头在块首，实体在 +SC_REF_HDR）。
+            // _flags = SC_REF_ATOM（T<atom>()，原子引用计数）| SC_REF_RAW（T<raw>()，裸分配）。
+            // 默认（_flags 无 RAW）走 sc_chunk 池化；T<raw>() 走 sc_alloc（libc/间接层）。
             if (fatTypeNames.count(tn)) {
-                out << "static inline " << tc << " *" << tc << "__new_ref(int32_t _atom) {\n";
+                out << "static inline " << tc << " *" << tc << "__new_ref(int32_t _flags) {\n";
                 if (g_memCheck) {
-                    // --check=mem：扩块为 [头哨兵|sc_ref 头|实体|尾哨兵]，头哨兵存{魔数,实体字节数}。
-                    out << "    char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof("
+                    // --check=mem 且 T<raw>()：扩块 [头哨兵|sc_ref 头|实体|尾哨兵]，codegen SC_CANARY 守护。
+                    // 默认（chunk）：走 sc_chunk，越界由 chunk 自带 MEM_DEBUG 尾金丝雀负责。
+                    out << "    sc_ref *_h; " << tc << " *_p;\n"
+                        << "    if (_flags & SC_REF_RAW) {\n"
+                        << "        char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof("
                         << tc << ") + SC_CANARY);\n"
-                        << "    if (!_b) return 0;\n"
-                        << "    sc_ref *_h = (sc_ref *)(_b + SC_CANARY);\n"
-                        << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom | SC_REF_CANARY;\n"
-                        << "    uintptr_t _m = sc_canary_magic(_b);\n"
-                        << "    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(" << tc << ");\n"
-                        << "    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tc << ")) = _m;\n"
-                        << "    " << tc << " *_p = (" << tc << " *)(_b + SC_CANARY + SC_REF_HDR);\n";
+                        << "        if (!_b) return 0;\n"
+                        << "        _h = (sc_ref *)(_b + SC_CANARY);\n"
+                        << "        _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags | SC_REF_CANARY;\n"
+                        << "        uintptr_t _m = sc_canary_magic(_b);\n"
+                        << "        ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(" << tc << ");\n"
+                        << "        *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(" << tc << ")) = _m;\n"
+                        << "        _p = (" << tc << " *)(_b + SC_CANARY + SC_REF_HDR);\n"
+                        << "    } else {\n"
+                        << "        _h = (sc_ref *)sc_chunk(SC_REF_HDR + sizeof(" << tc << "));\n"
+                        << "        if (!_h) return 0;\n"
+                        << "        _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;\n"
+                        << "        _p = (" << tc << " *)((char *)_h + SC_REF_HDR);\n"
+                        << "    }\n";
                 } else {
-                    out << "    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(" << tc << "));\n"
+                    // 默认 chunk 池化；T<raw>() 退化为裸分配（sc_alloc）。
+                    out << "    sc_ref *_h = (sc_ref *)((_flags & SC_REF_RAW)\n"
+                        << "        ? sc_alloc(SC_REF_HDR + sizeof(" << tc << "))\n"
+                        << "        : sc_chunk(SC_REF_HDR + sizeof(" << tc << ")));\n"
                         << "    if (!_h) return 0;\n"
-                        << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;\n"
+                        << "    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;\n"
                         << "    " << tc << " *_p = (" << tc << " *)((char *)_h + SC_REF_HDR);\n";
                 }
                 if (sd->kind == Decl::StructD && hasFieldDefaults(sd))
@@ -799,8 +812,8 @@ struct CGen {
                         if (i) out << ", ";
                         emitDeclarator(im->structCommon.fields[i]);
                     }
-                    out << ", int32_t _atom) {\n"
-                        << "    " << tc << " *_p = " << tc << "__new_ref(_atom);\n"
+                    out << ", int32_t _flags) {\n"
+                        << "    " << tc << " *_p = " << tc << "__new_ref(_flags);\n"
                         << "    if (_p) " << scPfx(im->name) << "(_p";
                     for (auto& f : im->structCommon.fields)
                         out << ", " << (f.name == "this" ? "_this" : f.name);
@@ -1302,6 +1315,14 @@ struct CGen {
         const Decl* dm = findMethod(typeName, "drop");
         if (!dm) return "";
         return "(void (*)(void *))" + scPfx(dm->name);
+    }
+
+    // T@ 胖目标构造的 sc_ref.flags 实参：合并 <atom>（原子引用计数）/ <raw>（裸分配）标记。
+    static std::string ctorRefFlags(const Expr& e) {
+        std::string s;
+        if (e.ctorAtom) s = "SC_REF_ATOM";
+        if (e.ctorRaw)  s = s.empty() ? "SC_REF_RAW" : (s + " | SC_REF_RAW");
+        return s.empty() ? "0" : s;
     }
 
     // 发一条胖指针解绑语句：有 dtorArg 走 sc_fat_unbind_d（带目标类型析构），否则 sc_fat_unbind。
@@ -2226,10 +2247,13 @@ struct CGen {
                 }
                 // 类型伪调用糖：T() → 堆构造 T__new()（malloc + 默认值 + init）
                 if (const Decl* td = typeCallee(e)) {
-                    // <atom> 仅用于自动指针 T@ 目标构造（赋给 T@ 变量/成员，经 emitFatBind）；
-                    // 此处是普通堆构造（赋给 T& 或表达式位）→ atom 无处安放，报错避免静默丢标记。
+                    // <atom>/<raw> 仅用于自动指针 T@ 目标构造（赋给 T@ 变量/成员，经 emitFatBind）；
+                    // 此处是普通堆构造（赋给 T& 或表达式位）→ 标记无处安放，报错避免静默丢标记。
                     if (e.ctorAtom)
                         throw CompileError("atom 标记仅用于自动指针 T@ 目标构造，"
+                                           "普通堆构造 T() 不支持", e.line);
+                    if (e.ctorRaw)
+                        throw CompileError("raw 标记仅用于自动指针 T@ 目标构造，"
                                            "普通堆构造 T() 不支持", e.line);
                     if (!e.futureId.empty()) {  // future<ID>(ctx?) → 打 id 标签 + 可选 ctx
                         out << mapType_(td->name) << "__new_tagged(" << scPfx(e.futureId) << ", ";
@@ -2799,11 +2823,11 @@ struct CGen {
             //     兑现，调用方 p->wait() 阻塞取结果。语句表达式求值（参数缓冲由 promise 堆拥有）：
             //     ({ struct W _ap = {0}; 填实参; q->async(q,(void(*)(void*))W_rpc,&_ap,sizeof(_ap)); })
             case Expr::Async: {
-                // 裸 async（无操作数）：取当前 sync 驱动 rpc 的调用会话，求值为 session&
+                // 裸 async（无操作数）：取当前 sync 驱动 rpc 的待应答调用，求值为 deferred&
                 //   （rpc 延迟应答；rpc 体 return 不再自动应答，须之后 done s, result 兑现）。
-                //   经 op 内核 op_session_current() 取（顺带标记「已领取」=转延迟），零 emit mt 符号。
+                //   经 op 内核 op_deferred_current() 取（顺带标记「已领取」=转延迟），零 emit mt 符号。
                 if (!e.a) {
-                    out << "sc_op_session_current()";
+                    out << "sc_op_deferred_current()";
                     break;
                 }
                 if (e.b) {                           // 带队列目标：非阻塞带回复，求值为 promise&
@@ -3059,9 +3083,9 @@ struct CGen {
             if (!init.args.empty()) {
                 out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
-                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                out << ", " << ctorRefFlags(init) << ");\n";
             } else {
-                out << mapType_(td->name) << "__new_ref(" << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                out << mapType_(td->name) << "__new_ref(" << ctorRefFlags(init) << ");\n";
             }
             indent();
             if (classNames.count(td->name)) {
@@ -3115,10 +3139,10 @@ struct CGen {
             if (!init.args.empty()) {
                 out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
-                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                out << ", " << ctorRefFlags(init) << ");\n";
             } else {
                 out << mapType_(td->name) << "__new_ref("
-                    << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                    << ctorRefFlags(init) << ");\n";
             }
             indent();
             // 裸 @ 目标：擦除类型。class 类型走 object 风味（p 偏移到 &_class、dtor=sc_obj_drop），
@@ -3248,10 +3272,10 @@ struct CGen {
             if (!init.args.empty()) {
                 out << mapType_(td->name) << "__new_ref_init(";
                 emitCtorInitArgs(td, init);
-                out << ", " << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                out << ", " << ctorRefFlags(init) << ");\n";
             } else {
                 out << mapType_(td->name) << "__new_ref("
-                    << (init.ctorAtom ? "SC_REF_ATOM" : "0") << ");\n";
+                    << ctorRefFlags(init) << ");\n";
             }
             indent(); out << "sc_fat_bind(&" << lv << ", " << tmp
                 << ", (sc_ref *)((char *)" << tmp << " - SC_REF_HDR), _self_own);\n";
@@ -5051,16 +5075,16 @@ struct CGen {
         indent(); out << "}\n";
     }
 
-    // done 语句 → 按操作数类型多态分派（future 单线程异步 / session rpc 延迟应答）：
+    // done 语句 → 按操作数类型多态分派（future 单线程异步 / deferred rpc 延迟应答）：
     //   future&：done f[, result]      → future_done(f, <result 擦除 void*>);
-    //   session&：done s[, result]     → s->respond(s, &临时, sizeof)；按返回类型宽度写回返回槽。
+    //   deferred&：done s[, result]    → s->respond(s, &临时, sizeof)；按返回类型宽度写回返回槽。
     // future 结果擦除为 void*（指针直转，标量经 intptr_t 往返，与 f.get(): T& 对应）；
-    // session 结果按其静态类型原值写入调用方返回槽（偏移 0，与即时应答原地写 _ 同布局），
+    // deferred 结果按其静态类型原值写入调用方返回槽（偏移 0，与即时应答原地写 _ 同布局），
     // 经协议指针 s->respond 派发——零 emit mt 符号。result 省略=无结果。
     void emitDoneStmt(const Stmt& s) {
         VType tv;
-        bool isSession = exprVType(*s.expr, tv) && tv.name == "session" && tv.arr == 0;
-        if (isSession) {
+        bool isDeferred = exprVType(*s.expr, tv) && tv.name == "deferred" && tv.arr == 0;
+        if (isDeferred) {
             indent();
             if (!s.forInit) {
                 // 无结果：respond(s, NULL, 0)（rpc 无返回值）
@@ -6576,7 +6600,7 @@ struct CGen {
         if (args.size() > r.structCommon.fields.size())
             throw CompileError{"rpc 实参数量超出：" + r.name, r.line};
         const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
-        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)calloc(1, sizeof(struct "
+        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)sc_chunk0(sizeof(struct "
                       << scPfx(r.name) << "));\n";
         for (size_t i = 0; i < args.size(); i++) {
             const Field& f = r.structCommon.fields[i];
@@ -6598,7 +6622,7 @@ struct CGen {
                 emitComIoAwait(base, isPtr, true, "(void *)&(" + rp + "->" + f.name + ")",
                                "sizeof(" + rp + "->" + f.name + ")", d);
         }
-        indent(); out << "free(" << rp << ");\n";
+        indent(); out << "sc_recycle(" << rp << ");\n";
     }
 
     // 【F】收· com >> rpc（异步）：堆分配帧槽 _p->_crpcN，初始化数组后备/句柄上下文（无
@@ -6610,12 +6634,12 @@ struct CGen {
         if (r.structCommon.variadic)
             throw CompileError{"com >> rpc 暂不支持可变参数 rpc：" + r.name, r.line};
         const std::string rp = "_p->_crpc" + std::to_string(comRpcIdx++);
-        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)calloc(1, sizeof(struct "
+        indent(); out << rp << " = (struct " << scPfx(r.name) << " *)sc_chunk0(sizeof(struct "
                       << scPfx(r.name) << "));\n";
         // 数组后备（堆）+ com[...] 句柄上下文初始化（无让出）
         for (auto& f : r.structCommon.fields) {
             if (!f.type.arrayDims.empty()) {
-                indent(); out << rp << "->" << f.name << " = calloc(1, ";
+                indent(); out << rp << "->" << f.name << " = sc_chunk0(";
                 emitRpcArraySizeof(f); out << ");\n";
                 indent(); out << rp << "->" << rpcArraySizeName(f) << " = ";
                 emitRpcArraySizeof(f); out << ";\n";
@@ -6661,8 +6685,8 @@ struct CGen {
         }
         indent(); out << scPfx(r.name) << "_rpc(" << rp << ");\n";
         for (auto& f : r.structCommon.fields)
-            if (!f.type.arrayDims.empty()) { indent(); out << "free(" << rp << "->" << f.name << ");\n"; }
-        indent(); out << "free(" << rp << ");\n";
+            if (!f.type.arrayDims.empty()) { indent(); out << "sc_recycle(" << rp << "->" << f.name << ");\n"; }
+        indent(); out << "sc_recycle(" << rp << ");\n";
     }
 
     // 完成：写返回槽 → 释放帧 → future_done 唤醒上游（return）。
@@ -6678,7 +6702,7 @@ struct CGen {
         }
         indent();
         out << "{ sc_future *_r = _p->_ret; void *_res = " << res
-            << "; free(_p); sc_future_done(_r, _res); return; }\n";
+            << "; sc_recycle(_p); sc_future_done(_r, _res); return; }\n";
     }
 
     // 发出异步 rpc 体（语句序列；await 点切段，支持 if/while/do-while/经典 for 内 await）。
@@ -6813,7 +6837,7 @@ struct CGen {
         out << ") {\n";
         depth++;
         indent(); out << "struct " << scPfx(d.name) << " *_p = (struct " << scPfx(d.name)
-                      << " *)calloc(1, sizeof(struct " << scPfx(d.name) << "));\n";
+                      << " *)sc_chunk0(sizeof(struct " << scPfx(d.name) << "));\n";
         indent(); out << "_p->_state = 0;\n";
         indent(); out << "_p->_ret = sc_future_new();\n";
         for (auto& f : d.structCommon.fields) {

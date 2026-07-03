@@ -124,7 +124,7 @@ static int32_t sc_sync_roundtrip(char *path) {
 }
 
 static sc_future *sc_async_read__async(sc_com *rc) {
-    struct sc_async_read *_p = (struct sc_async_read *)calloc(1, sizeof(struct sc_async_read));
+    struct sc_async_read *_p = (struct sc_async_read *)sc_chunk0(sizeof(struct sc_async_read));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->rc = rc;
@@ -145,7 +145,7 @@ static void sc_async_read_rpc(struct sc_async_read *_p) {
     _s1: ;
     printf("  异步读回: n=%d\n", _p->n);
     _p->_ = 0;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 int32_t main(void) {

@@ -7,7 +7,7 @@
 #       run note(7)                # detach：线程结束后自释放
 #   - thread 对象由 run 内部联合分配（thread + rpc 参数单块），
 #     成员仅 id（跨平台统一线程 id）；join 后整块回收，指针失效
-#   - 线程休眠用 platform.h 的 ::P_usleep(us)（默认 -I，直接 inc）
+#   - 线程休眠用 sys 模块的 usleep(us)（inc sys.sc）
 #   - cond.wait 方法：条件变量等待 c.wait(&mu[, nsec, sec])
 #     nsec/sec 全 0 或省略 → 无限等待；调用前须已持有 mutex
 #   - pool 线程池：run<p> 目标为 pool 时任务入池排队执行
@@ -17,6 +17,7 @@
 #     透传给 m 模块的 thread_run 由 C 具体实现（仅独立线程，不适用 pool）
 #
 inc mt.sc
+inc sys.sc         # 微秒休眠 usleep
 
 # 共享上下文：互斥锁保护计数器
 def ctx: {
@@ -101,7 +102,7 @@ fnc main: i4
 
     # detach：无出参，线程结束后自释放
     run note(7)
-    ::P_usleep(50000)    # 等 detach 线程打印完（platform.h）
+    usleep(50000)    # 等 detach 线程打印完（sys）
 
     # try_lock：未占用时成功
     if c.mu.try_lock()

@@ -61,7 +61,7 @@ static int32_t sc_dev_write(sc_com *_this, void *buf, uint32_t *size) {
 }
 
 static sc_future *sc_handler__async(sc_com *c) {
-    struct sc_handler *_p = (struct sc_handler *)calloc(1, sizeof(struct sc_handler));
+    struct sc_handler *_p = (struct sc_handler *)sc_chunk0(sizeof(struct sc_handler));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->c = c;
@@ -90,7 +90,7 @@ static void sc_handler_rpc(struct sc_handler *_p) {
     _p->_state = 2; return;
     _s2: ;
     _p->_ = 0;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 int32_t main(void) {

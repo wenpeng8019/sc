@@ -73,7 +73,7 @@ static int64_t sc_file_seek(sc_com *_this, int64_t off, int32_t whence) {
     int w = (whence == 0) ? SEEK_SET : (whence == 1) ? SEEK_CUR
           : (whence == 2) ? SEEK_END : -1;
     if (w < 0) return -1;
-#if defined(_WIN32)
+#if P_WIN
     if (_fseeki64(d->fp, (long long)off, w) != 0) return -1;
     long long pos = _ftelli64(d->fp);
 #else

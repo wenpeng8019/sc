@@ -416,11 +416,12 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     tc.threadsLib = pp.threads;
     tc.debugTool  = pp.known ? pp.debug : "none";
 
-    // --check=mem：为托管目标注入 -fstack-protector-strong，由 C 编译器在局部缓冲与
-    // 返回地址之间插入栈哨兵，捕获栈溢出破坏返回跳转地址这类最难追踪的随机崩溃。
-    // 裸机（freestanding）跳过：通常无 __stack_chk_guard/__stack_chk_fail 运行时支持。
+    // --check=mem：为托管目标注入 -fstack-protector-strong（栈哨兵，捕获栈溢出破坏
+    // 返回地址）+ -DMEM_DEBUG（令 chunk 池给每块加尾金丝雀 + 双重释放/野指针检测，
+    // 覆盖默认走池化的胖 T@ 与 rpc 帧）。裸分配的 T<raw>() 则另由 codegen SC_CANARY 守护。
+    // 裸机（freestanding）跳过：通常无 __stack_chk_* / MEM_DEBUG 所需的 fprintf/abort 运行时支持。
     if (getMemCheck() && !tc.freestanding)
-        tc.cflags += " -fstack-protector-strong";
+        tc.cflags += " -fstack-protector-strong -DMEM_DEBUG";
 
     // host≠target（平台族不同）：不能在本机直接运行
     tc.crossRun = !tc.triple.empty() &&
@@ -1026,7 +1027,7 @@ static void applyAddModules(Program& prog, const std::filesystem::path& srcPath,
 }
 
 
-// 使 P_usleep / sc_thread_id / P_clock 等 platform 自有符号无需显式 inc 即被认作已知，
+// 使 sc_thread_id / P_clock / P_tick_ms 等 platform 自有符号无需显式 inc 即被认作已知，
 // 且 platform.h 后续增删符号自动生效，无需改编译器白名单。
 static void ensureBuiltinHeaderSymbols(const std::filesystem::path& baseDir) {
     static bool done = false;

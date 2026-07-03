@@ -284,6 +284,10 @@ struct Expr {
     // + 置位 → T__new_ref 把对象头标记为原子，sc_fat_bind/unbind 对该对象 in/out 用原子 RMW。
     bool ctorAtom = false;
 
+    // T<raw>() 自动指针裸分配构造标记（仅 Call 且 callee 为类型名的胖目标构造时有效）；
+    // + 置位 → T__new_ref 走 sc_alloc（libc/间接层）而非默认 chunk 池，释放走 sc_free。
+    bool ctorRaw = false;
+
     // C 桥接标记（仅 Ident）：源码以 :: 前缀书写（::name）。
     // + name 是 C 侧的函数/宏/符号，不参与 sc 符号解析（跳过未定义检查），
     //   转 C 时原样 emit。后接 (...) 即 C 函数/宏调用；裸写即取 C 符号值。

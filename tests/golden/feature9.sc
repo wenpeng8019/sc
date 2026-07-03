@@ -2,6 +2,8 @@
 
 inc mt.sc
 
+inc sys.sc
+
 def ctx: {
     mu: mutex
     n: i4
@@ -74,7 +76,7 @@ fnc main: i4
     t2->join()
     ::printf("threads done: n=%d\n", c.n)
     run note(7)
-    ::P_usleep(50000)
+    usleep(50000)
     if c.mu.try_lock()
         ::printf("try_lock ok\n")
         c.mu.unlock()

@@ -2473,19 +2473,10 @@ int32_t sc_crypto_verify(void *a, void *b, uint64_t len) {
 }
 int32_t sc_crypto_random(uint8_t *out, uint64_t len) {
     if (len == 0) return 0;
-#if defined(_WIN32)
-    P_rand_bytes(out, (size_t)len);
+    /* 交叉平台 CSPRNG 统一由 op 运行时提供（实现在 platform.h P_RAND_IMPL，op_impl.c 落盘）：
+     * mac/BSD arc4random、Win RtlGenRandom、Linux getrandom→/dev/urandom（不在此散落裸平台判定）。 */
+    sc_rand_bytes(out, (size_t)len);
     return 0;
-#else
-    {
-        FILE *fp = fopen("/dev/urandom", "rb");
-        size_t got;
-        if (!fp) return -1;
-        got = fread(out, 1, (size_t)len, fp);
-        fclose(fp);
-        return got == (size_t)len ? 0 : -1;
-    }
-#endif
 }
 
 /* ================================================================

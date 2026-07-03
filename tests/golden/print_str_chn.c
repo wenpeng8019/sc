@@ -25,17 +25,19 @@ static inline sc_string *sc_string__new_init(const char *s) {
     return _p;
 }
 
-static inline sc_string *sc_string__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(sc_string));
+static inline sc_string *sc_string__new_ref(int32_t _flags) {
+    sc_ref *_h = (sc_ref *)((_flags & SC_REF_RAW)
+        ? sc_alloc(SC_REF_HDR + sizeof(sc_string))
+        : sc_chunk(SC_REF_HDR + sizeof(sc_string)));
     if (!_h) return 0;
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;
     sc_string *_p = (sc_string *)((char *)_h + SC_REF_HDR);
     memset(_p, 0, sizeof(sc_string));
     return _p;
 }
 
-static inline sc_string *sc_string__new_ref_init(const char *s, int32_t _atom) {
-    sc_string *_p = sc_string__new_ref(_atom);
+static inline sc_string *sc_string__new_ref_init(const char *s, int32_t _flags) {
+    sc_string *_p = sc_string__new_ref(_flags);
     if (_p) sc_string_init(_p, s);
     return _p;
 }

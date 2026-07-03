@@ -2,12 +2,12 @@
 
 inc mt.sc
 
-var g_sess: session& = nil
+var g_sess: deferred& = nil
 
 var g_arg: i4 = 0
 
 rpc serve: i4, x: i4
-    var s: session& = async
+    var s: deferred& = async
     g_sess = s
     g_arg = x
     return 0

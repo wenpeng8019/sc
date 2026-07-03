@@ -5,6 +5,7 @@
 #      （与调度无关，输出确定）——验证 acquire/release 跨线程可见性与无锁正确性。
 inc adt.sc
 inc mt.sc
+inc sys.sc
 
 @def shared: {
     q: ring
@@ -16,7 +17,7 @@ inc mt.sc
     var i: i4 = 1
     for i = 1; i <= n; i++
         while !s->q.push(&i)        # 满则自旋让出
-            ::P_usleep(0)
+            usleep(0)
 
 @rpc consumer: s: shared&, n: i4
     var v: i4 = 0
@@ -25,7 +26,7 @@ inc mt.sc
             s->sum = s->sum + v
             s->got = s->got + 1
         else
-            ::P_usleep(0)
+            usleep(0)
 
 @fnc main: i4
     # ---------- 单线程确定性语义 ----------

@@ -220,7 +220,7 @@ static void sc_greet_body_rpc(struct sc_greet_body *_p) {
 }
 
 static sc_future *sc_serve__async(sc_com *c) {
-    struct sc_serve *_p = (struct sc_serve *)calloc(1, sizeof(struct sc_serve));
+    struct sc_serve *_p = (struct sc_serve *)sc_chunk0(sizeof(struct sc_serve));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->c = c;
@@ -245,7 +245,7 @@ static void sc_serve_rpc(struct sc_serve *_p) {
         case 12: goto _s12;
     }
     _s0: ;
-    _p->_crpc0 = (struct sc_greet *)calloc(1, sizeof(struct sc_greet));
+    _p->_crpc0 = (struct sc_greet *)sc_chunk0(sizeof(struct sc_greet));
     _p->_crpc0->a = 7;
     _p->_crpc0->b = 9;
     _p->_fut = sc_com_write_async(_p->c, (void *)&(_p->_crpc0->a), sizeof(_p->_crpc0->a));
@@ -256,8 +256,8 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     if (sc_future_await(_p->_fut, _p, (void (*)(void *))sc_serve_rpc)) goto _s2;
     _p->_state = 2; return;
     _s2: ;
-    free(_p->_crpc0);
-    _p->_crpc1 = (struct sc_greet *)calloc(1, sizeof(struct sc_greet));
+    sc_recycle(_p->_crpc0);
+    _p->_crpc1 = (struct sc_greet *)sc_chunk0(sizeof(struct sc_greet));
     _p->_fut = sc_com_read_async(_p->c, (void *)&(_p->_crpc1->a), sizeof(_p->_crpc1->a));
     if (sc_future_await(_p->_fut, _p, (void (*)(void *))sc_serve_rpc)) goto _s3;
     _p->_state = 3; return;
@@ -267,11 +267,11 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     _p->_state = 4; return;
     _s4: ;
     sc_greet_rpc(_p->_crpc1);
-    free(_p->_crpc1);
+    sc_recycle(_p->_crpc1);
     _p->msg[0] = 'h';
     _p->msg[1] = 'i';
     _p->msg[2] = 0;
-    _p->_crpc2 = (struct sc_greet_buf *)calloc(1, sizeof(struct sc_greet_buf));
+    _p->_crpc2 = (struct sc_greet_buf *)sc_chunk0(sizeof(struct sc_greet_buf));
     _p->_crpc2->tag = 42;
     _p->_crpc2->buf = _p->msg;
     _p->_crpc2->buf_size = sizeof(char[8]);
@@ -283,9 +283,9 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     if (sc_future_await(_p->_fut, _p, (void (*)(void *))sc_serve_rpc)) goto _s6;
     _p->_state = 6; return;
     _s6: ;
-    free(_p->_crpc2);
-    _p->_crpc3 = (struct sc_greet_buf *)calloc(1, sizeof(struct sc_greet_buf));
-    _p->_crpc3->buf = calloc(1, sizeof(char[8]));
+    sc_recycle(_p->_crpc2);
+    _p->_crpc3 = (struct sc_greet_buf *)sc_chunk0(sizeof(struct sc_greet_buf));
+    _p->_crpc3->buf = sc_chunk0(sizeof(char[8]));
     _p->_crpc3->buf_size = sizeof(char[8]);
     _p->_fut = sc_com_read_async(_p->c, (void *)&(_p->_crpc3->tag), sizeof(_p->_crpc3->tag));
     if (sc_future_await(_p->_fut, _p, (void (*)(void *))sc_serve_rpc)) goto _s7;
@@ -296,8 +296,8 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     _p->_state = 8; return;
     _s8: ;
     sc_greet_buf_rpc(_p->_crpc3);
-    free(_p->_crpc3->buf);
-    free(_p->_crpc3);
+    sc_recycle(_p->_crpc3->buf);
+    sc_recycle(_p->_crpc3);
     _p->n5 = 5;
     sc_fill_raw(&(_p->raw[0]));
     _p->_fut = sc_com_write_async(_p->c, (void *)&(_p->n5), sizeof(_p->n5));
@@ -308,7 +308,7 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     if (sc_future_await(_p->_fut, _p, (void (*)(void *))sc_serve_rpc)) goto _s10;
     _p->_state = 10; return;
     _s10: ;
-    _p->_crpc4 = (struct sc_greet_body *)calloc(1, sizeof(struct sc_greet_body));
+    _p->_crpc4 = (struct sc_greet_body *)sc_chunk0(sizeof(struct sc_greet_body));
     _p->_crpc4->body.size = 16;
     _p->_crpc4->body.ending = NULL;
     _p->_fut = sc_com_read_async(_p->c, (void *)&(_p->_crpc4->n), sizeof(_p->_crpc4->n));
@@ -322,9 +322,9 @@ static void sc_serve_rpc(struct sc_serve *_p) {
     _p->_state = 12; return;
     _s12: ;
     sc_greet_body_rpc(_p->_crpc4);
-    free(_p->_crpc4);
+    sc_recycle(_p->_crpc4);
     _p->_ = 0;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 int32_t main(void) {

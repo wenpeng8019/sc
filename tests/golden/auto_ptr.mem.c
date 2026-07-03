@@ -24,15 +24,23 @@ static inline sc_node *sc_node__new(void) {
     return _p;
 }
 
-static inline sc_node *sc_node__new_ref(int32_t _atom) {
-    char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof(sc_node) + SC_CANARY);
-    if (!_b) return 0;
-    sc_ref *_h = (sc_ref *)(_b + SC_CANARY);
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom | SC_REF_CANARY;
-    uintptr_t _m = sc_canary_magic(_b);
-    ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(sc_node);
-    *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(sc_node)) = _m;
-    sc_node *_p = (sc_node *)(_b + SC_CANARY + SC_REF_HDR);
+static inline sc_node *sc_node__new_ref(int32_t _flags) {
+    sc_ref *_h; sc_node *_p;
+    if (_flags & SC_REF_RAW) {
+        char *_b = (char *)malloc(SC_CANARY + SC_REF_HDR + sizeof(sc_node) + SC_CANARY);
+        if (!_b) return 0;
+        _h = (sc_ref *)(_b + SC_CANARY);
+        _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags | SC_REF_CANARY;
+        uintptr_t _m = sc_canary_magic(_b);
+        ((uintptr_t *)_b)[0] = _m; ((uintptr_t *)_b)[1] = sizeof(sc_node);
+        *(uintptr_t *)(_b + SC_CANARY + SC_REF_HDR + sizeof(sc_node)) = _m;
+        _p = (sc_node *)(_b + SC_CANARY + SC_REF_HDR);
+    } else {
+        _h = (sc_ref *)sc_chunk(SC_REF_HDR + sizeof(sc_node));
+        if (!_h) return 0;
+        _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;
+        _p = (sc_node *)((char *)_h + SC_REF_HDR);
+    }
     memset(_p, 0, sizeof(sc_node));
     return _p;
 }

@@ -30,13 +30,14 @@
 #       后续按语言特性需要扩展（原子操作/线程局部存储等）。
 
 # 平台锁层 opt-in：拉起 platform.h 的互斥/条件/屏障层，使下方 @def 可直接以平台
-# 句柄类型（::sc_mutex_t 等，'::' 逃逸到 C 域）为字段——布局精确、无堆分配、无占位缓冲。
+# 句柄类型（::mutex_t 等，'::' 逃逸到 C 域）为字段——布局精确、无堆分配、无占位缓冲。
 inc "mt_p.h"
+inc os.sc                 # 默认线程池取 CPU 核数（os 的 sc_ncpu）
 
 # ---------------- mutex：互斥锁 ----------------
 
 @def mutex: {
-    h: ::sc_mutex_t      # 平台锁句柄（内联、无堆分配；实现私有，仅经 P_mutex_* 操作）
+    h: ::mutex_t      # 平台锁句柄（内联、无堆分配；实现私有，仅经 P_mutex_* 操作）
 
     fnc init::           # 构造（声明即构造适用）
     fnc drop::           # 析构
@@ -48,7 +49,7 @@ inc "mt_p.h"
 # ---------------- cond：条件变量（配合 wait 方法使用） ----------------
 
 @def cond: {
-    h: ::sc_cond_t       # 平台条件变量句柄（内联；实现私有，仅经 P_cond_* 操作）
+    h: ::cond_t       # 平台条件变量句柄（内联；实现私有，仅经 P_cond_* 操作）
 
     fnc init::            # 构造（声明即构造适用）
     fnc drop::            # 析构
@@ -62,7 +63,7 @@ inc "mt_p.h"
 # ---------------- barrier：屏障（N 方汇合） ----------------
 
 @def barrier: {
-    h: ::sc_barrier_t     # 平台屏障句柄（内联 = mutex+cond+计数；实现私有，仅经 P_barrier_* 操作）
+    h: ::barrier_t     # 平台屏障句柄（内联 = mutex+cond+计数；实现私有，仅经 P_barrier_* 操作）
 
     fnc init:: n: u4      # 构造：n 方汇合（0 视为 1）
     fnc drop::            # 析构

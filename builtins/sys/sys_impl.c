@@ -13,6 +13,17 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/* 微秒休眠。Windows 的 Sleep 仅毫秒精度，不足 1ms 向上取整为 1ms
+ * （避免 usleep(0) 退化为让出时间片不休眠）。 */
+void sc_usleep(uint64_t us) {
+#if P_WIN
+    Sleep((DWORD)((us + 999ULL) / 1000ULL));
+#else
+    struct timespec ts = { (time_t)(us / 1000000ULL), (long)(us % 1000000ULL) * 1000L };
+    nanosleep(&ts, NULL);
+#endif
+}
+
 /**
  * @brief                       规范化目录路径（原地修改）
  *                              1. 替换 ~ 为 HOME 目录

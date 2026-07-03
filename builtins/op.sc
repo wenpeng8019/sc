@@ -138,6 +138,64 @@ def operand: {
     fnc test_and_set_ord_or_acq::        # 成功 seq_cst / 失败 acquire
 }
 
+# ---------------- clock：时钟（时刻/时长的采集与换算，默认导入，无需 inc） ----------------
+# 与 operand 同属默认导入的语法机制类型。内联持有一个平台时间值句柄（::clk_t，
+# timespec 封装，值语义、无堆分配）：先用 now/mono/cost 采集当前时刻或耗时到自身，
+# 再用 s/ms/us（整数四舍五入）或 s_f/ms_f/us_f（浮点）读为标量，或 diff 求两次采样
+# 之差（再读为时长）、gt/ge 比较先后。C 侧结构体 sc_clock 与各方法均为 op.h 内
+# static inline 薄封装，直转 platform.h「时间与时钟」段的 P_time_now / P_clock_now /
+# P_cost_now 与 clock_* 换算宏——零调用开销；跨 Win/POSIX 由平台层负责。
+@def clock: {
+    h: ::clk_t            # 平台时间值句柄（内联；实现私有，仅经 P_* 采集、clock_* 换算）
+
+    # 采集：把当前时刻/耗时写入自身
+    fnc now::             # 墙钟（系统实时时间，受调时影响）
+    fnc mono::            # 单调钟（不受调时影响，适合测时长）
+    fnc cost:: proc: bool # CPU 耗时（时长）：proc=1 本进程累计 / 0 当前线程累计
+
+    # 换算：把已采集的时刻/时长读为标量（无后缀四舍五入取整，_f 为浮点）
+    fnc s::    u8         # 秒
+    fnc ms::   u8         # 毫秒
+    fnc us::   u8         # 微秒
+    fnc s_f::  f8         # 秒（浮点）
+    fnc ms_f:: f8         # 毫秒（浮点）
+    fnc us_f:: f8         # 微秒（浮点）
+
+    # 求差与比较（other 为另一 clock 采样）
+    fnc diff:: clock, other: clock    # 返回 self - other（新 clock 值；再 .s()/.ms()/.us() 取时长）
+    fnc gt::   bool, other: clock     # self > other（时刻/时长比较）
+    fnc ge::   bool, other: clock     # self >= other
+}
+
+# ---------------- tick：单调时钟快照与差值（便捷计时，默认导入，无需 inc） ----------------
+# 无需构造 clock 对象即可直接取单调钟当前刻度（秒/毫秒/微秒，u8）打点测时长，
+# 配合 tick_diff 求两次打点之差（now<=nlast 即回绕/乱序时返回 0）。底层即 clock 的
+# 单调钟（platform.h sc_tick_*，static inline 直转 P_clock_now + clock_* 换算，零开销）。
+@fnc tick_s::  u8                         # 单调钟当前刻度（秒）
+@fnc tick_ms:: u8                         # 单调钟当前刻度（毫秒）
+@fnc tick_us:: u8                         # 单调钟当前刻度（微秒）
+@fnc tick_diff:: u8, now: u8, nlast: u8   # now - nlast（now<=nlast 时返回 0）
+
+# ---------------- 随机数：系统 CSPRNG（默认导入，无需 inc） ----------------
+# op 单元恒被链接、op.h 默认带入每个 C 单元，故随机接口全库共用同一份系统随机源：
+#   mac/BSD arc4random_buf、Windows RtlGenRandom、Linux getrandom→/dev/urandom——
+#   均一次填满整块、无「种子」概念（系统源全不可用时才逐字节降级 rand()）。
+# 实现见 op_impl.c（薄封装转调），平台层见 platform.h P_RAND_IMPL。
+@fnc rand_bytes:: buf: &, n: u8       # 用 CSPRNG 填满 n 字节（n=0 空操作）
+@fnc rand32:: u4                      # 32 位随机整数（非零）
+@fnc rand64:: u8                      # 64 位随机整数（非零）
+
+# ---------------- 分配间接层：alloc / realloc / free（默认导入，无需 inc） ----------------
+# 语言内核堆对象与 adt 缓冲统一经此三件套分配·重分配·释放，便于整体切换分配器：
+#   默认（未定义 SC_POOL）：op.h 内为宏直通 libc malloc/realloc/free —— 零开销；
+#   -DSC_POOL（需链接 mem）：转发到 mem 池（size-class 每线程私有堆）。
+# 因 op 单元恒被链接、op.h 默认带入每个 C 单元，此层随构建在宏↔函数间透明切换，
+#   sc 侧调用点始终写 alloc/realloc/free 即可（无需 ::sc_alloc 裸逃逸）。
+# 注：确定性「恒池化」四件套 chunk/chunk0/refit/recycle 属 mem 模块（inc mem.sc）。
+@fnc alloc:: &, n: u8                 # 分配 n 字节，返回裸指针（对应 malloc）
+@fnc realloc:: &, p: &, n: u8         # 扩缩容并保留内容，返回新指针（对应 realloc）
+@fnc free:: p: &                      # 释放 p（对应 free；free(nil) 由底层保证安全）
+
 # ---------------- sizeof / offsetof：编译期取值（语言关键字）----------------
 # 二者为语言关键字（lexer KwSizeof / KwOffsetof），编译器直接转译为 C 同名运算，
 # 结果类型 u8（size_t）；无 sc 侧声明、不依赖任何模块。
@@ -428,20 +486,20 @@ def operand: {
     fnc ctx:: &         # f.ctx()：取发起时挂载的用户上下文（无则 nil）
 }
 
-# ---------------- session：rpc 延迟应答会话句柄（接口协议） ----------------
+# ---------------- deferred：rpc 延迟应答句柄（接口协议） ----------------
 # 与 future（fnc 单线程异步：async→future→done）对称的「rpc 延迟应答」机制：sync 驱动的
-# rpc 体内裸 `async` 取出当前调用会话（求值为 session&），rpc 体 return 不再自动应答；之后
+# rpc 体内裸 `async` 取出当前待应答调用（求值为 deferred&），rpc 体 return 不再自动应答；之后
 # （任意线程、任意时刻）`done s, result` 兑现——写回调用方返回槽并唤醒其阻塞，与 done future
-# 同形。session 是 op 层接口协议（仿 queue/promise）：respond 为每对象方法指针，由消息队列
+# 同形。deferred 是 op 层接口协议（仿 queue/promise）：respond 为每对象方法指针，由消息队列
 # 实现模块（mt，inc mt.sc）填充，故语言内核（done 兑现）经协议指针派发、零 emit mt 符号。
 #   rpc serve: i4, x: i4
-#       var s: session& = async    # 取当前会话：本次 sync 改为延迟应答（return 值被忽略）
+#       var s: deferred& = async   # 取当前待应答调用：本次 sync 改为延迟应答（return 值被忽略）
 #       g_saved = s                # 存起来：转交 / 攒批 / 等条件成熟
 #       return 0
 #   # 之后任意线程、任意时刻：
 #   done s, result                 # 兑现：写回调用方返回槽 + 唤醒（result 自动类型擦除）
 # 句柄由实现模块在调用方栈上构造（随调用方阻塞存活）；C 结构体（vtable）见 op.h。
-@def session: {
+@def deferred: {
     h: &                 # 实现私有区指针（实现私有）
 
     fnc respond: src: &, n: u8   # done 兑现：从 src 拷 n 字节到调用方返回槽 + 唤醒（n=0 无结果）

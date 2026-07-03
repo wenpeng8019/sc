@@ -4,8 +4,8 @@
 #   SHA-1 + Base64 算握手 accept key，把 RFC 6455 的握手 + 帧编解码封成可复用的 async rpc。
 #   协议完备性移植自 p2p_server/custom_ws.c（回调框架），适配为 sc 的 await/rpc 拉取模型。
 #
-# 依赖：inc io.sc（tcp 设备 + com）/ inc crypto.sc（crypto_sha1 + crypto_base64）/ inc async.sc（事件循环）
-#   / inc os.sc（os_rand：客户端随机掩码键）。
+# 依赖：inc io.sc（tcp 设备 + com）/ inc crypto.sc（crypto_sha1 + crypto_base64）/ inc async.sc（事件循环）。
+#   随机数（客户端随机掩码键）经 op 层 rand_bytes（CSPRNG，默认导入，无需 inc）。
 #   帧/握手报文统一用定长 char&/u1& 缓冲（调用方提供容量）：帧编解码是字节级热路径，
 #   定长缓冲零堆分配、零 adt 依赖，比堆 string 更契合 codec 场景（非可见性所迫）。
 #   使用方在自己的 async rpc 里 `await ws_handshake(c)` / `await ws_recv(&cn,...)` / `await ws_send(...)`。
@@ -13,7 +13,7 @@
 # RFC 6455 完备特性：
 #   · 握手：服务端解析 Sec-WebSocket-Key、算 accept、回 101；客户端发升级请求并读 101。
 #   · 帧解析：2/4/10 字节帧头、126/127 扩展长度、掩码键；RSV 位必须为 0；保留 opcode 拒绝。
-#   · 掩码角色（§5.3）：服务端收客户端帧必须带掩码、自身发帧不掩码；客户端反之（os_rand 随机键）。
+#   · 掩码角色（§5.3）：服务端收客户端帧必须带掩码、自身发帧不掩码；客户端反之（rand_bytes 随机键）。
 #   · 控制帧（§5.5）：必须 FIN 且 ≤125；PING 自动回 PONG；CLOSE 自动回复并校验状态码 + reason UTF-8。
 #   · 分片（§5.4）：CONTINUATION 状态机一致性校验 + 重组到调用方缓冲；容量不足回 1009 并关闭（不流失步）。
 #   · UTF-8（§8.1）：TEXT（含跨分片）payload 增量 DFA 校验，FIN 时确保多字节序列不被截断。
@@ -27,7 +27,6 @@
 inc io.sc
 inc crypto.sc
 inc async.sc
-inc os.sc
 
 # op.h 恒链接的异步 io 桥接原语（C ABI：future *com_*_async(struct com*, void*, uint32_t)）。
 # 声明为 @fnc 即可在 async rpc 里 `await` —— 得到运行时变长的异步读/写。
@@ -297,7 +296,7 @@ var g_ws_utf8d[364]: u1 = [
         hlen = hlen + 4
     return hlen
 
-# 内部：发送一帧控制/数据（pl[0..plen)）。服务端不加掩码；客户端用 os_rand 随机掩码键
+# 内部：发送一帧控制/数据（pl[0..plen)）。服务端不加掩码；客户端用 rand_bytes 随机掩码键
 # 就地掩码 pl（会修改 pl 缓冲）。返回 0 / <0 错。
 @rpc ws_emit: i4, cn: ws_conn&, opcode: u1, pl: u1&, plen: u4, c: com&
     var hdr[14]: u1
@@ -305,7 +304,7 @@ var g_ws_utf8d[364]: u1 = [
     var domask: i4 = 0
     if cn->is_server == 0
         domask = 1
-        os_rand((&mk[0]: &), 4)
+        rand_bytes((&mk[0]: &), 4)
     var hlen: i4 = ws_build_header((&hdr[0]: u1&), opcode, plen, domask, (&mk[0]: u1&))
     if domask != 0 && plen > 0
         ws_unmask(pl, plen, (&mk[0]: u1&))
@@ -470,13 +469,13 @@ var g_ws_utf8d[364]: u1 = [
 
 # ================================ 发帧 ================================
 
-# 发一帧。mask!=0（客户端）：用 os_rand 生成随机掩码键并就地掩码 payload（会修改缓冲）。
+# 发一帧。mask!=0（客户端）：用 rand_bytes 生成随机掩码键并就地掩码 payload（会修改缓冲）。
 # RFC §5.3 要求客户端掩码键不可预测，故每帧重新随机。返回 0 / <0 错。
 @rpc ws_send: i4, opcode: u1, payload: u1&, plen: u4, mask: i4, c: com&
     var hdr[14]: u1
     var maskkey[4]: u1
     if mask != 0
-        os_rand((&maskkey[0]: &), 4)
+        rand_bytes((&maskkey[0]: &), 4)
     var hlen: i4 = ws_build_header((&hdr[0]: u1&), opcode, plen, mask, (&maskkey[0]: u1&))
     if mask != 0 && plen > 0
         ws_unmask(payload, plen, (&maskkey[0]: u1&))
@@ -501,7 +500,7 @@ var g_ws_utf8d[364]: u1 = [
     var domask: i4 = 0
     if cn->is_server == 0
         domask = 1
-        os_rand((&mk[0]: &), 4)
+        rand_bytes((&mk[0]: &), 4)
     var hlen: i4 = ws_build_header((&hdrtmp[0]: u1&), opcode, plen, domask, (&mk[0]: u1&))
     # 把帧头写进预留前缀末尾（紧靠载荷），头+载荷连续；仅拷贝 ≤14 字节小头，载荷不动。
     var off: u4 = (WS_HDR_MAX: u4) - (hlen: u4)

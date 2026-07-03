@@ -1,8 +1,8 @@
 /* mt_p.h —— mt 模块的「平台锁层」opt-in 前置头
  *
  * 供 mt.sc 经 inc "mt_p.h" 拉起 platform.h 的互斥/条件变量/屏障层
- * （sc_mutex_t / sc_cond_t / sc_barrier_t + P_* 操作），使 @def 可直接以平台句柄
- * 类型为字段（h: ::sc_mutex_t）——布局精确、无需不透明字节缓冲占位。
+ * （mutex_t / cond_t / barrier_t + P_* 操作），使 @def 可直接以平台句柄
+ * 类型为字段（h: ::mutex_t）——布局精确、无需不透明字节缓冲占位。
  *
  * 机制：platform.h 的互斥/条件/屏障层置于主 include guard 之外的「P_MT_IMPL 延迟
  * 展开块」（见 platform.h 文末）。编译器为每个生成单元在顶部自动 #include "platform.h"

@@ -12,7 +12,6 @@
 
 inc async.sc
 inc io.sc
-inc os.sc
 inc sys.sc
 inc ../utils/ws.sc
 
@@ -51,7 +50,7 @@ rpc ws_echo_server: ret, c: com&
 rpc send_raw: ret, b0: u1, payload: u1&, plen: u4, c: com&
     var hdr[14]: u1
     var mk[4]: u1
-    os_rand((&mk[0]: &), 4)
+    rand_bytes((&mk[0]: &), 4)
     var hl: i4 = ws_build_header((&hdr[0]: u1&), 0, plen, 1, (&mk[0]: u1&))
     hdr[0] = b0
     if plen > 0

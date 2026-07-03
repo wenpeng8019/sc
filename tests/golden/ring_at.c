@@ -2,6 +2,7 @@
 #include "platform.h"
 #include "builtins/adt/adt.h"
 #include "builtins/mt/mt.h"
+#include "builtins/sys/sys.h"
 
 typedef struct sc_shared sc_shared;
 
@@ -44,34 +45,35 @@ typedef struct sc_com__project {
 
 void sc_mod_adt_init(void); void sc_mod_adt_drop(void);
 void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
+void sc_mod_sys_init(void); void sc_mod_sys_drop(void);
 
 void sc_producer_rpc(struct sc_producer *_p) {
-    /* line 16 */
-    int32_t i = 1;
     /* line 17 */
+    int32_t i = 1;
+    /* line 18 */
     for (i = 1; i <= _p->n; i++) {
-        /* line 18 */
+        /* line 19 */
         while (!(sc_ring_push(&_p->s->q, &(i)))) {
-            /* line 19 */
-            P_usleep(0);
+            /* line 20 */
+            sc_usleep(0);
         }
     }
 }
 
 void sc_consumer_rpc(struct sc_consumer *_p) {
-    /* line 22 */
-    int32_t v = 0;
     /* line 23 */
+    int32_t v = 0;
+    /* line 24 */
     while (_p->s->got < _p->n) {
-        /* line 24 */
+        /* line 25 */
         if (sc_ring_pop(&_p->s->q, &(v))) {
-            /* line 25 */
-            _p->s->sum = (_p->s->sum + v);
             /* line 26 */
+            _p->s->sum = (_p->s->sum + v);
+            /* line 27 */
             _p->s->got = (_p->s->got + 1);
         } else {
-            /* line 28 */
-            P_usleep(0);
+            /* line 29 */
+            sc_usleep(0);
         }
     }
 }
@@ -80,113 +82,115 @@ int32_t main(void) {
     SC_CONSOLE_UTF8();
     sc_mod_adt_init();
     sc_mod_mt_init();
-    /* line 32 */
-    int32_t x = 0;
+    sc_mod_sys_init();
     /* line 33 */
-    sc_ring r = {0};
+    int32_t x = 0;
     /* line 34 */
-    sc_ring_init(&r, sizeof(x), 3);
+    sc_ring r = {0};
     /* line 35 */
+    sc_ring_init(&r, sizeof(x), 3);
+    /* line 36 */
     uint64_t _sq0 = sc_ring_cap(&r);
     bool _sq1 = sc_ring_is_empty(&r);
     bool _sq2 = sc_ring_is_full(&r);
     printf("cap=%llu empty=%d full=%d\n", _sq0, _sq1, _sq2);
-    /* line 37 */
-    x = 10;
     /* line 38 */
-    sc_ring_push(&r, &(x));
+    x = 10;
     /* line 39 */
-    x = 20;
+    sc_ring_push(&r, &(x));
     /* line 40 */
-    sc_ring_push(&r, &(x));
+    x = 20;
     /* line 41 */
-    x = 30;
+    sc_ring_push(&r, &(x));
     /* line 42 */
-    sc_ring_push(&r, &(x));
+    x = 30;
     /* line 43 */
-    x = 40;
-    /* line 44 */
     sc_ring_push(&r, &(x));
+    /* line 44 */
+    x = 40;
     /* line 45 */
+    sc_ring_push(&r, &(x));
+    /* line 46 */
     uint64_t _sq3 = sc_ring_len(&r);
     bool _sq4 = sc_ring_is_full(&r);
     bool _sq5 = sc_ring_push(&r, &(x));
     printf("len=%llu full=%d push_when_full=%d\n", _sq3, _sq4, _sq5);
-    /* line 47 */
-    int32_t *pk = ((int32_t*)(sc_ring_peek(&r)));
     /* line 48 */
+    int32_t *pk = ((int32_t*)(sc_ring_peek(&r)));
+    /* line 49 */
     printf("peek=%d len_after_peek=%llu\n", pk[0], sc_ring_len(&r));
-    /* line 50 */
-    int32_t v = 0;
     /* line 51 */
+    int32_t v = 0;
+    /* line 52 */
     while (sc_ring_pop(&r, &(v))) {
-        /* line 52 */
+        /* line 53 */
         printf("pop=%d\n", v);
     }
-    /* line 53 */
+    /* line 54 */
     bool _sq6 = sc_ring_is_empty(&r);
     uint64_t _sq7 = sc_ring_len(&r);
     bool _sq8 = sc_ring_pop(&r, &(v));
     printf("drained empty=%d len=%llu pop_when_empty=%d\n", _sq6, _sq7, _sq8);
-    /* line 57 */
-    x = 100;
     /* line 58 */
-    sc_ring_push(&r, &(x));
+    x = 100;
     /* line 59 */
-    x = 200;
-    /* line 60 */
     sc_ring_push(&r, &(x));
+    /* line 60 */
+    x = 200;
     /* line 61 */
-    sc_ring_pop(&r, &(v));
+    sc_ring_push(&r, &(x));
     /* line 62 */
-    printf("wrap pop=%d len=%llu\n", v, sc_ring_len(&r));
+    sc_ring_pop(&r, &(v));
     /* line 63 */
+    printf("wrap pop=%d len=%llu\n", v, sc_ring_len(&r));
+    /* line 64 */
     sc_ring_drop(&r);
-    /* line 66 */
-    sc_shared s = {0};
     /* line 67 */
-    s.sum = 0;
+    sc_shared s = {0};
     /* line 68 */
-    s.got = 0;
+    s.sum = 0;
     /* line 69 */
-    sc_ring_init(&s.q, sizeof(x), 16);
+    s.got = 0;
     /* line 70 */
-    int32_t n = 50000;
+    sc_ring_init(&s.q, sizeof(x), 16);
     /* line 71 */
-    sc_thread *tp = NULL;
+    int32_t n = 50000;
     /* line 72 */
-    sc_thread *tc = NULL;
+    sc_thread *tp = NULL;
     /* line 73 */
+    sc_thread *tc = NULL;
+    /* line 74 */
     {
         struct sc_producer _rp = {0};
         _rp.s = &(s);
         _rp.n = n;
         sc_thread_run((void (*)(void *))sc_producer_rpc, &_rp, sizeof(_rp), (sc_thread **)(&(tp)), (uint32_t)0, (uint8_t)0);
     }
-    /* line 74 */
+    /* line 75 */
     {
         struct sc_consumer _rp = {0};
         _rp.s = &(s);
         _rp.n = n;
         sc_thread_run((void (*)(void *))sc_consumer_rpc, &_rp, sizeof(_rp), (sc_thread **)(&(tc)), (uint32_t)0, (uint8_t)0);
     }
-    /* line 75 */
-    sc_thread_join(tp);
     /* line 76 */
-    sc_thread_join(tc);
+    sc_thread_join(tp);
     /* line 77 */
-    int64_t expect = (((int64_t)(n)) * (n + 1)) / 2;
+    sc_thread_join(tc);
     /* line 78 */
+    int64_t expect = (((int64_t)(n)) * (n + 1)) / 2;
+    /* line 79 */
     printf("concurrent got=%d sum=%lld expect=%lld ok=%d\n", s.got, s.sum, expect, s.sum == expect);
-    /* line 80 */
+    /* line 81 */
     bool _sq9 = sc_ring_is_empty(&s.q);
     uint64_t _sq10 = sc_ring_cap(&s.q);
     printf("final empty=%d cap=%llu\n", _sq9, _sq10);
-    /* line 81 */
+    /* line 82 */
     sc_ring_drop(&s.q);
-    /* line 83 */
+    /* line 84 */
     {
         int32_t _ret = 0;
+        sc_mod_sys_drop();
         sc_mod_mt_drop();
         sc_mod_adt_drop();
         return _ret;

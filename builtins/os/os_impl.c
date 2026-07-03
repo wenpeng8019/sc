@@ -4,14 +4,16 @@
 #include "os.h"
 #include "platform.h"
 
-/* ---------------- os_rand：填充 n 字节密码学强随机 ----------------
- * 直接转发 platform.h 的 P_rand_bytes（CSPRNG）：
- *   macOS/BSD arc4random、Windows rand_s、Linux /dev/urandom。
- * 恒成功返回 0。用于 WS 客户端掩码键等需不可预测随机处（RFC 6455 §5.3）。
- */
-int32_t sc_os_rand(void *buf, uint32_t n) {
-    P_rand_bytes(buf, (size_t)n);
-    return 0;
+/* CPU 逻辑核数（至少返回 1）。跨平台分支经 platform.h（P_WIN/POSIX） */
+uint32_t sc_ncpu(void) {
+#if P_WIN
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwNumberOfProcessors > 0 ? (uint32_t)si.dwNumberOfProcessors : 1;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (uint32_t)n : 1;
+#endif
 }
 
 /* （待实现：网卡/防火墙/路由等系统管理查询；fs_*（文件/目录/路径）/ env_*（环境变量）/

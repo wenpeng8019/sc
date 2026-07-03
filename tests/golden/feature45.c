@@ -2,7 +2,7 @@
 #include "platform.h"
 #include "builtins/mt/mt.h"
 
-static sc_session *sc_g_sess = NULL;
+static sc_deferred *sc_g_sess = NULL;
 static int32_t sc_g_arg = 0;
 struct sc_serve {
     int32_t _;
@@ -37,7 +37,7 @@ void sc_mod_mt_init(void); void sc_mod_mt_drop(void);
 
 static void sc_serve_rpc(struct sc_serve *_p) {
     /* line 15 */
-    sc_session *s = sc_op_session_current();
+    sc_deferred *s = sc_op_deferred_current();
     /* line 16 */
     sc_g_sess = s;
     /* line 17 */

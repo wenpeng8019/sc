@@ -24,10 +24,12 @@ static inline sc_node *sc_node__new(void) {
     return _p;
 }
 
-static inline sc_node *sc_node__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(sc_node));
+static inline sc_node *sc_node__new_ref(int32_t _flags) {
+    sc_ref *_h = (sc_ref *)((_flags & SC_REF_RAW)
+        ? sc_alloc(SC_REF_HDR + sizeof(sc_node))
+        : sc_chunk(SC_REF_HDR + sizeof(sc_node)));
     if (!_h) return 0;
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;
     sc_node *_p = (sc_node *)((char *)_h + SC_REF_HDR);
     memset(_p, 0, sizeof(sc_node));
     return _p;

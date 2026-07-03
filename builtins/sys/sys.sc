@@ -187,6 +187,10 @@ def ARGS_PRE: cb_pre, name, s_cmd, l_cmd, desc
 @fnc ARGS_ls_count:: i4, ls: const char&&
 
 
+# ---------------- 休眠（C 实现接口）----------------
+# 微秒休眠。Windows 的 Sleep 仅毫秒精度，不足 1ms 向上取整为 1ms。
+@fnc usleep:: us: u8
+
 # ---------------- 系统路径查询（C 实现接口）----------------
 # 返回码约定（ret，即 i4 语义别名）：
 #   0  成功

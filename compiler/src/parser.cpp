@@ -1619,6 +1619,15 @@ struct Parser {
             advance(); advance(); advance();   // 消费 `< atom >`
             pendingAtom = true;
         }
+        // T<raw>() 自动指针裸分配构造：同形于 T<atom>()，退化为 sc_alloc（libc）而非默认 chunk 池。
+        bool pendingRaw = false;
+        if (!pendingAtom && e->kind == Expr::Ident && atOp("<") &&
+            peek().kind == Tok::Ident && peek().text == "raw" &&
+            peek(2).kind == Tok::Op && peek(2).text == ">" &&
+            peek(3).kind == Tok::LParen) {
+            advance(); advance(); advance();   // 消费 `< raw >`
+            pendingRaw = true;
+        }
         for (;;) {
             if (accept(Tok::LParen)) { // 函数调用：expr(args)
                 exprBracket++;
@@ -1627,6 +1636,7 @@ struct Parser {
                 if (hasSofOpts) { call->sofOpts = std::move(pendingSofOpts); hasSofOpts = false; }
                 if (hasFutureId) { call->futureId = std::move(pendingFutureId); hasFutureId = false; }
                 if (pendingAtom) { call->ctorAtom = true; pendingAtom = false; }
+                if (pendingRaw) { call->ctorRaw = true; pendingRaw = false; }
                 skipNlInBracket();
                 if (!at(Tok::RParen)) {
                     for (;;) {
@@ -1725,10 +1735,10 @@ struct Parser {
         if (at(Tok::KwAsync)) {
             auto e = mk(Expr::Async);
             advance();
-            // 裸 async（其后即换行/终止）：取当前 sync 驱动 rpc 的调用会话，求值为 session&
-            //   （rpc 延迟应答，a 留空区分于带操作数的 future/promise 发起形态，见 op.sc @def session）。
+            // 裸 async（其后即换行/终止）：取当前 sync 驱动 rpc 的待应答调用，求值为 deferred&
+            //   （rpc 延迟应答，a 留空区分于带操作数的 future/promise 发起形态，见 op.sc @def deferred）。
             if (at(Tok::Newline))
-                return e;                       // a==nullptr：裸 async → session&
+                return e;                       // a==nullptr：裸 async → deferred&
             parseTargetOptsBlock(e->b, e->syncOpts, "async");   // 可选 <q, prio:N, delay:ms>
             e->a = parseUnary();                // 操作数：rpc 调用
             return e;

@@ -5,6 +5,7 @@
  */
 #define P_LOG_SYS_IMPL  /* 在本 TU 内展开 platform.h 的 P_log_sys 系统日志实现（print 用） */
 #define P_MT_IMPL       /* 在本 TU 内展开 platform.h 的互斥/条件变量/线程层（内核 g_mu、线程 id 用） */
+#define P_RAND_IMPL     /* 在本 TU 内落盘 platform.h 的随机数实现（sc_rand_* 薄封装转调；全库唯一一份） */
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include "op.h"
 
@@ -22,6 +23,12 @@ void *sc_alloc(size_t n)            { return sc_chunk(n); }
 void *sc_realloc(void *p, size_t n) { return sc_refit(p, n); }
 void  sc_free(void *p)              { sc_recycle(p); }
 #endif
+
+/* ---------------- 随机数运行时（薄封装 platform.h 的 P_RAND_IMPL 平台层，契约见 op.h） ----------------
+ * op 单元恒被链接（op.sc 默认导入），故全库共用这一份系统 CSPRNG 随机源；os/crypto 等模块转调此层。 */
+void     sc_rand_bytes(void *buf, size_t n) { P_rand_bytes(buf, (size_t)n); }
+uint32_t sc_rand32(void)                    { return P_rand32(); }
+uint64_t sc_rand64(void)                    { return P_rand64(); }
 
 /* 异步内核的平台相关头（多路复用后端：epoll/kqueue/IOCP/poll、自管道、互斥）在
  * 文件末尾的「异步内核」段按平台 #ifdef 引入，使本文件在 POSIX 与 Windows 均可编译。 */
@@ -52,15 +59,17 @@ void sc_fat_on_zero(sc_fat *f) { sc_fat_on_zero_d(f, (void (*)(void *))0); }
 /* 入边归零（in→0）：堆对象先调目标类型析构 dtor（清子成员 → out 递减），再判 out。
  *   dtor != NULL 且 heap → 先析构（栈值对象走退域 RAII drop，不在此重复析构，故 heap 守卫）。
  *   out != 0（析构后仍持出边）→ 报「未清理」，不释放（释放会令其子目标 in 计数失衡）。
- *   out == 0 && heap → 释放整块（--check=mem 经 canary 校验）。 */
+ *   out == 0 && heap → 释放整块：默认胖 T@ 走 chunk 池（sc_recycle）；T<raw>() 走 sc_free；
+ *   --check=mem 裸块经 sc_canary_free 校验头尾哨兵。 */
 void sc_fat_on_zero_d(sc_fat *f, void (*dtor)(void *)) {
     sc_ref *r = (sc_ref *)f->tar;          /* in 为 sc_ref 首成员，故 &ref->in == ref == 块首 */
     if (!r) return;
     if (dtor && r->heap) dtor(f->p);       /* 堆对象 in→0：先析构，让其清理子成员（out 递减） */
     if (r->out != 0) { sc_ref_check(r, "对象"); return; }  /* 析构后仍持出边 → 报未清理，不释放 */
     if (!r->heap) return;                  /* 栈/全局对象：不释放 */
-    if (r->flags & SC_REF_CANARY) { sc_canary_free(r); return; }  /* --check=mem：校验头尾哨兵 */
-    sc_free(r);                            /* 堆对象 in==0 && out==0 → 释放整块（含头；经分配间接层） */
+    if (r->flags & SC_REF_CANARY) { sc_canary_free(r); return; }  /* --check=mem 裸块：校验头尾哨兵 */
+    if (r->flags & SC_REF_RAW)    { sc_free(r);        return; }  /* T<raw>()：裸分配 → 经间接层释放 */
+    sc_recycle(r);                         /* 默认：胖 T@ 走 chunk 池 → 池回收（含头） */
 }
 
 /* --check=mem：ref 头堆对象带头尾 canary。块首 = (char*)r - SC_CANARY；
@@ -664,18 +673,18 @@ sc_future *sc_future_new(void) {
     return f;
 }
 
-/* ---------------- session：rpc 延迟应答会话 TLS（见 op.h；后端中立） ----------------
- * 当前正在执行的 rpc 调用会话 + 是否被「裸 async」领取，按线程隔离（消费者各自一份）。
+/* ---------------- deferred：rpc 延迟应答句柄 TLS（见 op.h；后端中立） ----------------
+ * 当前正在执行的 rpc 调用 + 是否被「裸 async」领取，按线程隔离（消费者各自一份）。
  * 纯本线程读写、无跨线程共享，故无需加锁；身份对象由实现模块（mt）在调用方栈构造，
  * op 内核只透传指针。begin 在执行 rpc 体前调用、current 由体内裸 async 取用并置领取标记、
  * taken 在体返回后查询以决定即时应答（未领取）抑或延迟应答（已领取，等将来 done 兑现）。
  * 与异步后端（poll/libuv）无关，故置于后端条件编译之外。 */
-static TLS sc_session *g_cur_session;
-static TLS int      g_cur_session_taken;
+static TLS sc_deferred *g_cur_deferred;
+static TLS int      g_cur_deferred_taken;
 
-void sc_op_session_begin(sc_session *s) { g_cur_session = s; g_cur_session_taken = 0; }
-sc_session *sc_op_session_current(void) { g_cur_session_taken = 1; return g_cur_session; }
-int sc_op_session_taken(void) { return g_cur_session_taken; }
+void sc_op_deferred_begin(sc_deferred *s) { g_cur_deferred = s; g_cur_deferred_taken = 0; }
+sc_deferred *sc_op_deferred_current(void) { g_cur_deferred_taken = 1; return g_cur_deferred; }
+int sc_op_deferred_taken(void) { return g_cur_deferred_taken; }
 
 #ifdef SCC_WITH_UV
 /* ===================== 后端 B：libuv（-DSCC_WITH_UV） ===================== */
@@ -935,13 +944,7 @@ typedef int SC_FD;
 #  define SC_FD_NONE (-1)
 #endif
 
-static sc_mutex_t g_mu;                  /* 就绪队列 / g_pending 的跨线程互斥 */
-
-static uint64_t now_ms(void) {
-    P_clock c;
-    P_clock_now(&c);                    /* CLOCK_MONOTONIC */
-    return (uint64_t)c.tv_sec * 1000ull + (uint64_t)c.tv_nsec / 1000000ull;
-}
+static mutex_t g_mu;                  /* 就绪队列 / g_pending 的跨线程互斥 */
 
 /* delay 定时器节点（单调时钟截止） */
 typedef struct timer_node {
@@ -1355,7 +1358,7 @@ static void run_loop(void) {
 
         int timeout = -1;
         if (g_timers) {
-            uint64_t now = now_ms();
+            uint64_t now = sc_tick_ms();
             uint64_t nearest = 0; int have = 0;
             for (timer_node *t = g_timers; t; t = t->next)
                 if (!have || t->deadline_ms < nearest) { nearest = t->deadline_ms; have = 1; }
@@ -1365,7 +1368,7 @@ static void run_loop(void) {
         else if (any_needs_poll && (timeout < 0 || timeout > 1)) timeout = 1;
 
         mux_wait(timeout);
-        fire_timers(now_ms());
+        fire_timers(sc_tick_ms());
         execute_ready();
     }
 }
@@ -1387,7 +1390,7 @@ void *sc_op_uv_loop(void) { return NULL; }
 /* 基础定时器原语（事件循环超时驱动）：async 模块的 delay 等在其上构建。 */
 void sc_op_timer_arm(sc_future *f, uint32_t ms) {
     timer_node *t = (timer_node *)calloc(1, sizeof(timer_node));
-    t->deadline_ms = now_ms() + (uint64_t)ms;
+    t->deadline_ms = sc_tick_ms() + (uint64_t)ms;
     t->fut  = f;
     t->next = g_timers;
     g_timers = t;
@@ -1537,7 +1540,7 @@ struct sc_token {
 
 /* ---- 全局 token 表：adt 哈希（拷贝字符串键 → 裸 token*） ---- */
 static sc_dict    g_toks;          /* key_size=-1：dict 自持 id 拷贝 */
-static sc_mutex_t g_toks_mtx;      /* 守护 bind 的 intern 并发 */
+static mutex_t g_toks_mtx;      /* 守护 bind 的 intern 并发 */
 static int        g_toks_init = 0; /* 惰性构造（首次 bind 单线程，模块 init 阶段） */
 
 /* 依赖图世代计数：任一拓扑变更（注册 dep / 挂 exec）即自增，使各 token 的 back 调度缓存失效。

@@ -54,10 +54,12 @@ static inline sc_Dog *sc_Dog__new(void) {
     return _p;
 }
 
-static inline sc_Dog *sc_Dog__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(sc_Dog));
+static inline sc_Dog *sc_Dog__new_ref(int32_t _flags) {
+    sc_ref *_h = (sc_ref *)((_flags & SC_REF_RAW)
+        ? sc_alloc(SC_REF_HDR + sizeof(sc_Dog))
+        : sc_chunk(SC_REF_HDR + sizeof(sc_Dog)));
     if (!_h) return 0;
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;
     sc_Dog *_p = (sc_Dog *)((char *)_h + SC_REF_HDR);
     memset(_p, 0, sizeof(sc_Dog));
     _p->_class = sc_Dog_hyper_impl;
@@ -75,10 +77,12 @@ static inline sc_Node *sc_Node__new(void) {
     return _p;
 }
 
-static inline sc_Node *sc_Node__new_ref(int32_t _atom) {
-    sc_ref *_h = (sc_ref *)sc_alloc(SC_REF_HDR + sizeof(sc_Node));
+static inline sc_Node *sc_Node__new_ref(int32_t _flags) {
+    sc_ref *_h = (sc_ref *)((_flags & SC_REF_RAW)
+        ? sc_alloc(SC_REF_HDR + sizeof(sc_Node))
+        : sc_chunk(SC_REF_HDR + sizeof(sc_Node)));
     if (!_h) return 0;
-    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _atom;
+    _h->in = 0; _h->out = 0; _h->heap = 1; _h->flags = _flags;
     sc_Node *_p = (sc_Node *)((char *)_h + SC_REF_HDR);
     memset(_p, 0, sizeof(sc_Node));
     _p->_class = sc_Node_hyper_impl;

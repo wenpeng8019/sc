@@ -4,7 +4,7 @@
  *       统一经由本头文件实现跨平台，不直接散落 #ifdef。
  * 内容：常用标准 C 头（scc 生成的 C 统一由本头带入）、平台判定宏、
  *       平台基础头、路径分隔符、TLS、字节序、
- *       时钟（墙钟/单调/CPU 耗时）、微秒休眠、CPU 核数、原子操作、
+ *       时钟（墙钟/单调/CPU 耗时）、原子操作、
  *       互斥/条件变量/线程 id（跨平台 pthread ↔ Win32）。
  * 发行：与其他 builtins 资源一样内嵌进 scc 二进制并随用释放。
  */
@@ -155,50 +155,73 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #define P_POSIX_LIKE 0
 #endif
 
-/* ---------------- 控制台 UTF-8 ---------------- */
-/* sc 程序内部一律以 UTF-8 字节输出，但 Windows 控制台默认代码页为本地 ANSI
- * （简体中文为 GBK/936），直接 printf UTF-8 会显示为乱码。SC_CONSOLE_UTF8() 在
- * 程序入口把本进程控制台的输出/输入代码页切到 UTF-8（65001），令 UTF-8 字节正确
- * 显示与读取；非 Windows 平台为空操作。
- *   - 仅作用于当前进程的控制台句柄；stdout 被重定向到文件/管道时不影响其字节。
- *   - <windows.h> 已由上方平台基础头在 P_WIN 下带入，SetConsole*CP 直接可用。 */
-#if P_WIN
-#define SC_CONSOLE_UTF8() do { SetConsoleOutputCP(65001u); SetConsoleCP(65001u); } while (0)
+///////////////////////////////////////////////////////////////////////////////
+//  线程局部存储 
+///////////////////////////////////////////////////////////////////////////////
+
+#if defined(__cplusplus)
+#define TLS thread_local
+#elif defined(_MSC_VER)
+#define TLS __declspec(thread)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#define TLS _Thread_local
+#elif defined(__GNUC__) || defined(__clang__)
+#define TLS __thread
 #else
-#define SC_CONSOLE_UTF8() ((void)0)
+#error "TLS not supported on this compiler"
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////
-// 日志：终端着色 + 系统日志（跨平台自适应，参考 stdc）
+// 启动 / 退出钩子（constructor / destructor）
 ///////////////////////////////////////////////////////////////////////////////
-// print 关键字运行时（op_impl.c）据此着色 stdout / 写系统日志。
-// 级别/通道 1..6 = F/E/W/I/D/V（与 op.h enum、op.sc def log 对齐）。
 
-/* 终端检测：判断流是否连到 tty（print 据此决定是否着色，重定向/管道则纯文本） */
-#if P_WIN
-#   include <io.h>
-#   define P_isatty(f) _isatty(_fileno(f))
+/* 进入 main 前自动执行 SC_CONSTRUCTOR，退出（main 返回 / exit）后自动执行 SC_DESTRUCTOR。
+ * 用法（宏紧跟函数体，宏展开为「前置声明 + 定义签名」，其后的 { ... } 即钩子体）：
+ *     SC_CONSTRUCTOR(my_init) { ... }
+ *     SC_DESTRUCTOR(my_fini)  { ... }
+ * 可移植性：GCC / Clang 用 __attribute__；MSVC 经 .CRT$XCU 段放置 ctor 指针、
+ * 经 atexit 注册 dtor（需 <stdlib.h>，本头已含）。
+ * SC_HAVE_AUTO_HOOKS：本平台是否具备「进入 main 前 / 退出后自动运行」能力。
+ *   为 1（GCC/Clang/MSVC）：钩子由平台机制自动触发；scc 生成的显式调用以
+ *     #if !SC_HAVE_AUTO_HOOKS 包裹，不参与编译。
+ *   为 0（未知编译器）：宏仅定义「具名函数」而不自动注册，改由 scc 生成的
+ *     main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用。 */
+#if defined(__GNUC__) || defined(__clang__)
+#   define SC_HAVE_AUTO_HOOKS 1
+#   define SC_CONSTRUCTOR(f) \
+        static void f(void) __attribute__((constructor)); \
+        static void f(void)
+#   define SC_DESTRUCTOR(f) \
+        static void f(void) __attribute__((destructor)); \
+        static void f(void)
+#elif defined(_MSC_VER)
+#   define SC_HAVE_AUTO_HOOKS 1
+#   pragma section(".CRT$XCU", read)
+    /* ctor：把函数指针放入 CRT 初始化段；/include 链接器指令防止被裁剪。
+     * x86 下 C 符号带前导下划线，故 32 位加 "_" 前缀。 */
+#   define SC_CTOR_PLACE_(f, pfx) \
+        static void f(void); \
+        __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
+        __pragma(comment(linker, "/include:" pfx #f "_")) \
+        static void f(void)
+#   ifdef _WIN64
+#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "")
+#   else
+#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "_")
+#   endif
+    /* dtor：在 ctor 内 atexit 注册，进程退出时 LIFO 调用。 */
+#   define SC_DESTRUCTOR(f) \
+        static void f(void); \
+        SC_CONSTRUCTOR(f##_reg) { atexit(f); } \
+        static void f(void)
 #else
-#   define P_isatty(f) isatty(fileno(f))
+    /* 未知编译器：无自动 ctor/dtor 注册能力。退化为「仅定义具名函数」，
+     * 由 scc 生成的 main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用，
+     * 调用点以 #if !SC_HAVE_AUTO_HOOKS 包裹。 */
+#   define SC_HAVE_AUTO_HOOKS 0
+#   define SC_CONSTRUCTOR(f) static void f(void)
+#   define SC_DESTRUCTOR(f)  static void f(void)
 #endif
-
-/* ANSI 前景色码（按级别取用；I=状态用默认色，无码）。仅在 tty 输出时启用。 */
-#define P_ANSI_RESET   "\033[0m"
-#define P_ANSI_PURPLE  "\033[35m"   /* F 致命 */
-#define P_ANSI_RED     "\033[31m"   /* E 错误 */
-#define P_ANSI_YELLOW  "\033[33m"   /* W 警告 */
-#define P_ANSI_CYAN    "\033[36m"   /* D 调试 */
-#define P_ANSI_GRAY    "\033[90m"   /* V 详尽 */
-
-/* 系统日志（跨平台自适应）：把一行文本写入各平台系统日志设施。
- *   level：1..6 = F/E/W/I/D/V；  tag：日志标签（NULL/空 → "sc"）；
- *   text ：单行文本（不含级别/颜色修饰，末尾无换行）。
- * 平台映射：Win=OutputDebugStringA / macOS=os_log / Android=logcat /
- *          QNX=slog2 / Linux·BSD=syslog。实现体较重（含各平台专属头），仅在定义
- *          P_LOG_SYS_IMPL 的翻译单元（op_impl.c）内展开；其余 TU 不引入。
- * 注：实现体置于本头「主 include guard 之外」的末尾（见文件底部），因 op_impl.c 常在
- *     op.h 已先行带入 platform.h 之后才 #define P_LOG_SYS_IMPL 重包含本头——主体被
- *     guard 跳过，唯有 guard 外的实现块能据 P_LOG_SYS_IMPL 延迟展开。 */
 
 ///////////////////////////////////////////////////////////////////////////////
 // 内存对齐
@@ -384,211 +407,6 @@ static inline uint64_t sc_get_ll(const void *src) { uint64_t v; memcpy(&v, src, 
 #define sc_nset_ll(n)                  sc_nget_ll(n)
 
 static inline bool is_little_endian(void) { int i = 1; return *(char*)&i; }
-
-/* ---------------- 线程局部存储 ---------------- */
-
-#if defined(__cplusplus)
-#define TLS thread_local
-#elif defined(_MSC_VER)
-#define TLS __declspec(thread)
-#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#define TLS _Thread_local
-#elif defined(__GNUC__) || defined(__clang__)
-#define TLS __thread
-#else
-#error "TLS not supported on this compiler"
-#endif
-
-/* ---------------- 启动 / 退出钩子（constructor / destructor） ---------------- */
-/* 进入 main 前自动执行 SC_CONSTRUCTOR，退出（main 返回 / exit）后自动执行 SC_DESTRUCTOR。
- * 用法（宏紧跟函数体，宏展开为「前置声明 + 定义签名」，其后的 { ... } 即钩子体）：
- *     SC_CONSTRUCTOR(my_init) { ... }
- *     SC_DESTRUCTOR(my_fini)  { ... }
- * 可移植性：GCC / Clang 用 __attribute__；MSVC 经 .CRT$XCU 段放置 ctor 指针、
- * 经 atexit 注册 dtor（需 <stdlib.h>，本头已含）。
- * SC_HAVE_AUTO_HOOKS：本平台是否具备「进入 main 前 / 退出后自动运行」能力。
- *   为 1（GCC/Clang/MSVC）：钩子由平台机制自动触发；scc 生成的显式调用以
- *     #if !SC_HAVE_AUTO_HOOKS 包裹，不参与编译。
- *   为 0（未知编译器）：宏仅定义「具名函数」而不自动注册，改由 scc 生成的
- *     main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用。 */
-#if defined(__GNUC__) || defined(__clang__)
-#   define SC_HAVE_AUTO_HOOKS 1
-#   define SC_CONSTRUCTOR(f) \
-        static void f(void) __attribute__((constructor)); \
-        static void f(void)
-#   define SC_DESTRUCTOR(f) \
-        static void f(void) __attribute__((destructor)); \
-        static void f(void)
-#elif defined(_MSC_VER)
-#   define SC_HAVE_AUTO_HOOKS 1
-#   pragma section(".CRT$XCU", read)
-    /* ctor：把函数指针放入 CRT 初始化段；/include 链接器指令防止被裁剪。
-     * x86 下 C 符号带前导下划线，故 32 位加 "_" 前缀。 */
-#   define SC_CTOR_PLACE_(f, pfx) \
-        static void f(void); \
-        __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
-        __pragma(comment(linker, "/include:" pfx #f "_")) \
-        static void f(void)
-#   ifdef _WIN64
-#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "")
-#   else
-#       define SC_CONSTRUCTOR(f) SC_CTOR_PLACE_(f, "_")
-#   endif
-    /* dtor：在 ctor 内 atexit 注册，进程退出时 LIFO 调用。 */
-#   define SC_DESTRUCTOR(f) \
-        static void f(void); \
-        SC_CONSTRUCTOR(f##_reg) { atexit(f); } \
-        static void f(void)
-#else
-    /* 未知编译器：无自动 ctor/dtor 注册能力。退化为「仅定义具名函数」，
-     * 由 scc 生成的 main 序言/尾声（及库模块 sc_mod_*_init/drop）显式调用，
-     * 调用点以 #if !SC_HAVE_AUTO_HOOKS 包裹。 */
-#   define SC_HAVE_AUTO_HOOKS 0
-#   define SC_CONSTRUCTOR(f) static void f(void)
-#   define SC_DESTRUCTOR(f)  static void f(void)
-#endif
-
-/* ---------------- CPU 核数 ---------------- */
-
-/* 逻辑核数（至少返回 1） */
-static inline uint32_t P_ncpu(void) {
-#if P_WIN
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    return si.dwNumberOfProcessors > 0 ? (uint32_t)si.dwNumberOfProcessors : 1;
-#else
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return n > 0 ? (uint32_t)n : 1;
-#endif
-}
-
-/* ---------------- 时间与时钟 ---------------- */
-
-/* 统一时钟值类型。不能直接叫 clock：会与 libc 的 clock() 函数（time.h）重定义 */
-#if P_POSIX_LIKE
-typedef struct timespec P_clock;
-#else
-typedef struct { time_t tv_sec; long tv_nsec; } P_clock;
-#endif
-
-/* 墙钟（系统实时时间，受调时影响），成功返回 0 */
-static inline int P_time_now(P_clock* clk) {
-#if P_WIN
-    /* Win8+ 提供高精度版本，动态加载以兼容 Win7 */
-    typedef VOID (WINAPI *GetPreciseFn)(LPFILETIME);
-    static GetPreciseFn pPrecise = NULL;
-    static int s_checked = 0;
-    if (!s_checked) {
-        HMODULE k32 = GetModuleHandleA("kernel32.dll");
-        if (k32) pPrecise = (GetPreciseFn)GetProcAddress(k32, "GetSystemTimePreciseAsFileTime");
-        s_checked = 1;
-    }
-    FILETIME ft;
-    if (pPrecise) pPrecise(&ft);
-    else GetSystemTimeAsFileTime(&ft);
-    uint64_t t100 = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    t100 -= 116444736000000000ULL;   /* FILETIME 纪元 1601 → Unix 纪元 1970 */
-    clk->tv_sec = (time_t)(t100 / 10000000ULL);
-    clk->tv_nsec = (long)((t100 % 10000000ULL) * 100ULL);
-    return 0;
-#else
-    return clock_gettime(CLOCK_REALTIME, clk) == 0 ? 0 : -1;
-#endif
-}
-
-/* 单调时钟（不受系统时间调整影响，适合测时长），成功返回 0 */
-static inline int P_clock_now(P_clock* clk) {
-#if P_WIN
-    static LARGE_INTEGER freq = {0};
-    if (!freq.QuadPart && !QueryPerformanceFrequency(&freq)) return -1;
-    LARGE_INTEGER ticks;
-    if (!QueryPerformanceCounter(&ticks)) return -1;
-    clk->tv_sec = (time_t)(ticks.QuadPart / freq.QuadPart);
-    clk->tv_nsec = (long)((ticks.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
-    return 0;
-#else
-    return clock_gettime(CLOCK_MONOTONIC, clk) == 0 ? 0 : -1;
-#endif
-}
-
-/* CPU 耗时（用户态+内核态，是时长而非时刻），成功返回 0
- * process_or_thread：true = 本进程累计，false = 当前线程累计 */
-static inline int P_cost_now(P_clock* clk, bool process_or_thread) {
-#if P_WIN
-    FILETIME c, e, k, u;
-    BOOL ok = process_or_thread
-        ? GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)
-        : GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u);
-    if (!ok) return -1;
-    uint64_t t100 = (((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime)
-                  + (((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime);
-    /* 注意：CPU 时间是时长，不做 1601→1970 纪元偏移换算 */
-    clk->tv_sec = (time_t)(t100 / 10000000ULL);
-    clk->tv_nsec = (long)((t100 % 10000000ULL) * 100ULL);
-    return 0;
-#else
-    /* macOS 10.12+/Linux/BSD 均支持 CPUTIME 时钟源 */
-    return clock_gettime(process_or_thread ? CLOCK_PROCESS_CPUTIME_ID
-                                           : CLOCK_THREAD_CPUTIME_ID, clk) == 0 ? 0 : -1;
-#endif
-}
-
-/* 时钟值换算：_f 为浮点，无后缀为整数（四舍五入） */
-#define clock_s_f(a)     ((a).tv_sec+(a).tv_nsec/1000000000.0)
-#define clock_ms_f(a)    ((a).tv_sec*1000.0+(a).tv_nsec/1000000.0)
-#define clock_us_f(a)    ((a).tv_sec*1000000.0+(a).tv_nsec/1000.0)
-#define clock_s(a)       ((a).tv_sec+((a).tv_nsec+500000000)/1000000000)
-#define clock_ms(a)      ((a).tv_sec*1000+((a).tv_nsec+500000)/1000000)
-#define clock_us(a)      ((a).tv_sec*1000000+((a).tv_nsec+500)/1000)
-/* 注意：不要统一转换为 ns 再计算，按 long 精度以 ns 表示的 s 最多只能表示 2s */
-#define clock_s_diff(a,b)     (((a).tv_sec-(b).tv_sec)+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500000000:-500000000))/1000000000)
-#define clock_ms_diff(a,b)    (((a).tv_sec-(b).tv_sec)*1000+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500000:-500000))/1000000)
-#define clock_us_diff(a,b)    (((a).tv_sec-(b).tv_sec)*1000000+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500:-500))/1000)
-#define clock_dec(a,b,v) {                      \
-    (v).tv_sec = (a).tv_sec - (b).tv_sec;       \
-    (v).tv_nsec = (a).tv_nsec - (b).tv_nsec;    \
-    if ((v).tv_nsec < 0) {                      \
-        (v).tv_sec -= 1;                        \
-        (v).tv_nsec += 1000000000;              \
-    }                                           \
-}
-#define clock_inc(a,b,v) {                      \
-    (v).tv_sec = (a).tv_sec + (b).tv_sec;       \
-    (v).tv_nsec = (a).tv_nsec + (b).tv_nsec;    \
-    if ((v).tv_nsec >= 1000000000) {            \
-        (v).tv_sec += 1;                        \
-        (v).tv_nsec -= 1000000000;              \
-    }                                           \
-}
-#define clock_gt(a,b)      ((a).tv_sec>(b).tv_sec || ((a).tv_sec==(b).tv_sec && (a).tv_nsec>(b).tv_nsec))
-#define clock_ge(a,b)      ((a).tv_sec>(b).tv_sec || ((a).tv_sec==(b).tv_sec && (a).tv_nsec>=(b).tv_nsec))
-
-/* 单调时钟快照（秒/毫秒/微秒） */
-static inline uint64_t P_tick_s(void)  { P_clock _clk; P_clock_now(&_clk); return (uint64_t)clock_s(_clk); }
-static inline uint64_t P_tick_ms(void) { P_clock _clk; P_clock_now(&_clk); return (uint64_t)clock_ms(_clk); }
-static inline uint64_t P_tick_us(void) { P_clock _clk; P_clock_now(&_clk); return (uint64_t)clock_us(_clk); }
-
-#define tick_diff(now, nlast)  ((now)>(nlast) ? (now)-(nlast) : 0)
-
-/* ---------------- 休眠 ---------------- */
-
-/* 微秒休眠。注意：Windows 的 Sleep 实际精度只有毫秒精度，
- * 不足 1ms 的部分向上取整为 1ms（避免 Sleep(0) 变成让出时间片不休眠）。 */
-static inline void P_usleep(uint64_t us) {
-#if P_WIN
-    Sleep((DWORD)((us + 999ULL) / 1000ULL));
-#else
-    struct timespec ts = { (time_t)(us / 1000000ULL), (long)(us % 1000000ULL) * 1000L };
-    nanosleep(&ts, NULL);
-#endif
-}
-
-/* ---------------- 互斥 / 条件变量 / 线程 / 屏障 ---------------- */
-/* 该跨平台层（类型 sc_mutex_t / sc_cond_t / sc_barrier_t + 操作 P_mutex_* /
- * P_cond_* / P_cond_wait / P_thread_id / P_barrier_*）已移出主 guard，改为文末
- * P_MT_IMPL 延迟展开块（与 socket 的 SC_WITH_SOCKET 同款做法）。仅 opt-in 的
- * builtins 实现 TU（mt_impl.c / op_impl.c）在包含本头前 #define P_MT_IMPL 才展开，
- * 不给普通生成单元凭空拉入 <pthread.h> 等线程头。见文件底部 "P_MT_IMPL" 块。 */
 
 //------------------  原子操作（operand 指令的 C 侧实现：sc_*）  ----------------
 // 优先使用 C11 stdatomic.h，否则使用平台特定实现。命名直接采用 op.sc 的 operand
@@ -857,164 +675,164 @@ static inline bool sc_test_and_set_impl(volatile LONG* pVar, LONG* pTestVar, LON
 #error "Unsupported platform"
 #endif
 
-///////////////////////////////////////////////////////////////////////////////
-// 随机数生成
-///////////////////////////////////////////////////////////////////////////////
+/* ---------------- 时间与时钟 ---------------- */
 
-/*
- * P_rand_init()   - 初始化随机数生成器（可选，仅降级方案需要）
- * P_rand32()      - 生成 32 位随机数（加密安全）
- * P_rand64()      - 生成 64 位随机数（加密安全）
- * P_rand_bytes()  - 填充随机字节
- *
- * 平台实现：
- *   - macOS/BSD:  arc4random() (ChaCha20, CSPRNG) - 无需初始化
- *   - Windows:    rand_s() (RtlGenRandom, CSPRNG) - 无需初始化
- *   - Linux:      /dev/urandom (内核 CSPRNG) - 随用随开，无需初始化
- *   - 降级方案:   srand(time) + rand() (自动初始化，仅用于测试)
- *
- * 性能考虑：
- *   - Linux 平台采用"随用随开"策略，每次打开/关闭 /dev/urandom
- *   - 现代内核的 open() 开销很小，适合中低频调用
- *   - 避免长期占用文件描述符，简化生命周期管理
- *
- * 返回值：非零随机数（0 保留为无效值）
- */
-
-#if P_DARWIN || P_BSD
-    // macOS/BSD: arc4random() 无需初始化
-    static inline void P_rand_init(void) { /* 无操作 */ }
-
-    static inline uint32_t P_rand32(void) {
-        uint32_t r = arc4random();
-        return r ? r : 1;  // 避免返回 0
-    }
-
-    static inline uint64_t P_rand64(void) {
-        uint64_t r = ((uint64_t)arc4random() << 32) | arc4random();
-        return r ? r : 1;
-    }
-
-#elif P_WIN
-    // Windows: rand_s() 在 <stdlib.h> 中，需要定义 _CRT_RAND_S
-    #ifndef _CRT_RAND_S
-        #define _CRT_RAND_S
-    #endif
-
-    #if !(defined(_MSC_VER) && _MSC_VER >= 1400)
-        static bool g_rand_initialized = false;
-    #endif
-
-    static inline void P_rand_init(void) {
-        #if defined(_MSC_VER) && _MSC_VER >= 1400
-            /* rand_s() 无需初始化 */
-        #else
-            /* 降级方案：初始化 rand() */
-            if (!g_rand_initialized) {
-                srand((unsigned int)time(NULL));
-                g_rand_initialized = true;
-            }
-        #endif
-    }
-
-    static inline uint32_t P_rand32(void) {
-        uint32_t r;
-        #if defined(_MSC_VER) && _MSC_VER >= 1400
-            if (rand_s(&r) != 0) r = (uint32_t)time(NULL);
-        #else
-            if (!g_rand_initialized) P_rand_init();
-            r = (uint32_t)rand();  // 降级方案
-        #endif
-        return r ? r : 1;
-    }
-
-    static inline uint64_t P_rand64(void) {
-        uint64_t r;
-        #if defined(_MSC_VER) && _MSC_VER >= 1400
-            uint32_t hi, lo;
-            while (rand_s(&hi) != 0 || rand_s(&lo) != 0) { /* retry */ }
-            r = ((uint64_t)hi << 32) | lo;
-        #else
-            if (!g_rand_initialized) P_rand_init();
-            // 降级方案：组合多个 rand() 调用
-            r = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^
-                ((uint64_t)rand() << 16) ^ (uint64_t)rand();
-        #endif
-        return r ? r : 1;
-    }
-
+/* 统一时钟值类型 clk_t（timespec 封装，无堆分配）。
+ * 不叫 clock：会与 libc 的 clock() 函数（time.h）重定义；
+ * 也不叫 clock_t：会与 <time.h> 标准 typedef clock_t 冲突（重定义为不同类型）。
+ * sc 侧 op.sc 的 @def clock 以 h: ::clk_t 内联持有本类型，采集/换算方法
+ * （sc_clock_*）为 op.h 内 static inline 薄封装，直转本段 P_* 与 clock_* 宏。 */
+#if P_POSIX_LIKE
+typedef struct timespec clk_t;
 #else
-    // Linux/其他 POSIX: 使用 /dev/urandom（随用随开，避免长期占用文件描述符）
-    static bool g_rand_initialized = false;
-
-    static inline void P_rand_init(void) {
-        if (!g_rand_initialized) {
-            /* 初始化 rand() 作为降级方案 */
-            srand((unsigned int)time(NULL));
-            g_rand_initialized = true;
-        }
-    }
-
-    static inline uint32_t P_rand32(void) {
-        uint32_t r;
-        FILE *fp = fopen("/dev/urandom", "rb");
-        
-        if (fp && fread(&r, sizeof(r), 1, fp) == 1) {
-            fclose(fp);
-            /* 成功从 /dev/urandom 读取 */
-        } else {
-            if (fp) fclose(fp);
-            /* 降级方案：使用 rand() */
-            if (!g_rand_initialized) P_rand_init();
-            r = (uint32_t)rand();
-        }
-        return r ? r : 1;
-    }
-
-    static inline uint64_t P_rand64(void) {
-        uint64_t r;
-        FILE *fp = fopen("/dev/urandom", "rb");
-        
-        if (fp && fread(&r, sizeof(r), 1, fp) == 1) {
-            fclose(fp);
-            /* 成功从 /dev/urandom 读取 */
-        } else {
-            if (fp) fclose(fp);
-            /* 降级方案：组合多个 rand() */
-            if (!g_rand_initialized) P_rand_init();
-            r = ((uint64_t)rand() << 48) ^ ((uint64_t)rand() << 32) ^
-                ((uint64_t)rand() << 16) ^ (uint64_t)rand();
-        }
-        return r ? r : 1;
-    }
+typedef struct { time_t tv_sec; long tv_nsec; } clk_t;
 #endif
 
-
-/*
- * P_rand_bytes() - 填充缓冲区为随机字节
- * @param buf  目标缓冲区
- * @param len  字节数
- */
-static inline void P_rand_bytes(void *buf, size_t len) {
-    if (!buf || len == 0) return;
-    
-    uint8_t *p = (uint8_t *)buf;
-    
-    // 每次填充 4 字节，利用 P_rand32()
-    while (len >= 4) {
-        uint32_t r = P_rand32();
-        memcpy(p, &r, 4);
-        p += 4;
-        len -= 4;
+/* 墙钟（系统实时时间，受调时影响），成功返回 0 */
+static inline int P_time_now(clk_t* clk) {
+#if P_WIN
+    /* Win8+ 提供高精度版本，动态加载以兼容 Win7 */
+    typedef VOID (WINAPI *GetPreciseFn)(LPFILETIME);
+    static GetPreciseFn pPrecise = NULL;
+    static int s_checked = 0;
+    if (!s_checked) {
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        if (k32) pPrecise = (GetPreciseFn)GetProcAddress(k32, "GetSystemTimePreciseAsFileTime");
+        s_checked = 1;
     }
-    
-    // 处理剩余的 1-3 字节
-    if (len > 0) {
-        uint32_t r = P_rand32();
-        memcpy(p, &r, len);
-    }
+    FILETIME ft;
+    if (pPrecise) pPrecise(&ft);
+    else GetSystemTimeAsFileTime(&ft);
+    uint64_t t100 = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    t100 -= 116444736000000000ULL;   /* FILETIME 纪元 1601 → Unix 纪元 1970 */
+    clk->tv_sec = (time_t)(t100 / 10000000ULL);
+    clk->tv_nsec = (long)((t100 % 10000000ULL) * 100ULL);
+    return 0;
+#else
+    return clock_gettime(CLOCK_REALTIME, clk) == 0 ? 0 : -1;
+#endif
 }
 
+/* 单调时钟（不受系统时间调整影响，适合测时长），成功返回 0 */
+static inline int P_clock_now(clk_t* clk) {
+#if P_WIN
+    static LARGE_INTEGER freq = {0};
+    if (!freq.QuadPart && !QueryPerformanceFrequency(&freq)) return -1;
+    LARGE_INTEGER ticks;
+    if (!QueryPerformanceCounter(&ticks)) return -1;
+    clk->tv_sec = (time_t)(ticks.QuadPart / freq.QuadPart);
+    clk->tv_nsec = (long)((ticks.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
+    return 0;
+#else
+    return clock_gettime(CLOCK_MONOTONIC, clk) == 0 ? 0 : -1;
+#endif
+}
+
+/* CPU 耗时（用户态+内核态，是时长而非时刻），成功返回 0
+ * process_or_thread：true = 本进程累计，false = 当前线程累计 */
+static inline int P_cost_now(clk_t* clk, bool process_or_thread) {
+#if P_WIN
+    FILETIME c, e, k, u;
+    BOOL ok = process_or_thread
+        ? GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)
+        : GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u);
+    if (!ok) return -1;
+    uint64_t t100 = (((uint64_t)k.dwHighDateTime << 32) | k.dwLowDateTime)
+                  + (((uint64_t)u.dwHighDateTime << 32) | u.dwLowDateTime);
+    /* 注意：CPU 时间是时长，不做 1601→1970 纪元偏移换算 */
+    clk->tv_sec = (time_t)(t100 / 10000000ULL);
+    clk->tv_nsec = (long)((t100 % 10000000ULL) * 100ULL);
+    return 0;
+#else
+    /* macOS 10.12+/Linux/BSD 均支持 CPUTIME 时钟源 */
+    return clock_gettime(process_or_thread ? CLOCK_PROCESS_CPUTIME_ID
+                                           : CLOCK_THREAD_CPUTIME_ID, clk) == 0 ? 0 : -1;
+#endif
+}
+
+/* 时钟值换算：_f 为浮点，无后缀为整数（四舍五入） */
+#define clock_s_f(a)     ((a).tv_sec+(a).tv_nsec/1000000000.0)
+#define clock_ms_f(a)    ((a).tv_sec*1000.0+(a).tv_nsec/1000000.0)
+#define clock_us_f(a)    ((a).tv_sec*1000000.0+(a).tv_nsec/1000.0)
+#define clock_s(a)       ((a).tv_sec+((a).tv_nsec+500000000)/1000000000)
+#define clock_ms(a)      ((a).tv_sec*1000+((a).tv_nsec+500000)/1000000)
+#define clock_us(a)      ((a).tv_sec*1000000+((a).tv_nsec+500)/1000)
+/* 注意：不要统一转换为 ns 再计算，按 long 精度以 ns 表示的 s 最多只能表示 2s */
+#define clock_s_diff(a,b)     (((a).tv_sec-(b).tv_sec)+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500000000:-500000000))/1000000000)
+#define clock_ms_diff(a,b)    (((a).tv_sec-(b).tv_sec)*1000+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500000:-500000))/1000000)
+#define clock_us_diff(a,b)    (((a).tv_sec-(b).tv_sec)*1000000+((a).tv_nsec-(b).tv_nsec+((a).tv_nsec>=(b).tv_nsec?500:-500))/1000)
+#define clock_dec(a,b,v) {                      \
+    (v).tv_sec = (a).tv_sec - (b).tv_sec;       \
+    (v).tv_nsec = (a).tv_nsec - (b).tv_nsec;    \
+    if ((v).tv_nsec < 0) {                      \
+        (v).tv_sec -= 1;                        \
+        (v).tv_nsec += 1000000000;              \
+    }                                           \
+}
+#define clock_inc(a,b,v) {                      \
+    (v).tv_sec = (a).tv_sec + (b).tv_sec;       \
+    (v).tv_nsec = (a).tv_nsec + (b).tv_nsec;    \
+    if ((v).tv_nsec >= 1000000000) {            \
+        (v).tv_sec += 1;                        \
+        (v).tv_nsec -= 1000000000;              \
+    }                                           \
+}
+#define clock_gt(a,b)      ((a).tv_sec>(b).tv_sec || ((a).tv_sec==(b).tv_sec && (a).tv_nsec>(b).tv_nsec))
+#define clock_ge(a,b)      ((a).tv_sec>(b).tv_sec || ((a).tv_sec==(b).tv_sec && (a).tv_nsec>=(b).tv_nsec))
+
+/* 单调时钟快照（秒/毫秒/微秒，uint64）与差值。便捷计时无需构造 clock 对象；
+ * 直接经 op.sc 的 @fnc tick_s/ms/us/tick_diff 暴露给 sc（scc 生成 sc_tick_* 调用，
+ * 解析到本处 static inline，零开销）。tick_diff 用函数而非宏：避免宏对实参的多次求值。 */
+static inline uint64_t sc_tick_s(void)  { clk_t _clk; P_clock_now(&_clk); return (uint64_t)clock_s(_clk); }
+static inline uint64_t sc_tick_ms(void) { clk_t _clk; P_clock_now(&_clk); return (uint64_t)clock_ms(_clk); }
+static inline uint64_t sc_tick_us(void) { clk_t _clk; P_clock_now(&_clk); return (uint64_t)clock_us(_clk); }
+
+static inline uint64_t sc_tick_diff(uint64_t now, uint64_t nlast) { return now > nlast ? now - nlast : 0; }
+
+///////////////////////////////////////////////////////////////////////////////
+// 日志：终端着色 + 系统日志（跨平台自适应，参考 stdc）
+///////////////////////////////////////////////////////////////////////////////
+// print 关键字运行时（op_impl.c）据此着色 stdout / 写系统日志。
+// 级别/通道 1..6 = F/E/W/I/D/V（与 op.h enum、op.sc def log 对齐）。
+
+/* ---------------- 控制台 UTF-8 ---------------- */
+/* sc 程序内部一律以 UTF-8 字节输出，但 Windows 控制台默认代码页为本地 ANSI
+ * （简体中文为 GBK/936），直接 printf UTF-8 会显示为乱码。SC_CONSOLE_UTF8() 在
+ * 程序入口把本进程控制台的输出/输入代码页切到 UTF-8（65001），令 UTF-8 字节正确
+ * 显示与读取；非 Windows 平台为空操作。
+ *   - 仅作用于当前进程的控制台句柄；stdout 被重定向到文件/管道时不影响其字节。
+ *   - <windows.h> 已由上方平台基础头在 P_WIN 下带入，SetConsole*CP 直接可用。 */
+#if P_WIN
+#define SC_CONSOLE_UTF8() do { SetConsoleOutputCP(65001u); SetConsoleCP(65001u); } while (0)
+#else
+#define SC_CONSOLE_UTF8() ((void)0)
+#endif
+
+/* 终端检测：判断流是否连到 tty（print 据此决定是否着色，重定向/管道则纯文本） */
+#if P_WIN
+#   include <io.h>
+#   define P_isatty(f) _isatty(_fileno(f))
+#else
+#   define P_isatty(f) isatty(fileno(f))
+#endif
+
+/* ANSI 前景色码（按级别取用；I=状态用默认色，无码）。仅在 tty 输出时启用。 */
+#define P_ANSI_RESET   "\033[0m"
+#define P_ANSI_PURPLE  "\033[35m"   /* F 致命 */
+#define P_ANSI_RED     "\033[31m"   /* E 错误 */
+#define P_ANSI_YELLOW  "\033[33m"   /* W 警告 */
+#define P_ANSI_CYAN    "\033[36m"   /* D 调试 */
+#define P_ANSI_GRAY    "\033[90m"   /* V 详尽 */
+
+/* 系统日志（跨平台自适应）：把一行文本写入各平台系统日志设施。
+ *   level：1..6 = F/E/W/I/D/V；  tag：日志标签（NULL/空 → "sc"）；
+ *   text ：单行文本（不含级别/颜色修饰，末尾无换行）。
+ * 平台映射：Win=OutputDebugStringA / macOS=os_log / Android=logcat /
+ *          QNX=slog2 / Linux·BSD=syslog。实现体较重（含各平台专属头），仅在定义
+ *          P_LOG_SYS_IMPL 的翻译单元（op_impl.c）内展开；其余 TU 不引入。
+ * 注：实现体置于本头「主 include guard 之外」的末尾（见文件底部），因 op_impl.c 常在
+ *     op.h 已先行带入 platform.h 之后才 #define P_LOG_SYS_IMPL 重包含本头——主体被
+ *     guard 跳过，唯有 guard 外的实现块能据 P_LOG_SYS_IMPL 延迟展开。 */
 
 //------------------  op.sc 机制运行时（默认带入）  ----------------------
 // op.sc 为默认导入的语法机制声明模块；op.h 是其 C 侧伴随头（chain 等
@@ -1022,144 +840,6 @@ static inline void P_rand_bytes(void *buf, size_t len) {
 #include "op.h"
 
 #endif /* SC_PLATFORM_H */
-
-///////////////////////////////////////////////////////////////////////////////
-// 互斥 / 条件变量 / 线程 / 屏障（延迟展开，置于主 include guard 之外）
-///////////////////////////////////////////////////////////////////////////////
-// 仅当 TU 在包含本头前定义了 P_MT_IMPL 时展开（mt_impl.c / op_impl.c 等 builtins
-// 实现 opt-in），避免给不用线程的普通生成单元凭空拉入 <pthread.h> 等线程头。与 socket
-// 的 SC_WITH_SOCKET、系统日志的 P_LOG_SYS_IMPL 同款做法。一次性守卫 SC_PLATFORM_MT_DONE，
-// 独立于 SC_PLATFORM_H；依赖的平台判定宏（P_WIN/P_DARWIN/P_LINUX/...）由主体首次包含时
-// 已定义并留存。
-//
-// 命名：类型为 sc_mutex_t / sc_cond_t / sc_barrier_t（不与任何 sc 命名域符号冲突）；
-// 操作一律 P_ 前缀（平台适配层，非 sc 命名域）——sc 命名域的 mutex/cond/barrier 方法
-// 由 mt 模块（mt.h / mt_impl.c）以 sc_mutex_* 等薄包装转调本层 P_* 提供。
-#if defined(P_MT_IMPL) && !defined(SC_PLATFORM_MT_DONE)
-#define SC_PLATFORM_MT_DONE
-
-#if !P_WIN
-#   include <pthread.h>          /* 互斥/条件变量/线程：POSIX 后端 */
-#   if P_LINUX
-#       include <sys/syscall.h>  /* SYS_gettid（线程 id） */
-#   endif
-#endif
-
-#if P_WIN
-typedef CRITICAL_SECTION sc_mutex_t;
-#define P_mutex_init(pm)    InitializeCriticalSection(pm)
-#define P_mutex_final(pm)   DeleteCriticalSection(pm)
-#define P_mutex_lock(pm)    EnterCriticalSection(pm)
-#define P_mutex_unlock(pm)  LeaveCriticalSection(pm)
-#define P_mutex_try(pm)     (TryEnterCriticalSection(pm) ? 1 : 0)   /* 成功 1 / 否则 0 */
-
-typedef CONDITION_VARIABLE sc_cond_t;
-#define P_cond_init(pc)     InitializeConditionVariable(pc)
-#define P_cond_final(pc)    ((void)0)                               /* Win 条件变量无需销毁 */
-#define P_cond_one(pc)      WakeConditionVariable(pc)
-#define P_cond_all(pc)      WakeAllConditionVariable(pc)
-#else
-typedef pthread_mutex_t sc_mutex_t;
-#define P_mutex_init(pm)    pthread_mutex_init(pm, NULL)
-#define P_mutex_final(pm)   pthread_mutex_destroy(pm)
-#define P_mutex_lock(pm)    pthread_mutex_lock(pm)
-#define P_mutex_unlock(pm)  pthread_mutex_unlock(pm)
-#define P_mutex_try(pm)     (pthread_mutex_trylock(pm) == 0 ? 1 : 0) /* 成功 1 / 否则 0 */
-
-typedef pthread_cond_t sc_cond_t;
-#define P_cond_init(pc)     pthread_cond_init(pc, NULL)
-#define P_cond_final(pc)    pthread_cond_destroy(pc)
-#define P_cond_one(pc)      pthread_cond_signal(pc)
-#define P_cond_all(pc)      pthread_cond_broadcast(pc)
-#endif
-
-/* 条件等待：nsec/sec 全 0 → 无限等待；否则相对超时（sec 秒 + nsec 纳秒）。
- * 调用前须持有 pm。返回 0=被唤醒 / 1=超时 / -1=错误。 */
-static inline int P_cond_wait(sc_cond_t* pc, sc_mutex_t* pm, uint64_t nsec, uint64_t sec) {
-#if P_WIN
-    if (!nsec && !sec)
-        return SleepConditionVariableCS(pc, pm, INFINITE) ? 0 : -1;
-    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
-    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
-    return SleepConditionVariableCS(pc, pm, ms) ? 0
-         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
-#else
-    if (!nsec && !sec)
-        return pthread_cond_wait(pc, pm) == 0 ? 0 : -1;
-    int ret;
-#if P_DARWIN
-    /* macOS 提供相对超时接口，无需转绝对时间 */
-    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
-                            (long)(nsec % 1000000000ULL) };
-    ret = pthread_cond_timedwait_relative_np(pc, pm, &rel);
-#else
-    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
-    struct timespec abs_time;
-    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
-    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
-    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
-    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
-    ret = pthread_cond_timedwait(pc, pm, &abs_time);
-#endif
-    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
-#endif
-}
-
-/* 当前线程的内核级 id（mach tid / gettid / GetCurrentThreadId；其余回退 pthread_self） */
-static inline uint64_t P_thread_id(void) {
-#if P_WIN
-    return (uint64_t)GetCurrentThreadId();
-#elif P_DARWIN
-    return (uint64_t)pthread_mach_thread_np(pthread_self());
-#elif P_LINUX
-    return (uint64_t)syscall(SYS_gettid);
-#else
-    return (uint64_t)(uintptr_t)pthread_self();
-#endif
-}
-
-/* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
- * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */
-typedef struct {
-    sc_mutex_t mu;
-    sc_cond_t  cv;
-    uint32_t   total;    /* 需汇合的线程数 */
-    uint32_t   count;    /* 本代已到达数 */
-    uint32_t   phase;    /* 代际，每满一轮翻转 */
-} sc_barrier_t;
-
-static inline void P_barrier_init(sc_barrier_t* b, uint32_t n) {
-    P_mutex_init(&b->mu);
-    P_cond_init(&b->cv);
-    b->total = n ? n : 1;
-    b->count = 0;
-    b->phase = 0;
-}
-
-static inline void P_barrier_final(sc_barrier_t* b) {
-    P_mutex_final(&b->mu);
-    P_cond_final(&b->cv);
-}
-
-/* 汇合点：阻塞至 total 个线程全部到达。返回非 0 表示本线程为最后到达者
- * （对应 PTHREAD_BARRIER_SERIAL_THREAD，可用于选一个线程做收尾工作）。 */
-static inline int P_barrier_wait(sc_barrier_t* b) {
-    P_mutex_lock(&b->mu);
-    uint32_t ph = b->phase;
-    if (++b->count == b->total) {
-        b->phase++;                 /* 进入下一代 */
-        b->count = 0;
-        P_cond_all(&b->cv);        /* 放行全部 */
-        P_mutex_unlock(&b->mu);
-        return 1;                   /* serial thread */
-    }
-    while (ph == b->phase)          /* 等代际翻转，抗虚假唤醒/跨轮抢用 */
-        P_cond_wait(&b->cv, &b->mu, 0, 0);
-    P_mutex_unlock(&b->mu);
-    return 0;
-}
-
-#endif /* P_MT_IMPL && !SC_PLATFORM_MT_DONE */
 
 ///////////////////////////////////////////////////////////////////////////////
 // 系统日志实现（延迟展开，置于主 include guard 之外）
@@ -1236,6 +916,223 @@ static void P_log_sys(int level, const char *tag, const char *text) {
 }
 
 #endif /* P_LOG_SYS_IMPL && !SC_PLATFORM_LOG_SYS_DONE */
+
+///////////////////////////////////////////////////////////////////////////////
+// 随机数实现（延迟展开，置于主 include guard 之外）
+///////////////////////////////////////////////////////////////////////////////
+// 仅当 TU 定义 P_RAND_IMPL（op_impl.c）时展开；一次性守卫 SC_PLATFORM_RAND_DONE，
+// 独立于 SC_PLATFORM_H。平台判定宏（P_WIN/P_DARWIN/...）与原子层（sc_test_and_set）
+// 由主体首次包含时已定义并留存。集中到 op_impl.c 单 TU 落盘：降级种子的 static 状态
+// 进程内仅一份、仅播种一次（原子 CAS 保线程安全），且系统 CSPRNG 一次填满整块缓冲
+// （消除旧实现在 Linux 每次调用都 open/close /dev/urandom 的开销）。与日志 P_LOG_SYS_IMPL
+// 同款延迟落盘；由 op 运行时 sc_rand_*（op.h）薄封装转调，其余模块只调 sc_rand_*。
+#if defined(P_RAND_IMPL) && !defined(SC_PLATFORM_RAND_DONE)
+#define SC_PLATFORM_RAND_DONE
+
+#if P_WIN
+/* RtlGenRandom（SystemFunction036）：系统 CSPRNG，一次填满缓冲、无需种子/初始化。
+ * 无公开头文件，按 SDK 惯例手动声明；MSVC 自动链接 advapi32，MinGW 需 -ladvapi32。 */
+BOOLEAN NTAPI SystemFunction036(PVOID RandomBuffer, ULONG RandomBufferLength);
+#   if defined(_MSC_VER)
+#       pragma comment(lib, "advapi32.lib")
+#   endif
+#elif P_LINUX
+#   include <sys/syscall.h>   /* SYS_getrandom（Linux 3.17+；缺失/失败则回退 /dev/urandom） */
+#endif
+
+/* 末级兜底：一次性播种 libc rand()（仅当系统 CSPRNG 全部不可用才触发，近乎不发生）。
+ * 用主体已提供的跨平台原子 CAS（sc_test_and_set）保证进程内仅播种一次、线程安全。 */
+static inline void P_rand_seed_once(void) {
+    static int g_rand_seeded = 0;
+    int expected = 0;
+    if (sc_test_and_set(&g_rand_seeded, &expected, 1))
+        srand((unsigned int)((uintptr_t)&g_rand_seeded ^ (uintptr_t)time(NULL)));
+}
+
+/* 用系统 CSPRNG 一次填满整个缓冲区（无 per-call 开销、无「种子」概念）：
+ *   mac/BSD → arc4random_buf · Windows → RtlGenRandom · Linux → getrandom→/dev/urandom。
+ * 仅当系统源全部失败才逐字节降级到 rand()。 */
+static void P_rand_bytes(void *buf, size_t len) {
+    if (!buf || len == 0) return;
+    uint8_t *p = (uint8_t *)buf;
+#if P_DARWIN || P_BSD
+    arc4random_buf(p, len);
+#elif P_WIN
+    size_t off = 0;
+    while (off < len) {
+        ULONG chunk = (len - off > 0xFFFFFFFFul) ? 0xFFFFFFFFul : (ULONG)(len - off);
+        if (!SystemFunction036(p + off, chunk)) break;
+        off += chunk;
+    }
+    if (off < len) {                       /* 系统源失败 → 逐字节降级 */
+        P_rand_seed_once();
+        for (; off < len; off++) p[off] = (uint8_t)(rand() & 0xFF);
+    }
+#else /* Linux / 其他 POSIX */
+    size_t off = 0;
+#   if defined(SYS_getrandom)
+    while (off < len) {
+        long n = syscall(SYS_getrandom, p + off, len - off, 0);
+        if (n > 0) { off += (size_t)n; continue; }
+        if (n < 0 && errno == EINTR) continue;
+        break;                             /* getrandom 不可用/出错 → 回退 urandom */
+    }
+#   endif
+    if (off < len) {                       /* 一次性读满 /dev/urandom */
+        FILE *fp = fopen("/dev/urandom", "rb");
+        if (fp) { off += fread(p + off, 1, len - off, fp); fclose(fp); }
+    }
+    if (off < len) {                       /* 系统源全部失败 → 逐字节降级 */
+        P_rand_seed_once();
+        for (; off < len; off++) p[off] = (uint8_t)(rand() & 0xFF);
+    }
+#endif
+}
+
+/* 32/64 位随机整数：一律基于 P_rand_bytes，保证非零（0 保留为无效值）。 */
+static inline uint32_t P_rand32(void) { uint32_t r; P_rand_bytes(&r, sizeof r); return r ? r : 1u; }
+static inline uint64_t P_rand64(void) { uint64_t r; P_rand_bytes(&r, sizeof r); return r ? r : 1u; }
+
+#endif /* P_RAND_IMPL && !SC_PLATFORM_RAND_DONE */
+
+///////////////////////////////////////////////////////////////////////////////
+// 互斥 / 条件变量 / 线程 / 屏障（延迟展开，置于主 include guard 之外）
+///////////////////////////////////////////////////////////////////////////////
+// 仅当 TU 在包含本头前定义了 P_MT_IMPL 时展开（mt_impl.c / op_impl.c 等 builtins
+// 实现 opt-in），避免给不用线程的普通生成单元凭空拉入 <pthread.h> 等线程头。与 socket
+// 的 SC_WITH_SOCKET、系统日志的 P_LOG_SYS_IMPL 同款做法。一次性守卫 SC_PLATFORM_MT_DONE，
+// 独立于 SC_PLATFORM_H；依赖的平台判定宏（P_WIN/P_DARWIN/P_LINUX/...）由主体首次包含时
+// 已定义并留存。
+//
+// 命名：类型为 mutex_t / cond_t / barrier_t（平台句柄类型，无 sc_ 前缀——sc 无法暴露
+// C 侧类型声明，故本层类型仅经 '::' 逃逸供 mt 的 @def 直接作字段）；操作一律 P_ 前缀
+//（平台适配层，非 sc 命名域）——sc 命名域的 mutex/cond/barrier 方法由 mt 模块
+//（mt.h / mt_impl.c）以 sc_mutex_* 等薄包装转调本层 P_* 提供。
+#if defined(P_MT_IMPL) && !defined(SC_PLATFORM_MT_DONE)
+#define SC_PLATFORM_MT_DONE
+
+#if !P_WIN
+#   include <pthread.h>          /* 互斥/条件变量/线程：POSIX 后端 */
+#   if P_LINUX
+#       include <sys/syscall.h>  /* SYS_gettid（线程 id） */
+#   endif
+#endif
+
+#if P_WIN
+typedef CRITICAL_SECTION mutex_t;
+#define P_mutex_init(pm)    InitializeCriticalSection(pm)
+#define P_mutex_final(pm)   DeleteCriticalSection(pm)
+#define P_mutex_lock(pm)    EnterCriticalSection(pm)
+#define P_mutex_unlock(pm)  LeaveCriticalSection(pm)
+#define P_mutex_try(pm)     (TryEnterCriticalSection(pm) ? 1 : 0)   /* 成功 1 / 否则 0 */
+
+typedef CONDITION_VARIABLE cond_t;
+#define P_cond_init(pc)     InitializeConditionVariable(pc)
+#define P_cond_final(pc)    ((void)0)                               /* Win 条件变量无需销毁 */
+#define P_cond_one(pc)      WakeConditionVariable(pc)
+#define P_cond_all(pc)      WakeAllConditionVariable(pc)
+#else
+typedef pthread_mutex_t mutex_t;
+#define P_mutex_init(pm)    pthread_mutex_init(pm, NULL)
+#define P_mutex_final(pm)   pthread_mutex_destroy(pm)
+#define P_mutex_lock(pm)    pthread_mutex_lock(pm)
+#define P_mutex_unlock(pm)  pthread_mutex_unlock(pm)
+#define P_mutex_try(pm)     (pthread_mutex_trylock(pm) == 0 ? 1 : 0) /* 成功 1 / 否则 0 */
+
+typedef pthread_cond_t cond_t;
+#define P_cond_init(pc)     pthread_cond_init(pc, NULL)
+#define P_cond_final(pc)    pthread_cond_destroy(pc)
+#define P_cond_one(pc)      pthread_cond_signal(pc)
+#define P_cond_all(pc)      pthread_cond_broadcast(pc)
+#endif
+
+/* 条件等待：nsec/sec 全 0 → 无限等待；否则相对超时（sec 秒 + nsec 纳秒）。
+ * 调用前须持有 pm。返回 0=被唤醒 / 1=超时 / -1=错误。 */
+static inline int P_cond_wait(cond_t* pc, mutex_t* pm, uint64_t nsec, uint64_t sec) {
+#if P_WIN
+    if (!nsec && !sec)
+        return SleepConditionVariableCS(pc, pm, INFINITE) ? 0 : -1;
+    /* Windows 仅毫秒精度，不足 1ms 向上取整 */
+    DWORD ms = (DWORD)(sec * 1000ULL + (nsec + 999999ULL) / 1000000ULL);
+    return SleepConditionVariableCS(pc, pm, ms) ? 0
+         : (GetLastError() == ERROR_TIMEOUT ? 1 : -1);
+#else
+    if (!nsec && !sec)
+        return pthread_cond_wait(pc, pm) == 0 ? 0 : -1;
+    int ret;
+#if P_DARWIN
+    /* macOS 提供相对超时接口，无需转绝对时间 */
+    struct timespec rel = { (time_t)(sec + nsec / 1000000000ULL),
+                            (long)(nsec % 1000000000ULL) };
+    ret = pthread_cond_timedwait_relative_np(pc, pm, &rel);
+#else
+    /* 其他 POSIX：转换为 CLOCK_REALTIME 绝对时间 */
+    struct timespec abs_time;
+    if (clock_gettime(CLOCK_REALTIME, &abs_time) != 0) return -1;
+    uint64_t total_ns = (uint64_t)abs_time.tv_nsec + nsec;
+    abs_time.tv_sec += (time_t)(sec + total_ns / 1000000000ULL);
+    abs_time.tv_nsec = (long)(total_ns % 1000000000ULL);
+    ret = pthread_cond_timedwait(pc, pm, &abs_time);
+#endif
+    return ret == 0 ? 0 : (ret == ETIMEDOUT ? 1 : -1);
+#endif
+}
+
+/* 当前线程的内核级 id（mach tid / gettid / GetCurrentThreadId；其余回退 pthread_self） */
+static inline uint64_t P_thread_id(void) {
+#if P_WIN
+    return (uint64_t)GetCurrentThreadId();
+#elif P_DARWIN
+    return (uint64_t)pthread_mach_thread_np(pthread_self());
+#elif P_LINUX
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
+#endif
+}
+
+/* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
+ * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */
+typedef struct {
+    mutex_t mu;
+    cond_t  cv;
+    uint32_t   total;    /* 需汇合的线程数 */
+    uint32_t   count;    /* 本代已到达数 */
+    uint32_t   phase;    /* 代际，每满一轮翻转 */
+} barrier_t;
+
+static inline void P_barrier_init(barrier_t* b, uint32_t n) {
+    P_mutex_init(&b->mu);
+    P_cond_init(&b->cv);
+    b->total = n ? n : 1;
+    b->count = 0;
+    b->phase = 0;
+}
+
+static inline void P_barrier_final(barrier_t* b) {
+    P_mutex_final(&b->mu);
+    P_cond_final(&b->cv);
+}
+
+/* 汇合点：阻塞至 total 个线程全部到达。返回非 0 表示本线程为最后到达者
+ * （对应 PTHREAD_BARRIER_SERIAL_THREAD，可用于选一个线程做收尾工作）。 */
+static inline int P_barrier_wait(barrier_t* b) {
+    P_mutex_lock(&b->mu);
+    uint32_t ph = b->phase;
+    if (++b->count == b->total) {
+        b->phase++;                 /* 进入下一代 */
+        b->count = 0;
+        P_cond_all(&b->cv);        /* 放行全部 */
+        P_mutex_unlock(&b->mu);
+        return 1;                   /* serial thread */
+    }
+    while (ph == b->phase)          /* 等代际翻转，抗虚假唤醒/跨轮抢用 */
+        P_cond_wait(&b->cv, &b->mu, 0, 0);
+    P_mutex_unlock(&b->mu);
+    return 0;
+}
+
+#endif /* P_MT_IMPL && !SC_PLATFORM_MT_DONE */
 
 ///////////////////////////////////////////////////////////////////////////////
 // Socket 跨平台层（延迟展开，置于主 include guard 之外；参考 stdc 网络段）

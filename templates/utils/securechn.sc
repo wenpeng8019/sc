@@ -6,7 +6,7 @@
 #   叠一层认证加密分帧，调用方只管 send/recv 明文。
 #
 # 依赖：inc crypto.sc（x25519 / hkdf_sha256 / sha256 / aead_seal/open=ChaCha20-Poly1305）
-#   / inc io.sc（com 设备）/ inc async.sc（事件循环）/ inc os.sc（os_rand：CSPRNG）。
+#   / inc io.sc（com 设备）/ inc async.sc（事件循环）。随机数经 op 层 rand_bytes（CSPRNG，默认导入，无需 inc）。
 #
 # 两种握手模式（sec_mode）：
 #   · SEC_PSK_ONLY  —— 仅用 PSK 快速派生会话密钥（一个 RTT，无非对称运算）。无前向保密。
@@ -31,7 +31,6 @@
 inc crypto.sc
 inc io.sc
 inc async.sc
-inc os.sc
 
 # op.h 恒链接的异步 io 桥接原语（与 ws.sc 同）。声明为 @fnc 即可 await。
 @fnc com_read_async::  future&, c: com&, buf: &, n: u4
@@ -195,10 +194,10 @@ inc os.sc
     var my_pub[32]: u1
     my_hello[0] = (SEC_VERSION: u1)
     my_hello[1] = (use_eph: u1)
-    os_rand((&my_hello[2]: &), 32)
+    rand_bytes((&my_hello[2]: &), 32)
     var hello_len: u4 = 34
     if use_eph != 0
-        os_rand((&my_priv[0]: &), 32)
+        rand_bytes((&my_priv[0]: &), 32)
         crypto_x25519_base((&my_pub[0]: u1&), (&my_priv[0]: u1&))
         var b: u4 = 0
         while b < 32

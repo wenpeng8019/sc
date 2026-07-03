@@ -11,11 +11,11 @@
 #ifndef SC_M_H
 #define SC_M_H
 
-/* mt 内联持有平台锁/条件/屏障句柄（sc_mutex_t 等），须 opt-in 展开 platform.h 的
+/* mt 内联持有平台锁/条件/屏障句柄（mutex_t 等），须 opt-in 展开 platform.h 的
  * 互斥/条件/屏障/线程层，并把 <pthread.h> 带入所有 inc 本模块的单元（有意打破
  * 「普通单元不沾线程头」原则——用 mt 即认此代价，换取无堆分配的内联锁）。 */
 #define P_MT_IMPL
-#include "platform.h"   /* 提供 sc_mutex_t / sc_cond_t / sc_barrier_t + P_* 操作 */
+#include "platform.h"   /* 提供 mutex_t / cond_t / barrier_t + P_* 操作 */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -88,7 +88,7 @@ struct sc_queue *sc_default_queue(struct sc_pool *host);
 /* ---------------- mutex：互斥锁 ---------------- */
 
 typedef struct sc_mutex {
-    sc_mutex_t h;       /* 平台锁句柄（实现私有） */
+    mutex_t h;       /* 平台锁句柄（实现私有） */
 } sc_mutex;
 
 void    sc_mutex_init(sc_mutex *_this);
@@ -100,7 +100,7 @@ bool    sc_mutex_try_lock(sc_mutex *_this);     /* 1 成功 / 0 已被占用 */
 /* ---------------- cond：条件变量 ---------------- */
 
 typedef struct sc_cond {
-    sc_cond_t h;       /* 平台条件变量句柄（实现私有） */
+    cond_t h;       /* 平台条件变量句柄（实现私有） */
 } sc_cond;
 
 void    sc_cond_init(sc_cond *_this);
@@ -116,7 +116,7 @@ int32_t sc_cond_wait(sc_cond *c, sc_mutex *m, uint64_t nsec, uint64_t sec);
 /* ---------------- barrier：屏障（N 方汇合） ---------------- */
 
 typedef struct sc_barrier {
-    sc_barrier_t h;
+    barrier_t h;
 } sc_barrier;
 
 void    sc_barrier_init(sc_barrier *_this, uint32_t n);  /* n 方汇合（0 视为 1） */

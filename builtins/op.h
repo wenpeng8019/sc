@@ -66,6 +66,7 @@ typedef struct sc_thin {
 #define SC_REF_HDR  16                  /* 堆对象头偏移（≥sizeof(sc_ref)，过 max_align 对齐） */
 #define SC_REF_ATOM 1                   /* sc_ref.flags 位：对象引用计数用原子 RMW（T<atom>() 构造） */
 #define SC_REF_CANARY 2                 /* sc_ref.flags 位：对象带越界 canary（--check=mem 注入头尾哨兵） */
+#define SC_REF_RAW    4                 /* sc_ref.flags 位：T<raw>() 裸分配（sc_alloc/libc），释放走 sc_free */
 #define SC_OWN_ROOT ((int32_t*)-1)      /* 栈/全局根指针：域退出自动拆 */
 #define SC_OWN_RAW  ((int32_t*)-2)      /* 经裸 base / 显式转裸：不追踪 */
 /* own 是否「真实持有者」（普通 out 地址）：排除 NULL/ROOT/RAW 哨兵
@@ -133,7 +134,9 @@ sc_afat __sc_afat_objck(sc_afat a, void (*objdrop)(void *));
  *     全生命周期静态堆对象用 libc 即可，速度与资源利用率俱佳。
  *   启用池化（编译期 -DSC_POOL，需链接 builtins/mem）：转发到 mem 的
  *     chunk/refit/recycle（size-class 每线程私有堆，减碎片、支持跨线程回收）。
- * 注：--check=mem（canary）与 SC_POOL 互斥——canary 路径自带块算术，恒走 libc。 */
+ * 注：--check=mem（canary）与 SC_POOL 互斥——canary 路径自带块算术，恒走 libc。
+ *   胖 T@ 默认经 sc_chunk 池化（自带 MEM_DEBUG 尾金丝雀，--check=mem 联动开启）；
+ *   仅 T<raw>() 退化经本间接层（sc_alloc）分配、sc_free 释放。 */
 #ifndef SC_POOL
 #  define sc_alloc(n)       malloc((size_t)(n))
 #  define sc_realloc(p, n)  realloc((p), (size_t)(n))
@@ -264,6 +267,40 @@ static inline void sc_thin_unbind(sc_thin *t) {
     }
     t->p = (void *)0; t->tar = (int32_t *)0;
 }
+
+/* ---------------- clock：时钟（op.sc @def clock 的 C 契约，语言内核） ----------------
+ * 内联持有平台时间值句柄 clk_t（platform.h「时间与时钟」段，timespec 封装，值语义、
+ * 无堆分配）。全部方法为 static inline 薄封装，直转 P_time_now / P_clock_now /
+ * P_cost_now 采集与 clock_* 换算宏——零调用开销；跨 Win/POSIX 由平台层负责。
+ * 因 op.h 经 platform.h 带入每个 C 单元且 clk_t 先于此处定义，内联无链接/原型冲突。 */
+typedef struct sc_clock {
+    clk_t h;                        /* 平台时间值句柄（内联，实现私有） */
+} sc_clock;
+
+static inline void sc_clock_now (sc_clock *_this)             { P_time_now(&_this->h); }         /* 墙钟 */
+static inline void sc_clock_mono(sc_clock *_this)             { P_clock_now(&_this->h); }        /* 单调钟 */
+static inline void sc_clock_cost(sc_clock *_this, bool proc)  { P_cost_now(&_this->h, proc); }   /* CPU 耗时 */
+
+static inline uint64_t sc_clock_s (sc_clock *_this)  { return (uint64_t)clock_s(_this->h); }
+static inline uint64_t sc_clock_ms(sc_clock *_this)  { return (uint64_t)clock_ms(_this->h); }
+static inline uint64_t sc_clock_us(sc_clock *_this)  { return (uint64_t)clock_us(_this->h); }
+static inline double sc_clock_s_f (sc_clock *_this)  { return clock_s_f(_this->h); }
+static inline double sc_clock_ms_f(sc_clock *_this)  { return clock_ms_f(_this->h); }
+static inline double sc_clock_us_f(sc_clock *_this)  { return clock_us_f(_this->h); }
+
+static inline sc_clock sc_clock_diff(sc_clock *_this, sc_clock other) {
+    sc_clock r; clock_dec(_this->h, other.h, r.h); return r;   /* self - other */
+}
+static inline bool sc_clock_gt(sc_clock *_this, sc_clock other) { return clock_gt(_this->h, other.h); }
+static inline bool sc_clock_ge(sc_clock *_this, sc_clock other) { return clock_ge(_this->h, other.h); }
+
+/* ---------------- 随机数（系统 CSPRNG；实现见 op_impl.c，平台层 platform.h P_RAND_IMPL） ----------------
+ * op 单元恒被链接（默认导入），全库共用同一份随机源：mac/BSD arc4random_buf、Windows
+ * RtlGenRandom、Linux getrandom→/dev/urandom——均一次填满整块、无「种子」概念（系统源全部
+ * 不可用时才逐字节降级 rand()）。os/crypto 等模块转调此层，不再各自展开平台实现。 */
+void     sc_rand_bytes(void *buf, size_t n);   /* 用 CSPRNG 填满 n 字节；n==0 空操作 */
+uint32_t sc_rand32(void);                       /* 32 位随机整数（非零） */
+uint64_t sc_rand64(void);                       /* 64 位随机整数（非零） */
 
 /* ---------------- chain：侵入式双向链表 ----------------
  * 元素为 sc 链表结构体（def T: ~ {}，首位有 void *_prev, *_next）
@@ -440,9 +477,9 @@ void     sc_future_done(sc_future *f, void *result);  /* done 关键字：置就
  * 1=已就绪（不让出、直接续跑）；0=未就绪（保存状态后让出）。 */
 uint8_t  sc_future_await(sc_future *f, void *frame, void (*resume)(void *));
 
-/* ---------------- session：rpc 延迟应答会话句柄（接口协议） ----------------
+/* ---------------- deferred：rpc 延迟应答句柄（接口协议） ----------------
  * 与 sc_future（fnc 单线程异步）对称的「rpc 延迟应答」机制：sync 驱动的 rpc 体内裸 `async`
- * 取出当前调用会话（求值为 session&），rpc 体 return 不再自动应答；之后（任意线程、任意
+ * 取出当前待应答调用（求值为 deferred&），rpc 体 return 不再自动应答；之后（任意线程、任意
  * 时刻）`done s, result` 兑现——把结果写回调用方返回槽并唤醒其阻塞，与 `done sc_future` 同形。
  *
  * 是 op 层「接口协议」对象（仿 sc_queue/sc_promise）：respond 为每对象方法指针，由消息队列实现
@@ -450,21 +487,21 @@ uint8_t  sc_future_await(sc_future *f, void *frame, void (*resume)(void *));
  * respond(s, src, n)：从 src 拷 n 字节到调用方返回槽（偏移 0，与即时应答原地写 _ 对齐）并
  * 唤醒；n==0/src==NULL=无结果（rpc 无返回值）。
  *
- * 会话身份（当前正在执行的 rpc 调用会话）由 op 内核 TLS 维护（op_session_begin 在消费者
- * 执行 rpc 体前设置，裸 `async` 经 op_session_current 取出并标记「已领取」=转延迟应答）。
- * sc_session 句柄本身由实现模块在调用方栈上构造（随调用方阻塞存活），op 内核只透传其指针。 */
-typedef struct sc_session {
+ * 待应答调用身份（当前正在执行的 rpc 调用）由 op 内核 TLS 维护（op_deferred_begin 在消费者
+ * 执行 rpc 体前设置，裸 `async` 经 op_deferred_current 取出并标记「已领取」=转延迟应答）。
+ * sc_deferred 句柄本身由实现模块在调用方栈上构造（随调用方阻塞存活），op 内核只透传其指针。 */
+typedef struct sc_deferred {
     void  *h;                                              /* 实现私有区指针（实现私有） */
-    void (*respond)(struct sc_session *_this, void *src, size_t n);  /* done 兑现：写回返回槽 + 唤醒 */
-} sc_session;
+    void (*respond)(struct sc_deferred *_this, void *src, size_t n);  /* done 兑现：写回返回槽 + 唤醒 */
+} sc_deferred;
 
-/* 当前 rpc 调用会话 TLS（op 内核维护，消息队列实现模块在执行 rpc 体前后调用）：
- *   op_session_begin(s) —— 执行 rpc 体前置当前会话为 s、清「已领取」标记；
- *   sc_op_session_current() —— 裸 `async` 取当前会话，并标记「已领取」（转延迟应答）；
- *   sc_op_session_taken()  —— rpc 体返回后查询是否被领取（决定即时应答 vs 延迟应答）。 */
-void     sc_op_session_begin(sc_session *s);
-sc_session *sc_op_session_current(void);
-int      sc_op_session_taken(void);
+/* 当前 rpc 调用的延迟应答句柄 TLS（op 内核维护，消息队列实现模块在执行 rpc 体前后调用）：
+ *   op_deferred_begin(s) —— 执行 rpc 体前置当前待应答调用为 s、清「已领取」标记；
+ *   sc_op_deferred_current() —— 裸 `async` 取当前待应答调用，并标记「已领取」（转延迟应答）；
+ *   sc_op_deferred_taken()  —— rpc 体返回后查询是否被领取（决定即时应答 vs 延迟应答）。 */
+void     sc_op_deferred_begin(sc_deferred *s);
+sc_deferred *sc_op_deferred_current(void);
+int      sc_op_deferred_taken(void);
 
 /* op 层暴露给"异步功能库"（async 模块叶子原语生态）的钩子：
  *   op_timer_arm —— 基础定时器：在 ms 毫秒后兑现 f（done）。两后端各自实现

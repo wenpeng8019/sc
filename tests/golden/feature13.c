@@ -69,7 +69,7 @@ static inline sc_future *sc_future__new(void) {
 }
 
 static sc_future *sc_greet__async(char *name, uint32_t ms) {
-    struct sc_greet *_p = (struct sc_greet *)calloc(1, sizeof(struct sc_greet));
+    struct sc_greet *_p = (struct sc_greet *)sc_chunk0(sizeof(struct sc_greet));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->name = name;
@@ -91,11 +91,11 @@ static void sc_greet_rpc(struct sc_greet *_p) {
     _s1: ;
     printf("  [%s] 醒来\n", _p->name);
     _p->_ = _p->name;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 static sc_future *sc_both__async(char *a, char *b) {
-    struct sc_both *_p = (struct sc_both *)calloc(1, sizeof(struct sc_both));
+    struct sc_both *_p = (struct sc_both *)sc_chunk0(sizeof(struct sc_both));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->a = a;
@@ -123,7 +123,7 @@ static void sc_both_rpc(struct sc_both *_p) {
     _p->y = (char *)sc_future_get(_p->_fut);
     printf("  both 收集: %s + %s\n", _p->x, _p->y);
     _p->_ = 0;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 static void sc_square_worker_rpc(struct sc_square_worker *_p) {
@@ -146,7 +146,7 @@ static sc_future * sc_bg_square(int32_t n) {
 }
 
 static sc_future *sc_compute__async(int32_t n) {
-    struct sc_compute *_p = (struct sc_compute *)calloc(1, sizeof(struct sc_compute));
+    struct sc_compute *_p = (struct sc_compute *)sc_chunk0(sizeof(struct sc_compute));
     _p->_state = 0;
     _p->_ret = sc_future_new();
     _p->n = n;
@@ -173,7 +173,7 @@ static void sc_compute_rpc(struct sc_compute *_p) {
     _p->b = (int32_t)(intptr_t)sc_future_get(_p->_fut);
     printf("  compute: %d -> %d\n", _p->n, _p->b);
     _p->_ = _p->b;
-    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); free(_p); sc_future_done(_r, _res); return; }
+    { sc_future *_r = _p->_ret; void *_res = (void *)(intptr_t)(_p->_); sc_recycle(_p); sc_future_done(_r, _res); return; }
 }
 
 int32_t main(void) {
