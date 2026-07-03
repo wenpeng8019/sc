@@ -7,9 +7,16 @@ GPU / 着色器（shader）开发扩展。定位与主手册一致——既是**
 
 > **当前状态（重要）**
 >
-> 本文档描述的是**设计方案与路线图**，shader 扩展尚未实现（Beta 0.9 未含）。文中语法为
-> **提案**，标注「（待定）」处表示实现前仍可调整。已确定的架构决策（中枢 IR、一期产物、
-> 后端选型、模块划分）已在下文明确记录，作为落地时的一致依据。
+> **一期（最小可用）已落地**：`.sg` 文件路由、`vert`/`frag`/`comp` stage 解析、
+> `shader_sema` 子集强制、`codegen_glsl` 产 Vulkan-GLSL 文本 + 反射清单 JSON、
+> 属性语法（`loc`/`builtin`/`uniform`/`storage`/`push` + `set`/`binding`）、stage I/O
+> 成员改写、std140/std430 布局偏移均已实现并回归通过；全链路已实机跑通
+> （`scc` → `glslangValidator`(SPIR-V) → MoltenVK 渲染三角形，见 `examples/shader-tri/`）。
+>
+> **但离「无感好用」尚远**——见 §13「待做能力（近期优先）」，其中 GL 版本适配（P0）、
+> GPU 上下文模块（P1）、跨平台窗口模块（P2）是接下来的重点。文中未落地部分仍为**提案**，
+> 标注「（待定）」处实现前可调整；已确定的架构决策（中枢 IR、一期产物、后端选型、模块划分）
+> 作为落地时的一致依据。
 
 > **两条硬约束（贯穿全文）**
 >
@@ -347,33 +354,143 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
 
 ---
 
-## 13. 路线图
+## 13. 待做能力（近期优先）
 
-### 13.1 一期（最小可用）
-- `vert`/`frag` 关键字 + `vec/mat` 类型 + swizzle + stage I/O 结构体。
-- `codegen_glsl`：产 Vulkan-GLSL 文本 + 反射清单。
-- `shader_sema`：子集强制 + 基础类型检查。
-- 运行时侧样例（templates/demo）：GLSL 文本经 shaderc→SPIR-V→MoltenVK 在 Mac 上跑通一个
-  三角形/纹理四边形。
+一期已把「`.sg` → Vulkan-GLSL 450 → SPIR-V → MoltenVK 三角形」的**最小闭环**跑通，但要达到
+「写 `.sg` + 少量 sc 胶水就能出画面、且能跑在不止一个平台」的**无感好用**，还差三块能力。
+按优先级排列，前置依赖关系为：**P0 编译器侧（版本/能力）** 先行，**P1/P2 主机侧模块** 随后
+（后两者合起来正是要替换掉 demo 里手写的 C + glfw + Vulkan 样板）。
 
-### 13.2 二期
-- `comp` 计算着色器 + storage/SSBO。
+### 13.1 GL 语言版本适配与能力裁剪（P0，最高优先级）
+
+**现状**：`codegen_glsl` 硬编码 `#version 450`（Vulkan-GLSL），产物只能被 Vulkan/glslang 消费。
+目标平台一旦变（桌面 OpenGL、OpenGL ES、WebGL），产物即不可用。
+
+**要做的**：让「输出什么 GL 版本 / profile」成为一个**目标（target）参数**，贯穿 codegen 与 sema。
+
+- **目标矩阵（至少覆盖）**：
+
+  | target | 版本头 | 典型场景 |
+  |--------|--------|----------|
+  | `vulkan` | `#version 450`（或 460） | 一期现状；glslang/MoltenVK |
+  | `gl-core` | `#version 330/410/430 core` | 桌面 OpenGL（Linux/Win/Mac 兼容 profile） |
+  | `gles` | `#version 300 es` / `310 es` | 移动端 / 嵌入式 |
+  | `webgl` | `#version 300 es`（WebGL2）/ `100`（WebGL1） | 浏览器 |
+
+- **codegen 按 target 分叉的差异点**（需在 `codegen_glsl` 里参数化，而非硬编码）：
+  - **版本头 + profile**：`#version N [core|es]`。
+  - **精度限定符**：ES/WebGL 片元着色器须 `precision highp float;`（及 int/sampler 精度）。
+  - **绑定语法**：Vulkan 用 `layout(set=,binding=)`；桌面 GL 无 `set`、`binding` 需 GL≥4.2；
+    ES3.1 才有显式 binding；更低版本退化为运行时按名字 `glGetUniformLocation` → 反射清单需带名字。
+  - **内建变量名**：`gl_VertexIndex`↔`gl_VertexID`、`gl_InstanceIndex`↔`gl_InstanceID`
+    （Vulkan vs GL/ES 命名不同，`builtinGlsl` 需按 target 映射）。
+  - **I/O 关键字**：现代用 `in`/`out`；GLSL ES 100 / GL 120 用 `attribute`/`varying`。
+  - **采样**：`texture()`（现代）vs `texture2D()`（ES2/GL<3.3）；组合 sampler 的可用性。
+  - **数组构造器、位运算、`double`(f8)** 等在低版本不可用（见下）。
+
+- **shader_sema 按 target 收窄能力**（这是「语义分析也要根据输出版本进行功能限制」）：
+  - `storage`/SSBO → 需 GL≥4.3 / ES≥3.1，否则报错。
+  - `comp` 计算着色器 → 需 GL≥4.3 / ES≥3.1。
+  - `f8`（double）→ 仅桌面 GL≥4.0；ES/WebGL 无。
+  - 数组字面量构造器、整数位运算、无符号整型 → ES2/GL<3.3 不可用。
+  - 各版本内建函数集差异（如 `textureLod` 在 ES2 顶点阶段的限制）。
+  - 校验应产出**明确的版本相关报错**：「target `gles300` 不支持 storage buffer（需 ES≥3.1）」。
+
+- **接口设计（待定）**：
+  - CLI：`scc x.sg --target vulkan` / `--target gl-core --glsl 430` / `--target gles --glsl 300`。
+  - 或 `.sg` 内 pragma：`#pragma target gles 310`（与 sc 的 `#` 注释区分待定）。
+  - 允许一次产出多 target（同一 `.sg` 编出 Vulkan + GLES 两套），反射清单标注各自 target。
+  - 反射清单 JSON 增 `"target"` 字段；低版本 target 的 resources 需带 `"name"` 供按名绑定。
+
+- **落点**：`codegen_glsl` 引入 `struct GlslTarget { enum Api{Vulkan,GLCore,GLES,WebGL}; int version; }`，
+  `emitStage`/`emitResources`/`builtinGlsl` 均接收它；`shader_sema` 接收同一 target 做能力门控。
+
+### 13.2 GL/EGL 上下文环境模块（P1）——类 glfw 的「上下文/表面」层
+
+**现状**：`examples/shader-tri` 的 host 是手写 C（实例→设备→交换链→管线→渲染循环），且
+运行时靠环境变量硬指 MoltenVK/loader。用户要「无感好用」，这套样板必须被**可复用的 sc 模块**取代。
+
+**要做的**：一个 sc 侧 GPU 上下文模块（暂名 `templates/gpu/` 或未来 stdlib `gfx`），职责：
+
+- **上下文/设备创建**：
+  - Vulkan 路径（MoltenVK）：实例 + 物理/逻辑设备 + 队列 + 交换链，封装 portability 相关细节。
+  - EGL 路径（GLES）：`eglGetDisplay`/`eglCreateContext`/`eglCreateWindowSurface`。
+  - 桌面 GL 路径：CGL(Mac)/GLX(X11)/WGL(Win) 或直接复用窗口库给的 context。
+- **管线自动装配**：读 scc 产出的**反射清单 JSON**，据此建立管线布局、描述符集/绑定、顶点属性
+  绑定——把 §10「运行时按反射清单建管线」这段做成模块，而不是每个应用重抄一遍。
+- **着色器加载**：按 target 加载 `.spv`（Vulkan）或 GLSL 源（GL/ES，运行时 `glShaderSource`）。
+- **分层**：底层用 sc 的 C 互操作（`inc` Vulkan/EGL 头）做 FFI 绑定；上层给出 sc 友好的
+  「创建 context → 载入 .sg 产物 → 拿到可用管线」三步 API。
+
+对标 glfw 的「context」部分（不含窗口），但聚焦「把 `.sg` 产物变成可直接 draw 的管线」这条链。
+
+### 13.3 UI / 窗口跨平台环境模块（P2）——类 SDL 的「窗口/输入/事件」层
+
+**现状**：demo 直接依赖 glfw 建窗口、收输入、跑事件循环。
+
+**要做的**：一个跨平台窗口/输入的 sc 模块，与 §13.2 的上下文模块**解耦**（窗口只负责产出
+native handle / surface，交给上下文模块消费）：
+
+- **能力**：窗口创建/尺寸/全屏、事件循环、键鼠/触摸输入、时间/帧率、DPI。
+- **平台**：macOS(Cocoa + CAMetalLayer)、Linux(X11/Wayland)、Windows(Win32)、Web(canvas)。
+- **策略（待定）**：
+  - **(a) 薄封装现成 glfw/SDL**：sc 封装其 C API——快、省事，契合「不重复造轮子」，一期倾向此。
+  - **(b) 自研跨平台窗口层**：重，远期再评估。
+- 这是「无感好用」的最外层：用户写 `.sg` + 少量 sc 胶水（窗口 + 上下文两个模块）即可出画面。
+
+### 13.4 三者关系与推进顺序
+
+```mermaid
+flowchart LR
+    P0["§13.1 GL 版本适配<br/>(codegen + sema)"] --> P1["§13.2 GPU 上下文模块<br/>(类 glfw context)"]
+    W["§13.3 窗口模块<br/>(类 SDL)"] -->|native surface| P1
+    P1 --> APP["无感好用:<br/>.sg + 少量 sc 胶水 → 出画面"]
+    W --> APP
+```
+
+- **P0（§13.1）先做**：没有多 target，产物只能喂 Vulkan，谈不上跨平台。且它纯编译器侧、
+  与现有 `codegen_glsl`/`shader_sema` 同构，风险最低、收益最直接。
+- **P1（§13.2）次之**：把 demo 的手写 C host 沉淀为模块，是「好用」的核心。
+- **P2（§13.3）最后**：窗口层可先薄封装 glfw/SDL，快速替掉 demo 的裸 glfw 依赖。
+
+---
+
+## 14. 路线图
+
+### 14.1 一期（最小可用）——**已完成**
+- ✅ `vert`/`frag`/`comp` 关键字 + stage I/O 结构体 + swizzle + `vec/mat` 透传。
+- ✅ `codegen_glsl`：产 Vulkan-GLSL 文本 + 反射清单 JSON。
+- ✅ `shader_sema`：子集强制 + 基础类型检查 + `(set,binding)` 冲突检测。
+- ✅ 运行时样例（`examples/shader-tri`）：GLSL 经 `glslangValidator`→SPIR-V→MoltenVK 在 Mac 上
+  跑通彩色三角形。
+
+### 14.2 紧接一期（近期优先，详见 §13）
+- **P0**：GL 版本/profile 适配（Vulkan / gl-core / gles / webgl）+ 按版本的 sema 能力裁剪。
+- **P1**：GPU 上下文/表面模块（类 glfw context，读反射清单自动装配管线）。
+- **P2**：跨平台窗口/输入模块（类 SDL，先薄封装 glfw/SDL）。
+
+### 14.3 二期
+- `comp` 计算着色器 + storage/SSBO 的完整链路（一期已可解析，需 sema/codegen 深化）。
 - `@def` 共享布局（CPU↔GPU uniform 一致性校验，见 §7）。
 - `codegen_spirv`：SPIR-V 直发。
 - SPIRV-Cross→MSL 离线路径（发行用原生 Metal）。
 
-### 13.3 远期
+### 14.4 远期
 - `codegen_msl` 直产 MSL。
 - 评估 Slang 作为可选后端（autodiff/泛型多后端）。
 - 与 sc 的 `tok` 依赖图 / dnn 模板联动（compute shader 加速训练？——研究向）。
 
 ---
 
-## 14. 当前未决 / 待定
+## 15. 当前未决 / 待定
 
-- shader 属性附着语法（`loc`/`builtin`/`uniform` 的确切写法，见 §3）。
+- **GL 版本适配的接口形态**：CLI 标志 vs `.sg` 内 pragma vs 两者并存；多 target 一次产出的
+  产物命名与目录布局（见 §13.1）。
+- **上下文/窗口模块的边界与命名**：放 `templates/gpu/` 还是升为 stdlib `gfx`；薄封装 glfw/SDL
+  vs 自研的取舍（见 §13.2、§13.3）。
 - 向量/矩阵类型是内置关键字还是 shader builtins 模块提供（见 §4、§8）。
-- 反射清单 JSON 的确切 schema。
-- 是否需要一个「主机侧」sc 运行时封装（把 shaderc/MoltenVK 调用包成 sc 模块），还是留给
-  用户在 C 侧自行集成。
 - 计算着色器与 sc `tok`/dnn 体系的结合边界（远期研究）。
+- **已定**（一期落地时确定，此处存档）：属性附着语法（`loc N` / `builtin X` 跟在字段后；
+  `uniform|storage|push [set S binding B]` 跟在 `@def` 结构后）；反射清单 JSON schema
+  （`stages[].{inputs,outputs,location,builtin}` + `resources[].{kind,set,binding,layout,members[].{offset,size}}`）。
+
