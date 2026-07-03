@@ -1,8 +1,26 @@
-# path_stack 冒烟测试：验证移植自 c_prototype C_pth_* 的路径段栈（proto 底座）。
-# 运行：scc templates/utils/path_stack_test.sc && 生成的可执行直接跑。
-inc path.sc
+# path_stack_demo —— 路径段栈示例（templates/utils/path.sc 的 path_stack）
+#
+# path_stack 移植自 c_prototype 的 C_pth_*（C_stk/proto 的路径应用）：把路径当作「段的栈」，
+#   以 proto（FILO 纪律）为底座——push 下钻追加、up/ascend 上溯（等价 ".."）、build 按压入序
+#   以 '/' 拼接成路径串。段用 proto.feed 存原始字节（不经 strlen，允许任意段内容、无长度上限）。
+#
+# 运行：scc templates/demo/path_stack_demo.sc
+#   期望依次输出 5 组场景（绝对路径下钻/上溯、相对路径 "." 忽略、首段 '/' 自动判定绝对、
+#   空栈边界 "/" 与 "."、build_to 写入用户缓冲并测长）。
+#
+# 用法要点：
+#   var ps: path_stack
+#   ps.init(true)                 # true=绝对路径栈（build 前缀 '/'），false=相对
+#   ps.push("usr/local/bin")      # 逐段下钻（内部按 '/' 拆分；"." 忽略，".." 上溯不越根）
+#   ps.up() / ps.ascend(n)        # 上溯一段 / n 段（back 为 sc 保留字，故名 ascend）
+#   var s: char& = ps.build()     # 拼接成路径串（mem 分配，用完 recycle）
+#   ps.build_to(&buf[0], size)    # 或直接写入用户缓冲；buffer 为 nil 时仅测长
+#   ps.drop()                     # 释放底座 proto
+
+inc ../utils/path.sc
 inc mem.sc
 
+# 打印一个路径栈：标签 + 段数 + 拼接结果。
 @fnc show: label: const char&, ps: path_stack&
     var s: char& = ps->build()
     ::printf("%-22s depth=%llu  -> %s\n", label, ps->depth(), s)
@@ -30,7 +48,7 @@ inc mem.sc
     show("B ..", &b)
     b.drop()
 
-    # C：首段以 '/' 起自动判定绝对；back 多段
+    # C：首段以 '/' 起自动判定绝对；ascend 多段
     var c: path_stack
     c.init(false)
     c.push("/opt/app/data/cache")    # 自动绝对
