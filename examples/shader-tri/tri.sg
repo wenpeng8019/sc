@@ -1,0 +1,23 @@
+# 三角形 demo 着色器（syntax-g）。
+# 无顶点缓冲、无 uniform：三个顶点的位置与颜色写在常量数组里，
+# 由内建 vertex_id 索引。运行时 host 只需空 draw(3)。
+
+@def VsIn: {
+    vid: i4 builtin vertex_id
+}
+
+@def VsOut: {
+    clip:  vec4 builtin position
+    color: vec3
+}
+
+vert vs_main: VsOut, in: VsIn
+    let pos[3]: vec2 = {vec2(0.0, -0.5), vec2(0.5, 0.5), vec2(-0.5, 0.5)}
+    let col[3]: vec3 = {vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0)}
+    var o: VsOut
+    o.clip = vec4(pos[in.vid], 0.0, 1.0)
+    o.color = col[in.vid]
+    return o
+
+frag fs_main: vec4, in: VsOut
+    return vec4(in.color, 1.0)

@@ -116,6 +116,17 @@ struct Emitter {
         return expr(e);
     }
 
+    // 数组字面量 {a, b, ...} → GLSL 数组构造器 TYPE[N](a, b, ...)。
+    std::string initListArray(const TypeRef& t, const Expr* e) {
+        std::string dim = t.arrayDims.empty() ? "" : t.arrayDims.front();
+        std::string s = mapType(t.name) + "[" + dim + "](";
+        for (size_t i = 0; i < e->args.size(); i++) {
+            if (i) s += ", ";
+            s += expr(e->args[i].get());
+        }
+        return s + ")";
+    }
+
     std::string expr(const Expr* e) {
         if (!e) return "";
         switch (e->kind) {
@@ -203,7 +214,12 @@ struct Emitter {
                     if (s->kind == Stmt::LetS) os << "const ";
                     os << mapType(f.type.name) << " " << f.name;
                     for (const auto& d : f.type.arrayDims) os << "[" << d << "]";
-                    if (f.init) os << " = " << expr(f.init.get());
+                    if (f.init) {
+                        if (f.init->kind == Expr::InitList && !f.type.arrayDims.empty())
+                            os << " = " << initListArray(f.type, f.init.get());
+                        else
+                            os << " = " << expr(f.init.get());
+                    }
                     os << ";\n";
                 }
                 break;
