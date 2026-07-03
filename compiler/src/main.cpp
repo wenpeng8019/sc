@@ -22,6 +22,7 @@
 #include "ast_json.h"
 #include "ast_print.h"
 #include "codegen_c.h"
+#include "codegen_glsl.h"
 #include "codegen_sc.h"
 #include "error.h"
 #include "lexer.h"
@@ -2436,6 +2437,17 @@ int main(int argc, char** argv) {
         ss << fin.rdbuf();        // 将整个文件读入内存 stringstream
     }
     std::string src = ss.str();
+
+    // ---- .sg 着色器源：GPU/着色器扩展（syntax-g）子管线 ----
+    // 与 sc→C 管线并列而非交织：lex(shaderMode) → parse → codegen_glsl。
+    if (input != "-" && endsWith(input, ".sg")) {
+        std::string outDir;
+        if (!output.empty()) {
+            std::filesystem::path op(output);
+            outDir = op.has_parent_path() ? op.parent_path().string() : ".";
+        }
+        return compileShaderSource(src, input, outDir);
+    }
 
     // ---- 3. 编译流水线 + 输出 ----
     try {

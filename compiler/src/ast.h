@@ -3,6 +3,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "shader_ast.h"   // ShaderStage（GPU/着色器扩展；仅为 Decl 增加一个阶段标记）
 
 // ============================================================
 // AST（抽象语法树）—— 整个编译器的核心数据结构
@@ -584,6 +585,11 @@ struct Decl {
                                     // 跨模块编译时其类型定义聚合进工程级 generic.h（跨单元一致、
                                     // 去重），使模块导出签名引用实例类型时可见。普通声明为 false。
     std::string genericKey;         // 所属泛型实例键（如 "Vec<i4,int>"），跨单元去重用。
+
+    // GPU/着色器扩展（syntax-g）：FuncD 的着色阶段标记。仅在 .sg 源（shader 模式）
+    // 解析时由 parser 置位；None 即普通 sc 函数。shader 专属语义/代码生成在
+    // shader_sema.* / codegen_glsl.*。
+    ShaderStage shaderStage = ShaderStage::None;
 
     //---------
 

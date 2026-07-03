@@ -21,5 +21,9 @@
 //
 // 错误处理：
 //   所有语法错误通过 throw CompileError 报告，携带行号，main 统一捕获输出。
+//
+// shaderMode（GPU/着色器扩展 syntax-g）：仅用于 .sg 源。为真时，顶层标识符
+//   vert/frag/comp 被识别为着色阶段入口声明（否则仍是普通标识符，保持 .sc 方言
+//   与全部回归不受影响）。默认 false，现有调用点无需改动。
 // ============================================================
-Program parse(const std::vector<Token>& toks);
+Program parse(const std::vector<Token>& toks, bool shaderMode = false);

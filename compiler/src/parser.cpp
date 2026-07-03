@@ -95,7 +95,12 @@ struct Parser {
     // future<ID>() 构造点收集的 ID（去重、首见序）：parseProgram 末尾合成 future_id 枚举
     std::vector<std::string> futureIds;
 
+    // shader 模式（GPU/着色器扩展 syntax-g）：仅 .sg 源为 true。为真时顶层
+    // vert/frag/comp 标识符被识别为着色阶段入口。默认 false（.sc 完全不受影响）。
+    bool shaderMode = false;
+
     explicit Parser(const std::vector<Token>& toks) : t(toks) {}
+    Parser(const std::vector<Token>& toks, bool shader) : t(toks), shaderMode(shader) {}
 
     [[noreturn]] void err(const std::string& m) const { throw CompileError{m, cur().line}; }
     [[noreturn]] void err(int line, const std::string& m) const { throw CompileError{m, line}; }
@@ -1893,6 +1898,24 @@ struct Parser {
         accept(Tok::Dedent);
     }
 
+    // GPU/着色器扩展（syntax-g）：解析一个着色阶段入口声明（仅 shaderMode 下调用）。
+    // 骨架形态：vert|frag|comp NAME \n <缩进体>。复用核心 FuncD 表示，附 shaderStage 标记；
+    // 阶段体本身即 sc 语句，交由既有 parseStmts 解析，后由 codegen_glsl 翻译为 GLSL。
+    DeclPtr parseShaderStage(ShaderStage stage) {
+        auto d = std::make_unique<Decl>();
+        d->line = cur().line;
+        d->kind = Decl::FuncD;
+        d->shaderStage = stage;
+        advance();                                  // 跳过 vert/frag/comp 阶段标识符
+        if (!at(Tok::Ident)) err("着色阶段入口后期望名字");
+        d->name = advance().text;
+        // 着色器入口无返回值：返回类型 void
+        d->structCommon.type = std::make_shared<TypeRef>();
+        d->structCommon.type->name = "void";
+        parseBlock(d->body);                        // \n Indent stmts... Dedent
+        return d;
+    }
+
     // 解析条件表达式 + 缩进块（if/while 共用）
     // + 支持多行条件：后续行以二元运算符开头时作为条件续行
     //   '-' 分隔符区分续行条件与语句体
@@ -2686,6 +2709,20 @@ struct Parser {
                 }
 
                 default:
+                    // GPU/着色器扩展（syntax-g）：.sg 源顶层的 vert/frag/comp 阶段入口。
+                    // vert/frag/comp 仍作为普通标识符词法化（保护 .sc 方言与全部回归），
+                    // 仅在 shader 模式下、位于顶层时才升格为阶段声明。
+                    if (shaderMode && at(Tok::Ident)) {
+                        ShaderStage st = cur().text == "vert" ? ShaderStage::Vert
+                                       : cur().text == "frag" ? ShaderStage::Frag
+                                       : cur().text == "comp" ? ShaderStage::Comp
+                                       : ShaderStage::None;
+                        if (st != ShaderStage::None) {
+                            if (exported) err("着色阶段入口不支持 @ 导出");
+                            prog.decls.push_back(parseShaderStage(st));
+                            break;
+                        }
+                    }
                     // 顶层只允许程序结构对象的几种关键字
                     err("顶层只允许 inc/def/fnc/rpc/var/let/tls/mod/mix，得到 '" + cur().text + "'");
             }
@@ -2752,7 +2789,7 @@ struct Parser {
 } // namespace
 
 // 对外接口：创建 Parser 实例并执行完整的程序解析
-Program parse(const std::vector<Token>& toks) {
-    Parser ps(toks);
+Program parse(const std::vector<Token>& toks, bool shaderMode) {
+    Parser ps(toks, shaderMode);
     return ps.parseProgram();
 }

@@ -16,6 +16,8 @@ add_executable(scc
     src/ast_json.cpp
     src/codegen_c.cpp
     src/codegen_sc.cpp
+    # GPU/着色器扩展（syntax-g）后端：.sg 源 → Vulkan-GLSL 文本。与 codegen_c 解耦。
+    src/codegen_glsl.cpp
     src/semantic.cpp
     src/cheaders.cpp
     src/remote.cpp
