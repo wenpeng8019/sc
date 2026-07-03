@@ -7775,7 +7775,11 @@ struct CGen {
         }
 
         for (auto& d : prog.decls) {
-            if (!d->exported || d->external) continue;
+            if (!d->exported) continue;
+            // 外部声明（other 模块的类型/符号）由其模块头提供，导出头不重复；但 @inc 例外——
+            //   sc 模块 inc 被标 external，@inc 的意图正是把该依赖头传播进本导出头（如 path 的
+            //   path_stack 内嵌 proto 的 sc_proto 字段，须让消费单元先见到 proto.h）。
+            if (d->external && d->kind != Decl::IncD) continue;
             switch (d->kind) {
                 case Decl::EnumD: case Decl::StructD:
                 case Decl::UnionD: case Decl::AliasD:

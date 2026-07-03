@@ -18,8 +18,6 @@
 #include "proto.h"
 #include "platform.h"   /* builtins 跨平台基础头（编译时 -I builtins 根目录） */
 #include "mem/mem.h"    /* chunk / recycle（分块内存与结果缓冲；不受全局 -DSC_POOL 影响） */
-#include <string.h>     /* memcpy / strlen / strchr */
-#include <stdio.h>      /* snprintf（build 内置格式化） */
 
 #define PSZ ((uint32_t)sizeof(void *))   /* 内联指针字段字节宽 */
 
