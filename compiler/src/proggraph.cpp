@@ -4,9 +4,9 @@
 // 见 graph.h 与子项目 proggraph/docs/design.md。
 // ============================================================
 #include "proggraph.h"
+#include "graph/graph.h"   // builtins/graph 图算法规范接口：SCC 环检测复用 sc_graph_scc
 #include <algorithm>
 #include <filesystem>
-#include <functional>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -576,40 +576,51 @@ struct Builder {
         }
     }
 
-    // Tarjan SCC → 依赖环（size>1 或自环递归）
+    // Tarjan SCC → 依赖环（size>1 或自环递归）。
+    //   建图「适配」——把字符串节点 id 映射为 [0,nv) 整数顶点、抽出边表（排除 import 与 module
+    //   节点，与激活分析同口径），实际 SCC 算法委托给 builtins/graph 规范接口 sc_graph_scc
+    //   （与 semantic.cpp 的 tok 依赖环检测同源，算法不在编译器内重复实现）。
+    //   簇大小 > 1 = 相互递归环；单顶点自环（a→a）单独用 selfLoop 记录后并入。
     std::vector<std::vector<std::string>> cycles;
     void findCycles() {
-        std::unordered_map<std::string, std::vector<std::string>> adj;
-        std::unordered_set<std::string> selfLoop;
+        std::unordered_map<std::string, int> vid;   // 节点 id → 顶点编号
+        std::vector<std::string> vname;             // 顶点编号 → 节点 id
+        for (auto& n : nodes) {
+            if (n.kind == "module") continue;
+            vid.emplace(n.id, (int)vname.size());
+            vname.push_back(n.id);
+        }
+        if (vname.empty()) return;
+
+        std::vector<int> eu, ev;                    // 边表：eu[i] -> ev[i]
+        std::unordered_set<int> selfLoop;           // 自环顶点（SCC 归为 size-1，需单独判定）
         for (auto& e : edges) {
             if (e.kind == "import") continue;
-            if (e.from == e.to) { selfLoop.insert(e.from); continue; }
-            adj[e.from].push_back(e.to);
+            auto fu = vid.find(e.from), fv = vid.find(e.to);
+            if (fu == vid.end() || fv == vid.end()) continue;
+            if (fu->second == fv->second) { selfLoop.insert(fu->second); continue; }
+            eu.push_back(fu->second);
+            ev.push_back(fv->second);
         }
-        std::unordered_map<std::string, int> idx, low;
-        std::unordered_set<std::string> onStk;
-        std::vector<std::string> stk;
-        int counter = 0;
-        std::function<void(const std::string&)> dfs = [&](const std::string& u) {
-            idx[u] = low[u] = counter++;
-            stk.push_back(u); onStk.insert(u);
-            for (auto& v : adj[u]) {
-                if (!idx.count(v)) { dfs(v); low[u] = std::min(low[u], low[v]); }
-                else if (onStk.count(v)) low[u] = std::min(low[u], idx[v]);
-            }
-            if (low[u] == idx[u]) {
-                std::vector<std::string> comp;
-                while (true) {
-                    std::string w = stk.back(); stk.pop_back(); onStk.erase(w);
-                    comp.push_back(w);
-                    if (w == u) break;
-                }
-                if (comp.size() > 1) cycles.push_back(comp);
-                else if (selfLoop.count(u)) cycles.push_back({u});
-            }
-        };
-        for (auto& n : nodes)
-            if (n.kind != "module" && !idx.count(n.id)) dfs(n.id);
+
+        sc_graph g;
+        g.nv = (int)vname.size();
+        g.ne = (int)eu.size();
+        g.eu = eu.data();
+        g.ev = ev.data();
+        std::vector<int> comp((size_t)g.nv);
+        int ncomp = 0;
+        sc_graph_scc(&g, comp.data(), &ncomp);      // 回填每顶点 SCC 编号
+
+        // 按 SCC 分组（成员按顶点序追加，输出确定）：size>1 或含自环 = 依赖环
+        std::vector<std::vector<int>> comps((size_t)ncomp);
+        for (int v = 0; v < g.nv; v++) comps[comp[v]].push_back(v);
+        for (auto& m : comps) {
+            if (!(m.size() > 1 || (m.size() == 1 && selfLoop.count(m[0])))) continue;
+            std::vector<std::string> ids;
+            for (int v : m) ids.push_back(vname[v]);
+            cycles.push_back(std::move(ids));
+        }
     }
 };
 
