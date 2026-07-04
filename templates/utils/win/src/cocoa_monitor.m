@@ -139,22 +139,6 @@ static GLFWvidmode vidmodeFromCGDisplayMode(CGDisplayModeRef mode,
         result.refreshRate = (int) round(fallbackRefreshRate);
 
 #if MAC_OS_X_VERSION_MAX_ALLOWED == 101100
-    CFStringRef format = CGDisplayModeCopyPixelEncoding(mode);
-    if (CFStringCompare(format, CFSTR(IO16BitDirectPixels), 0) == 0)
-    {
-        result.redBits = 5;
-        result.greenBits = 5;
-        result.blueBits = 5;
-    }
-    else
-#endif /* MAC_OS_X_VERSION_MAX_ALLOWED */
-    {
-        result.redBits = 8;
-        result.greenBits = 8;
-        result.blueBits = 8;
-    }
-
-#if MAC_OS_X_VERSION_MAX_ALLOWED == 101100
     CFRelease(format);
 #endif /* MAC_OS_X_VERSION_MAX_ALLOWED */
     return result;

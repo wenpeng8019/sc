@@ -12,9 +12,6 @@ static GLFWvidmode getVideoMode(void)
     GLFWvidmode mode;
     mode.width = 1920;
     mode.height = 1080;
-    mode.redBits = 8;
-    mode.greenBits = 8;
-    mode.blueBits = 8;
     mode.refreshRate = 60;
     return mode;
 }

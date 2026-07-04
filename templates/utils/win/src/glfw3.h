@@ -597,13 +597,6 @@ extern "C" {
  *  Cursor centering [window hint](@ref GLFW_CENTER_CURSOR_hint).
  */
 #define GLFW_CENTER_CURSOR          0x00020009
-/*! @brief Window framebuffer transparency hint and attribute
- *
- *  Window framebuffer transparency
- *  [window hint](@ref GLFW_TRANSPARENT_FRAMEBUFFER_hint) and
- *  [window attribute](@ref GLFW_TRANSPARENT_FRAMEBUFFER_attrib).
- */
-#define GLFW_TRANSPARENT_FRAMEBUFFER 0x0002000A
 /*! @brief Mouse cursor hover window attribute.
  *
  *  Mouse cursor hover [window attribute](@ref GLFW_HOVERED_attrib).
@@ -635,182 +628,15 @@ extern "C" {
  */
 #define GLFW_POSITION_Y             0x0002000F
 
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_RED_BITS).
- */
-#define GLFW_RED_BITS               0x00021001
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_GREEN_BITS).
- */
-#define GLFW_GREEN_BITS             0x00021002
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_BLUE_BITS).
- */
-#define GLFW_BLUE_BITS              0x00021003
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_ALPHA_BITS).
- */
-#define GLFW_ALPHA_BITS             0x00021004
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_DEPTH_BITS).
- */
-#define GLFW_DEPTH_BITS             0x00021005
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_STENCIL_BITS).
- */
-#define GLFW_STENCIL_BITS           0x00021006
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_ACCUM_RED_BITS).
- */
-#define GLFW_ACCUM_RED_BITS         0x00021007
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_ACCUM_GREEN_BITS).
- */
-#define GLFW_ACCUM_GREEN_BITS       0x00021008
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_ACCUM_BLUE_BITS).
- */
-#define GLFW_ACCUM_BLUE_BITS        0x00021009
-/*! @brief Framebuffer bit depth hint.
- *
- *  Framebuffer bit depth [hint](@ref GLFW_ACCUM_ALPHA_BITS).
- */
-#define GLFW_ACCUM_ALPHA_BITS       0x0002100A
-/*! @brief Framebuffer auxiliary buffer hint.
- *
- *  Framebuffer auxiliary buffer [hint](@ref GLFW_AUX_BUFFERS).
- */
-#define GLFW_AUX_BUFFERS            0x0002100B
-/*! @brief OpenGL stereoscopic rendering hint.
- *
- *  OpenGL stereoscopic rendering [hint](@ref GLFW_STEREO).
- */
-#define GLFW_STEREO                 0x0002100C
-/*! @brief Framebuffer MSAA samples hint.
- *
- *  Framebuffer MSAA samples [hint](@ref GLFW_SAMPLES).
- */
-#define GLFW_SAMPLES                0x0002100D
-/*! @brief Framebuffer sRGB hint.
- *
- *  Framebuffer sRGB [hint](@ref GLFW_SRGB_CAPABLE).
- */
-#define GLFW_SRGB_CAPABLE           0x0002100E
-/*! @brief Monitor refresh rate hint.
- *
- *  Monitor refresh rate [hint](@ref GLFW_REFRESH_RATE).
- */
-#define GLFW_REFRESH_RATE           0x0002100F
-/*! @brief Framebuffer double buffering hint and attribute.
- *
- *  Framebuffer double buffering [hint](@ref GLFW_DOUBLEBUFFER_hint) and
- *  [attribute](@ref GLFW_DOUBLEBUFFER_attrib).
- */
-#define GLFW_DOUBLEBUFFER           0x00021010
 
-/*! @brief Context client API hint and attribute.
- *
- *  Context client API [hint](@ref GLFW_CLIENT_API_hint) and
- *  [attribute](@ref GLFW_CLIENT_API_attrib).
- */
-#define GLFW_CLIENT_API             0x00022001
-/*! @brief Context client API major version hint and attribute.
- *
- *  Context client API major version [hint](@ref GLFW_CONTEXT_VERSION_MAJOR_hint)
- *  and [attribute](@ref GLFW_CONTEXT_VERSION_MAJOR_attrib).
- */
-#define GLFW_CONTEXT_VERSION_MAJOR  0x00022002
-/*! @brief Context client API minor version hint and attribute.
- *
- *  Context client API minor version [hint](@ref GLFW_CONTEXT_VERSION_MINOR_hint)
- *  and [attribute](@ref GLFW_CONTEXT_VERSION_MINOR_attrib).
- */
-#define GLFW_CONTEXT_VERSION_MINOR  0x00022003
-/*! @brief Context client API revision number attribute.
- *
- *  Context client API revision number
- *  [attribute](@ref GLFW_CONTEXT_REVISION_attrib).
- */
-#define GLFW_CONTEXT_REVISION       0x00022004
-/*! @brief Context robustness hint and attribute.
- *
- *  Context client API revision number [hint](@ref GLFW_CONTEXT_ROBUSTNESS_hint)
- *  and [attribute](@ref GLFW_CONTEXT_ROBUSTNESS_attrib).
- */
-#define GLFW_CONTEXT_ROBUSTNESS     0x00022005
-/*! @brief OpenGL forward-compatibility hint and attribute.
- *
- *  OpenGL forward-compatibility [hint](@ref GLFW_OPENGL_FORWARD_COMPAT_hint)
- *  and [attribute](@ref GLFW_OPENGL_FORWARD_COMPAT_attrib).
- */
-#define GLFW_OPENGL_FORWARD_COMPAT  0x00022006
-/*! @brief Debug mode context hint and attribute.
- *
- *  Debug mode context [hint](@ref GLFW_CONTEXT_DEBUG_hint) and
- *  [attribute](@ref GLFW_CONTEXT_DEBUG_attrib).
- */
-#define GLFW_CONTEXT_DEBUG          0x00022007
-/*! @brief Legacy name for compatibility.
- *
- *  This is an alias for compatibility with earlier versions.
- */
-#define GLFW_OPENGL_DEBUG_CONTEXT   GLFW_CONTEXT_DEBUG
-/*! @brief OpenGL profile hint and attribute.
- *
- *  OpenGL profile [hint](@ref GLFW_OPENGL_PROFILE_hint) and
- *  [attribute](@ref GLFW_OPENGL_PROFILE_attrib).
- */
-#define GLFW_OPENGL_PROFILE         0x00022008
-/*! @brief Context flush-on-release hint and attribute.
- *
- *  Context flush-on-release [hint](@ref GLFW_CONTEXT_RELEASE_BEHAVIOR_hint) and
- *  [attribute](@ref GLFW_CONTEXT_RELEASE_BEHAVIOR_attrib).
- */
-#define GLFW_CONTEXT_RELEASE_BEHAVIOR 0x00022009
-/*! @brief Context error suppression hint and attribute.
- *
- *  Context error suppression [hint](@ref GLFW_CONTEXT_NO_ERROR_hint) and
- *  [attribute](@ref GLFW_CONTEXT_NO_ERROR_attrib).
- */
-#define GLFW_CONTEXT_NO_ERROR       0x0002200A
-/*! @brief Context creation API hint and attribute.
- *
- *  Context creation API [hint](@ref GLFW_CONTEXT_CREATION_API_hint) and
- *  [attribute](@ref GLFW_CONTEXT_CREATION_API_attrib).
- */
-#define GLFW_CONTEXT_CREATION_API   0x0002200B
 /*! @brief Window content area scaling window
  *  [window hint](@ref GLFW_SCALE_TO_MONITOR).
  */
 #define GLFW_SCALE_TO_MONITOR       0x0002200C
-/*! @brief Window framebuffer scaling
- *  [window hint](@ref GLFW_SCALE_FRAMEBUFFER_hint).
- */
-#define GLFW_SCALE_FRAMEBUFFER      0x0002200D
-/*! @brief Legacy name for compatibility.
- *
- *  This is an alias for the
- *  [GLFW_SCALE_FRAMEBUFFER](@ref GLFW_SCALE_FRAMEBUFFER_hint) window hint for
- *  compatibility with earlier versions.
- */
-#define GLFW_COCOA_RETINA_FRAMEBUFFER 0x00023001
 /*! @brief macOS specific
  *  [window hint](@ref GLFW_COCOA_FRAME_NAME_hint).
  */
 #define GLFW_COCOA_FRAME_NAME         0x00023002
-/*! @brief macOS specific
- *  [window hint](@ref GLFW_COCOA_GRAPHICS_SWITCHING_hint).
- */
-#define GLFW_COCOA_GRAPHICS_SWITCHING 0x00023003
 /*! @brief X11 specific
  *  [window hint](@ref GLFW_X11_CLASS_NAME_hint).
  */
@@ -831,17 +657,8 @@ extern "C" {
 #define GLFW_WAYLAND_APP_ID         0x00026001
 /*! @} */
 
-#define GLFW_NO_API                          0
-#define GLFW_OPENGL_API             0x00030001
-#define GLFW_OPENGL_ES_API          0x00030002
 
-#define GLFW_NO_ROBUSTNESS                   0
-#define GLFW_NO_RESET_NOTIFICATION  0x00031001
-#define GLFW_LOSE_CONTEXT_ON_RESET  0x00031002
 
-#define GLFW_OPENGL_ANY_PROFILE              0
-#define GLFW_OPENGL_CORE_PROFILE    0x00032001
-#define GLFW_OPENGL_COMPAT_PROFILE  0x00032002
 
 #define GLFW_CURSOR                  0x00033001
 #define GLFW_STICKY_KEYS             0x00033002
@@ -859,17 +676,6 @@ extern "C" {
 #define GLFW_RELEASE_BEHAVIOR_FLUSH 0x00035001
 #define GLFW_RELEASE_BEHAVIOR_NONE  0x00035002
 
-#define GLFW_NATIVE_CONTEXT_API     0x00036001
-#define GLFW_EGL_CONTEXT_API        0x00036002
-#define GLFW_OSMESA_CONTEXT_API     0x00036003
-
-#define GLFW_ANGLE_PLATFORM_TYPE_NONE    0x00037001
-#define GLFW_ANGLE_PLATFORM_TYPE_OPENGL  0x00037002
-#define GLFW_ANGLE_PLATFORM_TYPE_OPENGLES 0x00037003
-#define GLFW_ANGLE_PLATFORM_TYPE_D3D9    0x00037004
-#define GLFW_ANGLE_PLATFORM_TYPE_D3D11   0x00037005
-#define GLFW_ANGLE_PLATFORM_TYPE_VULKAN  0x00037007
-#define GLFW_ANGLE_PLATFORM_TYPE_METAL   0x00037008
 
 #define GLFW_WAYLAND_PREFER_LIBDECOR    0x00038001
 #define GLFW_WAYLAND_DISABLE_LIBDECOR   0x00038002
@@ -1704,15 +1510,6 @@ typedef struct GLFWvidmode
     /*! The height, in screen coordinates, of the video mode.
      */
     int height;
-    /*! The bit depth of the red channel of the video mode.
-     */
-    int redBits;
-    /*! The bit depth of the green channel of the video mode.
-     */
-    int greenBits;
-    /*! The bit depth of the blue channel of the video mode.
-     */
-    int blueBits;
     /*! The refresh rate, in Hz, of the video mode.
      */
     int refreshRate;
