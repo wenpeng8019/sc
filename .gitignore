@@ -37,3 +37,6 @@ vendor/bgfx/
 
 # ssh 组件自包含静态库（host 构建产物，由 templates/utils/build_libssh2.sh 生成）
 templates/utils/libssh2.a
+
+# plib 跨平台库模板构建产物
+templates/plib/*.a
