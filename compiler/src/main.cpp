@@ -2342,7 +2342,7 @@ int main(int argc, char** argv) {
     std::string clangLib;                     // --clang 指定的 libclang 路径（空 + clangRequested = 自动检测）
     bool clangRequested = false;              // 是否出现 --clang（决定检测/加载失败是否报错）
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
-    bool graphWhole = true;                   // --graph 默认整程序；--graph=unit 仅当前单元
+    bool graphWhole = true;                    // --graph 默认整程序；--graph=unit 仅当前单元
     if (const char* rc = std::getenv("SCC_REF_CHECK"); rc && *rc && std::string(rc) != "0")
         setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     if (const char* mc = std::getenv("SCC_MEM_CHECK"); mc && *mc && std::string(mc) != "0")

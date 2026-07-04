@@ -29,5 +29,11 @@ examples/*.dSYM/
 # 第三方依赖构建产物（vendor 源码保留，仅忽略编译输出）
 vendor/libuv/build/
 
+# 后端选型参考源码（bgfx/sokol/glfw，仅本地比对参考，暂不入库；
+# 若某个转正为 sc 后端依赖，再从此处移除对应条目）
+vendor/glfw/
+vendor/sokol/
+vendor/bgfx/
+
 # ssh 组件自包含静态库（host 构建产物，由 templates/utils/build_libssh2.sh 生成）
 templates/utils/libssh2.a

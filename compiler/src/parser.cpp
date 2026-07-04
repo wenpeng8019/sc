@@ -1974,16 +1974,31 @@ struct Parser {
         advance();                                  // 跳过 tar
         do {
             if (!at(Tok::Ident))
-                err("tar 后期望目标 API 名（vulkan/glcore/gles/webgl）");
+                err("tar 后期望目标 API 名（vulkan/glcore/gles/webgl/metal）");
             std::string api = advance().text;
             GlslTarget t;
             if (!parseGlApi(api, t.api))
-                err("未知目标 API '" + api + "'（vulkan/glcore/gles/webgl）");
+                err("未知目标 API '" + api + "'（vulkan/glcore/gles/webgl/metal）");
             if (!(at(Tok::Op) && cur().text == "@"))
-                err("目标须显式指定版本，如 " + api + "@450");
+                err("目标须显式指定版本，如 " + api + "@450 或 " + api + "@2.0");
             advance();                              // 跳过 @
-            if (!at(Tok::Int)) err("@ 后期望 GLSL 版本整数");
-            t.version = std::stoi(advance().text);
+            // 版本号整数或小数皆可：GL 惯用整数(450)、Metal 惯用小数(2.0)，均归一化。
+            //   Tok::Int  "450"/"2"      → major=值, minor=0, 无小数
+            //   Tok::Float "2.0"/"4.5"   → major.minor
+            int major = 0, minor = 0; bool hasDecimal = false;
+            if (at(Tok::Int)) {
+                major = std::stoi(advance().text);
+            } else if (at(Tok::Float)) {
+                const std::string v = advance().text;
+                const auto dot = v.find('.');
+                major = std::stoi(v.substr(0, dot));
+                const std::string frac = v.substr(dot + 1);
+                minor = frac.empty() ? 0 : std::stoi(frac);
+                hasDecimal = true;
+            } else {
+                err("@ 后期望版本号（整数如 450 或小数如 2.0）");
+            }
+            t.version = normalizeShaderVersion(t.api, major, minor, hasDecimal);
             prog.shaderTargets.push_back(t);
         } while (accept(Tok::Comma));
         expect(Tok::Newline, "换行");

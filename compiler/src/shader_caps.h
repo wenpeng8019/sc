@@ -16,16 +16,22 @@
 // 新增目标加一列——不易遗漏、易扩展。
 // ============================================================
 
-// 目标 API 族。
-enum class GlApi { Vulkan, GLCore, GLES, WebGL };
+// 目标 API 族。Metal 非 GLSL 方言，而是 SPIR-V 转译出的发行后端（MSL）；
+// 其内部 GLSL 中间产物按 Vulkan 语义生成（见 glslIsVulkanFlavor）。
+enum class GlApi { Vulkan, GLCore, GLES, WebGL, Metal };
 
-// 一个转义目标：API 族 + 精确 GLSL 版本号（如 450 / 330 / 300 / 100）。
+// 一个转义目标：API 族 + 精确版本号。
+//   GL 家族：GLSL #version 整数（如 450 / 330 / 300 / 100）。
+//   Metal  ：MSL 打包整数 major*10000 + minor*100（如 2.0→20000、2.1→20100）。
 struct GlslTarget {
     GlApi api = GlApi::Vulkan;
     int   version = 0;
 
     bool isES()     const { return api == GlApi::GLES || api == GlApi::WebGL; }
     bool isVulkan() const { return api == GlApi::Vulkan; }
+    bool isMetal()  const { return api == GlApi::Metal; }
+    // 内部 GLSL 中间产物是否用 Vulkan 语义（Vulkan 目标本身 + Metal 经 SPIR-V 转译）。
+    bool glslIsVulkanFlavor() const { return isVulkan() || isMetal(); }
 
     // `#version N <profile>` 里的 profile 词：Vulkan 无、桌面 core、ES/WebGL es。
     const char* profileWord() const {
@@ -33,9 +39,19 @@ struct GlslTarget {
         if (api == GlApi::GLCore) return "core";
         return "";
     }
-    // set= 描述符集限定符仅 Vulkan-GLSL 可表达。
-    bool useSetQualifier() const { return api == GlApi::Vulkan; }
+    // set= 描述符集限定符仅 Vulkan-GLSL 可表达（Metal 内部亦走 Vulkan 语义）。
+    bool useSetQualifier() const { return glslIsVulkanFlavor(); }
 };
+
+// 归一化版本：把源码里书写的版本（整数或 major.minor 小数）换算成该 API 的规范整数。
+//   GL 家族规范 = GLSL #version 整数：整数书写(450)即规范值原样返回；
+//     小数书写(4.5/3.3/3.0/1.0) → major*100 + minor*10。
+//   Metal 规范 = MSL 打包整数：整数书写视为主版本(2→20000)；小数(2.0/2.1) → major*10000 + minor*100。
+inline int normalizeShaderVersion(GlApi api, int major, int minor, bool hasDecimal) {
+    if (api == GlApi::Metal) return major * 10000 + minor * 100;
+    if (hasDecimal)          return major * 100 + minor * 10;
+    return major;
+}
 
 // API 族名（诊断 / 反射清单 / 产物 tag）。
 inline const char* glApiName(GlApi a) {
@@ -44,6 +60,7 @@ inline const char* glApiName(GlApi a) {
         case GlApi::GLCore: return "glcore";
         case GlApi::GLES:   return "gles";
         case GlApi::WebGL:  return "webgl";
+        case GlApi::Metal:  return "metal";
     }
     return "?";
 }
@@ -54,6 +71,7 @@ inline bool parseGlApi(const std::string& s, GlApi& out) {
     if (s == "glcore" || s == "gl")  { out = GlApi::GLCore; return true; }
     if (s == "gles")                 { out = GlApi::GLES;   return true; }
     if (s == "webgl")                { out = GlApi::WebGL;  return true; }
+    if (s == "metal" || s == "msl")  { out = GlApi::Metal;  return true; }
     return false;
 }
 
@@ -75,19 +93,20 @@ enum class Cap {
 };
 
 struct CapRow {
-    const char* name;                  // 诊断用可读名
-    int vulkan, glcore, gles, webgl;   // 起始支持版本；-1 = 不支持
+    const char* name;                         // 诊断用可读名
+    int vulkan, glcore, gles, webgl, metal;   // 起始支持版本；-1 = 不支持
 };
 
 // inline 函数内的静态局部数组保证跨 TU 单实例（避免 ODR 重复定义）。
+// Metal 列用 MSL 打包整数（20000 = MSL 2.0）；f8 双精度 Metal 永不支持（-1）。
 inline const CapRow& capRow(Cap c) {
     static const CapRow TABLE[(int)Cap::CapCount] = {
-        /*StorageBuffer  */ {"storage 缓冲",     450, 430, 310, -1},
-        /*ComputeStage   */ {"comp 计算着色",    450, 430, 310, -1},
-        /*PushConstant   */ {"push 常量",        450,  -1,  -1, -1},
-        /*DoubleType     */ {"f8 双精度",        450, 400,  -1, -1},
-        /*DescriptorSet  */ {"多描述符集(set>=1)", 450, -1, -1, -1},
-        /*ExplicitBinding*/ {"binding 显式绑定", 450, 420, 310, -1},
+        /*StorageBuffer  */ {"storage 缓冲",     450, 430, 310, -1, 20000},
+        /*ComputeStage   */ {"comp 计算着色",    450, 430, 310, -1, 20000},
+        /*PushConstant   */ {"push 常量",        450,  -1,  -1, -1, 20000},
+        /*DoubleType     */ {"f8 双精度",        450, 400,  -1, -1,    -1},
+        /*DescriptorSet  */ {"多描述符集(set>=1)", 450, -1, -1, -1, 20000},
+        /*ExplicitBinding*/ {"binding 显式绑定", 450, 420, 310, -1, 20000},
     };
     return TABLE[(int)c];
 }
@@ -100,6 +119,7 @@ inline int capMinVersion(Cap c, GlApi a) {
         case GlApi::GLCore: return r.glcore;
         case GlApi::GLES:   return r.gles;
         case GlApi::WebGL:  return r.webgl;
+        case GlApi::Metal:  return r.metal;
     }
     return -1;
 }

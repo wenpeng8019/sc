@@ -2,6 +2,8 @@
 #include "lexer.h"
 #include "parser.h"
 #include "shader_sema.h"
+#include "shader_spv.h"
+#include "shader_msl.h"
 #include "error.h"
 
 #include <algorithm>
@@ -524,6 +526,15 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
     return j.str();
 }
 
+// ShaderStage（AST）→ SpvStage（glslang 封装）阶段种类映射。
+static scc_shader::SpvStage toSpvStage(ShaderStage s) {
+    switch (s) {
+        case ShaderStage::Frag: return scc_shader::SpvStage::Fragment;
+        case ShaderStage::Comp: return scc_shader::SpvStage::Compute;
+        default:                return scc_shader::SpvStage::Vertex;
+    }
+}
+
 int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
     try {
@@ -551,6 +562,38 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         };
 
         for (const auto& target : prog.shaderTargets) {
+            // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
+            std::string tag = multi ? ("." + glTargetTag(target)) : "";
+
+            // ---- Metal 目标：内部走 Vulkan-GLSL(450) → SPIR-V(glslang) → MSL(spirv-cross) ----
+            // 能力门控已在 shaderSemaCheck 按 metal 目标自身的能力矩阵完成；此处 Vulkan-GLSL
+            // 仅作中间语（450 支持全部所需能力）。每阶段产 <entry>.metal（入口 main→阶段名）。
+            if (target.isMetal()) {
+                GlslTarget vk; vk.api = GlApi::Vulkan; vk.version = 450;
+                auto units = emitGlsl(prog, vk);
+                if (units.empty()) {
+                    std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                    return 1;
+                }
+                std::string reflect = emitReflectionJson(prog, target);
+                for (const auto& u : units) {
+                    std::vector<uint32_t> spv = scc_shader::glslToSpirv(u.text, toSpvStage(u.stage));
+                    scc_shader::MslOptions mo;
+                    mo.mslVersion = (uint32_t)target.version;
+                    mo.renameEntry = u.entry;            // 多阶段链入同一 metallib 时避免 main0 冲突
+                    std::string msl = scc_shader::spirvToMsl(spv, mo);
+                    if (outDir.empty())
+                        std::printf("// ===== %s%s.metal =====\n%s\n",
+                                    u.entry.c_str(), tag.c_str(), msl.c_str());
+                    else if (!write(outDir + "/" + u.entry + tag + ".metal", msl)) return 1;
+                }
+                if (outDir.empty())
+                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
+                                stem.c_str(), tag.c_str(), reflect.c_str());
+                else if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
+                continue;
+            }
+
             auto units = emitGlsl(prog, target);
             std::string reflect = emitReflectionJson(prog, target);
 
@@ -558,9 +601,6 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                 std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                 return 1;
             }
-
-            // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.gles300.reflect.json）。
-            std::string tag = multi ? ("." + glTargetTag(target)) : "";
 
             if (outDir.empty()) {
                 for (const auto& u : units)

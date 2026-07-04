@@ -18,6 +18,10 @@ add_executable(scc
     src/codegen_sc.cpp
     # GPU/着色器扩展（syntax-g）后端：.sg 源 → Vulkan-GLSL 文本。与 codegen_c 解耦。
     src/codegen_glsl.cpp
+    # GPU/着色器扩展发行后端：SPIR-V → MSL（SPIRV-Cross 封装）。未集成时为安全失败桩。
+    src/shader_msl.cpp
+    # GPU/着色器扩展中枢 IR：GLSL → SPIR-V（glslang 封装）。未集成时为安全失败桩。
+    src/shader_spv.cpp
     # GPU/着色器扩展：shader 方言子集强制与类型/绑定检查。独立于 semantic.cpp。
     src/shader_sema.cpp
     src/semantic.cpp
@@ -110,6 +114,68 @@ if(SCC_WITH_LIBSSH2)
     endif()
 else()
     message(STATUS "远程构建 SSH 后端=system（仅系统 ssh/scp；未内置 libssh2）")
+endif()
+
+# ------------------------------------------------------------
+# 着色器发行后端 SPIR-V→MSL（SPIRV-Cross）：-DSCC_WITH_SPIRV_CROSS=ON（默认 ON）
+#   一期：vendor/spirv-cross 走其自身 CMake 产静态库（不 file(GLOB) 直接拖源码进 scc），
+#   经 add_subdirectory 链入 scc；scc 内部完成 SPIR-V→MSL（发行侧 Metal 着色器），
+#   取代外部 spirv-cross CLI。MSL 后端仅需 core+glsl+msl，其余后端关掉以省编译。
+# ------------------------------------------------------------
+option(SCC_WITH_SPIRV_CROSS "着色器后端集成 SPIRV-Cross（SPIR-V→MSL，默认 ON）" ON)
+if(SCC_WITH_SPIRV_CROSS)
+    get_filename_component(SCC_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vendor ABSOLUTE)
+    if(EXISTS ${SCC_VENDOR_DIR}/spirv-cross/spirv_msl.cpp)
+        # 只产我们要的静态库：关 CLI/测试/共享库/安装，关用不到的 HLSL/CPP/Reflect/Util/C-API
+        set(SPIRV_CROSS_CLI OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_SHARED OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_STATIC ON CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_SKIP_INSTALL ON CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_HLSL OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_CPP OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_REFLECT OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_UTIL OFF CACHE BOOL "" FORCE)
+        set(SPIRV_CROSS_ENABLE_C_API OFF CACHE BOOL "" FORCE)
+        add_subdirectory(${SCC_VENDOR_DIR}/spirv-cross
+                         ${CMAKE_CURRENT_BINARY_DIR}/spirv-cross EXCLUDE_FROM_ALL)
+        # 链 msl 即可（静态库的 PRIVATE 依赖 glsl/core 会被传播到最终链接），显式列全以稳妥
+        target_link_libraries(scc PRIVATE spirv-cross-msl spirv-cross-glsl spirv-cross-core)
+        target_compile_definitions(scc PRIVATE SCC_WITH_SPIRV_CROSS)
+        message(STATUS "着色器后端=SPIRV-Cross（vendor 源码经其 CMake 产静态库，SPIR-V→MSL 内建）")
+    else()
+        message(WARNING "SCC_WITH_SPIRV_CROSS=ON 但缺 vendor/spirv-cross；MSL 转译不可用（安全失败桩）")
+    endif()
+endif()
+
+# ------------------------------------------------------------
+# 着色器中枢 IR：GLSL → SPIR-V（glslang）：-DSCC_WITH_GLSLANG=ON（默认 ON）
+#   一期：vendor/glslang-src 走其自身 CMake 产静态库（glslang + SPIRV +
+#   glslang-default-resource-limits），链入 scc；scc 内部完成 Vulkan-GLSL→SPIR-V，
+#   接上 SPIRV-Cross 即为 .sg→…→MSL 全内建链。关掉 External/spirv-opt/HLSL/二进制/测试以精简。
+#   最后一期将由自研 codegen_spirv（AST→SPIR-V）取代 glslang。
+# ------------------------------------------------------------
+option(SCC_WITH_GLSLANG "着色器集成 glslang（GLSL→SPIR-V，默认 ON）" ON)
+if(SCC_WITH_GLSLANG)
+    get_filename_component(SCC_VENDOR_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../vendor ABSOLUTE)
+    if(EXISTS ${SCC_VENDOR_DIR}/glslang-src/glslang/Public/ShaderLang.h)
+        set(BUILD_EXTERNAL OFF CACHE BOOL "" FORCE)          # 不建 External（免 spirv-tools 子模块）
+        set(ENABLE_OPT OFF CACHE BOOL "" FORCE)              # 关 spirv-opt（无 spirv-tools）
+        set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE) # 不建 glslang/glslangValidator 可执行
+        set(ENABLE_HLSL OFF CACHE BOOL "" FORCE)             # 只需 GLSL 前端
+        set(ENABLE_SPVREMAPPER OFF CACHE BOOL "" FORCE)
+        set(GLSLANG_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLSLANG_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+        set(ENABLE_PCH OFF CACHE BOOL "" FORCE)              # 关预编译头（跨项目并入更稳）
+        add_subdirectory(${SCC_VENDOR_DIR}/glslang-src
+                         ${CMAKE_CURRENT_BINARY_DIR}/glslang EXCLUDE_FROM_ALL)
+        # SPIRV 已 INTERFACE 链 glslang，故只列 SPIRV + resource-limits（避免 glslang 重复上链接行）
+        target_link_libraries(scc PRIVATE SPIRV glslang-default-resource-limits)
+        target_compile_definitions(scc PRIVATE SCC_WITH_GLSLANG)
+        message(STATUS "着色器中枢=glslang（vendor 源码经其 CMake 产静态库，GLSL→SPIR-V 内建）")
+    else()
+        message(WARNING "SCC_WITH_GLSLANG=ON 但缺 vendor/glslang-src；GLSL→SPIR-V 不可用（安全失败桩）")
+    endif()
 endif()
 
 # ------------------------------------------------------------
