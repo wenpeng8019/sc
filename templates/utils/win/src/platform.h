@@ -6,8 +6,7 @@
     defined(GLFW_BUILD_POSIX_TIMER) || \
     defined(GLFW_BUILD_POSIX_MODULE) || \
     defined(GLFW_BUILD_POSIX_THREAD) || \
-    defined(GLFW_BUILD_POSIX_POLL) || \
-    defined(GLFW_BUILD_LINUX_JOYSTICK)
+    defined(GLFW_BUILD_POSIX_POLL)
  #error "You must not define these; define zero or more _GLFW_<platform> macros instead"
 #endif
 
@@ -64,32 +63,6 @@
  #define GLFW_GLX_LIBRARY_CONTEXT_STATE
 #endif
 
-#include "null_joystick.h"
-
-#if defined(_GLFW_WIN32)
- #include "win32_joystick.h"
-#else
- #define GLFW_WIN32_JOYSTICK_STATE
- #define GLFW_WIN32_LIBRARY_JOYSTICK_STATE
-#endif
-
-#if defined(_GLFW_COCOA)
- #include "cocoa_joystick.h"
-#else
- #define GLFW_COCOA_JOYSTICK_STATE
- #define GLFW_COCOA_LIBRARY_JOYSTICK_STATE
-#endif
-
-#if (defined(_GLFW_X11) || defined(_GLFW_WAYLAND)) && defined(__linux__)
- #define GLFW_BUILD_LINUX_JOYSTICK
-#endif
-
-#if defined(GLFW_BUILD_LINUX_JOYSTICK)
- #include "linux_joystick.h"
-#else
- #define GLFW_LINUX_JOYSTICK_STATE
- #define GLFW_LINUX_LIBRARY_JOYSTICK_STATE
-#endif
 
 #define GLFW_PLATFORM_WINDOW_STATE \
         GLFW_WIN32_WINDOW_STATE \
@@ -112,10 +85,6 @@
         GLFW_X11_CURSOR_STATE \
         GLFW_NULL_CURSOR_STATE \
 
-#define GLFW_PLATFORM_JOYSTICK_STATE \
-        GLFW_WIN32_JOYSTICK_STATE \
-        GLFW_COCOA_JOYSTICK_STATE \
-        GLFW_LINUX_JOYSTICK_STATE
 
 #define GLFW_PLATFORM_LIBRARY_WINDOW_STATE \
         GLFW_WIN32_LIBRARY_WINDOW_STATE \
@@ -124,10 +93,6 @@
         GLFW_X11_LIBRARY_WINDOW_STATE \
         GLFW_NULL_LIBRARY_WINDOW_STATE \
 
-#define GLFW_PLATFORM_LIBRARY_JOYSTICK_STATE \
-        GLFW_WIN32_LIBRARY_JOYSTICK_STATE \
-        GLFW_COCOA_LIBRARY_JOYSTICK_STATE \
-        GLFW_LINUX_LIBRARY_JOYSTICK_STATE
 
 #define GLFW_PLATFORM_CONTEXT_STATE \
         GLFW_WGL_CONTEXT_STATE \

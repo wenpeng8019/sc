@@ -1350,10 +1350,6 @@ static void inputText(_GLFWwindow* window, uint32_t scancode)
 
 static void handleEvents(double* timeout)
 {
-#if defined(GLFW_BUILD_LINUX_JOYSTICK)
-    if (_glfw.joysticksInitialized)
-        _glfwDetectJoystickConnectionLinux();
-#endif
 
     GLFWbool event = GLFW_FALSE;
     enum { DISPLAY_FD, KEYREPEAT_FD, CURSOR_FD };

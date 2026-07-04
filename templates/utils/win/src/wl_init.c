@@ -417,19 +417,6 @@ GLFWbool _glfwConnectWayland(int platformID, _GLFWplatform* platform)
         .getKeyScancode = _glfwGetKeyScancodeWayland,
         .setClipboardString = _glfwSetClipboardStringWayland,
         .getClipboardString = _glfwGetClipboardStringWayland,
-#if defined(GLFW_BUILD_LINUX_JOYSTICK)
-        .initJoysticks = _glfwInitJoysticksLinux,
-        .terminateJoysticks = _glfwTerminateJoysticksLinux,
-        .pollJoystick = _glfwPollJoystickLinux,
-        .getMappingName = _glfwGetMappingNameLinux,
-        .updateGamepadGUID = _glfwUpdateGamepadGUIDLinux,
-#else
-        .initJoysticks = _glfwInitJoysticksNull,
-        .terminateJoysticks = _glfwTerminateJoysticksNull,
-        .pollJoystick = _glfwPollJoystickNull,
-        .getMappingName = _glfwGetMappingNameNull,
-        .updateGamepadGUID = _glfwUpdateGamepadGUIDNull,
-#endif
         .freeMonitor = _glfwFreeMonitorWayland,
         .getMonitorPos = _glfwGetMonitorPosWayland,
         .getMonitorContentScale = _glfwGetMonitorContentScaleWayland,
