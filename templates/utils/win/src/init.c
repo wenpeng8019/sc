@@ -88,7 +88,6 @@ static void terminate(void)
     _glfw.monitorCount = 0;
 
 
-    _glfwTerminateVulkan();
     _glfw.platform.terminate();
 
     _glfw.initialized = GLFW_FALSE;

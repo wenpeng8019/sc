@@ -384,12 +384,6 @@ static GLFWbool initializeTIS(void)
 
 - (void)applicationDidChangeScreenParameters:(NSNotification *) notification
 {
-    for (_GLFWwindow* window = _glfw.windowListHead;  window;  window = window->next)
-    {
-        if (window->context.client != GLFW_NO_API)
-            [window->context.nsgl.object update];
-    }
-
     _glfwPollMonitorsCocoa();
 }
 
@@ -467,7 +461,6 @@ GLFWbool _glfwConnectCocoa(int platformID, _GLFWplatform* platform)
         .setWindowSize = _glfwSetWindowSizeCocoa,
         .setWindowSizeLimits = _glfwSetWindowSizeLimitsCocoa,
         .setWindowAspectRatio = _glfwSetWindowAspectRatioCocoa,
-        .getFramebufferSize = _glfwGetFramebufferSizeCocoa,
         .getWindowFrameSize = _glfwGetWindowFrameSizeCocoa,
         .getWindowContentScale = _glfwGetWindowContentScaleCocoa,
         .iconifyWindow = _glfwIconifyWindowCocoa,
@@ -483,7 +476,6 @@ GLFWbool _glfwConnectCocoa(int platformID, _GLFWplatform* platform)
         .windowVisible = _glfwWindowVisibleCocoa,
         .windowMaximized = _glfwWindowMaximizedCocoa,
         .windowHovered = _glfwWindowHoveredCocoa,
-        .framebufferTransparent = _glfwFramebufferTransparentCocoa,
         .getWindowOpacity = _glfwGetWindowOpacityCocoa,
         .setWindowResizable = _glfwSetWindowResizableCocoa,
         .setWindowDecorated = _glfwSetWindowDecoratedCocoa,
@@ -493,13 +485,7 @@ GLFWbool _glfwConnectCocoa(int platformID, _GLFWplatform* platform)
         .pollEvents = _glfwPollEventsCocoa,
         .waitEvents = _glfwWaitEventsCocoa,
         .waitEventsTimeout = _glfwWaitEventsTimeoutCocoa,
-        .postEmptyEvent = _glfwPostEmptyEventCocoa,
-        .getEGLPlatform = _glfwGetEGLPlatformCocoa,
-        .getEGLNativeDisplay = _glfwGetEGLNativeDisplayCocoa,
-        .getEGLNativeWindow = _glfwGetEGLNativeWindowCocoa,
-        .getRequiredInstanceExtensions = _glfwGetRequiredInstanceExtensionsCocoa,
-        .getPhysicalDevicePresentationSupport = _glfwGetPhysicalDevicePresentationSupportCocoa,
-        .createWindowSurface = _glfwCreateWindowSurfaceCocoa
+        .postEmptyEvent = _glfwPostEmptyEventCocoa
     };
 
     *platform = cocoa;
@@ -618,10 +604,6 @@ void _glfwTerminateCocoa(void)
         [NSEvent removeMonitor:_glfw.ns.keyUpMonitor];
 
     _glfw_free(_glfw.ns.clipboardString);
-
-    _glfwTerminateNSGL();
-    _glfwTerminateEGL();
-    _glfwTerminateOSMesa();
 
     memset(&_glfw.ns, 0, sizeof(_glfw.ns));
 

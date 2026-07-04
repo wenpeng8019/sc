@@ -1,4 +1,6 @@
 
+#include "internal.h"
+
 #define GLFW_NULL_WINDOW_STATE          _GLFWwindowNull null;
 #define GLFW_NULL_LIBRARY_WINDOW_STATE  _GLFWlibraryNull null;
 #define GLFW_NULL_MONITOR_STATE         _GLFWmonitorNull null;
@@ -130,17 +132,6 @@
 #define GLFW_NULL_SC_MENU           120
 #define GLFW_NULL_SC_LAST           GLFW_NULL_SC_MENU
 
-typedef VkFlags VkHeadlessSurfaceCreateFlagsEXT;
-
-typedef struct VkHeadlessSurfaceCreateInfoEXT
-{
-    VkStructureType                 sType;
-    const void*                     pNext;
-    VkHeadlessSurfaceCreateFlagsEXT flags;
-} VkHeadlessSurfaceCreateInfoEXT;
-
-typedef VkResult (APIENTRY *PFN_vkCreateHeadlessSurfaceEXT)(VkInstance,const VkHeadlessSurfaceCreateInfoEXT*,const VkAllocationCallbacks*,VkSurfaceKHR*);
-
 // Null-specific per-window data
 //
 typedef struct _GLFWwindowNull
@@ -193,7 +184,7 @@ GLFWbool _glfwGetVideoModeNull(_GLFWmonitor* monitor, GLFWvidmode* mode);
 GLFWbool _glfwGetGammaRampNull(_GLFWmonitor* monitor, GLFWgammaramp* ramp);
 void _glfwSetGammaRampNull(_GLFWmonitor* monitor, const GLFWgammaramp* ramp);
 
-GLFWbool _glfwCreateWindowNull(_GLFWwindow* window, const _GLFWwndconfig* wndconfig, const _GLFWctxconfig* ctxconfig, const _GLFWfbconfig* fbconfig);
+GLFWbool _glfwCreateWindowNull(_GLFWwindow* window, const _GLFWwndconfig* wndconfig);
 void _glfwDestroyWindowNull(_GLFWwindow* window);
 void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title);
 void _glfwSetWindowIconNull(_GLFWwindow* window, int count, const GLFWimage* images);
@@ -204,7 +195,6 @@ void _glfwGetWindowSizeNull(_GLFWwindow* window, int* width, int* height);
 void _glfwSetWindowSizeNull(_GLFWwindow* window, int width, int height);
 void _glfwSetWindowSizeLimitsNull(_GLFWwindow* window, int minwidth, int minheight, int maxwidth, int maxheight);
 void _glfwSetWindowAspectRatioNull(_GLFWwindow* window, int n, int d);
-void _glfwGetFramebufferSizeNull(_GLFWwindow* window, int* width, int* height);
 void _glfwGetWindowFrameSizeNull(_GLFWwindow* window, int* left, int* top, int* right, int* bottom);
 void _glfwGetWindowContentScaleNull(_GLFWwindow* window, float* xscale, float* yscale);
 void _glfwIconifyWindowNull(_GLFWwindow* window);
@@ -212,7 +202,6 @@ void _glfwRestoreWindowNull(_GLFWwindow* window);
 void _glfwMaximizeWindowNull(_GLFWwindow* window);
 GLFWbool _glfwWindowMaximizedNull(_GLFWwindow* window);
 GLFWbool _glfwWindowHoveredNull(_GLFWwindow* window);
-GLFWbool _glfwFramebufferTransparentNull(_GLFWwindow* window);
 void _glfwSetWindowResizableNull(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowDecoratedNull(_GLFWwindow* window, GLFWbool enabled);
 void _glfwSetWindowFloatingNull(_GLFWwindow* window, GLFWbool enabled);
@@ -244,13 +233,6 @@ const char* _glfwGetClipboardStringNull(void);
 const char* _glfwGetScancodeNameNull(int scancode);
 int _glfwGetKeyScancodeNull(int key);
 
-EGLenum _glfwGetEGLPlatformNull(EGLint** attribs);
-EGLNativeDisplayType _glfwGetEGLNativeDisplayNull(void);
-EGLNativeWindowType _glfwGetEGLNativeWindowNull(_GLFWwindow* window);
-
-void _glfwGetRequiredInstanceExtensionsNull(char** extensions);
-GLFWbool _glfwGetPhysicalDevicePresentationSupportNull(VkInstance instance, VkPhysicalDevice device, uint32_t queuefamily);
-VkResult _glfwCreateWindowSurfaceNull(VkInstance instance, _GLFWwindow* window, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface);
 
 void _glfwPollMonitorsNull(void);
 
