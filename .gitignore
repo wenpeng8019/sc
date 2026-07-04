@@ -40,3 +40,5 @@ templates/utils/libssh2.a
 
 # plib 跨平台库模板构建产物
 templates/plib/*.a
+templates/utils/win/*.o
+templates/utils/win/*.a
