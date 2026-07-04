@@ -27,145 +27,6 @@ extern "C" {
  */
 #include <stdint.h>
 
-#if defined(GLFW_INCLUDE_VULKAN)
-  #include <vulkan/vulkan.h>
-#endif /* Vulkan header */
-
-/* The Vulkan header may have indirectly included windows.h (because of
- * VK_USE_PLATFORM_WIN32_KHR) so we offer our replacement symbols after it.
- */
-
-/* It is customary to use APIENTRY for OpenGL function pointer declarations on
- * all platforms.  Additionally, the Windows OpenGL header needs APIENTRY.
- */
-#if !defined(APIENTRY)
- #if defined(_WIN32)
-  #define APIENTRY __stdcall
- #else
-  #define APIENTRY
- #endif
- #define GLFW_APIENTRY_DEFINED
-#endif /* APIENTRY */
-
-/* Some Windows OpenGL headers need this.
- */
-#if !defined(WINGDIAPI) && defined(_WIN32)
- #define WINGDIAPI __declspec(dllimport)
- #define GLFW_WINGDIAPI_DEFINED
-#endif /* WINGDIAPI */
-
-/* Some Windows GLU headers need this.
- */
-#if !defined(CALLBACK) && defined(_WIN32)
- #define CALLBACK __stdcall
- #define GLFW_CALLBACK_DEFINED
-#endif /* CALLBACK */
-
-/* Include the chosen OpenGL or OpenGL ES headers.
- */
-#if defined(GLFW_INCLUDE_ES1)
-
- #include <GLES/gl.h>
- #if defined(GLFW_INCLUDE_GLEXT)
-  #include <GLES/glext.h>
- #endif
-
-#elif defined(GLFW_INCLUDE_ES2)
-
- #include <GLES2/gl2.h>
- #if defined(GLFW_INCLUDE_GLEXT)
-  #include <GLES2/gl2ext.h>
- #endif
-
-#elif defined(GLFW_INCLUDE_ES3)
-
- #include <GLES3/gl3.h>
- #if defined(GLFW_INCLUDE_GLEXT)
-  #include <GLES2/gl2ext.h>
- #endif
-
-#elif defined(GLFW_INCLUDE_ES31)
-
- #include <GLES3/gl31.h>
- #if defined(GLFW_INCLUDE_GLEXT)
-  #include <GLES2/gl2ext.h>
- #endif
-
-#elif defined(GLFW_INCLUDE_ES32)
-
- #include <GLES3/gl32.h>
- #if defined(GLFW_INCLUDE_GLEXT)
-  #include <GLES2/gl2ext.h>
- #endif
-
-#elif defined(GLFW_INCLUDE_GLCOREARB)
-
- #if defined(__APPLE__)
-
-  #include <OpenGL/gl3.h>
-  #if defined(GLFW_INCLUDE_GLEXT)
-   #include <OpenGL/gl3ext.h>
-  #endif /*GLFW_INCLUDE_GLEXT*/
-
- #else /*__APPLE__*/
-
-  #include <GL/glcorearb.h>
-  #if defined(GLFW_INCLUDE_GLEXT)
-   #include <GL/glext.h>
-  #endif
-
- #endif /*__APPLE__*/
-
-#elif defined(GLFW_INCLUDE_GLU)
-
- #if defined(__APPLE__)
-
-  #if defined(GLFW_INCLUDE_GLU)
-   #include <OpenGL/glu.h>
-  #endif
-
- #else /*__APPLE__*/
-
-  #if defined(GLFW_INCLUDE_GLU)
-   #include <GL/glu.h>
-  #endif
-
- #endif /*__APPLE__*/
-
-#elif !defined(GLFW_INCLUDE_NONE) && \
-      !defined(__gl_h_) && \
-      !defined(__gles1_gl_h_) && \
-      !defined(__gles2_gl2_h_) && \
-      !defined(__gles2_gl3_h_) && \
-      !defined(__gles2_gl31_h_) && \
-      !defined(__gles2_gl32_h_) && \
-      !defined(__gl_glcorearb_h_) && \
-      !defined(__gl2_h_) /*legacy*/ && \
-      !defined(__gl3_h_) /*legacy*/ && \
-      !defined(__gl31_h_) /*legacy*/ && \
-      !defined(__gl32_h_) /*legacy*/ && \
-      !defined(__glcorearb_h_) /*legacy*/ && \
-      !defined(__GL_H__) /*non-standard*/ && \
-      !defined(__gltypes_h_) /*non-standard*/ && \
-      !defined(__glee_h_) /*non-standard*/
-
- #if defined(__APPLE__)
-
-  #if !defined(GLFW_INCLUDE_GLEXT)
-   #define GL_GLEXT_LEGACY
-  #endif
-  #include <OpenGL/gl.h>
-
- #else /*__APPLE__*/
-
-  #include <GL/gl.h>
-  #if defined(GLFW_INCLUDE_GLEXT)
-   #include <GL/glext.h>
-  #endif
-
- #endif /*__APPLE__*/
-
-#endif /* OpenGL and OpenGL ES headers */
 
 #if defined(GLFW_DLL) && defined(_GLFW_BUILD_DLL)
  /* GLFW_DLL must be defined by applications that are linking against the DLL
@@ -1911,6 +1772,8 @@ typedef struct GLFWimage
     unsigned char* pixels;
 } GLFWimage;
 
+/*! @brief Custom heap memory allocator.
+ *
  *  This describes a custom heap memory allocator for GLFW.  To set an allocator, pass it
  *  to @ref glfwInitAllocator before initializing the library.
  *

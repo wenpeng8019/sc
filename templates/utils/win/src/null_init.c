@@ -47,7 +47,6 @@ GLFWbool _glfwConnectNull(int platformID, _GLFWplatform* platform)
         .setWindowSize = _glfwSetWindowSizeNull,
         .setWindowSizeLimits = _glfwSetWindowSizeLimitsNull,
         .setWindowAspectRatio = _glfwSetWindowAspectRatioNull,
-        .getFramebufferSize = _glfwGetFramebufferSizeNull,
         .getWindowFrameSize = _glfwGetWindowFrameSizeNull,
         .getWindowContentScale = _glfwGetWindowContentScaleNull,
         .iconifyWindow = _glfwIconifyWindowNull,
@@ -63,7 +62,6 @@ GLFWbool _glfwConnectNull(int platformID, _GLFWplatform* platform)
         .windowVisible = _glfwWindowVisibleNull,
         .windowMaximized = _glfwWindowMaximizedNull,
         .windowHovered = _glfwWindowHoveredNull,
-        .framebufferTransparent = _glfwFramebufferTransparentNull,
         .getWindowOpacity = _glfwGetWindowOpacityNull,
         .setWindowResizable = _glfwSetWindowResizableNull,
         .setWindowDecorated = _glfwSetWindowDecoratedNull,
@@ -74,12 +72,6 @@ GLFWbool _glfwConnectNull(int platformID, _GLFWplatform* platform)
         .waitEvents = _glfwWaitEventsNull,
         .waitEventsTimeout = _glfwWaitEventsTimeoutNull,
         .postEmptyEvent = _glfwPostEmptyEventNull,
-        .getEGLPlatform = _glfwGetEGLPlatformNull,
-        .getEGLNativeDisplay = _glfwGetEGLNativeDisplayNull,
-        .getEGLNativeWindow = _glfwGetEGLNativeWindowNull,
-        .getRequiredInstanceExtensions = _glfwGetRequiredInstanceExtensionsNull,
-        .getPhysicalDevicePresentationSupport = _glfwGetPhysicalDevicePresentationSupportNull,
-        .createWindowSurface = _glfwCreateWindowSurfaceNull
     };
 
     *platform = null;
