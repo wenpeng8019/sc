@@ -589,7 +589,7 @@ static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start)
 
 // builtins 根目录根级头文件默认加入编译 -I：platform.h 等
 // + 搜索顺序同模块解析：输入目标文件所在目录向上 → cwd(当前目录)向上 → SCC_BUILTINS → 内嵌释放目录
-static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
+static std::filesystem::path resolveBuiltinsDir(const std::string& input) {
 
     namespace fs = std::filesystem; fs::path b;
 
@@ -615,13 +615,35 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
     if (b.empty()) b = embeddedBuiltinsDir();
 #endif
 
+    return b;
+}
+
+// 项目根（= builtins 目录的上级）：头支撑模块手写头 #include 路径相对此根计算。
+//   在任何后端 codegen 前调用，使 emit-c/run/build 各模式一致（含 templates/utils/* 深层分组）。
+static void setupProjectRoot(const std::string& input) {
+    namespace fs = std::filesystem;
+    const fs::path b = resolveBuiltinsDir(input);
+    if (b.empty()) return;
+    const fs::path parent = b.parent_path();
+    if (!parent.empty() && parent != b) setProjectRoot(parent.string());
+}
+
+static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
+
+    namespace fs = std::filesystem;
+    const fs::path b = resolveBuiltinsDir(input);
+
     if (!b.empty()) {
         tc.cflags += " -I " + b.string();
         tc.builtinsDir = b.string();   // 记录供远程构建整目录推送
         // builtins 根的上级目录：使生成代码中带根名的引用（如
         // #include "builtins/adt/adt.h"）可解析
         const fs::path parent = b.parent_path();
-        if (!parent.empty() && parent != b) tc.cflags += " -I " + parent.string();
+        if (!parent.empty() && parent != b) {
+            tc.cflags += " -I " + parent.string();
+            // 项目根：头支撑模块手写头 #include 路径相对此根计算（含 templates/utils/* 深层分组）
+            setProjectRoot(parent.string());
+        }
     }
 }
 
@@ -2596,6 +2618,7 @@ int main(int argc, char** argv) {
         // 3c. 代码生成：根据 mode 选择后端（run 模式也先生成 C）
         std::string sofHeaderSrc;  // --emit-c -o 模式下 stringify 格式化器（同级 stringify.h）
         if (getRefCheck() || getMemCheck() || getPtrCheck()) setRefSrcFile(input);  // T@ 栈悬挂/栈数组越界/指针下标守卫 site 用源码文件名
+        setupProjectRoot(input);   // 头支撑模块手写头 #include 路径的项目根（须早于任何后端 codegen）
         auto c = mode == "ast" ? emitAstJson(prog, warnings)        // AST→JSON（携带外部描述符使用警告）
                : mode == "api" ? emitScApi(prog)                    // AST→导出接口摘要（@导出 签名）
                : mode == "sc"  ? emitSc(prog)                       // AST→规范化sc

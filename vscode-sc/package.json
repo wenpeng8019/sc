@@ -19,6 +19,10 @@
                     "light": "./icons/sc-icon-dark.svg",
                     "dark": "./icons/sc-icon.svg"
                 }
+            },
+            {
+                "id": "properties",
+                "filenames": [".sc"]
             }
         ],
         "grammars": [

@@ -47,6 +47,10 @@ bool getPtrCheck();
 // 栈悬挂断言 site 文案使用的源码文件名（独立于 #line 的 srcFile）。
 void setRefSrcFile(const std::string& path);
 
+// 项目根目录（builtins 目录的上级）：头支撑模块手写头的 #include 路径相对此根计算，
+//   使 builtins/adt、templates/utils/wsi 等任意分组层级模块均落为根相对可解析路径。
+void setProjectRoot(const std::string& path);
+
 // 单元测试模式开关（--test）：开启时本单元被视为测试目标。
 //   tst 用例编译为 static 测试函数；用户 main 被屏蔽；合成 runner main 串起
 //   模块 init/drop 与各用例（setjmp 隔离失败、TAP 风格报告、失败数即退出码）。

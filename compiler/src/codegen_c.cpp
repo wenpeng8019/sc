@@ -36,6 +36,11 @@ bool g_ptrCheck = false;
 // 栈悬挂断言 site 文案用的源码文件名（与 #line 的 srcFile 解耦，避免强制注入 #line）。
 std::string g_refSrcFile;
 
+// 项目根目录（= builtins 目录的上级）。头支撑模块手写头的 #include 路径优先相对此根
+// 计算，令任意分组层级（builtins/adt、templates/utils/wsi）均落为根相对路径，随
+// -I <项目根> 可解析。空=未知（回退祖父目录名前缀的历史行为）。
+std::string g_projectRoot;
+
 // 单元测试模式开关（--test）：本单元为测试目标 → tst 编译为测试函数 + 合成 runner main，
 // 屏蔽用户 main。默认关闭：tst/assert 不产出运行代码。
 bool g_testMode = false;
@@ -156,6 +161,28 @@ std::string moduleFileToken(const std::string& s) {
 
 std::string moduleHeaderName(const std::string& s) {
     return moduleFileToken(s) + ".h";
+}
+
+// 头支撑模块手写头的 #include 路径：<模块目录>/<stem>.h（模块目录名恒等于 stem）。
+// 优先相对项目根（g_projectRoot = builtins 上级）计算，令任意分组层级
+// （builtins/adt → "builtins/adt/adt.h"、templates/utils/wsi → "templates/utils/wsi/wsi.h"）
+// 均落为根相对路径且经 -I <项目根> 可解析。无根信息或模块在根外（相对路径逃出根）时，
+// 回退历史行为「祖父目录名/stem/stem.h」。moduleDir 期望即 p.parent_path()。
+std::string headerBackedPath(const std::filesystem::path& moduleDir,
+                             const std::string& stem) {
+    namespace fs = std::filesystem;
+    if (!g_projectRoot.empty()) {
+        std::error_code ec;
+        fs::path rel = fs::relative(moduleDir, fs::path(g_projectRoot), ec);
+        if (!ec && !rel.empty()) {
+            const std::string r = rel.generic_string();
+            if (r != "." && r.rfind("..", 0) != 0)   // 未逃出项目根
+                return r + "/" + stem + ".h";
+        }
+    }
+    const fs::path gp = moduleDir.parent_path();
+    const std::string gpName = gp.empty() ? std::string() : gp.filename().string();
+    return (gpName.empty() ? "" : gpName + "/") + stem + "/" + stem + ".h";
 }
 
 // CGen 内部类 —— 封装 C 代码生成的状态
@@ -3069,8 +3096,7 @@ struct CGen {
     // 瘦指针 T@^（sc_thin）绑定：只统计目标入边 tar，dtor 随句柄，无 own 记账。
     //   nil → 仅解绑；T() → 带头堆分配 + sc_thin_bind；胖/瘦左值 → 拷 p/tar 绑新边。
     //   p/dtor 风味与裸 @ 一致（class → &_class + sc_obj_drop），故与 @ 互转无损。
-    void emitThinBind(const std::string& lv, const Expr& init, bool isInit,
-                      const std::string& tt) {
+    void emitThinBind(const std::string& lv, const Expr& init, bool isInit) {
         if (init.kind == Expr::Ident && init.text == "nil") {
             if (!isInit) emitFatUnbind(lv, "", false, /*thin*/ true);
             return;
@@ -3124,7 +3150,7 @@ struct CGen {
         bool bare = targetType.empty();
         std::string dtorArg = fatDtorArg(targetType);
         // 瘦 @^：sc_thin 路径（只统计 tar，无 own）。dtor 随句柄；nil/T()/胖左值三态。
-        if (thin) { emitThinBind(lv, init, isInit, targetType); return; }
+        if (thin) { emitThinBind(lv, init, isInit); return; }
         // nil：仅解绑
         if (init.kind == Expr::Ident && init.text == "nil") {
             if (!isInit) emitFatUnbind(lv, dtorArg, bare);
@@ -6902,11 +6928,10 @@ struct CGen {
             const std::string stem = p.stem().string();
             if (p.has_parent_path() && p.parent_path().filename() == stem &&
                 std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
-                const std::filesystem::path root = p.parent_path().parent_path();
-                const std::string rootName = root.empty() ? std::string()
-                                                          : root.filename().string();
-                out << "#include \"" << (rootName.empty() ? "" : rootName + "/")
-                    << stem << "/" << stem << ".h\"\n";
+                // 相对项目根的模块头路径（含分组，如 "builtins/adt/adt.h"、
+                // "templates/utils/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
+                out << "#include \"" << headerBackedPath(p.parent_path(), stem)
+                    << "\"\n";
                 return;
             }
             out << "#include \"" << moduleHeaderName(key) << "\"\n";
@@ -7022,7 +7047,7 @@ struct CGen {
                     gInits.push_back({scPfx(f.name), scPfx(im->name),
                                       typeHasFatMember(f.type.name) ? "SC_OWN_RAW" : ""});
                 const Decl* dm = findMethod(f.type.name, "drop");
-                if (dm) gDrops.push_back({scPfx(f.name), scPfx(dm->name)});
+                if (dm) gDrops.push_back({scPfx(f.name), scPfx(dm->name), ""});
             }
         }
         // dep 依赖关系：解析每个依赖项 id → 已绑定 tok 句柄变量名（同单元内声明序在前）。
@@ -7343,11 +7368,9 @@ struct CGen {
             if (endsWith(p.string(), ".sc") && p.has_parent_path() &&
                 p.parent_path().filename() == stem &&
                 std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
-                const std::filesystem::path root = p.parent_path().parent_path();
-                const std::string rootName = root.empty() ? std::string()
-                                                          : root.filename().string();
-                headerBackedInclude = (rootName.empty() ? "" : rootName + "/")
-                                      + stem + "/" + stem + ".h";
+                // 引用手写头的相对项目根路径（如 "builtins/adt/adt.h"、
+                // "templates/utils/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
+                headerBackedInclude = headerBackedPath(p.parent_path(), stem);
                 unitHeaderBacked = true;
             }
             // op：默认导入的语言运行时模块（builtins/op.sc + 同目录 op.h），其手写头
@@ -7838,6 +7861,7 @@ bool getMemCheck() { return g_memCheck; }
 void setPtrCheck(bool on) { g_ptrCheck = on; }
 bool getPtrCheck() { return g_ptrCheck; }
 void setRefSrcFile(const std::string& path) { g_refSrcFile = path; }
+void setProjectRoot(const std::string& path) { g_projectRoot = path; }
 void setTestMode(bool on) { g_testMode = on; }
 bool getTestMode() { return g_testMode; }
 

@@ -5,7 +5,6 @@
 // ============================================================
 #include "proggraph.h"
 #include "graph/graph.h"   // builtins/graph 图算法规范接口：SCC 环检测复用 sc_graph_scc
-#include <algorithm>
 #include <filesystem>
 #include <sstream>
 #include <unordered_map>

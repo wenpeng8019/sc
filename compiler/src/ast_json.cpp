@@ -7,7 +7,6 @@
 // ============================================================
 #include "ast_json.h"
 #include "ast_print.h"
-#include <sstream>
 
 namespace {
 
