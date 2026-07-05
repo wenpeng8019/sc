@@ -24,162 +24,162 @@ static int translateKeySyms(const KeySym* keysyms, int width)
     {
         switch (keysyms[1])
         {
-            case XK_KP_0:           return GLFW_KEY_KP_0;
-            case XK_KP_1:           return GLFW_KEY_KP_1;
-            case XK_KP_2:           return GLFW_KEY_KP_2;
-            case XK_KP_3:           return GLFW_KEY_KP_3;
-            case XK_KP_4:           return GLFW_KEY_KP_4;
-            case XK_KP_5:           return GLFW_KEY_KP_5;
-            case XK_KP_6:           return GLFW_KEY_KP_6;
-            case XK_KP_7:           return GLFW_KEY_KP_7;
-            case XK_KP_8:           return GLFW_KEY_KP_8;
-            case XK_KP_9:           return GLFW_KEY_KP_9;
+            case XK_KP_0:           return SC_KEY_KP_0;
+            case XK_KP_1:           return SC_KEY_KP_1;
+            case XK_KP_2:           return SC_KEY_KP_2;
+            case XK_KP_3:           return SC_KEY_KP_3;
+            case XK_KP_4:           return SC_KEY_KP_4;
+            case XK_KP_5:           return SC_KEY_KP_5;
+            case XK_KP_6:           return SC_KEY_KP_6;
+            case XK_KP_7:           return SC_KEY_KP_7;
+            case XK_KP_8:           return SC_KEY_KP_8;
+            case XK_KP_9:           return SC_KEY_KP_9;
             case XK_KP_Separator:
-            case XK_KP_Decimal:     return GLFW_KEY_KP_DECIMAL;
-            case XK_KP_Equal:       return GLFW_KEY_KP_EQUAL;
-            case XK_KP_Enter:       return GLFW_KEY_KP_ENTER;
+            case XK_KP_Decimal:     return SC_KEY_KP_DECIMAL;
+            case XK_KP_Equal:       return SC_KEY_KP_EQUAL;
+            case XK_KP_Enter:       return SC_KEY_KP_ENTER;
             default:                break;
         }
     }
 
     switch (keysyms[0])
     {
-        case XK_Escape:         return GLFW_KEY_ESCAPE;
-        case XK_Tab:            return GLFW_KEY_TAB;
-        case XK_Shift_L:        return GLFW_KEY_LEFT_SHIFT;
-        case XK_Shift_R:        return GLFW_KEY_RIGHT_SHIFT;
-        case XK_Control_L:      return GLFW_KEY_LEFT_CONTROL;
-        case XK_Control_R:      return GLFW_KEY_RIGHT_CONTROL;
+        case XK_Escape:         return SC_KEY_ESCAPE;
+        case XK_Tab:            return SC_KEY_TAB;
+        case XK_Shift_L:        return SC_KEY_LEFT_SHIFT;
+        case XK_Shift_R:        return SC_KEY_RIGHT_SHIFT;
+        case XK_Control_L:      return SC_KEY_LEFT_CONTROL;
+        case XK_Control_R:      return SC_KEY_RIGHT_CONTROL;
         case XK_Meta_L:
-        case XK_Alt_L:          return GLFW_KEY_LEFT_ALT;
+        case XK_Alt_L:          return SC_KEY_LEFT_ALT;
         case XK_Mode_switch: // Mapped to Alt_R on many keyboards
         case XK_ISO_Level3_Shift: // AltGr on at least some machines
         case XK_Meta_R:
-        case XK_Alt_R:          return GLFW_KEY_RIGHT_ALT;
-        case XK_Super_L:        return GLFW_KEY_LEFT_SUPER;
-        case XK_Super_R:        return GLFW_KEY_RIGHT_SUPER;
-        case XK_Menu:           return GLFW_KEY_MENU;
-        case XK_Num_Lock:       return GLFW_KEY_NUM_LOCK;
-        case XK_Caps_Lock:      return GLFW_KEY_CAPS_LOCK;
-        case XK_Print:          return GLFW_KEY_PRINT_SCREEN;
-        case XK_Scroll_Lock:    return GLFW_KEY_SCROLL_LOCK;
-        case XK_Pause:          return GLFW_KEY_PAUSE;
-        case XK_Delete:         return GLFW_KEY_DELETE;
-        case XK_BackSpace:      return GLFW_KEY_BACKSPACE;
-        case XK_Return:         return GLFW_KEY_ENTER;
-        case XK_Home:           return GLFW_KEY_HOME;
-        case XK_End:            return GLFW_KEY_END;
-        case XK_Page_Up:        return GLFW_KEY_PAGE_UP;
-        case XK_Page_Down:      return GLFW_KEY_PAGE_DOWN;
-        case XK_Insert:         return GLFW_KEY_INSERT;
-        case XK_Left:           return GLFW_KEY_LEFT;
-        case XK_Right:          return GLFW_KEY_RIGHT;
-        case XK_Down:           return GLFW_KEY_DOWN;
-        case XK_Up:             return GLFW_KEY_UP;
-        case XK_F1:             return GLFW_KEY_F1;
-        case XK_F2:             return GLFW_KEY_F2;
-        case XK_F3:             return GLFW_KEY_F3;
-        case XK_F4:             return GLFW_KEY_F4;
-        case XK_F5:             return GLFW_KEY_F5;
-        case XK_F6:             return GLFW_KEY_F6;
-        case XK_F7:             return GLFW_KEY_F7;
-        case XK_F8:             return GLFW_KEY_F8;
-        case XK_F9:             return GLFW_KEY_F9;
-        case XK_F10:            return GLFW_KEY_F10;
-        case XK_F11:            return GLFW_KEY_F11;
-        case XK_F12:            return GLFW_KEY_F12;
-        case XK_F13:            return GLFW_KEY_F13;
-        case XK_F14:            return GLFW_KEY_F14;
-        case XK_F15:            return GLFW_KEY_F15;
-        case XK_F16:            return GLFW_KEY_F16;
-        case XK_F17:            return GLFW_KEY_F17;
-        case XK_F18:            return GLFW_KEY_F18;
-        case XK_F19:            return GLFW_KEY_F19;
-        case XK_F20:            return GLFW_KEY_F20;
-        case XK_F21:            return GLFW_KEY_F21;
-        case XK_F22:            return GLFW_KEY_F22;
-        case XK_F23:            return GLFW_KEY_F23;
-        case XK_F24:            return GLFW_KEY_F24;
-        case XK_F25:            return GLFW_KEY_F25;
+        case XK_Alt_R:          return SC_KEY_RIGHT_ALT;
+        case XK_Super_L:        return SC_KEY_LEFT_SUPER;
+        case XK_Super_R:        return SC_KEY_RIGHT_SUPER;
+        case XK_Menu:           return SC_KEY_MENU;
+        case XK_Num_Lock:       return SC_KEY_NUM_LOCK;
+        case XK_Caps_Lock:      return SC_KEY_CAPS_LOCK;
+        case XK_Print:          return SC_KEY_PRINT_SCREEN;
+        case XK_Scroll_Lock:    return SC_KEY_SCROLL_LOCK;
+        case XK_Pause:          return SC_KEY_PAUSE;
+        case XK_Delete:         return SC_KEY_DELETE;
+        case XK_BackSpace:      return SC_KEY_BACKSPACE;
+        case XK_Return:         return SC_KEY_ENTER;
+        case XK_Home:           return SC_KEY_HOME;
+        case XK_End:            return SC_KEY_END;
+        case XK_Page_Up:        return SC_KEY_PAGE_UP;
+        case XK_Page_Down:      return SC_KEY_PAGE_DOWN;
+        case XK_Insert:         return SC_KEY_INSERT;
+        case XK_Left:           return SC_KEY_LEFT;
+        case XK_Right:          return SC_KEY_RIGHT;
+        case XK_Down:           return SC_KEY_DOWN;
+        case XK_Up:             return SC_KEY_UP;
+        case XK_F1:             return SC_KEY_F1;
+        case XK_F2:             return SC_KEY_F2;
+        case XK_F3:             return SC_KEY_F3;
+        case XK_F4:             return SC_KEY_F4;
+        case XK_F5:             return SC_KEY_F5;
+        case XK_F6:             return SC_KEY_F6;
+        case XK_F7:             return SC_KEY_F7;
+        case XK_F8:             return SC_KEY_F8;
+        case XK_F9:             return SC_KEY_F9;
+        case XK_F10:            return SC_KEY_F10;
+        case XK_F11:            return SC_KEY_F11;
+        case XK_F12:            return SC_KEY_F12;
+        case XK_F13:            return SC_KEY_F13;
+        case XK_F14:            return SC_KEY_F14;
+        case XK_F15:            return SC_KEY_F15;
+        case XK_F16:            return SC_KEY_F16;
+        case XK_F17:            return SC_KEY_F17;
+        case XK_F18:            return SC_KEY_F18;
+        case XK_F19:            return SC_KEY_F19;
+        case XK_F20:            return SC_KEY_F20;
+        case XK_F21:            return SC_KEY_F21;
+        case XK_F22:            return SC_KEY_F22;
+        case XK_F23:            return SC_KEY_F23;
+        case XK_F24:            return SC_KEY_F24;
+        case XK_F25:            return SC_KEY_F25;
 
         // Numeric keypad
-        case XK_KP_Divide:      return GLFW_KEY_KP_DIVIDE;
-        case XK_KP_Multiply:    return GLFW_KEY_KP_MULTIPLY;
-        case XK_KP_Subtract:    return GLFW_KEY_KP_SUBTRACT;
-        case XK_KP_Add:         return GLFW_KEY_KP_ADD;
+        case XK_KP_Divide:      return SC_KEY_KP_DIVIDE;
+        case XK_KP_Multiply:    return SC_KEY_KP_MULTIPLY;
+        case XK_KP_Subtract:    return SC_KEY_KP_SUBTRACT;
+        case XK_KP_Add:         return SC_KEY_KP_ADD;
 
         // These should have been detected in secondary keysym test above!
-        case XK_KP_Insert:      return GLFW_KEY_KP_0;
-        case XK_KP_End:         return GLFW_KEY_KP_1;
-        case XK_KP_Down:        return GLFW_KEY_KP_2;
-        case XK_KP_Page_Down:   return GLFW_KEY_KP_3;
-        case XK_KP_Left:        return GLFW_KEY_KP_4;
-        case XK_KP_Right:       return GLFW_KEY_KP_6;
-        case XK_KP_Home:        return GLFW_KEY_KP_7;
-        case XK_KP_Up:          return GLFW_KEY_KP_8;
-        case XK_KP_Page_Up:     return GLFW_KEY_KP_9;
-        case XK_KP_Delete:      return GLFW_KEY_KP_DECIMAL;
-        case XK_KP_Equal:       return GLFW_KEY_KP_EQUAL;
-        case XK_KP_Enter:       return GLFW_KEY_KP_ENTER;
+        case XK_KP_Insert:      return SC_KEY_KP_0;
+        case XK_KP_End:         return SC_KEY_KP_1;
+        case XK_KP_Down:        return SC_KEY_KP_2;
+        case XK_KP_Page_Down:   return SC_KEY_KP_3;
+        case XK_KP_Left:        return SC_KEY_KP_4;
+        case XK_KP_Right:       return SC_KEY_KP_6;
+        case XK_KP_Home:        return SC_KEY_KP_7;
+        case XK_KP_Up:          return SC_KEY_KP_8;
+        case XK_KP_Page_Up:     return SC_KEY_KP_9;
+        case XK_KP_Delete:      return SC_KEY_KP_DECIMAL;
+        case XK_KP_Equal:       return SC_KEY_KP_EQUAL;
+        case XK_KP_Enter:       return SC_KEY_KP_ENTER;
 
         // Last resort: Check for printable keys (should not happen if the XKB
         // extension is available). This will give a layout dependent mapping
         // (which is wrong, and we may miss some keys, especially on non-US
         // keyboards), but it's better than nothing...
-        case XK_a:              return GLFW_KEY_A;
-        case XK_b:              return GLFW_KEY_B;
-        case XK_c:              return GLFW_KEY_C;
-        case XK_d:              return GLFW_KEY_D;
-        case XK_e:              return GLFW_KEY_E;
-        case XK_f:              return GLFW_KEY_F;
-        case XK_g:              return GLFW_KEY_G;
-        case XK_h:              return GLFW_KEY_H;
-        case XK_i:              return GLFW_KEY_I;
-        case XK_j:              return GLFW_KEY_J;
-        case XK_k:              return GLFW_KEY_K;
-        case XK_l:              return GLFW_KEY_L;
-        case XK_m:              return GLFW_KEY_M;
-        case XK_n:              return GLFW_KEY_N;
-        case XK_o:              return GLFW_KEY_O;
-        case XK_p:              return GLFW_KEY_P;
-        case XK_q:              return GLFW_KEY_Q;
-        case XK_r:              return GLFW_KEY_R;
-        case XK_s:              return GLFW_KEY_S;
-        case XK_t:              return GLFW_KEY_T;
-        case XK_u:              return GLFW_KEY_U;
-        case XK_v:              return GLFW_KEY_V;
-        case XK_w:              return GLFW_KEY_W;
-        case XK_x:              return GLFW_KEY_X;
-        case XK_y:              return GLFW_KEY_Y;
-        case XK_z:              return GLFW_KEY_Z;
-        case XK_1:              return GLFW_KEY_1;
-        case XK_2:              return GLFW_KEY_2;
-        case XK_3:              return GLFW_KEY_3;
-        case XK_4:              return GLFW_KEY_4;
-        case XK_5:              return GLFW_KEY_5;
-        case XK_6:              return GLFW_KEY_6;
-        case XK_7:              return GLFW_KEY_7;
-        case XK_8:              return GLFW_KEY_8;
-        case XK_9:              return GLFW_KEY_9;
-        case XK_0:              return GLFW_KEY_0;
-        case XK_space:          return GLFW_KEY_SPACE;
-        case XK_minus:          return GLFW_KEY_MINUS;
-        case XK_equal:          return GLFW_KEY_EQUAL;
-        case XK_bracketleft:    return GLFW_KEY_LEFT_BRACKET;
-        case XK_bracketright:   return GLFW_KEY_RIGHT_BRACKET;
-        case XK_backslash:      return GLFW_KEY_BACKSLASH;
-        case XK_semicolon:      return GLFW_KEY_SEMICOLON;
-        case XK_apostrophe:     return GLFW_KEY_APOSTROPHE;
-        case XK_grave:          return GLFW_KEY_GRAVE_ACCENT;
-        case XK_comma:          return GLFW_KEY_COMMA;
-        case XK_period:         return GLFW_KEY_PERIOD;
-        case XK_slash:          return GLFW_KEY_SLASH;
-        case XK_less:           return GLFW_KEY_WORLD_1; // At least in some layouts...
+        case XK_a:              return SC_KEY_A;
+        case XK_b:              return SC_KEY_B;
+        case XK_c:              return SC_KEY_C;
+        case XK_d:              return SC_KEY_D;
+        case XK_e:              return SC_KEY_E;
+        case XK_f:              return SC_KEY_F;
+        case XK_g:              return SC_KEY_G;
+        case XK_h:              return SC_KEY_H;
+        case XK_i:              return SC_KEY_I;
+        case XK_j:              return SC_KEY_J;
+        case XK_k:              return SC_KEY_K;
+        case XK_l:              return SC_KEY_L;
+        case XK_m:              return SC_KEY_M;
+        case XK_n:              return SC_KEY_N;
+        case XK_o:              return SC_KEY_O;
+        case XK_p:              return SC_KEY_P;
+        case XK_q:              return SC_KEY_Q;
+        case XK_r:              return SC_KEY_R;
+        case XK_s:              return SC_KEY_S;
+        case XK_t:              return SC_KEY_T;
+        case XK_u:              return SC_KEY_U;
+        case XK_v:              return SC_KEY_V;
+        case XK_w:              return SC_KEY_W;
+        case XK_x:              return SC_KEY_X;
+        case XK_y:              return SC_KEY_Y;
+        case XK_z:              return SC_KEY_Z;
+        case XK_1:              return SC_KEY_1;
+        case XK_2:              return SC_KEY_2;
+        case XK_3:              return SC_KEY_3;
+        case XK_4:              return SC_KEY_4;
+        case XK_5:              return SC_KEY_5;
+        case XK_6:              return SC_KEY_6;
+        case XK_7:              return SC_KEY_7;
+        case XK_8:              return SC_KEY_8;
+        case XK_9:              return SC_KEY_9;
+        case XK_0:              return SC_KEY_0;
+        case XK_space:          return SC_KEY_SPACE;
+        case XK_minus:          return SC_KEY_MINUS;
+        case XK_equal:          return SC_KEY_EQUAL;
+        case XK_bracketleft:    return SC_KEY_LEFT_BRACKET;
+        case XK_bracketright:   return SC_KEY_RIGHT_BRACKET;
+        case XK_backslash:      return SC_KEY_BACKSLASH;
+        case XK_semicolon:      return SC_KEY_SEMICOLON;
+        case XK_apostrophe:     return SC_KEY_APOSTROPHE;
+        case XK_grave:          return SC_KEY_GRAVE_ACCENT;
+        case XK_comma:          return SC_KEY_COMMA;
+        case XK_period:         return SC_KEY_PERIOD;
+        case XK_slash:          return SC_KEY_SLASH;
+        case XK_less:           return SC_KEY_WORLD_1; // At least in some layouts...
         default:                break;
     }
 
     // No matching translation was found
-    return GLFW_KEY_UNKNOWN;
+    return SC_KEY_UNKNOWN;
 }
 
 // Create key code translation tables
@@ -208,133 +208,133 @@ static void createKeyTables(void)
             char* name;
         } keymap[] =
         {
-            { GLFW_KEY_GRAVE_ACCENT, "TLDE" },
-            { GLFW_KEY_1, "AE01" },
-            { GLFW_KEY_2, "AE02" },
-            { GLFW_KEY_3, "AE03" },
-            { GLFW_KEY_4, "AE04" },
-            { GLFW_KEY_5, "AE05" },
-            { GLFW_KEY_6, "AE06" },
-            { GLFW_KEY_7, "AE07" },
-            { GLFW_KEY_8, "AE08" },
-            { GLFW_KEY_9, "AE09" },
-            { GLFW_KEY_0, "AE10" },
-            { GLFW_KEY_MINUS, "AE11" },
-            { GLFW_KEY_EQUAL, "AE12" },
-            { GLFW_KEY_Q, "AD01" },
-            { GLFW_KEY_W, "AD02" },
-            { GLFW_KEY_E, "AD03" },
-            { GLFW_KEY_R, "AD04" },
-            { GLFW_KEY_T, "AD05" },
-            { GLFW_KEY_Y, "AD06" },
-            { GLFW_KEY_U, "AD07" },
-            { GLFW_KEY_I, "AD08" },
-            { GLFW_KEY_O, "AD09" },
-            { GLFW_KEY_P, "AD10" },
-            { GLFW_KEY_LEFT_BRACKET, "AD11" },
-            { GLFW_KEY_RIGHT_BRACKET, "AD12" },
-            { GLFW_KEY_A, "AC01" },
-            { GLFW_KEY_S, "AC02" },
-            { GLFW_KEY_D, "AC03" },
-            { GLFW_KEY_F, "AC04" },
-            { GLFW_KEY_G, "AC05" },
-            { GLFW_KEY_H, "AC06" },
-            { GLFW_KEY_J, "AC07" },
-            { GLFW_KEY_K, "AC08" },
-            { GLFW_KEY_L, "AC09" },
-            { GLFW_KEY_SEMICOLON, "AC10" },
-            { GLFW_KEY_APOSTROPHE, "AC11" },
-            { GLFW_KEY_Z, "AB01" },
-            { GLFW_KEY_X, "AB02" },
-            { GLFW_KEY_C, "AB03" },
-            { GLFW_KEY_V, "AB04" },
-            { GLFW_KEY_B, "AB05" },
-            { GLFW_KEY_N, "AB06" },
-            { GLFW_KEY_M, "AB07" },
-            { GLFW_KEY_COMMA, "AB08" },
-            { GLFW_KEY_PERIOD, "AB09" },
-            { GLFW_KEY_SLASH, "AB10" },
-            { GLFW_KEY_BACKSLASH, "BKSL" },
-            { GLFW_KEY_WORLD_1, "LSGT" },
-            { GLFW_KEY_SPACE, "SPCE" },
-            { GLFW_KEY_ESCAPE, "ESC" },
-            { GLFW_KEY_ENTER, "RTRN" },
-            { GLFW_KEY_TAB, "TAB" },
-            { GLFW_KEY_BACKSPACE, "BKSP" },
-            { GLFW_KEY_INSERT, "INS" },
-            { GLFW_KEY_DELETE, "DELE" },
-            { GLFW_KEY_RIGHT, "RGHT" },
-            { GLFW_KEY_LEFT, "LEFT" },
-            { GLFW_KEY_DOWN, "DOWN" },
-            { GLFW_KEY_UP, "UP" },
-            { GLFW_KEY_PAGE_UP, "PGUP" },
-            { GLFW_KEY_PAGE_DOWN, "PGDN" },
-            { GLFW_KEY_HOME, "HOME" },
-            { GLFW_KEY_END, "END" },
-            { GLFW_KEY_CAPS_LOCK, "CAPS" },
-            { GLFW_KEY_SCROLL_LOCK, "SCLK" },
-            { GLFW_KEY_NUM_LOCK, "NMLK" },
-            { GLFW_KEY_PRINT_SCREEN, "PRSC" },
-            { GLFW_KEY_PAUSE, "PAUS" },
-            { GLFW_KEY_F1, "FK01" },
-            { GLFW_KEY_F2, "FK02" },
-            { GLFW_KEY_F3, "FK03" },
-            { GLFW_KEY_F4, "FK04" },
-            { GLFW_KEY_F5, "FK05" },
-            { GLFW_KEY_F6, "FK06" },
-            { GLFW_KEY_F7, "FK07" },
-            { GLFW_KEY_F8, "FK08" },
-            { GLFW_KEY_F9, "FK09" },
-            { GLFW_KEY_F10, "FK10" },
-            { GLFW_KEY_F11, "FK11" },
-            { GLFW_KEY_F12, "FK12" },
-            { GLFW_KEY_F13, "FK13" },
-            { GLFW_KEY_F14, "FK14" },
-            { GLFW_KEY_F15, "FK15" },
-            { GLFW_KEY_F16, "FK16" },
-            { GLFW_KEY_F17, "FK17" },
-            { GLFW_KEY_F18, "FK18" },
-            { GLFW_KEY_F19, "FK19" },
-            { GLFW_KEY_F20, "FK20" },
-            { GLFW_KEY_F21, "FK21" },
-            { GLFW_KEY_F22, "FK22" },
-            { GLFW_KEY_F23, "FK23" },
-            { GLFW_KEY_F24, "FK24" },
-            { GLFW_KEY_F25, "FK25" },
-            { GLFW_KEY_KP_0, "KP0" },
-            { GLFW_KEY_KP_1, "KP1" },
-            { GLFW_KEY_KP_2, "KP2" },
-            { GLFW_KEY_KP_3, "KP3" },
-            { GLFW_KEY_KP_4, "KP4" },
-            { GLFW_KEY_KP_5, "KP5" },
-            { GLFW_KEY_KP_6, "KP6" },
-            { GLFW_KEY_KP_7, "KP7" },
-            { GLFW_KEY_KP_8, "KP8" },
-            { GLFW_KEY_KP_9, "KP9" },
-            { GLFW_KEY_KP_DECIMAL, "KPDL" },
-            { GLFW_KEY_KP_DIVIDE, "KPDV" },
-            { GLFW_KEY_KP_MULTIPLY, "KPMU" },
-            { GLFW_KEY_KP_SUBTRACT, "KPSU" },
-            { GLFW_KEY_KP_ADD, "KPAD" },
-            { GLFW_KEY_KP_ENTER, "KPEN" },
-            { GLFW_KEY_KP_EQUAL, "KPEQ" },
-            { GLFW_KEY_LEFT_SHIFT, "LFSH" },
-            { GLFW_KEY_LEFT_CONTROL, "LCTL" },
-            { GLFW_KEY_LEFT_ALT, "LALT" },
-            { GLFW_KEY_LEFT_SUPER, "LWIN" },
-            { GLFW_KEY_RIGHT_SHIFT, "RTSH" },
-            { GLFW_KEY_RIGHT_CONTROL, "RCTL" },
-            { GLFW_KEY_RIGHT_ALT, "RALT" },
-            { GLFW_KEY_RIGHT_ALT, "LVL3" },
-            { GLFW_KEY_RIGHT_ALT, "MDSW" },
-            { GLFW_KEY_RIGHT_SUPER, "RWIN" },
-            { GLFW_KEY_MENU, "MENU" }
+            { SC_KEY_GRAVE_ACCENT, "TLDE" },
+            { SC_KEY_1, "AE01" },
+            { SC_KEY_2, "AE02" },
+            { SC_KEY_3, "AE03" },
+            { SC_KEY_4, "AE04" },
+            { SC_KEY_5, "AE05" },
+            { SC_KEY_6, "AE06" },
+            { SC_KEY_7, "AE07" },
+            { SC_KEY_8, "AE08" },
+            { SC_KEY_9, "AE09" },
+            { SC_KEY_0, "AE10" },
+            { SC_KEY_MINUS, "AE11" },
+            { SC_KEY_EQUAL, "AE12" },
+            { SC_KEY_Q, "AD01" },
+            { SC_KEY_W, "AD02" },
+            { SC_KEY_E, "AD03" },
+            { SC_KEY_R, "AD04" },
+            { SC_KEY_T, "AD05" },
+            { SC_KEY_Y, "AD06" },
+            { SC_KEY_U, "AD07" },
+            { SC_KEY_I, "AD08" },
+            { SC_KEY_O, "AD09" },
+            { SC_KEY_P, "AD10" },
+            { SC_KEY_LEFT_BRACKET, "AD11" },
+            { SC_KEY_RIGHT_BRACKET, "AD12" },
+            { SC_KEY_A, "AC01" },
+            { SC_KEY_S, "AC02" },
+            { SC_KEY_D, "AC03" },
+            { SC_KEY_F, "AC04" },
+            { SC_KEY_G, "AC05" },
+            { SC_KEY_H, "AC06" },
+            { SC_KEY_J, "AC07" },
+            { SC_KEY_K, "AC08" },
+            { SC_KEY_L, "AC09" },
+            { SC_KEY_SEMICOLON, "AC10" },
+            { SC_KEY_APOSTROPHE, "AC11" },
+            { SC_KEY_Z, "AB01" },
+            { SC_KEY_X, "AB02" },
+            { SC_KEY_C, "AB03" },
+            { SC_KEY_V, "AB04" },
+            { SC_KEY_B, "AB05" },
+            { SC_KEY_N, "AB06" },
+            { SC_KEY_M, "AB07" },
+            { SC_KEY_COMMA, "AB08" },
+            { SC_KEY_PERIOD, "AB09" },
+            { SC_KEY_SLASH, "AB10" },
+            { SC_KEY_BACKSLASH, "BKSL" },
+            { SC_KEY_WORLD_1, "LSGT" },
+            { SC_KEY_SPACE, "SPCE" },
+            { SC_KEY_ESCAPE, "ESC" },
+            { SC_KEY_ENTER, "RTRN" },
+            { SC_KEY_TAB, "TAB" },
+            { SC_KEY_BACKSPACE, "BKSP" },
+            { SC_KEY_INSERT, "INS" },
+            { SC_KEY_DELETE, "DELE" },
+            { SC_KEY_RIGHT, "RGHT" },
+            { SC_KEY_LEFT, "LEFT" },
+            { SC_KEY_DOWN, "DOWN" },
+            { SC_KEY_UP, "UP" },
+            { SC_KEY_PAGE_UP, "PGUP" },
+            { SC_KEY_PAGE_DOWN, "PGDN" },
+            { SC_KEY_HOME, "HOME" },
+            { SC_KEY_END, "END" },
+            { SC_KEY_CAPS_LOCK, "CAPS" },
+            { SC_KEY_SCROLL_LOCK, "SCLK" },
+            { SC_KEY_NUM_LOCK, "NMLK" },
+            { SC_KEY_PRINT_SCREEN, "PRSC" },
+            { SC_KEY_PAUSE, "PAUS" },
+            { SC_KEY_F1, "FK01" },
+            { SC_KEY_F2, "FK02" },
+            { SC_KEY_F3, "FK03" },
+            { SC_KEY_F4, "FK04" },
+            { SC_KEY_F5, "FK05" },
+            { SC_KEY_F6, "FK06" },
+            { SC_KEY_F7, "FK07" },
+            { SC_KEY_F8, "FK08" },
+            { SC_KEY_F9, "FK09" },
+            { SC_KEY_F10, "FK10" },
+            { SC_KEY_F11, "FK11" },
+            { SC_KEY_F12, "FK12" },
+            { SC_KEY_F13, "FK13" },
+            { SC_KEY_F14, "FK14" },
+            { SC_KEY_F15, "FK15" },
+            { SC_KEY_F16, "FK16" },
+            { SC_KEY_F17, "FK17" },
+            { SC_KEY_F18, "FK18" },
+            { SC_KEY_F19, "FK19" },
+            { SC_KEY_F20, "FK20" },
+            { SC_KEY_F21, "FK21" },
+            { SC_KEY_F22, "FK22" },
+            { SC_KEY_F23, "FK23" },
+            { SC_KEY_F24, "FK24" },
+            { SC_KEY_F25, "FK25" },
+            { SC_KEY_KP_0, "KP0" },
+            { SC_KEY_KP_1, "KP1" },
+            { SC_KEY_KP_2, "KP2" },
+            { SC_KEY_KP_3, "KP3" },
+            { SC_KEY_KP_4, "KP4" },
+            { SC_KEY_KP_5, "KP5" },
+            { SC_KEY_KP_6, "KP6" },
+            { SC_KEY_KP_7, "KP7" },
+            { SC_KEY_KP_8, "KP8" },
+            { SC_KEY_KP_9, "KP9" },
+            { SC_KEY_KP_DECIMAL, "KPDL" },
+            { SC_KEY_KP_DIVIDE, "KPDV" },
+            { SC_KEY_KP_MULTIPLY, "KPMU" },
+            { SC_KEY_KP_SUBTRACT, "KPSU" },
+            { SC_KEY_KP_ADD, "KPAD" },
+            { SC_KEY_KP_ENTER, "KPEN" },
+            { SC_KEY_KP_EQUAL, "KPEQ" },
+            { SC_KEY_LEFT_SHIFT, "LFSH" },
+            { SC_KEY_LEFT_CONTROL, "LCTL" },
+            { SC_KEY_LEFT_ALT, "LALT" },
+            { SC_KEY_LEFT_SUPER, "LWIN" },
+            { SC_KEY_RIGHT_SHIFT, "RTSH" },
+            { SC_KEY_RIGHT_CONTROL, "RCTL" },
+            { SC_KEY_RIGHT_ALT, "RALT" },
+            { SC_KEY_RIGHT_ALT, "LVL3" },
+            { SC_KEY_RIGHT_ALT, "MDSW" },
+            { SC_KEY_RIGHT_SUPER, "RWIN" },
+            { SC_KEY_MENU, "MENU" }
         };
 
         // Find the X11 key code -> GLFW key code mapping
         for (int scancode = scancodeMin;  scancode <= scancodeMax;  scancode++)
         {
-            int key = GLFW_KEY_UNKNOWN;
+            int key = SC_KEY_UNKNOWN;
 
             // Map the key name to a GLFW key code. Note: We use the US
             // keyboard layout. Because function keys aren't mapped correctly
@@ -354,7 +354,7 @@ static void createKeyTables(void)
             // Fall back to key aliases in case the key name did not match
             for (int i = 0;  i < desc->names->num_key_aliases;  i++)
             {
-                if (key != GLFW_KEY_UNKNOWN)
+                if (key != SC_KEY_UNKNOWN)
                     break;
 
                 if (strncmp(desc->names->key_aliases[i].real,
@@ -461,7 +461,7 @@ static void inputMethodInstantiateCallback(Display* display,
         callback.client_data = NULL;
         XSetIMValues(_glfw.x11.im, XNDestroyCallback, &callback, NULL);
 
-        for (_GLFWwindow* window = _glfw.windowListHead;  window;  window = window->next)
+        for (_sc_window* window = _glfw.windowListHead;  window;  window = window->next)
             _glfwCreateInputContextX11(window);
     }
 }
@@ -693,7 +693,7 @@ static GLFWbool initExtensions(void)
             }
             else
             {
-                _glfwInputError(GLFW_PLATFORM_ERROR,
+                _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                                 "X11: Failed to query RandR version");
             }
         }
@@ -1026,7 +1026,7 @@ static GLFWbool createEmptyEventPipe(void)
 {
     if (pipe(_glfw.x11.emptyEventPipe) != 0)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "X11: Failed to create empty event pipe: %s",
                         strerror(errno));
         return GLFW_FALSE;
@@ -1041,7 +1041,7 @@ static GLFWbool createEmptyEventPipe(void)
             fcntl(_glfw.x11.emptyEventPipe[i], F_SETFL, sf | O_NONBLOCK) == -1 ||
             fcntl(_glfw.x11.emptyEventPipe[i], F_SETFD, df | FD_CLOEXEC) == -1)
         {
-            _glfwInputError(GLFW_PLATFORM_ERROR,
+            _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                             "X11: Failed to set flags for empty event pipe: %s",
                             strerror(errno));
             return GLFW_FALSE;
@@ -1141,7 +1141,7 @@ GLFWbool _glfwConnectX11(int platformID, _GLFWplatform* platform)
 {
     const _GLFWplatform x11 =
     {
-        .platformID = GLFW_PLATFORM_X11,
+        .platformID = SC_PLATFORM_X11,
         .init = _glfwInitX11,
         .terminate = _glfwTerminateX11,
         .getCursorPos = _glfwGetCursorPosX11,
@@ -1226,8 +1226,8 @@ GLFWbool _glfwConnectX11(int platformID, _GLFWplatform* platform)
 #endif
     if (!module)
     {
-        if (platformID == GLFW_PLATFORM_X11)
-            _glfwInputError(GLFW_PLATFORM_ERROR, "X11: Failed to load Xlib");
+        if (platformID == SC_PLATFORM_X11)
+            _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR, "X11: Failed to load Xlib");
 
         return GLFW_FALSE;
     }
@@ -1240,8 +1240,8 @@ GLFWbool _glfwConnectX11(int platformID, _GLFWplatform* platform)
         _glfwPlatformGetModuleSymbol(module, "XOpenDisplay");
     if (!XInitThreads || !XrmInitialize || !XOpenDisplay)
     {
-        if (platformID == GLFW_PLATFORM_X11)
-            _glfwInputError(GLFW_PLATFORM_ERROR, "X11: Failed to load Xlib entry point");
+        if (platformID == SC_PLATFORM_X11)
+            _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR, "X11: Failed to load Xlib entry point");
 
         _glfwPlatformFreeModule(module);
         return GLFW_FALSE;
@@ -1253,17 +1253,17 @@ GLFWbool _glfwConnectX11(int platformID, _GLFWplatform* platform)
     Display* display = XOpenDisplay(NULL);
     if (!display)
     {
-        if (platformID == GLFW_PLATFORM_X11)
+        if (platformID == SC_PLATFORM_X11)
         {
             const char* name = getenv("DISPLAY");
             if (name)
             {
-                _glfwInputError(GLFW_PLATFORM_UNAVAILABLE,
+                _glfwInputError(SC_WIN_ERR_PLATFORM_UNAVAILABLE,
                                 "X11: Failed to open display %s", name);
             }
             else
             {
-                _glfwInputError(GLFW_PLATFORM_UNAVAILABLE,
+                _glfwInputError(SC_WIN_ERR_PLATFORM_UNAVAILABLE,
                                 "X11: The DISPLAY environment variable is missing");
             }
         }

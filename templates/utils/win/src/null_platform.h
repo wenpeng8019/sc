@@ -1,9 +1,9 @@
 
 #include "internal.h"
 
-#define GLFW_NULL_WINDOW_STATE          _GLFWwindowNull null;
+#define GLFW_NULL_WINDOW_STATE          _sc_windowNull null;
 #define GLFW_NULL_LIBRARY_WINDOW_STATE  _GLFWlibraryNull null;
-#define GLFW_NULL_MONITOR_STATE         _GLFWmonitorNull null;
+#define GLFW_NULL_MONITOR_STATE         _sc_monitorNull null;
 
 #define GLFW_NULL_CONTEXT_STATE
 #define GLFW_NULL_CURSOR_STATE
@@ -134,7 +134,7 @@
 
 // Null-specific per-window data
 //
-typedef struct _GLFWwindowNull
+typedef struct _sc_windowNull
 {
     int             xpos;
     int             ypos;
@@ -148,14 +148,14 @@ typedef struct _GLFWwindowNull
     GLFWbool        floating;
     GLFWbool        transparent;
     float           opacity;
-} _GLFWwindowNull;
+} _sc_windowNull;
 
 // Null-specific per-monitor data
 //
-typedef struct _GLFWmonitorNull
+typedef struct _sc_monitorNull
 {
     GLFWgammaramp   ramp;
-} _GLFWmonitorNull;
+} _sc_monitorNull;
 
 // Null-specific global data
 //
@@ -164,9 +164,9 @@ typedef struct _GLFWlibraryNull
     int             xcursor;
     int             ycursor;
     char*           clipboardString;
-    _GLFWwindow*    focusedWindow;
+    _sc_window*    focusedWindow;
     uint16_t        keycodes[GLFW_NULL_SC_LAST + 1];
-    uint8_t         scancodes[GLFW_KEY_LAST + 1];
+    uint8_t         scancodes[SC_KEY_LAST + 1];
 } _GLFWlibraryNull;
 
 void _glfwPollMonitorsNull(void);
@@ -175,59 +175,59 @@ GLFWbool _glfwConnectNull(int platformID, _GLFWplatform* platform);
 int _glfwInitNull(void);
 void _glfwTerminateNull(void);
 
-void _glfwFreeMonitorNull(_GLFWmonitor* monitor);
-void _glfwGetMonitorPosNull(_GLFWmonitor* monitor, int* xpos, int* ypos);
-void _glfwGetMonitorContentScaleNull(_GLFWmonitor* monitor, float* xscale, float* yscale);
-void _glfwGetMonitorWorkareaNull(_GLFWmonitor* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* _glfwGetVideoModesNull(_GLFWmonitor* monitor, int* found);
-GLFWbool _glfwGetVideoModeNull(_GLFWmonitor* monitor, GLFWvidmode* mode);
-GLFWbool _glfwGetGammaRampNull(_GLFWmonitor* monitor, GLFWgammaramp* ramp);
-void _glfwSetGammaRampNull(_GLFWmonitor* monitor, const GLFWgammaramp* ramp);
+void _glfwFreeMonitorNull(_sc_monitor* monitor);
+void _glfwGetMonitorPosNull(_sc_monitor* monitor, int* xpos, int* ypos);
+void _glfwGetMonitorContentScaleNull(_sc_monitor* monitor, float* xscale, float* yscale);
+void _glfwGetMonitorWorkareaNull(_sc_monitor* monitor, int* xpos, int* ypos, int* width, int* height);
+GLFWvidmode* _glfwGetVideoModesNull(_sc_monitor* monitor, int* found);
+GLFWbool _glfwGetVideoModeNull(_sc_monitor* monitor, GLFWvidmode* mode);
+GLFWbool _glfwGetGammaRampNull(_sc_monitor* monitor, GLFWgammaramp* ramp);
+void _glfwSetGammaRampNull(_sc_monitor* monitor, const GLFWgammaramp* ramp);
 
-GLFWbool _glfwCreateWindowNull(_GLFWwindow* window, const _GLFWwndconfig* wndconfig);
-void _glfwDestroyWindowNull(_GLFWwindow* window);
-void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title);
-void _glfwSetWindowIconNull(_GLFWwindow* window, int count, const GLFWimage* images);
-void _glfwSetWindowMonitorNull(_GLFWwindow* window, _GLFWmonitor* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-void _glfwGetWindowPosNull(_GLFWwindow* window, int* xpos, int* ypos);
-void _glfwSetWindowPosNull(_GLFWwindow* window, int xpos, int ypos);
-void _glfwGetWindowSizeNull(_GLFWwindow* window, int* width, int* height);
-void _glfwSetWindowSizeNull(_GLFWwindow* window, int width, int height);
-void _glfwSetWindowSizeLimitsNull(_GLFWwindow* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void _glfwSetWindowAspectRatioNull(_GLFWwindow* window, int n, int d);
-void _glfwGetWindowFrameSizeNull(_GLFWwindow* window, int* left, int* top, int* right, int* bottom);
-void _glfwGetWindowContentScaleNull(_GLFWwindow* window, float* xscale, float* yscale);
-void _glfwIconifyWindowNull(_GLFWwindow* window);
-void _glfwRestoreWindowNull(_GLFWwindow* window);
-void _glfwMaximizeWindowNull(_GLFWwindow* window);
-GLFWbool _glfwWindowMaximizedNull(_GLFWwindow* window);
-GLFWbool _glfwWindowHoveredNull(_GLFWwindow* window);
-void _glfwSetWindowResizableNull(_GLFWwindow* window, GLFWbool enabled);
-void _glfwSetWindowDecoratedNull(_GLFWwindow* window, GLFWbool enabled);
-void _glfwSetWindowFloatingNull(_GLFWwindow* window, GLFWbool enabled);
-void _glfwSetWindowMousePassthroughNull(_GLFWwindow* window, GLFWbool enabled);
-float _glfwGetWindowOpacityNull(_GLFWwindow* window);
-void _glfwSetWindowOpacityNull(_GLFWwindow* window, float opacity);
-void _glfwSetRawMouseMotionNull(_GLFWwindow *window, GLFWbool enabled);
+GLFWbool _glfwCreateWindowNull(_sc_window* window, const _GLFWwndconfig* wndconfig);
+void _glfwDestroyWindowNull(_sc_window* window);
+void _glfwSetWindowTitleNull(_sc_window* window, const char* title);
+void _glfwSetWindowIconNull(_sc_window* window, int count, const GLFWimage* images);
+void _glfwSetWindowMonitorNull(_sc_window* window, _sc_monitor* monitor, int xpos, int ypos, int width, int height, int refreshRate);
+void _glfwGetWindowPosNull(_sc_window* window, int* xpos, int* ypos);
+void _glfwSetWindowPosNull(_sc_window* window, int xpos, int ypos);
+void _glfwGetWindowSizeNull(_sc_window* window, int* width, int* height);
+void _glfwSetWindowSizeNull(_sc_window* window, int width, int height);
+void _glfwSetWindowSizeLimitsNull(_sc_window* window, int minwidth, int minheight, int maxwidth, int maxheight);
+void _glfwSetWindowAspectRatioNull(_sc_window* window, int n, int d);
+void _glfwGetWindowFrameSizeNull(_sc_window* window, int* left, int* top, int* right, int* bottom);
+void _glfwGetWindowContentScaleNull(_sc_window* window, float* xscale, float* yscale);
+void _glfwIconifyWindowNull(_sc_window* window);
+void _glfwRestoreWindowNull(_sc_window* window);
+void _glfwMaximizeWindowNull(_sc_window* window);
+GLFWbool _glfwWindowMaximizedNull(_sc_window* window);
+GLFWbool _glfwWindowHoveredNull(_sc_window* window);
+void _glfwSetWindowResizableNull(_sc_window* window, GLFWbool enabled);
+void _glfwSetWindowDecoratedNull(_sc_window* window, GLFWbool enabled);
+void _glfwSetWindowFloatingNull(_sc_window* window, GLFWbool enabled);
+void _glfwSetWindowMousePassthroughNull(_sc_window* window, GLFWbool enabled);
+float _glfwGetWindowOpacityNull(_sc_window* window);
+void _glfwSetWindowOpacityNull(_sc_window* window, float opacity);
+void _glfwSetRawMouseMotionNull(_sc_window *window, GLFWbool enabled);
 GLFWbool _glfwRawMouseMotionSupportedNull(void);
-void _glfwShowWindowNull(_GLFWwindow* window);
-void _glfwRequestWindowAttentionNull(_GLFWwindow* window);
-void _glfwHideWindowNull(_GLFWwindow* window);
-void _glfwFocusWindowNull(_GLFWwindow* window);
-GLFWbool _glfwWindowFocusedNull(_GLFWwindow* window);
-GLFWbool _glfwWindowIconifiedNull(_GLFWwindow* window);
-GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window);
+void _glfwShowWindowNull(_sc_window* window);
+void _glfwRequestWindowAttentionNull(_sc_window* window);
+void _glfwHideWindowNull(_sc_window* window);
+void _glfwFocusWindowNull(_sc_window* window);
+GLFWbool _glfwWindowFocusedNull(_sc_window* window);
+GLFWbool _glfwWindowIconifiedNull(_sc_window* window);
+GLFWbool _glfwWindowVisibleNull(_sc_window* window);
 void _glfwPollEventsNull(void);
 void _glfwWaitEventsNull(void);
 void _glfwWaitEventsTimeoutNull(double timeout);
 void _glfwPostEmptyEventNull(void);
-void _glfwGetCursorPosNull(_GLFWwindow* window, double* xpos, double* ypos);
-void _glfwSetCursorPosNull(_GLFWwindow* window, double x, double y);
-void _glfwSetCursorModeNull(_GLFWwindow* window, int mode);
-GLFWbool _glfwCreateCursorNull(_GLFWcursor* cursor, const GLFWimage* image, int xhot, int yhot);
-GLFWbool _glfwCreateStandardCursorNull(_GLFWcursor* cursor, int shape);
-void _glfwDestroyCursorNull(_GLFWcursor* cursor);
-void _glfwSetCursorNull(_GLFWwindow* window, _GLFWcursor* cursor);
+void _glfwGetCursorPosNull(_sc_window* window, double* xpos, double* ypos);
+void _glfwSetCursorPosNull(_sc_window* window, double x, double y);
+void _glfwSetCursorModeNull(_sc_window* window, int mode);
+GLFWbool _glfwCreateCursorNull(_sc_cursor* cursor, const GLFWimage* image, int xhot, int yhot);
+GLFWbool _glfwCreateStandardCursorNull(_sc_cursor* cursor, int shape);
+void _glfwDestroyCursorNull(_sc_cursor* cursor);
+void _glfwSetCursorNull(_sc_window* window, _sc_cursor* cursor);
 void _glfwSetClipboardStringNull(const char* string);
 const char* _glfwGetClipboardStringNull(void);
 const char* _glfwGetScancodeNameNull(int scancode);

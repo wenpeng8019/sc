@@ -104,8 +104,8 @@ extern "C" {
  *  of the specified monitor, or `NULL` if an [error](@ref error_handling)
  *  occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -114,7 +114,7 @@ extern "C" {
  *
  *  @ingroup native
  */
-GLFWAPI const char* glfwGetWin32Adapter(GLFWmonitor* monitor);
+GLFWAPI const char* glfwGetWin32Adapter(sc_monitor* monitor);
 
 /*! @brief Returns the display device name of the specified monitor.
  *
@@ -122,8 +122,8 @@ GLFWAPI const char* glfwGetWin32Adapter(GLFWmonitor* monitor);
  *  `\\.\DISPLAY1\Monitor0`) of the specified monitor, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -132,15 +132,15 @@ GLFWAPI const char* glfwGetWin32Adapter(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI const char* glfwGetWin32Monitor(GLFWmonitor* monitor);
+GLFWAPI const char* glfwGetWin32Monitor(sc_monitor* monitor);
 
 /*! @brief Returns the `HWND` of the specified window.
  *
  *  @return The `HWND` of the specified window, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @remark The `HDC` associated with the window can be queried with the
  *  [GetDC](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdc)
@@ -157,7 +157,7 @@ GLFWAPI const char* glfwGetWin32Monitor(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI HWND glfwGetWin32Window(GLFWwindow* window);
+GLFWAPI HWND glfwGetWin32Window(sc_window* window);
 #endif
 
 
@@ -167,8 +167,8 @@ GLFWAPI HWND glfwGetWin32Window(GLFWwindow* window);
  *  @return The `CGDirectDisplayID` of the specified monitor, or
  *  `kCGNullDirectDisplay` if an [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -177,15 +177,15 @@ GLFWAPI HWND glfwGetWin32Window(GLFWwindow* window);
  *
  *  @ingroup native
  */
-GLFWAPI CGDirectDisplayID glfwGetCocoaMonitor(GLFWmonitor* monitor);
+GLFWAPI CGDirectDisplayID glfwGetCocoaMonitor(sc_monitor* monitor);
 
 /*! @brief Returns the `NSWindow` of the specified window.
  *
  *  @return The `NSWindow` of the specified window, or `nil` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -194,15 +194,15 @@ GLFWAPI CGDirectDisplayID glfwGetCocoaMonitor(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI id glfwGetCocoaWindow(GLFWwindow* window);
+GLFWAPI id glfwGetCocoaWindow(sc_window* window);
 
 /*! @brief Returns the `NSView` of the specified window.
  *
  *  @return The `NSView` of the specified window, or `nil` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -211,7 +211,7 @@ GLFWAPI id glfwGetCocoaWindow(GLFWwindow* window);
  *
  *  @ingroup native
  */
-GLFWAPI id glfwGetCocoaView(GLFWwindow* window);
+GLFWAPI id glfwGetCocoaView(sc_window* window);
 #endif
 
 
@@ -221,8 +221,8 @@ GLFWAPI id glfwGetCocoaView(GLFWwindow* window);
  *  @return The `Display` used by GLFW, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -238,8 +238,8 @@ GLFWAPI Display* glfwGetX11Display(void);
  *  @return The `RRCrtc` of the specified monitor, or `None` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -248,15 +248,15 @@ GLFWAPI Display* glfwGetX11Display(void);
  *
  *  @ingroup native
  */
-GLFWAPI RRCrtc glfwGetX11Adapter(GLFWmonitor* monitor);
+GLFWAPI RRCrtc glfwGetX11Adapter(sc_monitor* monitor);
 
 /*! @brief Returns the `RROutput` of the specified monitor.
  *
  *  @return The `RROutput` of the specified monitor, or `None` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -265,15 +265,15 @@ GLFWAPI RRCrtc glfwGetX11Adapter(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI RROutput glfwGetX11Monitor(GLFWmonitor* monitor);
+GLFWAPI RROutput glfwGetX11Monitor(sc_monitor* monitor);
 
 /*! @brief Returns the `Window` of the specified window.
  *
  *  @return The `Window` of the specified window, or `None` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -282,14 +282,14 @@ GLFWAPI RROutput glfwGetX11Monitor(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI Window glfwGetX11Window(GLFWwindow* window);
+GLFWAPI Window glfwGetX11Window(sc_window* window);
 
 /*! @brief Sets the current primary selection to the specified string.
  *
  *  @param[in] string A UTF-8 encoded string.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_UNAVAILABLE and @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE and @ref SC_WIN_ERR_PLATFORM_ERROR.
  *
  *  @pointer_lifetime The specified string is copied before this function
  *  returns.
@@ -309,13 +309,13 @@ GLFWAPI void glfwSetX11SelectionString(const char* string);
 /*! @brief Returns the contents of the current primary selection as a string.
  *
  *  If the selection is empty or if its contents cannot be converted, `NULL`
- *  is returned and a @ref GLFW_FORMAT_UNAVAILABLE error is generated.
+ *  is returned and a @ref SC_WIN_ERR_FORMAT_UNAVAILABLE error is generated.
  *
  *  @return The contents of the selection as a UTF-8 encoded string, or `NULL`
  *  if an [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_UNAVAILABLE and @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE and @ref SC_WIN_ERR_PLATFORM_ERROR.
  *
  *  @pointer_lifetime The returned string is allocated and freed by GLFW. You
  *  should not free it yourself. It is valid until the next call to @ref
@@ -342,8 +342,8 @@ GLFWAPI const char* glfwGetX11SelectionString(void);
  *  @return The `struct wl_display*` used by GLFW, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -359,8 +359,8 @@ GLFWAPI struct wl_display* glfwGetWaylandDisplay(void);
  *  @return The `struct wl_output*` of the specified monitor, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -369,15 +369,15 @@ GLFWAPI struct wl_display* glfwGetWaylandDisplay(void);
  *
  *  @ingroup native
  */
-GLFWAPI struct wl_output* glfwGetWaylandMonitor(GLFWmonitor* monitor);
+GLFWAPI struct wl_output* glfwGetWaylandMonitor(sc_monitor* monitor);
 
 /*! @brief Returns the main `struct wl_surface*` of the specified window.
  *
  *  @return The main `struct wl_surface*` of the specified window, or `NULL` if
  *  an [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED and @ref
- *  GLFW_PLATFORM_UNAVAILABLE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED and @ref
+ *  SC_WIN_ERR_PLATFORM_UNAVAILABLE.
  *
  *  @thread_safety This function may be called from any thread.  Access is not
  *  synchronized.
@@ -386,7 +386,7 @@ GLFWAPI struct wl_output* glfwGetWaylandMonitor(GLFWmonitor* monitor);
  *
  *  @ingroup native
  */
-GLFWAPI struct wl_surface* glfwGetWaylandWindow(GLFWwindow* window);
+GLFWAPI struct wl_surface* glfwGetWaylandWindow(sc_window* window);
 #endif
 
 

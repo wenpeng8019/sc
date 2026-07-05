@@ -262,14 +262,14 @@ void _glfwPollMonitorsCocoa(void)
     for (int i = 0;  i < _glfw.monitorCount;  i++)
         _glfw.monitors[i]->ns.screen = nil;
 
-    _GLFWmonitor** disconnected = NULL;
+    _sc_monitor** disconnected = NULL;
     uint32_t disconnectedCount = _glfw.monitorCount;
     if (disconnectedCount)
     {
-        disconnected = _glfw_calloc(_glfw.monitorCount, sizeof(_GLFWmonitor*));
+        disconnected = _glfw_calloc(_glfw.monitorCount, sizeof(_sc_monitor*));
         memcpy(disconnected,
                _glfw.monitors,
-               _glfw.monitorCount * sizeof(_GLFWmonitor*));
+               _glfw.monitorCount * sizeof(_sc_monitor*));
     }
 
     for (uint32_t i = 0;  i < displayCount;  i++)
@@ -313,7 +313,7 @@ void _glfwPollMonitorsCocoa(void)
         if (!name)
             continue;
 
-        _GLFWmonitor* monitor = _glfwAllocMonitor(name, size.width, size.height);
+        _sc_monitor* monitor = _glfwAllocMonitor(name, size.width, size.height);
         monitor->ns.displayID  = displays[i];
         monitor->ns.unitNumber = unitNumber;
         monitor->ns.screen     = screen;
@@ -325,13 +325,13 @@ void _glfwPollMonitorsCocoa(void)
             monitor->ns.fallbackRefreshRate = getFallbackRefreshRate(displays[i]);
         CGDisplayModeRelease(mode);
 
-        _glfwInputMonitor(monitor, GLFW_CONNECTED, _GLFW_INSERT_LAST);
+        _glfwInputMonitor(monitor, SC_CONNECTED, _GLFW_INSERT_LAST);
     }
 
     for (uint32_t i = 0;  i < disconnectedCount;  i++)
     {
         if (disconnected[i])
-            _glfwInputMonitor(disconnected[i], GLFW_DISCONNECTED, 0);
+            _glfwInputMonitor(disconnected[i], SC_DISCONNECTED, 0);
     }
 
     _glfw_free(disconnected);
@@ -340,7 +340,7 @@ void _glfwPollMonitorsCocoa(void)
 
 // Change the current video mode
 //
-void _glfwSetVideoModeCocoa(_GLFWmonitor* monitor, const GLFWvidmode* desired)
+void _glfwSetVideoModeCocoa(_sc_monitor* monitor, const GLFWvidmode* desired)
 {
     GLFWvidmode current;
     _glfwGetVideoModeCocoa(monitor, &current);
@@ -383,7 +383,7 @@ void _glfwSetVideoModeCocoa(_GLFWmonitor* monitor, const GLFWvidmode* desired)
 
 // Restore the previously saved (original) video mode
 //
-void _glfwRestoreVideoModeCocoa(_GLFWmonitor* monitor)
+void _glfwRestoreVideoModeCocoa(_sc_monitor* monitor)
 {
     if (monitor->ns.previousMode)
     {
@@ -402,11 +402,11 @@ void _glfwRestoreVideoModeCocoa(_GLFWmonitor* monitor)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-void _glfwFreeMonitorCocoa(_GLFWmonitor* monitor)
+void _glfwFreeMonitorCocoa(_sc_monitor* monitor)
 {
 }
 
-void _glfwGetMonitorPosCocoa(_GLFWmonitor* monitor, int* xpos, int* ypos)
+void _glfwGetMonitorPosCocoa(_sc_monitor* monitor, int* xpos, int* ypos)
 {
     @autoreleasepool {
 
@@ -420,14 +420,14 @@ void _glfwGetMonitorPosCocoa(_GLFWmonitor* monitor, int* xpos, int* ypos)
     } // autoreleasepool
 }
 
-void _glfwGetMonitorContentScaleCocoa(_GLFWmonitor* monitor,
+void _glfwGetMonitorContentScaleCocoa(_sc_monitor* monitor,
                                       float* xscale, float* yscale)
 {
     @autoreleasepool {
 
     if (!monitor->ns.screen)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "Cocoa: Cannot query content scale without screen");
     }
 
@@ -442,7 +442,7 @@ void _glfwGetMonitorContentScaleCocoa(_GLFWmonitor* monitor,
     } // autoreleasepool
 }
 
-void _glfwGetMonitorWorkareaCocoa(_GLFWmonitor* monitor,
+void _glfwGetMonitorWorkareaCocoa(_sc_monitor* monitor,
                                   int* xpos, int* ypos,
                                   int* width, int* height)
 {
@@ -450,7 +450,7 @@ void _glfwGetMonitorWorkareaCocoa(_GLFWmonitor* monitor,
 
     if (!monitor->ns.screen)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "Cocoa: Cannot query workarea without screen");
     }
 
@@ -468,7 +468,7 @@ void _glfwGetMonitorWorkareaCocoa(_GLFWmonitor* monitor,
     } // autoreleasepool
 }
 
-GLFWvidmode* _glfwGetVideoModesCocoa(_GLFWmonitor* monitor, int* count)
+GLFWvidmode* _glfwGetVideoModesCocoa(_sc_monitor* monitor, int* count)
 {
     @autoreleasepool {
 
@@ -508,14 +508,14 @@ GLFWvidmode* _glfwGetVideoModesCocoa(_GLFWmonitor* monitor, int* count)
     } // autoreleasepool
 }
 
-GLFWbool _glfwGetVideoModeCocoa(_GLFWmonitor* monitor, GLFWvidmode *mode)
+GLFWbool _glfwGetVideoModeCocoa(_sc_monitor* monitor, GLFWvidmode *mode)
 {
     @autoreleasepool {
 
     CGDisplayModeRef native = CGDisplayCopyDisplayMode(monitor->ns.displayID);
     if (!native)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR, "Cocoa: Failed to query display mode");
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR, "Cocoa: Failed to query display mode");
         return GLFW_FALSE;
     }
 
@@ -526,7 +526,7 @@ GLFWbool _glfwGetVideoModeCocoa(_GLFWmonitor* monitor, GLFWvidmode *mode)
     } // autoreleasepool
 }
 
-GLFWbool _glfwGetGammaRampCocoa(_GLFWmonitor* monitor, GLFWgammaramp* ramp)
+GLFWbool _glfwGetGammaRampCocoa(_sc_monitor* monitor, GLFWgammaramp* ramp)
 {
     @autoreleasepool {
 
@@ -555,7 +555,7 @@ GLFWbool _glfwGetGammaRampCocoa(_GLFWmonitor* monitor, GLFWgammaramp* ramp)
     } // autoreleasepool
 }
 
-void _glfwSetGammaRampCocoa(_GLFWmonitor* monitor, const GLFWgammaramp* ramp)
+void _glfwSetGammaRampCocoa(_sc_monitor* monitor, const GLFWgammaramp* ramp)
 {
     @autoreleasepool {
 
@@ -584,17 +584,17 @@ void _glfwSetGammaRampCocoa(_GLFWmonitor* monitor, const GLFWgammaramp* ramp)
 //////                        GLFW native API                       //////
 //////////////////////////////////////////////////////////////////////////
 
-GLFWAPI CGDirectDisplayID glfwGetCocoaMonitor(GLFWmonitor* handle)
+GLFWAPI CGDirectDisplayID glfwGetCocoaMonitor(sc_monitor* handle)
 {
     _GLFW_REQUIRE_INIT_OR_RETURN(kCGNullDirectDisplay);
 
-    if (_glfw.platform.platformID != GLFW_PLATFORM_COCOA)
+    if (_glfw.platform.platformID != SC_PLATFORM_COCOA)
     {
-        _glfwInputError(GLFW_PLATFORM_UNAVAILABLE, "Cocoa: Platform not initialized");
+        _glfwInputError(SC_WIN_ERR_PLATFORM_UNAVAILABLE, "Cocoa: Platform not initialized");
         return kCGNullDirectDisplay;
     }
 
-    _GLFWmonitor* monitor = (_GLFWmonitor*) handle;
+    _sc_monitor* monitor = (_sc_monitor*) handle;
     assert(monitor != NULL);
 
     return monitor->ns.displayID;

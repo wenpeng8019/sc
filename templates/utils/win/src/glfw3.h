@@ -109,27 +109,27 @@ extern "C" {
  *
  *  @ingroup input
  */
-#define GLFW_RELEASE                0
+#define SC_RELEASE                0
 /*! @brief The key or mouse button was pressed.
  *
  *  The key or mouse button was pressed.
  *
  *  @ingroup input
  */
-#define GLFW_PRESS                  1
+#define SC_PRESS                  1
 /*! @brief The key was held down until it repeated.
  *
  *  The key was held down until it repeated.
  *
  *  @ingroup input
  */
-#define GLFW_REPEAT                 2
+#define SC_REPEAT                 2
 /*! @} */
 
 
 /*! @ingroup input
  */
-#define GLFW_KEY_UNKNOWN            -1
+#define SC_KEY_UNKNOWN            -1
 
 /*! @} */
 
@@ -158,130 +158,130 @@ extern "C" {
  */
 
 /* Printable keys */
-#define GLFW_KEY_SPACE              32
-#define GLFW_KEY_APOSTROPHE         39  /* ' */
-#define GLFW_KEY_COMMA              44  /* , */
-#define GLFW_KEY_MINUS              45  /* - */
-#define GLFW_KEY_PERIOD             46  /* . */
-#define GLFW_KEY_SLASH              47  /* / */
-#define GLFW_KEY_0                  48
-#define GLFW_KEY_1                  49
-#define GLFW_KEY_2                  50
-#define GLFW_KEY_3                  51
-#define GLFW_KEY_4                  52
-#define GLFW_KEY_5                  53
-#define GLFW_KEY_6                  54
-#define GLFW_KEY_7                  55
-#define GLFW_KEY_8                  56
-#define GLFW_KEY_9                  57
-#define GLFW_KEY_SEMICOLON          59  /* ; */
-#define GLFW_KEY_EQUAL              61  /* = */
-#define GLFW_KEY_A                  65
-#define GLFW_KEY_B                  66
-#define GLFW_KEY_C                  67
-#define GLFW_KEY_D                  68
-#define GLFW_KEY_E                  69
-#define GLFW_KEY_F                  70
-#define GLFW_KEY_G                  71
-#define GLFW_KEY_H                  72
-#define GLFW_KEY_I                  73
-#define GLFW_KEY_J                  74
-#define GLFW_KEY_K                  75
-#define GLFW_KEY_L                  76
-#define GLFW_KEY_M                  77
-#define GLFW_KEY_N                  78
-#define GLFW_KEY_O                  79
-#define GLFW_KEY_P                  80
-#define GLFW_KEY_Q                  81
-#define GLFW_KEY_R                  82
-#define GLFW_KEY_S                  83
-#define GLFW_KEY_T                  84
-#define GLFW_KEY_U                  85
-#define GLFW_KEY_V                  86
-#define GLFW_KEY_W                  87
-#define GLFW_KEY_X                  88
-#define GLFW_KEY_Y                  89
-#define GLFW_KEY_Z                  90
-#define GLFW_KEY_LEFT_BRACKET       91  /* [ */
-#define GLFW_KEY_BACKSLASH          92  /* \ */
-#define GLFW_KEY_RIGHT_BRACKET      93  /* ] */
-#define GLFW_KEY_GRAVE_ACCENT       96  /* ` */
-#define GLFW_KEY_WORLD_1            161 /* non-US #1 */
-#define GLFW_KEY_WORLD_2            162 /* non-US #2 */
+#define SC_KEY_SPACE              32
+#define SC_KEY_APOSTROPHE         39  /* ' */
+#define SC_KEY_COMMA              44  /* , */
+#define SC_KEY_MINUS              45  /* - */
+#define SC_KEY_PERIOD             46  /* . */
+#define SC_KEY_SLASH              47  /* / */
+#define SC_KEY_0                  48
+#define SC_KEY_1                  49
+#define SC_KEY_2                  50
+#define SC_KEY_3                  51
+#define SC_KEY_4                  52
+#define SC_KEY_5                  53
+#define SC_KEY_6                  54
+#define SC_KEY_7                  55
+#define SC_KEY_8                  56
+#define SC_KEY_9                  57
+#define SC_KEY_SEMICOLON          59  /* ; */
+#define SC_KEY_EQUAL              61  /* = */
+#define SC_KEY_A                  65
+#define SC_KEY_B                  66
+#define SC_KEY_C                  67
+#define SC_KEY_D                  68
+#define SC_KEY_E                  69
+#define SC_KEY_F                  70
+#define SC_KEY_G                  71
+#define SC_KEY_H                  72
+#define SC_KEY_I                  73
+#define SC_KEY_J                  74
+#define SC_KEY_K                  75
+#define SC_KEY_L                  76
+#define SC_KEY_M                  77
+#define SC_KEY_N                  78
+#define SC_KEY_O                  79
+#define SC_KEY_P                  80
+#define SC_KEY_Q                  81
+#define SC_KEY_R                  82
+#define SC_KEY_S                  83
+#define SC_KEY_T                  84
+#define SC_KEY_U                  85
+#define SC_KEY_V                  86
+#define SC_KEY_W                  87
+#define SC_KEY_X                  88
+#define SC_KEY_Y                  89
+#define SC_KEY_Z                  90
+#define SC_KEY_LEFT_BRACKET       91  /* [ */
+#define SC_KEY_BACKSLASH          92  /* \ */
+#define SC_KEY_RIGHT_BRACKET      93  /* ] */
+#define SC_KEY_GRAVE_ACCENT       96  /* ` */
+#define SC_KEY_WORLD_1            161 /* non-US #1 */
+#define SC_KEY_WORLD_2            162 /* non-US #2 */
 
 /* Function keys */
-#define GLFW_KEY_ESCAPE             256
-#define GLFW_KEY_ENTER              257
-#define GLFW_KEY_TAB                258
-#define GLFW_KEY_BACKSPACE          259
-#define GLFW_KEY_INSERT             260
-#define GLFW_KEY_DELETE             261
-#define GLFW_KEY_RIGHT              262
-#define GLFW_KEY_LEFT               263
-#define GLFW_KEY_DOWN               264
-#define GLFW_KEY_UP                 265
-#define GLFW_KEY_PAGE_UP            266
-#define GLFW_KEY_PAGE_DOWN          267
-#define GLFW_KEY_HOME               268
-#define GLFW_KEY_END                269
-#define GLFW_KEY_CAPS_LOCK          280
-#define GLFW_KEY_SCROLL_LOCK        281
-#define GLFW_KEY_NUM_LOCK           282
-#define GLFW_KEY_PRINT_SCREEN       283
-#define GLFW_KEY_PAUSE              284
-#define GLFW_KEY_F1                 290
-#define GLFW_KEY_F2                 291
-#define GLFW_KEY_F3                 292
-#define GLFW_KEY_F4                 293
-#define GLFW_KEY_F5                 294
-#define GLFW_KEY_F6                 295
-#define GLFW_KEY_F7                 296
-#define GLFW_KEY_F8                 297
-#define GLFW_KEY_F9                 298
-#define GLFW_KEY_F10                299
-#define GLFW_KEY_F11                300
-#define GLFW_KEY_F12                301
-#define GLFW_KEY_F13                302
-#define GLFW_KEY_F14                303
-#define GLFW_KEY_F15                304
-#define GLFW_KEY_F16                305
-#define GLFW_KEY_F17                306
-#define GLFW_KEY_F18                307
-#define GLFW_KEY_F19                308
-#define GLFW_KEY_F20                309
-#define GLFW_KEY_F21                310
-#define GLFW_KEY_F22                311
-#define GLFW_KEY_F23                312
-#define GLFW_KEY_F24                313
-#define GLFW_KEY_F25                314
-#define GLFW_KEY_KP_0               320
-#define GLFW_KEY_KP_1               321
-#define GLFW_KEY_KP_2               322
-#define GLFW_KEY_KP_3               323
-#define GLFW_KEY_KP_4               324
-#define GLFW_KEY_KP_5               325
-#define GLFW_KEY_KP_6               326
-#define GLFW_KEY_KP_7               327
-#define GLFW_KEY_KP_8               328
-#define GLFW_KEY_KP_9               329
-#define GLFW_KEY_KP_DECIMAL         330
-#define GLFW_KEY_KP_DIVIDE          331
-#define GLFW_KEY_KP_MULTIPLY        332
-#define GLFW_KEY_KP_SUBTRACT        333
-#define GLFW_KEY_KP_ADD             334
-#define GLFW_KEY_KP_ENTER           335
-#define GLFW_KEY_KP_EQUAL           336
-#define GLFW_KEY_LEFT_SHIFT         340
-#define GLFW_KEY_LEFT_CONTROL       341
-#define GLFW_KEY_LEFT_ALT           342
-#define GLFW_KEY_LEFT_SUPER         343
-#define GLFW_KEY_RIGHT_SHIFT        344
-#define GLFW_KEY_RIGHT_CONTROL      345
-#define GLFW_KEY_RIGHT_ALT          346
-#define GLFW_KEY_RIGHT_SUPER        347
-#define GLFW_KEY_MENU               348
+#define SC_KEY_ESCAPE             256
+#define SC_KEY_ENTER              257
+#define SC_KEY_TAB                258
+#define SC_KEY_BACKSPACE          259
+#define SC_KEY_INSERT             260
+#define SC_KEY_DELETE             261
+#define SC_KEY_RIGHT              262
+#define SC_KEY_LEFT               263
+#define SC_KEY_DOWN               264
+#define SC_KEY_UP                 265
+#define SC_KEY_PAGE_UP            266
+#define SC_KEY_PAGE_DOWN          267
+#define SC_KEY_HOME               268
+#define SC_KEY_END                269
+#define SC_KEY_CAPS_LOCK          280
+#define SC_KEY_SCROLL_LOCK        281
+#define SC_KEY_NUM_LOCK           282
+#define SC_KEY_PRINT_SCREEN       283
+#define SC_KEY_PAUSE              284
+#define SC_KEY_F1                 290
+#define SC_KEY_F2                 291
+#define SC_KEY_F3                 292
+#define SC_KEY_F4                 293
+#define SC_KEY_F5                 294
+#define SC_KEY_F6                 295
+#define SC_KEY_F7                 296
+#define SC_KEY_F8                 297
+#define SC_KEY_F9                 298
+#define SC_KEY_F10                299
+#define SC_KEY_F11                300
+#define SC_KEY_F12                301
+#define SC_KEY_F13                302
+#define SC_KEY_F14                303
+#define SC_KEY_F15                304
+#define SC_KEY_F16                305
+#define SC_KEY_F17                306
+#define SC_KEY_F18                307
+#define SC_KEY_F19                308
+#define SC_KEY_F20                309
+#define SC_KEY_F21                310
+#define SC_KEY_F22                311
+#define SC_KEY_F23                312
+#define SC_KEY_F24                313
+#define SC_KEY_F25                314
+#define SC_KEY_KP_0               320
+#define SC_KEY_KP_1               321
+#define SC_KEY_KP_2               322
+#define SC_KEY_KP_3               323
+#define SC_KEY_KP_4               324
+#define SC_KEY_KP_5               325
+#define SC_KEY_KP_6               326
+#define SC_KEY_KP_7               327
+#define SC_KEY_KP_8               328
+#define SC_KEY_KP_9               329
+#define SC_KEY_KP_DECIMAL         330
+#define SC_KEY_KP_DIVIDE          331
+#define SC_KEY_KP_MULTIPLY        332
+#define SC_KEY_KP_SUBTRACT        333
+#define SC_KEY_KP_ADD             334
+#define SC_KEY_KP_ENTER           335
+#define SC_KEY_KP_EQUAL           336
+#define SC_KEY_LEFT_SHIFT         340
+#define SC_KEY_LEFT_CONTROL       341
+#define SC_KEY_LEFT_ALT           342
+#define SC_KEY_LEFT_SUPER         343
+#define SC_KEY_RIGHT_SHIFT        344
+#define SC_KEY_RIGHT_CONTROL      345
+#define SC_KEY_RIGHT_ALT          346
+#define SC_KEY_RIGHT_SUPER        347
+#define SC_KEY_MENU               348
 
-#define GLFW_KEY_LAST               GLFW_KEY_MENU
+#define SC_KEY_LAST               SC_KEY_MENU
 
 /*! @} */
 
@@ -297,34 +297,34 @@ extern "C" {
  *
  *  If this bit is set one or more Shift keys were held down.
  */
-#define GLFW_MOD_SHIFT           0x0001
+#define SC_MOD_SHIFT           0x0001
 /*! @brief If this bit is set one or more Control keys were held down.
  *
  *  If this bit is set one or more Control keys were held down.
  */
-#define GLFW_MOD_CONTROL         0x0002
+#define SC_MOD_CONTROL         0x0002
 /*! @brief If this bit is set one or more Alt keys were held down.
  *
  *  If this bit is set one or more Alt keys were held down.
  */
-#define GLFW_MOD_ALT             0x0004
+#define SC_MOD_ALT             0x0004
 /*! @brief If this bit is set one or more Super keys were held down.
  *
  *  If this bit is set one or more Super keys were held down.
  */
-#define GLFW_MOD_SUPER           0x0008
+#define SC_MOD_SUPER           0x0008
 /*! @brief If this bit is set the Caps Lock key is enabled.
  *
  *  If this bit is set the Caps Lock key is enabled and the @ref
- *  GLFW_LOCK_KEY_MODS input mode is set.
+ *  SC_LOCK_KEY_MODS input mode is set.
  */
-#define GLFW_MOD_CAPS_LOCK       0x0010
+#define SC_MOD_CAPS_LOCK       0x0010
 /*! @brief If this bit is set the Num Lock key is enabled.
  *
  *  If this bit is set the Num Lock key is enabled and the @ref
- *  GLFW_LOCK_KEY_MODS input mode is set.
+ *  SC_LOCK_KEY_MODS input mode is set.
  */
-#define GLFW_MOD_NUM_LOCK        0x0020
+#define SC_MOD_NUM_LOCK        0x0020
 
 /*! @} */
 
@@ -335,20 +335,21 @@ extern "C" {
  *
  *  @ingroup input
  *  @{ */
-#define GLFW_MOUSE_BUTTON_1         0
-#define GLFW_MOUSE_BUTTON_2         1
-#define GLFW_MOUSE_BUTTON_3         2
-#define GLFW_MOUSE_BUTTON_4         3
-#define GLFW_MOUSE_BUTTON_5         4
-#define GLFW_MOUSE_BUTTON_6         5
-#define GLFW_MOUSE_BUTTON_7         6
-#define GLFW_MOUSE_BUTTON_8         7
-#define GLFW_MOUSE_BUTTON_LAST      GLFW_MOUSE_BUTTON_8
-#define GLFW_MOUSE_BUTTON_LEFT      GLFW_MOUSE_BUTTON_1
-#define GLFW_MOUSE_BUTTON_RIGHT     GLFW_MOUSE_BUTTON_2
-#define GLFW_MOUSE_BUTTON_MIDDLE    GLFW_MOUSE_BUTTON_3
+#define SC_MOUSE_BUTTON_1         0
+#define SC_MOUSE_BUTTON_2         1
+#define SC_MOUSE_BUTTON_3         2
+#define SC_MOUSE_BUTTON_4         3
+#define SC_MOUSE_BUTTON_5         4
+#define SC_MOUSE_BUTTON_6         5
+#define SC_MOUSE_BUTTON_7         6
+#define SC_MOUSE_BUTTON_8         7
+#define SC_MOUSE_BUTTON_LAST      SC_MOUSE_BUTTON_8
+#define SC_MOUSE_BUTTON_LEFT      SC_MOUSE_BUTTON_1
+#define SC_MOUSE_BUTTON_RIGHT     SC_MOUSE_BUTTON_2
+#define SC_MOUSE_BUTTON_MIDDLE    SC_MOUSE_BUTTON_3
 /*! @} */
 
+//-------------------------------------------------------------------------
 
 /*! @defgroup errors 错误码
  *  @brief 错误码.
@@ -363,7 +364,7 @@ extern "C" {
  *
  *  @analysis Yay.
  */
-#define GLFW_NO_ERROR               0
+#define SC_WIN_ERR_NONE               0
 /*! @brief GLFW has not been initialized.
  *
  *  This occurs if a GLFW function was called that must not be called unless the
@@ -372,7 +373,7 @@ extern "C" {
  *  @analysis Application programmer error.  Initialize GLFW before calling any
  *  function that requires initialization.
  */
-#define GLFW_NOT_INITIALIZED        0x00010001
+#define SC_WIN_ERR_NOT_INITIALIZED        0x00010001
 /*! @brief No context is current for this thread.
  *
  *  This occurs if a GLFW function was called that needs and operates on the
@@ -382,7 +383,7 @@ extern "C" {
  *  @analysis Application programmer error.  Ensure a context is current before
  *  calling functions that require a current context.
  */
-#define GLFW_NO_CURRENT_CONTEXT     0x00010002
+#define SC_WIN_ERR_NO_CURRENT_CONTEXT     0x00010002
 /*! @brief One of the arguments to the function was an invalid enum value.
  *
  *  One of the arguments to the function was an invalid enum value, for example
@@ -390,18 +391,18 @@ extern "C" {
  *
  *  @analysis Application programmer error.  Fix the offending call.
  */
-#define GLFW_INVALID_ENUM           0x00010003
+#define SC_WIN_ERR_INVALID_ENUM           0x00010003
 /*! @brief One of the arguments to the function was an invalid value.
  *
  *  One of the arguments to the function was an invalid value, for example
  *  requesting a non-existent OpenGL or OpenGL ES version like 2.7.
  *
  *  Requesting a valid but unavailable OpenGL or OpenGL ES version will instead
- *  result in a @ref GLFW_VERSION_UNAVAILABLE error.
+ *  result in a @ref SC_WIN_ERR_VERSION_UNAVAILABLE error.
  *
  *  @analysis Application programmer error.  Fix the offending call.
  */
-#define GLFW_INVALID_VALUE          0x00010004
+#define SC_WIN_ERR_INVALID_VALUE          0x00010004
 /*! @brief A memory allocation failed.
  *
  *  A memory allocation failed.
@@ -409,7 +410,7 @@ extern "C" {
  *  @analysis A bug in GLFW or the underlying operating system.  Report the bug
  *  to our [issue tracker](https://github.com/glfw/glfw/issues).
  */
-#define GLFW_OUT_OF_MEMORY          0x00010005
+#define SC_WIN_ERR_OUT_OF_MEMORY          0x00010005
 /*! @brief GLFW could not find support for the requested API on the system.
  *
  *  GLFW could not find support for the requested API on the system.
@@ -425,7 +426,7 @@ extern "C" {
  *  EGL, OpenGL and OpenGL ES libraries do not interface with the Nvidia binary
  *  driver.  Older graphics drivers do not support Vulkan.
  */
-#define GLFW_API_UNAVAILABLE        0x00010006
+#define SC_WIN_ERR_API_UNAVAILABLE        0x00010006
 /*! @brief The requested OpenGL or OpenGL ES version is not available.
  *
  *  The requested OpenGL or OpenGL ES version (including any requested context
@@ -439,10 +440,10 @@ extern "C" {
  *  @par
  *  Future invalid OpenGL and OpenGL ES versions, for example OpenGL 4.8 if 5.0
  *  comes out before the 4.x series gets that far, also fail with this error and
- *  not @ref GLFW_INVALID_VALUE, because GLFW cannot know what future versions
+ *  not @ref SC_WIN_ERR_INVALID_VALUE, because GLFW cannot know what future versions
  *  will exist.
  */
-#define GLFW_VERSION_UNAVAILABLE    0x00010007
+#define SC_WIN_ERR_VERSION_UNAVAILABLE    0x00010007
 /*! @brief A platform-specific error occurred that does not match any of the
  *  more specific categories.
  *
@@ -453,7 +454,7 @@ extern "C" {
  *  system or its drivers, or a lack of required resources.  Report the issue to
  *  our [issue tracker](https://github.com/glfw/glfw/issues).
  */
-#define GLFW_PLATFORM_ERROR         0x00010008
+#define SC_WIN_ERR_PLATFORM_ERROR         0x00010008
 /*! @brief The requested format is not supported or available.
  *
  *  If emitted during window creation, the requested pixel format is not
@@ -472,7 +473,7 @@ extern "C" {
  *  If emitted when querying the clipboard, ignore the error or report it to
  *  the user, as appropriate.
  */
-#define GLFW_FORMAT_UNAVAILABLE     0x00010009
+#define SC_WIN_ERR_FORMAT_UNAVAILABLE     0x00010009
 /*! @brief The specified window does not have an OpenGL or OpenGL ES context.
  *
  *  A window that does not have an OpenGL or OpenGL ES context was passed to
@@ -480,7 +481,7 @@ extern "C" {
  *
  *  @analysis Application programmer error.  Fix the offending call.
  */
-#define GLFW_NO_WINDOW_CONTEXT      0x0001000A
+#define SC_WIN_ERR_NO_WINDOW_CONTEXT      0x0001000A
 /*! @brief The specified cursor shape is not available.
  *
  *  The specified standard cursor shape is not available, either because the
@@ -491,7 +492,7 @@ extern "C" {
  *  [standard cursor shape](@ref shapes) or create a
  *  [custom cursor](@ref cursor_custom).
  */
-#define GLFW_CURSOR_UNAVAILABLE     0x0001000B
+#define SC_WIN_ERR_CURSOR_UNAVAILABLE     0x0001000B
 /*! @brief The requested feature is not provided by the platform.
  *
  *  The requested feature is not provided by the platform, so GLFW is unable to
@@ -505,7 +506,7 @@ extern "C" {
  *  A function call that emits this error has no effect other than the error and
  *  updating any existing out parameters.
  */
-#define GLFW_FEATURE_UNAVAILABLE    0x0001000C
+#define SC_WIN_ERR_FEATURE_UNAVAILABLE    0x0001000C
 /*! @brief The requested feature is not implemented for the platform.
  *
  *  The requested feature has not yet been implemented in GLFW for this platform.
@@ -518,11 +519,11 @@ extern "C" {
  *  A function call that emits this error has no effect other than the error and
  *  updating any existing out parameters.
  */
-#define GLFW_FEATURE_UNIMPLEMENTED  0x0001000D
+#define SC_WIN_ERR_FEATURE_UNIMPLEMENTED  0x0001000D
 /*! @brief Platform unavailable or no matching platform was found.
  *
  *  If emitted during initialization, no matching platform was found.  If the @ref
- *  GLFW_PLATFORM init hint was set to `GLFW_ANY_PLATFORM`, GLFW could not detect any of
+ *  SC_PLATFORM init hint was set to `SC_PLATFORM_ANY`, GLFW could not detect any of
  *  the platforms supported by this library binary, except for the Null platform.  If the
  *  init hint was set to a specific platform, it is either not supported by this library
  *  binary or GLFW was not able to detect it.
@@ -537,11 +538,13 @@ extern "C" {
  *  detected.
  *
  *  Failure to detect a specific platform may have the same cause as above or be because
- *  support for that platform was not compiled in.  Call @ref glfwPlatformSupported to
+ *  support for that platform was not compiled in.  Call @ref sc_win_platform_supported to
  *  check whether a specific platform is supported by a library binary.
  */
-#define GLFW_PLATFORM_UNAVAILABLE   0x0001000E
+#define SC_WIN_ERR_PLATFORM_UNAVAILABLE   0x0001000E
 /*! @} */
+
+//-------------------------------------------------------------------------
 
 /*! @addtogroup window
  *  @{ */
@@ -550,137 +553,135 @@ extern "C" {
  *  Input focus [window hint](@ref GLFW_FOCUSED_hint) or
  *  [window attribute](@ref GLFW_FOCUSED_attrib).
  */
-#define GLFW_FOCUSED                0x00020001
+#define SC_WIN_FOCUSED                0x00020001
 /*! @brief Window iconification window attribute
  *
  *  Window iconification [window attribute](@ref GLFW_ICONIFIED_attrib).
  */
-#define GLFW_ICONIFIED              0x00020002
+#define SC_WIN_ICONIFIED              0x00020002
 /*! @brief Window resize-ability window hint and attribute
  *
  *  Window resize-ability [window hint](@ref GLFW_RESIZABLE_hint) and
  *  [window attribute](@ref GLFW_RESIZABLE_attrib).
  */
-#define GLFW_RESIZABLE              0x00020003
+#define SC_WIN_RESIZABLE              0x00020003
 /*! @brief Window visibility window hint and attribute
  *
  *  Window visibility [window hint](@ref GLFW_VISIBLE_hint) and
  *  [window attribute](@ref GLFW_VISIBLE_attrib).
  */
-#define GLFW_VISIBLE                0x00020004
+#define SC_WIN_VISIBLE                0x00020004
 /*! @brief Window decoration window hint and attribute
  *
  *  Window decoration [window hint](@ref GLFW_DECORATED_hint) and
  *  [window attribute](@ref GLFW_DECORATED_attrib).
  */
-#define GLFW_DECORATED              0x00020005
+#define SC_WIN_DECORATED              0x00020005
 /*! @brief Window auto-iconification window hint and attribute
  *
  *  Window auto-iconification [window hint](@ref GLFW_AUTO_ICONIFY_hint) and
  *  [window attribute](@ref GLFW_AUTO_ICONIFY_attrib).
  */
-#define GLFW_AUTO_ICONIFY           0x00020006
+#define SC_WIN_AUTO_ICONIFY           0x00020006
 /*! @brief Window decoration window hint and attribute
  *
  *  Window decoration [window hint](@ref GLFW_FLOATING_hint) and
  *  [window attribute](@ref GLFW_FLOATING_attrib).
  */
-#define GLFW_FLOATING               0x00020007
+#define SC_WIN_FLOATING               0x00020007
 /*! @brief Window maximization window hint and attribute
  *
  *  Window maximization [window hint](@ref GLFW_MAXIMIZED_hint) and
  *  [window attribute](@ref GLFW_MAXIMIZED_attrib).
  */
-#define GLFW_MAXIMIZED              0x00020008
+#define SC_WIN_MAXIMIZED              0x00020008
 /*! @brief Cursor centering window hint
  *
  *  Cursor centering [window hint](@ref GLFW_CENTER_CURSOR_hint).
  */
-#define GLFW_CENTER_CURSOR          0x00020009
+#define SC_WIN_CENTER_CURSOR          0x00020009
 /*! @brief Mouse cursor hover window attribute.
  *
  *  Mouse cursor hover [window attribute](@ref GLFW_HOVERED_attrib).
  */
-#define GLFW_HOVERED                0x0002000B
+#define SC_WIN_HOVERED                0x0002000B
 /*! @brief Input focus on calling show window hint and attribute
  *
  *  Input focus [window hint](@ref GLFW_FOCUS_ON_SHOW_hint) or
  *  [window attribute](@ref GLFW_FOCUS_ON_SHOW_attrib).
  */
-#define GLFW_FOCUS_ON_SHOW          0x0002000C
+#define SC_WIN_FOCUS_ON_SHOW          0x0002000C
 
 /*! @brief Mouse input transparency window hint and attribute
  *
- *  Mouse input transparency [window hint](@ref GLFW_MOUSE_PASSTHROUGH_hint) or
- *  [window attribute](@ref GLFW_MOUSE_PASSTHROUGH_attrib).
+ *  Mouse input transparency [window hint](@ref SC_MOUSE_PASSTHROUGH_hint) or
+ *  [window attribute](@ref SC_MOUSE_PASSTHROUGH_attrib).
  */
-#define GLFW_MOUSE_PASSTHROUGH      0x0002000D
+#define SC_WIN_MOUSE_PASSTHROUGH      0x0002000D
 
 /*! @brief Initial position x-coordinate window hint.
  *
- *  Initial position x-coordinate [window hint](@ref GLFW_POSITION_X).
+ *  Initial position x-coordinate [window hint](@ref SC_WIN_POSITION_X).
  */
-#define GLFW_POSITION_X             0x0002000E
+#define SC_WIN_POSITION_X             0x0002000E
 
 /*! @brief Initial position y-coordinate window hint.
  *
- *  Initial position y-coordinate [window hint](@ref GLFW_POSITION_Y).
+ *  Initial position y-coordinate [window hint](@ref SC_WIN_POSITION_Y).
  */
-#define GLFW_POSITION_Y             0x0002000F
+#define SC_WIN_POSITION_Y             0x0002000F
 
+//-------------------------------------------------------------------------
 
 /*! @brief Window content area scaling window
- *  [window hint](@ref GLFW_SCALE_TO_MONITOR).
+ *  [window hint](@ref SC_SCALE_TO_MONITOR).
  */
-#define GLFW_SCALE_TO_MONITOR       0x0002200C
+#define SC_SCALE_TO_MONITOR       0x0002200C
 /*! @brief macOS specific
  *  [window hint](@ref GLFW_COCOA_FRAME_NAME_hint).
  */
-#define GLFW_COCOA_FRAME_NAME         0x00023002
+#define SC_COCOA_FRAME_NAME         0x00023002
 /*! @brief X11 specific
  *  [window hint](@ref GLFW_X11_CLASS_NAME_hint).
  */
-#define GLFW_X11_CLASS_NAME         0x00024001
+#define SC_X11_CLASS_NAME         0x00024001
 /*! @brief X11 specific
  *  [window hint](@ref GLFW_X11_CLASS_NAME_hint).
  */
-#define GLFW_X11_INSTANCE_NAME      0x00024002
+#define SC_X11_INSTANCE_NAME      0x00024002
 #define GLFW_WIN32_KEYBOARD_MENU    0x00025001
 /*! @brief Win32 specific [window hint](@ref GLFW_WIN32_SHOWDEFAULT_hint).
  */
-#define GLFW_WIN32_SHOWDEFAULT      0x00025002
+#define SC_WIN32_SHOWDEFAULT      0x00025002
 /*! @brief Wayland specific
  *  [window hint](@ref GLFW_WAYLAND_APP_ID_hint).
  *  
  *  Allows specification of the Wayland app_id.
  */
-#define GLFW_WAYLAND_APP_ID         0x00026001
+#define SC_WAYLAND_APP_ID         0x00026001
 /*! @} */
 
 
+//-------------------------------------------------------------------------
 
+#define SC_CURSOR                  0x00033001
+#define SC_STICKY_KEYS             0x00033002
+#define SC_STICKY_MOUSE_BUTTONS    0x00033003
+#define SC_LOCK_KEY_MODS           0x00033004
+#define SC_RAW_MOUSE_MOTION        0x00033005
+#define SC_UNLIMITED_MOUSE_BUTTONS 0x00033006
 
-#define GLFW_CURSOR                  0x00033001
-#define GLFW_STICKY_KEYS             0x00033002
-#define GLFW_STICKY_MOUSE_BUTTONS    0x00033003
-#define GLFW_LOCK_KEY_MODS           0x00033004
-#define GLFW_RAW_MOUSE_MOTION        0x00033005
-#define GLFW_UNLIMITED_MOUSE_BUTTONS 0x00033006
+#define SC_CURSOR_NORMAL          0x00034001
+#define SC_CURSOR_HIDDEN          0x00034002
+#define SC_CURSOR_DISABLED        0x00034003
+#define SC_CURSOR_CAPTURED        0x00034004
 
-#define GLFW_CURSOR_NORMAL          0x00034001
-#define GLFW_CURSOR_HIDDEN          0x00034002
-#define GLFW_CURSOR_DISABLED        0x00034003
-#define GLFW_CURSOR_CAPTURED        0x00034004
+#define SC_WAYLAND_PREFER_LIBDECOR    0x00038001
+#define SC_WAYLAND_DISABLE_LIBDECOR   0x00038002
 
-#define GLFW_ANY_RELEASE_BEHAVIOR            0
-#define GLFW_RELEASE_BEHAVIOR_FLUSH 0x00035001
-#define GLFW_RELEASE_BEHAVIOR_NONE  0x00035002
+#define SC_ANY_POSITION           0x80000000
 
-
-#define GLFW_WAYLAND_PREFER_LIBDECOR    0x00038001
-#define GLFW_WAYLAND_DISABLE_LIBDECOR   0x00038002
-
-#define GLFW_ANY_POSITION           0x80000000
+//-------------------------------------------------------------------------
 
 /*! @defgroup shapes 标准光标形状
  *  @brief 标准系统光标形状。
@@ -695,41 +696,41 @@ extern "C" {
  *
  *  The regular arrow cursor shape.
  */
-#define GLFW_ARROW_CURSOR           0x00036001
+#define SC_ARROW_CURSOR           0x00036001
 /*! @brief The text input I-beam cursor shape.
  *
  *  The text input I-beam cursor shape.
  */
-#define GLFW_IBEAM_CURSOR           0x00036002
+#define SC_IBEAM_CURSOR           0x00036002
 /*! @brief The crosshair cursor shape.
  *
  *  The crosshair cursor shape.
  */
-#define GLFW_CROSSHAIR_CURSOR       0x00036003
+#define SC_CROSSHAIR_CURSOR       0x00036003
 /*! @brief The pointing hand cursor shape.
  *
  *  The pointing hand cursor shape.
  */
-#define GLFW_POINTING_HAND_CURSOR   0x00036004
+#define SC_POINTING_HAND_CURSOR   0x00036004
 /*! @brief The horizontal resize/move arrow shape.
  *
  *  The horizontal resize/move arrow shape.  This is usually a horizontal
  *  double-headed arrow.
  */
-#define GLFW_RESIZE_EW_CURSOR       0x00036005
+#define SC_RESIZE_EW_CURSOR       0x00036005
 /*! @brief The vertical resize/move arrow shape.
  *
  *  The vertical resize/move shape.  This is usually a vertical double-headed
  *  arrow.
  */
-#define GLFW_RESIZE_NS_CURSOR       0x00036006
+#define SC_RESIZE_NS_CURSOR       0x00036006
 /*! @brief The top-left to bottom-right diagonal resize/move arrow shape.
  *
  *  The top-left to bottom-right diagonal resize/move shape.  This is usually
  *  a diagonal double-headed arrow.
  *
  *  @note __macOS:__ This shape is provided by a private system API and may fail
- *  with @ref GLFW_CURSOR_UNAVAILABLE in the future.
+ *  with @ref SC_WIN_ERR_CURSOR_UNAVAILABLE in the future.
  *
  *  @note __Wayland:__ This shape is provided by a newer standard not supported by
  *  all cursor themes.
@@ -737,14 +738,14 @@ extern "C" {
  *  @note __X11:__ This shape is provided by a newer standard not supported by all
  *  cursor themes.
  */
-#define GLFW_RESIZE_NWSE_CURSOR     0x00036007
+#define SC_RESIZE_NWSE_CURSOR     0x00036007
 /*! @brief The top-right to bottom-left diagonal resize/move arrow shape.
  *
  *  The top-right to bottom-left diagonal resize/move shape.  This is usually
  *  a diagonal double-headed arrow.
  *
  *  @note __macOS:__ This shape is provided by a private system API and may fail
- *  with @ref GLFW_CURSOR_UNAVAILABLE in the future.
+ *  with @ref SC_WIN_ERR_CURSOR_UNAVAILABLE in the future.
  *
  *  @note __Wayland:__ This shape is provided by a newer standard not supported by
  *  all cursor themes.
@@ -752,13 +753,13 @@ extern "C" {
  *  @note __X11:__ This shape is provided by a newer standard not supported by all
  *  cursor themes.
  */
-#define GLFW_RESIZE_NESW_CURSOR     0x00036008
+#define SC_RESIZE_NESW_CURSOR     0x00036008
 /*! @brief The omni-directional resize/move cursor shape.
  *
  *  The omni-directional resize cursor/move shape.  This is usually either
  *  a combined horizontal and vertical double-headed arrow or a grabbing hand.
  */
-#define GLFW_RESIZE_ALL_CURSOR      0x00036009
+#define SC_RESIZE_ALL_CURSOR      0x00036009
 /*! @brief The operation-not-allowed shape.
  *
  *  The operation-not-allowed shape.  This is usually a circle with a diagonal
@@ -770,26 +771,14 @@ extern "C" {
  *  @note __X11:__ This shape is provided by a newer standard not supported by all
  *  cursor themes.
  */
-#define GLFW_NOT_ALLOWED_CURSOR     0x0003600A
-/*! @brief Legacy name for compatibility.
- *
- *  This is an alias for compatibility with earlier versions.
- */
-#define GLFW_HRESIZE_CURSOR         GLFW_RESIZE_EW_CURSOR
-/*! @brief Legacy name for compatibility.
- *
- *  This is an alias for compatibility with earlier versions.
- */
-#define GLFW_VRESIZE_CURSOR         GLFW_RESIZE_NS_CURSOR
-/*! @brief Legacy name for compatibility.
- *
- *  This is an alias for compatibility with earlier versions.
- */
-#define GLFW_HAND_CURSOR            GLFW_POINTING_HAND_CURSOR
 /*! @} */
 
-#define GLFW_CONNECTED              0x00040001
-#define GLFW_DISCONNECTED           0x00040002
+//-------------------------------------------------------------------------
+
+#define SC_CONNECTED              0x00040001
+#define SC_DISCONNECTED           0x00040002
+
+//-------------------------------------------------------------------------
 
 /*! @addtogroup init
  *  @{ */
@@ -797,122 +786,77 @@ extern "C" {
  *
  *  ANGLE rendering backend [init hint](@ref GLFW_ANGLE_PLATFORM_TYPE_hint).
  */
-#define GLFW_ANGLE_PLATFORM_TYPE    0x00050002
+#define SC_ANGLE_PLATFORM_TYPE    0x00050002
 /*! @brief Platform selection init hint.
  *
- *  Platform selection [init hint](@ref GLFW_PLATFORM).
+ *  Platform selection [init hint](@ref SC_PLATFORM).
  */
-#define GLFW_PLATFORM               0x00050003
+#define SC_PLATFORM               0x00050003
 /*! @brief macOS specific init hint.
  *
  *  macOS specific [init hint](@ref GLFW_COCOA_CHDIR_RESOURCES_hint).
  */
-#define GLFW_COCOA_CHDIR_RESOURCES  0x00051001
+#define SC_COCOA_CHDIR_RESOURCES  0x00051001
 /*! @brief macOS specific init hint.
  *
  *  macOS specific [init hint](@ref GLFW_COCOA_MENUBAR_hint).
  */
-#define GLFW_COCOA_MENUBAR          0x00051002
-/*! @brief X11 specific init hint.
- *
- *  X11 specific [init hint](@ref GLFW_X11_XCB_VULKAN_SURFACE_hint).
- */
-#define GLFW_X11_XCB_VULKAN_SURFACE 0x00052001
+#define SC_COCOA_MENUBAR          0x00051002
 /*! @brief Wayland specific init hint.
  *
  *  Wayland specific [init hint](@ref GLFW_WAYLAND_LIBDECOR_hint).
  */
-#define GLFW_WAYLAND_LIBDECOR       0x00053001
+#define SC_WAYLAND_LIBDECOR       0x00053001
 /*! @} */
 
 /*! @addtogroup init
  *  @{ */
 /*! @brief Hint value that enables automatic platform selection.
  *
- *  Hint value for @ref GLFW_PLATFORM that enables automatic platform selection.
+ *  Hint value for @ref SC_PLATFORM that enables automatic platform selection.
  */
-#define GLFW_ANY_PLATFORM           0x00060000
-#define GLFW_PLATFORM_WIN32         0x00060001
-#define GLFW_PLATFORM_COCOA         0x00060002
-#define GLFW_PLATFORM_WAYLAND       0x00060003
-#define GLFW_PLATFORM_X11           0x00060004
-#define GLFW_PLATFORM_NULL          0x00060005
+#define SC_PLATFORM_ANY           0x00060000
+#define SC_PLATFORM_WIN32         0x00060001
+#define SC_PLATFORM_COCOA         0x00060002
+#define SC_PLATFORM_WAYLAND       0x00060003
+#define SC_PLATFORM_X11           0x00060004
+#define SC_PLATFORM_NULL          0x00060005
 /*! @} */
 
 /* Reserved platform define for external Emscripten ports: 0x00060006
  * See https://github.com/pongasoft/emscripten-glfw
  */
 
-#define GLFW_DONT_CARE              -1
+#define SC_DONT_CARE              -1
 
 
 /*************************************************************************
  * GLFW API types
  *************************************************************************/
 
-/*! @brief Client API function pointer type.
+/*! @brief 错误回调函数指针类型。
  *
- *  Generic function pointer used for returning client API function pointers
- *  without forcing a cast from a regular pointer.
+ *  This is the function pointer type for error callbacks.  An error callback
+ *  function has the following signature:
+ *  @code
+ *  void callback_name(int error_code, const char* description)
+ *  @endcode
  *
- *  @sa @ref context_glext
- *  @sa @ref glfwGetProcAddress
+ *  @param[in] error_code An [error code](@ref errors).  Future releases may add
+ *  more error codes.
+ *  @param[in] description 描述错误的 UTF-8 编码字符串。
  *
- *  @since Added in version 3.0.
+ *  @pointer_lifetime The error description string is valid until the callback
+ *  function returns.
  *
- *  @ingroup context
- */
-typedef void (*GLFWglproc)(void);
-
-/*! @brief Vulkan API function pointer type.
- *
- *  Generic function pointer used for returning Vulkan API function pointers
- *  without forcing a cast from a regular pointer.
- *
- *  @sa @ref vulkan_proc
- *  @sa @ref glfwGetInstanceProcAddress
- *
- *  @since Added in version 3.2.
- *
- *  @ingroup vulkan
- */
-typedef void (*GLFWvkproc)(void);
-
-/*! @brief 不透明监视器对象。
- *
- *  不透明监视器对象。
- *
- *  @see @ref monitor_object
+ *  @sa @ref error_handling
+ *  @sa @ref sc_win_set_error_callback
  *
  *  @since Added in version 3.0.
  *
- *  @ingroup monitor
+ *  @ingroup init
  */
-typedef struct GLFWmonitor GLFWmonitor;
-
-/*! @brief 不透明窗口对象。
- *
- *  不透明窗口对象。
- *
- *  @see @ref window_object
- *
- *  @since Added in version 3.0.
- *
- *  @ingroup window
- */
-typedef struct GLFWwindow GLFWwindow;
-
-/*! @brief 不透明光标对象。
- *
- *  不透明光标对象。
- *
- *  @see @ref cursor_object
- *
- *  @since Added in version 3.1.
- *
- *  @ingroup input
- */
-typedef struct GLFWcursor GLFWcursor;
+typedef void (* sc_error_cb)(int error_code, const char* description);
 
 /*! @brief 内存分配回调函数指针类型。
  *
@@ -926,8 +870,8 @@ typedef struct GLFWcursor GLFWcursor;
  *  or `NULL` if allocation failed.  Note that not all parts of GLFW handle allocation
  *  failures gracefully yet.
  *
- *  This function must support being called during @ref glfwInit but before the library is
- *  flagged as initialized, as well as during @ref glfwTerminate after the library is no
+ *  This function must support being called during @ref sc_win_init but before the library is
+ *  flagged as initialized, as well as during @ref sc_win_terminate after the library is no
  *  longer flagged as initialized.
  *
  *  Any memory allocated via this function will be deallocated via the same allocator
@@ -941,7 +885,7 @@ typedef struct GLFWcursor GLFWcursor;
  *  The size will always be greater than zero.  Allocations of size zero are filtered out
  *  before reaching the custom allocator.
  *
- *  If this function returns `NULL`, GLFW will emit @ref GLFW_OUT_OF_MEMORY.
+ *  If this function returns `NULL`, GLFW will emit @ref SC_WIN_ERR_OUT_OF_MEMORY.
  *
  *  This function must not call any GLFW function.
  *
@@ -959,13 +903,13 @@ typedef struct GLFWcursor GLFWcursor;
  *  functions.
  *
  *  @sa @ref init_allocator
- *  @sa @ref GLFWallocator
+ *  @sa @ref sc_allocator_cb
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-typedef void* (* GLFWallocatefun)(size_t size, void* user);
+typedef void* (* sc_allocate_cb)(size_t size, void* user);
 
 /*! @brief 内存重新分配回调函数指针类型。
  *
@@ -979,8 +923,8 @@ typedef void* (* GLFWallocatefun)(size_t size, void* user);
  *  `NULL` if allocation failed.  Note that not all parts of GLFW handle allocation
  *  failures gracefully yet.
  *
- *  This function must support being called during @ref glfwInit but before the library is
- *  flagged as initialized, as well as during @ref glfwTerminate after the library is no
+ *  This function must support being called during @ref sc_win_init but before the library is
+ *  flagged as initialized, as well as during @ref sc_win_terminate after the library is no
  *  longer flagged as initialized.
  *
  *  Any memory allocated via this function will be deallocated via the same allocator
@@ -996,7 +940,7 @@ typedef void* (* GLFWallocatefun)(size_t size, void* user);
  *  the custom allocator.  Reallocations of `NULL` to a non-zero size are converted into
  *  regular allocations before reaching the custom allocator.
  *
- *  If this function returns `NULL`, GLFW will emit @ref GLFW_OUT_OF_MEMORY.
+ *  If this function returns `NULL`, GLFW will emit @ref SC_WIN_ERR_OUT_OF_MEMORY.
  *
  *  This function must not call any GLFW function.
  *
@@ -1015,13 +959,13 @@ typedef void* (* GLFWallocatefun)(size_t size, void* user);
  *  functions.
  *
  *  @sa @ref init_allocator
- *  @sa @ref GLFWallocator
+ *  @sa @ref sc_allocator_cb
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-typedef void* (* GLFWreallocatefun)(void* block, size_t size, void* user);
+typedef void* (* sc_reallocate_cb)(void* block, size_t size, void* user);
 
 /*! @brief 内存释放回调函数指针类型。
  *
@@ -1034,14 +978,14 @@ typedef void* (* GLFWreallocatefun)(void* block, size_t size, void* user);
  *  This function may deallocate the specified memory block.  This memory block
  *  will have been allocated with the same allocator.
  *
- *  This function must support being called during @ref glfwInit but before the library is
- *  flagged as initialized, as well as during @ref glfwTerminate after the library is no
+ *  This function must support being called during @ref sc_win_init but before the library is
+ *  flagged as initialized, as well as during @ref sc_win_terminate after the library is no
  *  longer flagged as initialized.
  *
  *  The block address will never be `NULL`.  Deallocations of `NULL` are filtered out
  *  before reaching the custom allocator.
  *
- *  If this function returns `NULL`, GLFW will emit @ref GLFW_OUT_OF_MEMORY.
+ *  If this function returns `NULL`, GLFW will emit @ref SC_WIN_ERR_OUT_OF_MEMORY.
  *
  *  This function must not call any GLFW function.
  *
@@ -1057,44 +1001,115 @@ typedef void* (* GLFWreallocatefun)(void* block, size_t size, void* user);
  *  functions.
  *
  *  @sa @ref init_allocator
- *  @sa @ref GLFWallocator
+ *  @sa @ref sc_allocator_cb
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-typedef void (* GLFWdeallocatefun)(void* block, void* user);
+typedef void (* sc_deallocate_cb)(void* block, void* user);
 
-/*! @brief 错误回调函数指针类型。
+/*! @brief 自定义堆内存分配器。
  *
- *  This is the function pointer type for error callbacks.  An error callback
- *  function has the following signature:
- *  @code
- *  void callback_name(int error_code, const char* description)
- *  @endcode
+ *  描述 GLFW 的自定义堆内存分配器。  To set an allocator, pass it
+ *  to @ref sc_win_init_allocator before initializing the library.
  *
- *  @param[in] error_code An [error code](@ref errors).  Future releases may add
- *  more error codes.
- *  @param[in] description 描述错误的 UTF-8 编码字符串。
+ *  @sa @ref init_allocator
+ *  @sa @ref sc_win_init_allocator
  *
- *  @pointer_lifetime The error description string is valid until the callback
- *  function returns.
- *
- *  @sa @ref error_handling
- *  @sa @ref glfwSetErrorCallback
- *
- *  @since Added in version 3.0.
+ *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-typedef void (* GLFWerrorfun)(int error_code, const char* description);
+typedef struct sc_allocator_cb
+{
+ /*! 内存分配函数。  See @ref sc_allocate_cb for details about
+  *  allocation function.
+  */
+ sc_allocate_cb allocate;
+ /*! 内存重新分配函数。  See @ref sc_reallocate_cb for details about
+  *  reallocation function.
+  */
+ sc_reallocate_cb reallocate;
+ /*! 内存释放函数。  See @ref sc_deallocate_cb for details about
+  *  deallocation function.
+  */
+ sc_deallocate_cb deallocate;
+ /*! 自定义分配器的用户指针。  This value will be passed to the
+  *  allocator functions.
+  */
+ void* user;
+} sc_allocator_cb;
+
+/*************************************************************************
+ * GLFW API types
+ *************************************************************************/
+
+/*! @brief 不透明监视器对象。
+ *
+ *  不透明监视器对象。
+ *
+ *  @see @ref monitor_object
+ *
+ *  @since Added in version 3.0.
+ *
+ *  @ingroup monitor
+ */
+typedef struct sc_monitor sc_monitor;
+
+/*! @brief 监视器配置回调函数指针类型。
+ *
+ *  This is the function pointer type for monitor configuration callbacks.
+ *  A monitor callback function has the following signature:
+ *  @code
+ *  void function_name(sc_monitor* monitor, int event)
+ *  @endcode
+ *
+ *  @param[in] monitor 被连接或断开的监视器。
+ *  @param[in] event `SC_CONNECTED` 或 `SC_DISCONNECTED` 之一。  Future
+ *  releases may add more events.
+ *
+ *  @sa @ref monitor_event
+ *  @sa @ref glfwSetMonitorCallback
+ *
+ *  @since Added in version 3.0.
+ *
+ *  @ingroup monitor
+ */
+typedef void (* sc_monitor_cb)(sc_monitor* monitor, int event);
+
+
+/*! @brief 不透明窗口对象。
+ *
+ *  不透明窗口对象。
+ *
+ *  @see @ref window_object
+ *
+ *  @since Added in version 3.0.
+ *
+ *  @ingroup window
+ */
+typedef struct sc_window sc_window;
+
+/*! @brief 不透明光标对象。
+ *
+ *  不透明光标对象。
+ *
+ *  @see @ref cursor_object
+ *
+ *  @since Added in version 3.1.
+ *
+ *  @ingroup input
+ */
+typedef struct sc_cursor sc_cursor;
+
 
 /*! @brief 窗口位置回调函数指针类型。
  *
  *  This is the function pointer type for window position callbacks.  A window
  *  position callback function has the following signature:
  *  @code
- *  void callback_name(GLFWwindow* window, int xpos, int ypos)
+ *  void callback_name(sc_window* window, int xpos, int ypos)
  *  @endcode
  *
  *  @param[in] window 被移动的窗口。
@@ -1110,14 +1125,14 @@ typedef void (* GLFWerrorfun)(int error_code, const char* description);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowposfun)(GLFWwindow* window, int xpos, int ypos);
+typedef void (* sc_win_pos_cb)(sc_window* window, int xpos, int ypos);
 
 /*! @brief 窗口大小回调函数指针类型。
  *
  *  This is the function pointer type for window size callbacks.  A window size
  *  callback function has the following signature:
  *  @code
- *  void callback_name(GLFWwindow* window, int width, int height)
+ *  void callback_name(sc_window* window, int width, int height)
  *  @endcode
  *
  *  @param[in] window 被调整大小的窗口。
@@ -1132,14 +1147,14 @@ typedef void (* GLFWwindowposfun)(GLFWwindow* window, int xpos, int ypos);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowsizefun)(GLFWwindow* window, int width, int height);
+typedef void (* sc_win_size_cb)(sc_window* window, int width, int height);
 
 /*! @brief 窗口关闭回调函数指针类型。
  *
  *  This is the function pointer type for window close callbacks.  A window
  *  close callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window)
+ *  void function_name(sc_window* window)
  *  @endcode
  *
  *  @param[in] window 用户尝试关闭的窗口。
@@ -1152,14 +1167,14 @@ typedef void (* GLFWwindowsizefun)(GLFWwindow* window, int width, int height);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowclosefun)(GLFWwindow* window);
+typedef void (* sc_win_close_cb)(sc_window* window);
 
 /*! @brief The function pointer type for window content refresh callbacks.
  *
  *  This is the function pointer type for window content refresh callbacks.
  *  A window content refresh callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window);
+ *  void function_name(sc_window* window);
  *  @endcode
  *
  *  @param[in] window 内容需要刷新的窗口。
@@ -1172,14 +1187,14 @@ typedef void (* GLFWwindowclosefun)(GLFWwindow* window);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowrefreshfun)(GLFWwindow* window);
+typedef void (* sc_win_refresh_cb)(sc_window* window);
 
 /*! @brief 窗口焦点回调函数指针类型。
  *
  *  This is the function pointer type for window focus callbacks.  A window
  *  focus callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int focused)
+ *  void function_name(sc_window* window, int focused)
  *  @endcode
  *
  *  @param[in] window 获得或失去输入焦点的窗口。
@@ -1192,14 +1207,14 @@ typedef void (* GLFWwindowrefreshfun)(GLFWwindow* window);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowfocusfun)(GLFWwindow* window, int focused);
+typedef void (* sc_win_focus_cb)(sc_window* window, int focused);
 
 /*! @brief 窗口最小化回调函数指针类型。
  *
  *  This is the function pointer type for window iconify callbacks.  A window
  *  iconify callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int iconified)
+ *  void function_name(sc_window* window, int iconified)
  *  @endcode
  *
  *  @param[in] window 被最小化或恢复的窗口。
@@ -1212,14 +1227,14 @@ typedef void (* GLFWwindowfocusfun)(GLFWwindow* window, int focused);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowiconifyfun)(GLFWwindow* window, int iconified);
+typedef void (* sc_win_iconify_cb)(sc_window* window, int iconified);
 
 /*! @brief 窗口最大化回调函数指针类型。
  *
  *  This is the function pointer type for window maximize callbacks.  A window
  *  maximize callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int maximized)
+ *  void function_name(sc_window* window, int maximized)
  *  @endcode
  *
  *  @param[in] window 被最大化或恢复的窗口。
@@ -1232,35 +1247,14 @@ typedef void (* GLFWwindowiconifyfun)(GLFWwindow* window, int iconified);
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowmaximizefun)(GLFWwindow* window, int maximized);
-
-/*! @brief 帧缓冲大小回调函数指针类型。
- *
- *  This is the function pointer type for framebuffer size callbacks.
- *  A framebuffer size callback function has the following signature:
- *  @code
- *  void function_name(GLFWwindow* window, int width, int height)
- *  @endcode
- *
- *  @param[in] window The window whose framebuffer was resized.
- *  @param[in] width The new width, in pixels, of the framebuffer.
- *  @param[in] height The new height, in pixels, of the framebuffer.
- *
- *  @sa @ref window_fbsize
- *  @sa @ref glfwSetFramebufferSizeCallback
- *
- *  @since Added in version 3.0.
- *
- *  @ingroup window
- */
-typedef void (* GLFWframebuffersizefun)(GLFWwindow* window, int width, int height);
+typedef void (* sc_win_maximize_cb)(sc_window* window, int maximized);
 
 /*! @brief 窗口内容缩放回调函数指针类型。
  *
  *  This is the function pointer type for window content scale callbacks.
  *  A window content scale callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, float xscale, float yscale)
+ *  void function_name(sc_window* window, float xscale, float yscale)
  *  @endcode
  *
  *  @param[in] window The window whose content scale changed.
@@ -1274,19 +1268,19 @@ typedef void (* GLFWframebuffersizefun)(GLFWwindow* window, int width, int heigh
  *
  *  @ingroup window
  */
-typedef void (* GLFWwindowcontentscalefun)(GLFWwindow* window, float xscale, float yscale);
+typedef void (* sc_win_content_scale_cb)(sc_window* window, float xscale, float yscale);
 
 /*! @brief 鼠标按钮回调函数指针类型。
  *
  *  This is the function pointer type for mouse button callback functions.
  *  A mouse button callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int button, int action, int mods)
+ *  void function_name(sc_window* window, int button, int action, int mods)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
  *  @param[in] button 被按下或释放的 [鼠标按钮](@ref buttons)。
- *  @param[in] action One of `GLFW_PRESS` or `GLFW_RELEASE`.  Future releases
+ *  @param[in] action One of `SC_PRESS` or `SC_RELEASE`.  Future releases
  *  may add more actions.
  *  @param[in] mods 描述按下哪些 [修饰键](@ref mods) 的位字段。
  *
@@ -1298,14 +1292,14 @@ typedef void (* GLFWwindowcontentscalefun)(GLFWwindow* window, float xscale, flo
  *
  *  @ingroup input
  */
-typedef void (* GLFWmousebuttonfun)(GLFWwindow* window, int button, int action, int mods);
+typedef void (* sc_win_mouse_button_cb)(sc_window* window, int button, int action, int mods);
 
 /*! @brief 光标位置回调函数指针类型。
  *
  *  This is the function pointer type for cursor position callbacks.  A cursor
  *  position callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, double xpos, double ypos);
+ *  void function_name(sc_window* window, double xpos, double ypos);
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1321,14 +1315,14 @@ typedef void (* GLFWmousebuttonfun)(GLFWwindow* window, int button, int action, 
  *
  *  @ingroup input
  */
-typedef void (* GLFWcursorposfun)(GLFWwindow* window, double xpos, double ypos);
+typedef void (* sc_cursor_pos_cb)(sc_window* window, double xpos, double ypos);
 
 /*! @brief 光标进入/离开回调函数指针类型。
  *
  *  This is the function pointer type for cursor enter/leave callbacks.
  *  A cursor enter/leave callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int entered)
+ *  void function_name(sc_window* window, int entered)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1341,14 +1335,14 @@ typedef void (* GLFWcursorposfun)(GLFWwindow* window, double xpos, double ypos);
  *
  *  @ingroup input
  */
-typedef void (* GLFWcursorenterfun)(GLFWwindow* window, int entered);
+typedef void (* sc_cursor_enter_cb)(sc_window* window, int entered);
 
 /*! @brief 滚轮回调函数指针类型。
  *
  *  This is the function pointer type for scroll callbacks.  A scroll callback
  *  function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, double xoffset, double yoffset)
+ *  void function_name(sc_window* window, double xoffset, double yoffset)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1362,20 +1356,20 @@ typedef void (* GLFWcursorenterfun)(GLFWwindow* window, int entered);
  *
  *  @ingroup input
  */
-typedef void (* GLFWscrollfun)(GLFWwindow* window, double xoffset, double yoffset);
+typedef void (* sc_scroll_cb)(sc_window* window, double xoffset, double yoffset);
 
 /*! @brief 键盘按键回调函数指针类型。
  *
  *  This is the function pointer type for keyboard key callbacks.  A keyboard
  *  key callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int key, int scancode, int action, int mods)
+ *  void function_name(sc_window* window, int key, int scancode, int action, int mods)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
  *  @param[in] key 被按下或释放的 [键盘按键](@ref keys)。
  *  @param[in] scancode The platform-specific scancode of the key.
- *  @param[in] action `GLFW_PRESS`、`GLFW_RELEASE` 或 `GLFW_REPEAT`。  Future
+ *  @param[in] action `SC_PRESS`、`SC_RELEASE` 或 `SC_REPEAT`。  Future
  *  releases may add more actions.
  *  @param[in] mods 描述按下哪些 [修饰键](@ref mods) 的位字段。
  *
@@ -1387,14 +1381,14 @@ typedef void (* GLFWscrollfun)(GLFWwindow* window, double xoffset, double yoffse
  *
  *  @ingroup input
  */
-typedef void (* GLFWkeyfun)(GLFWwindow* window, int key, int scancode, int action, int mods);
+typedef void (* sc_key_cb)(sc_window* window, int key, int scancode, int action, int mods);
 
 /*! @brief Unicode 字符回调函数指针类型。
  *
  *  This is the function pointer type for Unicode character callbacks.
  *  A Unicode character callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, unsigned int codepoint)
+ *  void function_name(sc_window* window, unsigned int codepoint)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1408,7 +1402,7 @@ typedef void (* GLFWkeyfun)(GLFWwindow* window, int key, int scancode, int actio
  *
  *  @ingroup input
  */
-typedef void (* GLFWcharfun)(GLFWwindow* window, unsigned int codepoint);
+typedef void (* sc_char_cb)(sc_window* window, unsigned int codepoint);
 
 /*! @brief The function pointer type for Unicode character with modifiers
  *  callbacks.
@@ -1418,7 +1412,7 @@ typedef void (* GLFWcharfun)(GLFWwindow* window, unsigned int codepoint);
  *  modifier keys are held down.  A Unicode character with modifiers callback
  *  function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, unsigned int codepoint, int mods)
+ *  void function_name(sc_window* window, unsigned int codepoint, int mods)
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1434,14 +1428,14 @@ typedef void (* GLFWcharfun)(GLFWwindow* window, unsigned int codepoint);
  *
  *  @ingroup input
  */
-typedef void (* GLFWcharmodsfun)(GLFWwindow* window, unsigned int codepoint, int mods);
+typedef void (* sc_char_mods_cb)(sc_window* window, unsigned int codepoint, int mods);
 
 /*! @brief 文件拖放回调函数指针类型。
  *
  *  This is the function pointer type for path drop callbacks.  A path drop
  *  callback function has the following signature:
  *  @code
- *  void function_name(GLFWwindow* window, int path_count, const char* paths[])
+ *  void function_name(sc_window* window, int path_count, const char* paths[])
  *  @endcode
  *
  *  @param[in] window 接收事件的窗口。
@@ -1458,28 +1452,11 @@ typedef void (* GLFWcharmodsfun)(GLFWwindow* window, unsigned int codepoint, int
  *
  *  @ingroup input
  */
-typedef void (* GLFWdropfun)(GLFWwindow* window, int path_count, const char* paths[]);
+typedef void (* sc_drop_cb)(sc_window* window, int path_count, const char* paths[]);
 
-/*! @brief 监视器配置回调函数指针类型。
+/*************************************************************************
  *
- *  This is the function pointer type for monitor configuration callbacks.
- *  A monitor callback function has the following signature:
- *  @code
- *  void function_name(GLFWmonitor* monitor, int event)
- *  @endcode
- *
- *  @param[in] monitor 被连接或断开的监视器。
- *  @param[in] event `GLFW_CONNECTED` 或 `GLFW_DISCONNECTED` 之一。  Future
- *  releases may add more events.
- *
- *  @sa @ref monitor_event
- *  @sa @ref glfwSetMonitorCallback
- *
- *  @since Added in version 3.0.
- *
- *  @ingroup monitor
- */
-typedef void (* GLFWmonitorfun)(GLFWmonitor* monitor, int event);
+ *************************************************************************/
 
 /*! @brief 视频模式类型。
  *
@@ -1561,39 +1538,6 @@ typedef struct GLFWimage
     unsigned char* pixels;
 } GLFWimage;
 
-/*! @brief 自定义堆内存分配器。
- *
- *  描述 GLFW 的自定义堆内存分配器。  To set an allocator, pass it
- *  to @ref glfwInitAllocator before initializing the library.
- *
- *  @sa @ref init_allocator
- *  @sa @ref glfwInitAllocator
- *
- *  @since Added in version 3.4.
- *
- *  @ingroup init
- */
-typedef struct GLFWallocator
-{
-    /*! 内存分配函数。  See @ref GLFWallocatefun for details about
-     *  allocation function.
-     */
-    GLFWallocatefun allocate;
-    /*! 内存重新分配函数。  See @ref GLFWreallocatefun for details about
-     *  reallocation function.
-     */
-    GLFWreallocatefun reallocate;
-    /*! 内存释放函数。  See @ref GLFWdeallocatefun for details about
-     *  deallocation function.
-     */
-    GLFWdeallocatefun deallocate;
-    /*! 自定义分配器的用户指针。  This value will be passed to the
-     *  allocator functions.
-     */
-    void* user;
-} GLFWallocator;
-
-
 /*************************************************************************
  * GLFW API functions
  *************************************************************************/
@@ -1605,37 +1549,37 @@ typedef struct GLFWallocator
  *  should be terminated in order to free any resources allocated during or
  *  after initialization.
  *
- *  如果此函数失败，它会在返回前调用 @ref glfwTerminate。  If it
- *  succeeds, you should call @ref glfwTerminate before the application exits.
+ *  如果此函数失败，它会在返回前调用 @ref sc_win_terminate。  If it
+ *  succeeds, you should call @ref sc_win_terminate before the application exits.
  *
  *  Additional calls to this function after successful initialization but before
  *  termination will return `GLFW_TRUE` immediately.
  *
- *  The @ref GLFW_PLATFORM init hint controls which platforms are considered during
+ *  The @ref SC_PLATFORM init hint controls which platforms are considered during
  *  initialization.  This also depends on which platforms the library was compiled to
  *  support.
  *
  *  @return 成功返回 `GLFW_TRUE`，如果发生 [错误](@ref error_handling) 则返回 `GLFW_FALSE`。
  *
- *  @errors Possible errors include @ref GLFW_PLATFORM_UNAVAILABLE and @ref
- *  GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_PLATFORM_UNAVAILABLE and @ref
+ *  SC_WIN_ERR_PLATFORM_ERROR.
  *
  *  @remark __macOS:__ This function will change the current directory of the
  *  application to the `Contents/Resources` subdirectory of the application's
  *  bundle, if present.  This can be disabled with the @ref
- *  GLFW_COCOA_CHDIR_RESOURCES init hint.
+ *  SC_COCOA_CHDIR_RESOURCES init hint.
  *
  *  @remark __macOS:__ This function will create the main menu and dock icon for the
  *  application.  If GLFW finds a `MainMenu.nib` it is loaded and assumed to
  *  contain a menu bar.  Otherwise a minimal menu bar is created manually with
  *  common commands like Hide, Quit and About.  The About entry opens a minimal
  *  about dialog with information from the application's bundle.  The menu bar
- *  and dock icon can be disabled entirely with the @ref GLFW_COCOA_MENUBAR init
+ *  and dock icon can be disabled entirely with the @ref SC_COCOA_MENUBAR init
  *  hint.
  *
  *  @remark __Wayland, X11:__ If the library was compiled with support for both
- *  Wayland and X11, and the @ref GLFW_PLATFORM init hint is set to
- *  `GLFW_ANY_PLATFORM`, the `XDG_SESSION_TYPE` environment variable affects
+ *  Wayland and X11, and the @ref SC_PLATFORM init hint is set to
+ *  `SC_PLATFORM_ANY`, the `XDG_SESSION_TYPE` environment variable affects
  *  which platform is picked.  If the environment variable is not set, or is set
  *  to something other than `wayland` or `x11`, the regular detection mechanism
  *  will be used instead.
@@ -1647,31 +1591,31 @@ typedef struct GLFWallocator
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @sa @ref intro_init
- *  @sa @ref glfwInitHint
- *  @sa @ref glfwInitAllocator
- *  @sa @ref glfwTerminate
+ *  @sa @ref sc_win_init_hint
+ *  @sa @ref sc_win_init_allocator
+ *  @sa @ref sc_win_terminate
  *
  *  @since Added in version 1.0.
  *
  *  @ingroup init
  */
-GLFWAPI int glfwInit(void);
+GLFWAPI int sc_win_init(void);
 
 /*! @brief 终止 GLFW 库。
  *
  *  此函数销毁所有剩余窗口和光标，恢复任何修改过的伽马斜坡，并释放所有其他分配的资源。  Once this
- *  function is called, you must again call @ref glfwInit successfully before
+ *  function is called, you must again call @ref sc_win_init successfully before
  *  you will be able to use most GLFW functions.
  *
  *  如果 GLFW 已成功初始化，应在应用程序退出前调用此函数。  If initialization fails, there is no need to
- *  call this function, as it is called by @ref glfwInit before it returns
+ *  call this function, as it is called by @ref sc_win_init before it returns
  *  failure.
  *
  *  This function has no effect if GLFW is not initialized.
  *
- *  @errors Possible errors include @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_PLATFORM_ERROR.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @warning The contexts of any remaining windows must not be current on any
  *  other thread when this function is called.
@@ -1681,13 +1625,13 @@ GLFWAPI int glfwInit(void);
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @sa @ref intro_init
- *  @sa @ref glfwInit
+ *  @sa @ref sc_win_init
  *
  *  @since Added in version 1.0.
  *
  *  @ingroup init
  */
-GLFWAPI void glfwTerminate(void);
+GLFWAPI void sc_win_terminate(void);
 
 /*! @brief 设置指定的初始化提示值。
  *
@@ -1705,21 +1649,21 @@ GLFWAPI void glfwTerminate(void);
  *  @param[in] hint 要设置的 [初始化提示](@ref init_hints)。
  *  @param[in] value 初始化提示的新值。
  *
- *  @errors Possible errors include @ref GLFW_INVALID_ENUM and @ref
- *  GLFW_INVALID_VALUE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_INVALID_ENUM and @ref
+ *  SC_WIN_ERR_INVALID_VALUE.
  *
- *  @remarks 此函数可在 @ref glfwInit 之前调用。
+ *  @remarks 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @sa init_hints
- *  @sa glfwInit
+ *  @sa sc_win_init
  *
  *  @since Added in version 3.3.
  *
  *  @ingroup init
  */
-GLFWAPI void glfwInitHint(int hint, int value);
+GLFWAPI void sc_win_init_hint(int hint, int value);
 
 /*! @brief Sets the init allocator to the desired value.
  *
@@ -1727,16 +1671,16 @@ GLFWAPI void glfwInitHint(int hint, int value);
  *
  *  If you specify an allocator struct, every member must be a valid function
  *  pointer.  If any member is `NULL`, this function will emit @ref
- *  GLFW_INVALID_VALUE and the init allocator will be unchanged.
+ *  SC_WIN_ERR_INVALID_VALUE and the init allocator will be unchanged.
  *
  *  The functions in the allocator must fulfil a number of requirements.  See the
- *  documentation for @ref GLFWallocatefun, @ref GLFWreallocatefun and @ref
- *  GLFWdeallocatefun for details.
+ *  documentation for @ref sc_allocate_cb, @ref sc_reallocate_cb and @ref
+ *  sc_deallocate_cb for details.
  *
  *  @param[in] allocator The allocator to use at the next initialization, or
  *  `NULL` to use the default one.
  *
- *  @errors Possible errors include @ref GLFW_INVALID_VALUE.
+ *  @errors Possible errors include @ref SC_WIN_ERR_INVALID_VALUE.
  *
  *  @pointer_lifetime The specified allocator is copied before this function
  *  returns.
@@ -1744,13 +1688,13 @@ GLFWAPI void glfwInitHint(int hint, int value);
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @sa @ref init_allocator
- *  @sa @ref glfwInit
+ *  @sa @ref sc_win_init
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-GLFWAPI void glfwInitAllocator(const GLFWallocator* allocator);
+GLFWAPI void sc_win_init_allocator(const sc_allocator_cb* allocator);
 
 
 /*! @brief 获取 GLFW 库的版本。
@@ -1766,18 +1710,18 @@ GLFWAPI void glfwInitAllocator(const GLFWallocator* allocator);
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
  *  @sa @ref intro_version
- *  @sa @ref glfwGetVersionString
+ *  @sa @ref sc_win_get_version_string
  *
  *  @since Added in version 1.0.
  *
  *  @ingroup init
  */
-GLFWAPI void glfwGetVersion(int* major, int* minor, int* rev);
+GLFWAPI void sc_win_get_version(int* major, int* minor, int* rev);
 
 /*! @brief Returns a string describing the compile-time configuration.
  *
@@ -1788,41 +1732,41 @@ GLFWAPI void glfwGetVersion(int* major, int* minor, int* rev);
  *  string, queried with `glGetString`.
  *
  *  __Do not use the version string__ to parse the GLFW library version.  The
- *  @ref glfwGetVersion function provides the version of the running library
+ *  @ref sc_win_get_version function provides the version of the running library
  *  binary in numerical format.
  *
  *  __Do not use the version string__ to parse what platforms are supported.  The @ref
- *  glfwPlatformSupported function lets you query platform support.
+ *  sc_win_platform_supported function lets you query platform support.
  *
  *  @return The ASCII encoded GLFW version string.
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @pointer_lifetime The returned string is static and compile-time generated.
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
  *  @sa @ref intro_version
- *  @sa @ref glfwGetVersion
+ *  @sa @ref sc_win_get_version
  *
  *  @since Added in version 3.0.
  *
  *  @ingroup init
  */
-GLFWAPI const char* glfwGetVersionString(void);
+GLFWAPI const char* sc_win_get_version_string(void);
 
 /*! @brief Returns and clears the last error for the calling thread.
  *
  *  This function returns and clears the [error code](@ref errors) of the last
  *  error that occurred on the calling thread, and optionally a UTF-8 encoded
  *  human-readable description of it.  If no error has occurred since the last
- *  call, it returns @ref GLFW_NO_ERROR (zero) and the description pointer is
+ *  call, it returns @ref SC_WIN_ERR_NONE (zero) and the description pointer is
  *  set to `NULL`.
  *
  *  @param[in] description Where to store the error description pointer, or `NULL`.
- *  @return The last error code for the calling thread, or @ref GLFW_NO_ERROR
+ *  @return The last error code for the calling thread, or @ref SC_WIN_ERR_NONE
  *  (zero).
  *
  *  @errors None.
@@ -1831,18 +1775,18 @@ GLFWAPI const char* glfwGetVersionString(void);
  *  should not free it yourself.  It is guaranteed to be valid only until the
  *  next error occurs or the library is terminated.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
  *  @sa @ref error_handling
- *  @sa @ref glfwSetErrorCallback
+ *  @sa @ref sc_win_set_error_callback
  *
  *  @since Added in version 3.3.
  *
  *  @ingroup init
  */
-GLFWAPI int glfwGetError(const char** description);
+GLFWAPI int sc_win_get_error(const char** description);
 
 /*! @brief 设置错误回调。
  *
@@ -1850,7 +1794,7 @@ GLFWAPI int glfwGetError(const char** description);
  *  and a human-readable description each time a GLFW error occurs.
  *
  *  The error code is set before the callback is called.  Calling @ref
- *  glfwGetError from the error callback will return the same value as the error
+ *  sc_win_get_error from the error callback will return the same value as the error
  *  code argument.
  *
  *  The error callback is called on the thread where the error occurred.  If you
@@ -1872,67 +1816,67 @@ GLFWAPI int glfwGetError(const char** description);
  *  void callback_name(int error_code, const char* description)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [callback pointer type](@ref GLFWerrorfun).
+ *  [callback pointer type](@ref sc_error_cb).
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @sa @ref error_handling
- *  @sa @ref glfwGetError
+ *  @sa @ref sc_win_get_error
  *
  *  @since Added in version 3.0.
  *
  *  @ingroup init
  */
-GLFWAPI GLFWerrorfun glfwSetErrorCallback(GLFWerrorfun callback);
+GLFWAPI sc_error_cb sc_win_set_error_callback(sc_error_cb callback);
 
 /*! @brief 返回当前选择的平台。
  *
  *  This function returns the platform that was selected during initialization.  The
- *  returned value will be one of `GLFW_PLATFORM_WIN32`, `GLFW_PLATFORM_COCOA`,
- *  `GLFW_PLATFORM_WAYLAND`, `GLFW_PLATFORM_X11` or `GLFW_PLATFORM_NULL`.
+ *  returned value will be one of `SC_PLATFORM_WIN32`, `SC_PLATFORM_COCOA`,
+ *  `SC_PLATFORM_WAYLAND`, `SC_PLATFORM_X11` or `SC_PLATFORM_NULL`.
  *
  *  @return The currently selected platform, or zero if an error occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
  *  @sa @ref platform
- *  @sa @ref glfwPlatformSupported
+ *  @sa @ref sc_win_platform_supported
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-GLFWAPI int glfwGetPlatform(void);
+GLFWAPI int sc_win_get_platform(void);
 
 /*! @brief 返回库是否支持指定平台。
  *
  *  This function returns whether the library was compiled with support for the specified
- *  platform.  The platform must be one of `GLFW_PLATFORM_WIN32`, `GLFW_PLATFORM_COCOA`,
- *  `GLFW_PLATFORM_WAYLAND`, `GLFW_PLATFORM_X11` or `GLFW_PLATFORM_NULL`.
+ *  platform.  The platform must be one of `SC_PLATFORM_WIN32`, `SC_PLATFORM_COCOA`,
+ *  `SC_PLATFORM_WAYLAND`, `SC_PLATFORM_X11` or `SC_PLATFORM_NULL`.
  *
  *  @param[in] platform The platform to query.
  *  @return `GLFW_TRUE` if the platform is supported, or `GLFW_FALSE` otherwise.
  *
- *  @errors Possible errors include @ref GLFW_INVALID_ENUM.
+ *  @errors Possible errors include @ref SC_WIN_ERR_INVALID_ENUM.
  *
- *  @remark 此函数可在 @ref glfwInit 之前调用。
+ *  @remark 此函数可在 @ref sc_win_init 之前调用。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
  *  @sa @ref platform
- *  @sa @ref glfwGetPlatform
+ *  @sa @ref sc_win_get_platform
  *
  *  @since Added in version 3.4.
  *
  *  @ingroup init
  */
-GLFWAPI int glfwPlatformSupported(int platform);
+GLFWAPI int sc_win_platform_supported(int platform);
 
 /*! @brief 返回当前连接的监视器列表。
  *
@@ -1944,7 +1888,7 @@ GLFWAPI int glfwPlatformSupported(int platform);
  *  @return An array of monitor handles, or `NULL` if no monitors were found or
  *  if an [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
  *  should not free it yourself.  It is guaranteed to be valid only until the
@@ -1954,13 +1898,13 @@ GLFWAPI int glfwPlatformSupported(int platform);
  *
  *  @sa @ref monitor_monitors
  *  @sa @ref monitor_event
- *  @sa @ref glfwGetPrimaryMonitor
+ *  @sa @ref sc_win_get_primary_monitor
  *
  *  @since Added in version 3.0.
  *
  *  @ingroup monitor
  */
-GLFWAPI GLFWmonitor** glfwGetMonitors(int* count);
+GLFWAPI sc_monitor** sc_win_get_monitors(int* count);
 
 /*! @brief 返回主监视器。
  *
@@ -1970,21 +1914,21 @@ GLFWAPI GLFWmonitor** glfwGetMonitors(int* count);
  *  @return The primary monitor, or `NULL` if no monitors were found or if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @remark The primary monitor is always first in the array returned by @ref
- *  glfwGetMonitors.
+ *  sc_win_get_monitors.
  *
  *  @sa @ref monitor_monitors
- *  @sa @ref glfwGetMonitors
+ *  @sa @ref sc_win_get_monitors
  *
  *  @since Added in version 3.0.
  *
  *  @ingroup monitor
  */
-GLFWAPI GLFWmonitor* glfwGetPrimaryMonitor(void);
+GLFWAPI sc_monitor* sc_win_get_primary_monitor(void);
 
 /*! @brief Returns the position of the monitor's viewport on the virtual screen.
  *
@@ -1997,7 +1941,7 @@ GLFWAPI GLFWmonitor* glfwGetPrimaryMonitor(void);
  *  @param[out] xpos Where to store the monitor x-coordinate, or `NULL`.
  *  @param[out] ypos Where to store the monitor y-coordinate, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2007,7 +1951,7 @@ GLFWAPI GLFWmonitor* glfwGetPrimaryMonitor(void);
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwGetMonitorPos(GLFWmonitor* monitor, int* xpos, int* ypos);
+GLFWAPI void sc_win_get_monitor_pos(sc_monitor* monitor, int* xpos, int* ypos);
 
 /*! @brief Retrieves the work area of the monitor.
  *
@@ -2027,7 +1971,7 @@ GLFWAPI void glfwGetMonitorPos(GLFWmonitor* monitor, int* xpos, int* ypos);
  *  @param[out] width Where to store the monitor width, or `NULL`.
  *  @param[out] height Where to store the monitor height, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2037,7 +1981,7 @@ GLFWAPI void glfwGetMonitorPos(GLFWmonitor* monitor, int* xpos, int* ypos);
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwGetMonitorWorkarea(GLFWmonitor* monitor, int* xpos, int* ypos, int* width, int* height);
+GLFWAPI void sc_win_get_monitor_workarea(sc_monitor* monitor, int* xpos, int* ypos, int* width, int* height);
 
 /*! @brief 返回监视器的物理尺寸。
  *
@@ -2058,7 +2002,7 @@ GLFWAPI void glfwGetMonitorWorkarea(GLFWmonitor* monitor, int* xpos, int* ypos, 
  *  @param[out] heightMM Where to store the height, in millimetres, of the
  *  monitor's display area, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @remark __Win32:__ On Windows 8 and earlier the physical size is calculated from
  *  the current resolution and system DPI instead of querying the monitor EDID data.
@@ -2071,7 +2015,7 @@ GLFWAPI void glfwGetMonitorWorkarea(GLFWmonitor* monitor, int* xpos, int* ypos, 
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwGetMonitorPhysicalSize(GLFWmonitor* monitor, int* widthMM, int* heightMM);
+GLFWAPI void sc_win_get_monitor_physical_size(sc_monitor* monitor, int* widthMM, int* heightMM);
 
 /*! @brief Retrieves the content scale for the specified monitor.
  *
@@ -2091,7 +2035,7 @@ GLFWAPI void glfwGetMonitorPhysicalSize(GLFWmonitor* monitor, int* widthMM, int*
  *  @param[out] xscale 存储 x 轴内容缩放比例的位置，或 `NULL`。
  *  @param[out] yscale 存储 y 轴内容缩放比例的位置，或 `NULL`。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_PLATFORM_ERROR。
  *
  *  @remark __Wayland:__ Fractional scaling information is not yet available for
  *  monitors, so this function only returns integer content scales.
@@ -2105,7 +2049,7 @@ GLFWAPI void glfwGetMonitorPhysicalSize(GLFWmonitor* monitor, int* widthMM, int*
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwGetMonitorContentScale(GLFWmonitor* monitor, float* xscale, float* yscale);
+GLFWAPI void glfwGetMonitorContentScale(sc_monitor* monitor, float* xscale, float* yscale);
 
 /*! @brief 返回指定监视器的名称。
  *
@@ -2117,7 +2061,7 @@ GLFWAPI void glfwGetMonitorContentScale(GLFWmonitor* monitor, float* xscale, flo
  *  @return The UTF-8 encoded name of the monitor, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
  *  should not free it yourself.  It is valid until the specified monitor is
@@ -2131,7 +2075,7 @@ GLFWAPI void glfwGetMonitorContentScale(GLFWmonitor* monitor, float* xscale, flo
  *
  *  @ingroup monitor
  */
-GLFWAPI const char* glfwGetMonitorName(GLFWmonitor* monitor);
+GLFWAPI const char* glfwGetMonitorName(sc_monitor* monitor);
 
 /*! @brief 设置指定监视器的用户指针。
  *
@@ -2145,7 +2089,7 @@ GLFWAPI const char* glfwGetMonitorName(GLFWmonitor* monitor);
  *  @param[in] monitor The monitor whose pointer to set.
  *  @param[in] pointer The new value.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -2157,7 +2101,7 @@ GLFWAPI const char* glfwGetMonitorName(GLFWmonitor* monitor);
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwSetMonitorUserPointer(GLFWmonitor* monitor, void* pointer);
+GLFWAPI void glfwSetMonitorUserPointer(sc_monitor* monitor, void* pointer);
 
 /*! @brief 返回指定监视器的用户指针。
  *
@@ -2169,7 +2113,7 @@ GLFWAPI void glfwSetMonitorUserPointer(GLFWmonitor* monitor, void* pointer);
  *
  *  @param[in] monitor The monitor whose pointer to return.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -2181,7 +2125,7 @@ GLFWAPI void glfwSetMonitorUserPointer(GLFWmonitor* monitor, void* pointer);
  *
  *  @ingroup monitor
  */
-GLFWAPI void* glfwGetMonitorUserPointer(GLFWmonitor* monitor);
+GLFWAPI void* glfwGetMonitorUserPointer(sc_monitor* monitor);
 
 /*! @brief 设置监视器配置回调。
  *
@@ -2195,12 +2139,12 @@ GLFWAPI void* glfwGetMonitorUserPointer(GLFWmonitor* monitor);
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWmonitor* monitor, int event)
+ *  void function_name(sc_monitor* monitor, int event)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWmonitorfun).
+ *  [function pointer type](@ref sc_monitor_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2210,7 +2154,7 @@ GLFWAPI void* glfwGetMonitorUserPointer(GLFWmonitor* monitor);
  *
  *  @ingroup monitor
  */
-GLFWAPI GLFWmonitorfun glfwSetMonitorCallback(GLFWmonitorfun callback);
+GLFWAPI sc_monitor_cb glfwSetMonitorCallback(sc_monitor_cb callback);
 
 /*! @brief 返回指定监视器的可用视频模式。
  *
@@ -2225,7 +2169,7 @@ GLFWAPI GLFWmonitorfun glfwSetMonitorCallback(GLFWmonitorfun callback);
  *  @return An array of video modes, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_PLATFORM_ERROR。
  *
  *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
  *  should not free it yourself.  It is valid until the specified monitor is
@@ -2242,7 +2186,7 @@ GLFWAPI GLFWmonitorfun glfwSetMonitorCallback(GLFWmonitorfun callback);
  *
  *  @ingroup monitor
  */
-GLFWAPI const GLFWvidmode* glfwGetVideoModes(GLFWmonitor* monitor, int* count);
+GLFWAPI const GLFWvidmode* glfwGetVideoModes(sc_monitor* monitor, int* count);
 
 /*! @brief 返回指定监视器的当前模式。
  *
@@ -2254,7 +2198,7 @@ GLFWAPI const GLFWvidmode* glfwGetVideoModes(GLFWmonitor* monitor, int* count);
  *  @return The current mode of the monitor, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
  *  should not free it yourself.  It is valid until the specified monitor is
@@ -2269,7 +2213,7 @@ GLFWAPI const GLFWvidmode* glfwGetVideoModes(GLFWmonitor* monitor, int* count);
  *
  *  @ingroup monitor
  */
-GLFWAPI const GLFWvidmode* glfwGetVideoMode(GLFWmonitor* monitor);
+GLFWAPI const GLFWvidmode* glfwGetVideoMode(sc_monitor* monitor);
 
 /*! @brief 生成伽马斜坡并设置到指定监视器。
  *
@@ -2288,11 +2232,11 @@ GLFWAPI const GLFWvidmode* glfwGetVideoMode(GLFWmonitor* monitor);
  *  @param[in] monitor The monitor whose gamma ramp to set.
  *  @param[in] gamma The desired exponent.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref GLFW_INVALID_VALUE,
- *  @ref GLFW_PLATFORM_ERROR and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref SC_WIN_ERR_INVALID_VALUE,
+ *  @ref GLFW_PLATFORM_ERROR and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ Monitor gamma is a privileged protocol, so this function
- *  cannot be implemented and emits @ref GLFW_FEATURE_UNAVAILABLE.
+ *  cannot be implemented and emits @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2302,7 +2246,7 @@ GLFWAPI const GLFWvidmode* glfwGetVideoMode(GLFWmonitor* monitor);
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwSetGamma(GLFWmonitor* monitor, float gamma);
+GLFWAPI void glfwSetGamma(sc_monitor* monitor, float gamma);
 
 /*! @brief 返回指定监视器当前的伽马斜坡。
  *
@@ -2312,11 +2256,11 @@ GLFWAPI void glfwSetGamma(GLFWmonitor* monitor, float gamma);
  *  @return The current gamma ramp, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref GLFW_PLATFORM_ERROR
- *  and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref GLFW_PLATFORM_ERROR
+ *  and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ Monitor gamma is a privileged protocol, so this function
- *  cannot be implemented and emits @ref GLFW_FEATURE_UNAVAILABLE while
+ *  cannot be implemented and emits @ref SC_WIN_ERR_FEATURE_UNAVAILABLE while
  *  returning `NULL`.
  *
  *  @pointer_lifetime The returned structure and its arrays are allocated and
@@ -2332,13 +2276,13 @@ GLFWAPI void glfwSetGamma(GLFWmonitor* monitor, float gamma);
  *
  *  @ingroup monitor
  */
-GLFWAPI const GLFWgammaramp* glfwGetGammaRamp(GLFWmonitor* monitor);
+GLFWAPI const GLFWgammaramp* glfwGetGammaRamp(sc_monitor* monitor);
 
 /*! @brief 设置指定监视器当前的伽马斜坡。
  *
  *  此函数设置指定监视器的当前伽马斜坡。  The
  *  original gamma ramp for that monitor is saved by GLFW the first time this
- *  function is called and is restored by @ref glfwTerminate.
+ *  function is called and is restored by @ref sc_win_terminate.
  *
  *  The software controlled gamma ramp is applied _in addition_ to the hardware
  *  gamma correction, which today is usually an approximation of sRGB gamma.
@@ -2351,8 +2295,8 @@ GLFWAPI const GLFWgammaramp* glfwGetGammaRamp(GLFWmonitor* monitor);
  *  @param[in] monitor The monitor whose gamma ramp to set.
  *  @param[in] ramp 要使用的伽马斜坡。
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref GLFW_PLATFORM_ERROR
- *  and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref GLFW_PLATFORM_ERROR
+ *  and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark The size of the specified gamma ramp should match the size of the
  *  current ramp for that monitor.
@@ -2360,7 +2304,7 @@ GLFWAPI const GLFWgammaramp* glfwGetGammaRamp(GLFWmonitor* monitor);
  *  @remark __Win32:__ The gamma ramp size must be 256.
  *
  *  @remark __Wayland:__ Monitor gamma is a privileged protocol, so this function
- *  cannot be implemented and emits @ref GLFW_FEATURE_UNAVAILABLE.
+ *  cannot be implemented and emits @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @pointer_lifetime The specified gamma ramp is copied before this function
  *  returns.
@@ -2373,13 +2317,13 @@ GLFWAPI const GLFWgammaramp* glfwGetGammaRamp(GLFWmonitor* monitor);
  *
  *  @ingroup monitor
  */
-GLFWAPI void glfwSetGammaRamp(GLFWmonitor* monitor, const GLFWgammaramp* ramp);
+GLFWAPI void glfwSetGammaRamp(sc_monitor* monitor, const GLFWgammaramp* ramp);
 
 /*! @brief 重置所有窗口提示为默认值。
  *
  *  此函数将所有窗口提示重置为 [默认值](@ref window_hints_values)。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2413,7 +2357,7 @@ GLFWAPI void glfwDefaultWindowHints(void);
  *  @param[in] hint The [window hint](@ref window_hints) to set.
  *  @param[in] value The new value of the window hint.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2447,7 +2391,7 @@ GLFWAPI void glfwWindowHint(int hint, int value);
  *  @param[in] hint The [window hint](@ref window_hints) to set.
  *  @param[in] value The new value of the window hint.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @pointer_lifetime The specified string is copied before this function
  *  returns.
@@ -2501,9 +2445,9 @@ GLFWAPI void glfwWindowHintString(int hint, const char* value);
  *
  *  By default, newly created windows use the placement recommended by the
  *  window system.  To create the window at a specific position, set the @ref
- *  GLFW_POSITION_X and @ref GLFW_POSITION_Y window hints before creation.  To
+ *  SC_WIN_POSITION_X and @ref SC_WIN_POSITION_Y window hints before creation.  To
  *  restore the default behavior, set either or both hints back to
- *  `GLFW_ANY_POSITION`.
+ *  `SC_ANY_POSITION`.
  *
  *  As long as at least one full screen window is not iconified, the screensaver
  *  is prohibited from starting.
@@ -2524,10 +2468,10 @@ GLFWAPI void glfwWindowHintString(int hint, const char* value);
  *  @param[in] share 要共享资源的窗口上下文，或 `NULL` 不共享资源。
  *  @return 创建的窗口句柄，如果发生 [错误](@ref error_handling) 则返回 `NULL`。
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_ENUM, @ref GLFW_INVALID_VALUE, @ref GLFW_API_UNAVAILABLE, @ref
- *  GLFW_VERSION_UNAVAILABLE, @ref GLFW_FORMAT_UNAVAILABLE, @ref
- *  GLFW_NO_WINDOW_CONTEXT and @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_ENUM, @ref SC_WIN_ERR_INVALID_VALUE, @ref SC_WIN_ERR_API_UNAVAILABLE, @ref
+ *  SC_WIN_ERR_VERSION_UNAVAILABLE, @ref SC_WIN_ERR_FORMAT_UNAVAILABLE, @ref
+ *  SC_WIN_ERR_NO_WINDOW_CONTEXT and @ref GLFW_PLATFORM_ERROR.
  *
  *  @remark __Win32:__ Window creation will fail if the Microsoft GDI software
  *  OpenGL implementation is the only one available.
@@ -2566,7 +2510,7 @@ GLFWAPI void glfwWindowHintString(int hint, const char* value);
  *  [hidpi-guide]: https://developer.apple.com/library/mac/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/Explained/Explained.html
  *
  *  @remark __macOS:__ When activating frame autosaving with
- *  [GLFW_COCOA_FRAME_NAME](@ref GLFW_COCOA_FRAME_NAME_hint), the specified
+ *  [SC_COCOA_FRAME_NAME](@ref GLFW_COCOA_FRAME_NAME_hint), the specified
  *  window size and position may be overridden by previously saved values.
  *
  *  @remark __Wayland:__ GLFW uses [libdecor][] where available to create its window
@@ -2590,8 +2534,8 @@ GLFWAPI void glfwWindowHintString(int hint, const char* value);
  *  default be set to the window title passed to this function.  The instance
  *  part will use the contents of the `RESOURCE_NAME` environment variable, if
  *  present and not empty, or fall back to the window title.  Set the
- *  [GLFW_X11_CLASS_NAME](@ref GLFW_X11_CLASS_NAME_hint) and
- *  [GLFW_X11_INSTANCE_NAME](@ref GLFW_X11_INSTANCE_NAME_hint) window hints to
+ *  [SC_X11_CLASS_NAME](@ref GLFW_X11_CLASS_NAME_hint) and
+ *  [SC_X11_INSTANCE_NAME](@ref GLFW_X11_INSTANCE_NAME_hint) window hints to
  *  override this.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -2603,7 +2547,7 @@ GLFWAPI void glfwWindowHintString(int hint, const char* value);
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindow* glfwCreateWindow(int width, int height, const char* title, GLFWmonitor* monitor, GLFWwindow* share);
+GLFWAPI sc_window* glfwCreateWindow(int width, int height, const char* title, sc_monitor* monitor, sc_window* share);
 
 /*! @brief 销毁指定窗口及其上下文。
  *
@@ -2615,7 +2559,7 @@ GLFWAPI GLFWwindow* glfwCreateWindow(int width, int height, const char* title, G
  *
  *  @param[in] window 要销毁的窗口。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @note The context of the specified window must not be current on any other
  *  thread when this function is called.
@@ -2631,7 +2575,7 @@ GLFWAPI GLFWwindow* glfwCreateWindow(int width, int height, const char* title, G
  *
  *  @ingroup window
  */
-GLFWAPI void glfwDestroyWindow(GLFWwindow* window);
+GLFWAPI void glfwDestroyWindow(sc_window* window);
 
 /*! @brief Checks the close flag of the specified window.
  *
@@ -2640,7 +2584,7 @@ GLFWAPI void glfwDestroyWindow(GLFWwindow* window);
  *  @param[in] window 要查询的窗口。
  *  @return The value of the close flag.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -2651,7 +2595,7 @@ GLFWAPI void glfwDestroyWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI int glfwWindowShouldClose(GLFWwindow* window);
+GLFWAPI int glfwWindowShouldClose(sc_window* window);
 
 /*! @brief Sets the close flag of the specified window.
  *
@@ -2661,7 +2605,7 @@ GLFWAPI int glfwWindowShouldClose(GLFWwindow* window);
  *  @param[in] window The window whose flag to change.
  *  @param[in] value The new value.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -2672,7 +2616,7 @@ GLFWAPI int glfwWindowShouldClose(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowShouldClose(GLFWwindow* window, int value);
+GLFWAPI void glfwSetWindowShouldClose(sc_window* window, int value);
 
 /*! @brief 返回指定窗口的标题。
  *
@@ -2684,7 +2628,7 @@ GLFWAPI void glfwSetWindowShouldClose(GLFWwindow* window, int value);
  *  @return The UTF-8 encoded window title, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @remark The returned title is currently a copy of the title last set by @ref
  *  glfwCreateWindow or @ref glfwSetWindowTitle.  It does not include any
@@ -2704,7 +2648,7 @@ GLFWAPI void glfwSetWindowShouldClose(GLFWwindow* window, int value);
  *
  *  @ingroup window
  */
-GLFWAPI const char* glfwGetWindowTitle(GLFWwindow* window);
+GLFWAPI const char* glfwGetWindowTitle(sc_window* window);
 
 /*! @brief 设置指定窗口的标题。
  *
@@ -2714,7 +2658,7 @@ GLFWAPI const char* glfwGetWindowTitle(GLFWwindow* window);
  *  @param[in] window The window whose title to change.
  *  @param[in] title The UTF-8 encoded window title.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __macOS:__ The window title will not be updated until the next time you
  *  process events.
@@ -2729,7 +2673,7 @@ GLFWAPI const char* glfwGetWindowTitle(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowTitle(GLFWwindow* window, const char* title);
+GLFWAPI void glfwSetWindowTitle(sc_window* window, const char* title);
 
 /*! @brief 设置指定窗口的图标。
  *
@@ -2752,15 +2696,15 @@ GLFWAPI void glfwSetWindowTitle(GLFWwindow* window, const char* title);
  *  @param[in] images 用于创建图标的图像。  This is ignored if
  *  count is zero.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_VALUE, @ref GLFW_PLATFORM_ERROR and @ref
- *  GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_VALUE, @ref GLFW_PLATFORM_ERROR and @ref
+ *  SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @pointer_lifetime The specified image data is copied before this function
  *  returns.
  *
  *  @remark __macOS:__ Regular windows do not have icons on macOS.  This function
- *  will emit @ref GLFW_FEATURE_UNAVAILABLE.  The dock icon will be the same as
+ *  will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.  The dock icon will be the same as
  *  the application bundle's icon.  For more information on bundles, see the
  *  [Bundle Programming Guide][bundle-guide] in the Mac Developer Library.
  *
@@ -2768,7 +2712,7 @@ GLFWAPI void glfwSetWindowTitle(GLFWwindow* window, const char* title);
  *
  *  @remark __Wayland:__ There is no existing protocol to change an icon, the
  *  window will thus inherit the one defined in the application's desktop file.
- *  This function will emit @ref GLFW_FEATURE_UNAVAILABLE.
+ *  This function will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2778,7 +2722,7 @@ GLFWAPI void glfwSetWindowTitle(GLFWwindow* window, const char* title);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowIcon(GLFWwindow* window, int count, const GLFWimage* images);
+GLFWAPI void glfwSetWindowIcon(sc_window* window, int count, const GLFWimage* images);
 
 /*! @brief 获取指定窗口内容区域的位置。
  *
@@ -2793,12 +2737,12 @@ GLFWAPI void glfwSetWindowIcon(GLFWwindow* window, int count, const GLFWimage* i
  *  @param[out] ypos Where to store the y-coordinate of the upper-left corner of
  *  the content area, or `NULL`.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_ERROR and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  GLFW_PLATFORM_ERROR and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ Window positions are not currently part of any common
  *  Wayland protocol, so this function cannot be implemented and will emit @ref
- *  GLFW_FEATURE_UNAVAILABLE.
+ *  SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2809,7 +2753,7 @@ GLFWAPI void glfwSetWindowIcon(GLFWwindow* window, int count, const GLFWimage* i
  *
  *  @ingroup window
  */
-GLFWAPI void glfwGetWindowPos(GLFWwindow* window, int* xpos, int* ypos);
+GLFWAPI void glfwGetWindowPos(sc_window* window, int* xpos, int* ypos);
 
 /*! @brief 设置指定窗口内容区域的位置。
  *
@@ -2827,12 +2771,12 @@ GLFWAPI void glfwGetWindowPos(GLFWwindow* window, int* xpos, int* ypos);
  *  @param[in] xpos The x-coordinate of the upper-left corner of the content area.
  *  @param[in] ypos The y-coordinate of the upper-left corner of the content area.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_ERROR and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  GLFW_PLATFORM_ERROR and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ Window positions are not currently part of any common
  *  Wayland protocol, so this function cannot be implemented and will emit @ref
- *  GLFW_FEATURE_UNAVAILABLE.
+ *  SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2844,7 +2788,7 @@ GLFWAPI void glfwGetWindowPos(GLFWwindow* window, int* xpos, int* ypos);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowPos(GLFWwindow* window, int xpos, int ypos);
+GLFWAPI void glfwSetWindowPos(sc_window* window, int xpos, int ypos);
 
 /*! @brief 获取指定窗口内容区域的大小。
  *
@@ -2860,7 +2804,7 @@ GLFWAPI void glfwSetWindowPos(GLFWwindow* window, int xpos, int ypos);
  *  @param[out] height Where to store the height, in screen coordinates, of the
  *  content area, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2872,7 +2816,7 @@ GLFWAPI void glfwSetWindowPos(GLFWwindow* window, int xpos, int ypos);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwGetWindowSize(GLFWwindow* window, int* width, int* height);
+GLFWAPI void glfwGetWindowSize(sc_window* window, int* width, int* height);
 
 /*! @brief Sets the size limits of the specified window.
  *
@@ -2888,15 +2832,15 @@ GLFWAPI void glfwGetWindowSize(GLFWwindow* window, int* width, int* height);
  *
  *  @param[in] window The window to set limits for.
  *  @param[in] minwidth The minimum width, in screen coordinates, of the content
- *  area, or `GLFW_DONT_CARE`.
+ *  area, or `SC_DONT_CARE`.
  *  @param[in] minheight The minimum height, in screen coordinates, of the
- *  content area, or `GLFW_DONT_CARE`.
+ *  content area, or `SC_DONT_CARE`.
  *  @param[in] maxwidth The maximum width, in screen coordinates, of the content
- *  area, or `GLFW_DONT_CARE`.
+ *  area, or `SC_DONT_CARE`.
  *  @param[in] maxheight The maximum height, in screen coordinates, of the
- *  content area, or `GLFW_DONT_CARE`.
+ *  content area, or `SC_DONT_CARE`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED、@ref GLFW_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED、@ref SC_WIN_ERR_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark If you set size limits and an aspect ratio that conflict, the
  *  results are undefined.
@@ -2913,7 +2857,7 @@ GLFWAPI void glfwGetWindowSize(GLFWwindow* window, int* width, int* height);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowSizeLimits(GLFWwindow* window, int minwidth, int minheight, int maxwidth, int maxheight);
+GLFWAPI void glfwSetWindowSizeLimits(sc_window* window, int minwidth, int minheight, int maxwidth, int maxheight);
 
 /*! @brief Sets the aspect ratio of the specified window.
  *
@@ -2925,7 +2869,7 @@ GLFWAPI void glfwSetWindowSizeLimits(GLFWwindow* window, int minwidth, int minhe
  *  values must be greater than zero.  For example, the common 16:9 aspect ratio
  *  is specified as 16 and 9, respectively.
  *
- *  If the numerator and denominator is set to `GLFW_DONT_CARE` then the aspect
+ *  If the numerator and denominator is set to `SC_DONT_CARE` then the aspect
  *  ratio limit is disabled.
  *
  *  The aspect ratio is applied immediately to a windowed mode window and may
@@ -2933,11 +2877,11 @@ GLFWAPI void glfwSetWindowSizeLimits(GLFWwindow* window, int minwidth, int minhe
  *
  *  @param[in] window The window to set limits for.
  *  @param[in] numer The numerator of the desired aspect ratio, or
- *  `GLFW_DONT_CARE`.
+ *  `SC_DONT_CARE`.
  *  @param[in] denom The denominator of the desired aspect ratio, or
- *  `GLFW_DONT_CARE`.
+ *  `SC_DONT_CARE`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED、@ref GLFW_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED、@ref SC_WIN_ERR_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark If you set size limits and an aspect ratio that conflict, the
  *  results are undefined.
@@ -2954,7 +2898,7 @@ GLFWAPI void glfwSetWindowSizeLimits(GLFWwindow* window, int minwidth, int minhe
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowAspectRatio(GLFWwindow* window, int numer, int denom);
+GLFWAPI void glfwSetWindowAspectRatio(sc_window* window, int numer, int denom);
 
 /*! @brief 设置指定窗口内容区域的大小。
  *
@@ -2977,7 +2921,7 @@ GLFWAPI void glfwSetWindowAspectRatio(GLFWwindow* window, int numer, int denom);
  *  @param[in] height The desired height, in screen coordinates, of the window
  *  content area.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -2990,7 +2934,7 @@ GLFWAPI void glfwSetWindowAspectRatio(GLFWwindow* window, int numer, int denom);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowSize(GLFWwindow* window, int width, int height);
+GLFWAPI void glfwSetWindowSize(sc_window* window, int width, int height);
 
 
 /*! @brief 获取指定窗口边框的大小。
@@ -3016,7 +2960,7 @@ GLFWAPI void glfwSetWindowSize(GLFWwindow* window, int width, int height);
  *  @param[out] bottom Where to store the size, in screen coordinates, of the
  *  bottom edge of the window frame, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3026,7 +2970,7 @@ GLFWAPI void glfwSetWindowSize(GLFWwindow* window, int width, int height);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwGetWindowFrameSize(GLFWwindow* window, int* left, int* top, int* right, int* bottom);
+GLFWAPI void glfwGetWindowFrameSize(sc_window* window, int* left, int* top, int* right, int* bottom);
 
 /*! @brief 获取指定窗口的内容缩放比例。
  *
@@ -3046,7 +2990,7 @@ GLFWAPI void glfwGetWindowFrameSize(GLFWwindow* window, int* left, int* top, int
  *  @param[out] xscale 存储 x 轴内容缩放比例的位置，或 `NULL`。
  *  @param[out] yscale 存储 y 轴内容缩放比例的位置，或 `NULL`。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3058,7 +3002,7 @@ GLFWAPI void glfwGetWindowFrameSize(GLFWwindow* window, int* left, int* top, int
  *
  *  @ingroup window
  */
-GLFWAPI void glfwGetWindowContentScale(GLFWwindow* window, float* xscale, float* yscale);
+GLFWAPI void glfwGetWindowContentScale(sc_window* window, float* xscale, float* yscale);
 
 /*! @brief 返回整个窗口的不透明度。
  *
@@ -3073,7 +3017,7 @@ GLFWAPI void glfwGetWindowContentScale(GLFWwindow* window, float* xscale, float*
  *  @param[in] window 要查询的窗口。
  *  @return The opacity value of the specified window.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3084,7 +3028,7 @@ GLFWAPI void glfwGetWindowContentScale(GLFWwindow* window, float* xscale, float*
  *
  *  @ingroup window
  */
-GLFWAPI float glfwGetWindowOpacity(GLFWwindow* window);
+GLFWAPI float glfwGetWindowOpacity(sc_window* window);
 
 /*! @brief 设置整个窗口的不透明度。
  *
@@ -3101,11 +3045,11 @@ GLFWAPI float glfwGetWindowOpacity(GLFWwindow* window);
  *  @param[in] window The window to set the opacity for.
  *  @param[in] opacity The desired opacity of the specified window.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_ERROR and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  GLFW_PLATFORM_ERROR and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ There is no way to set an opacity factor for a window.
- *  This function will emit @ref GLFW_FEATURE_UNAVAILABLE.
+ *  This function will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3116,7 +3060,7 @@ GLFWAPI float glfwGetWindowOpacity(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowOpacity(GLFWwindow* window, float opacity);
+GLFWAPI void glfwSetWindowOpacity(sc_window* window, float opacity);
 
 /*! @brief 最小化指定窗口。
  *
@@ -3129,7 +3073,7 @@ GLFWAPI void glfwSetWindowOpacity(GLFWwindow* window, float opacity);
  *
  *  @param[in] window The window to iconify.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3142,7 +3086,7 @@ GLFWAPI void glfwSetWindowOpacity(GLFWwindow* window, float opacity);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwIconifyWindow(GLFWwindow* window);
+GLFWAPI void glfwIconifyWindow(sc_window* window);
 
 /*! @brief 恢复指定窗口。
  *
@@ -3154,7 +3098,7 @@ GLFWAPI void glfwIconifyWindow(GLFWwindow* window);
  *
  *  @param[in] window The window to restore.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __Wayland:__ Restoring a window from maximization is not currently
  *  part of any common Wayland protocol, so this function can only restore
@@ -3171,7 +3115,7 @@ GLFWAPI void glfwIconifyWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwRestoreWindow(GLFWwindow* window);
+GLFWAPI void glfwRestoreWindow(sc_window* window);
 
 /*! @brief 最大化指定窗口。
  *
@@ -3181,7 +3125,7 @@ GLFWAPI void glfwRestoreWindow(GLFWwindow* window);
  *
  *  @param[in] window The window to maximize.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @par Thread Safety
  *  This function may only be called from the main thread.
@@ -3194,7 +3138,7 @@ GLFWAPI void glfwRestoreWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwMaximizeWindow(GLFWwindow* window);
+GLFWAPI void glfwMaximizeWindow(sc_window* window);
 
 /*! @brief 显示指定窗口。
  *
@@ -3202,13 +3146,13 @@ GLFWAPI void glfwMaximizeWindow(GLFWwindow* window);
  *  function does nothing.
  *
  *  By default, windowed mode windows are focused when shown
- *  Set the [GLFW_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) window hint
+ *  Set the [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) window hint
  *  to change this behavior for all newly created windows, or change the
  *  behavior for an existing window with @ref glfwSetWindowAttrib.
  *
  *  @param[in] window The window to make visible.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __Wayland:__ Because Wayland wants every frame of the desktop to be
  *  complete, this function does not immediately make the window visible.
@@ -3224,7 +3168,7 @@ GLFWAPI void glfwMaximizeWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwShowWindow(GLFWwindow* window);
+GLFWAPI void glfwShowWindow(sc_window* window);
 
 /*! @brief 隐藏指定窗口。
  *
@@ -3234,7 +3178,7 @@ GLFWAPI void glfwShowWindow(GLFWwindow* window);
  *
  *  @param[in] window The window to hide.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3245,7 +3189,7 @@ GLFWAPI void glfwShowWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwHideWindow(GLFWwindow* window);
+GLFWAPI void glfwHideWindow(sc_window* window);
 
 /*! @brief Brings the specified window to front and sets input focus.
  *
@@ -3253,12 +3197,12 @@ GLFWAPI void glfwHideWindow(GLFWwindow* window);
  *  窗口应已可见且未最小化。
  *
  *  By default, both windowed and full screen mode windows are focused when
- *  initially created.  Set the [GLFW_FOCUSED](@ref GLFW_FOCUSED_hint) to
+ *  initially created.  Set the [SC_WIN_FOCUSED](@ref GLFW_FOCUSED_hint) to
  *  disable this behavior.
  *
  *  Also by default, windowed mode windows are focused when shown
  *  with @ref glfwShowWindow. Set the
- *  [GLFW_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) to disable this behavior.
+ *  [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) to disable this behavior.
  *
  *  __Do not use this function__ to steal focus from other applications unless
  *  you are certain that is what the user wants.  Focus stealing can be
@@ -3269,7 +3213,7 @@ GLFWAPI void glfwHideWindow(GLFWwindow* window);
  *
  *  @param[in] window The window to give input focus.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __Wayland:__ The compositor will likely ignore focus requests unless
  *  another window created by the same application already has input focus.
@@ -3283,7 +3227,7 @@ GLFWAPI void glfwHideWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwFocusWindow(GLFWwindow* window);
+GLFWAPI void glfwFocusWindow(sc_window* window);
 
 /*! @brief 请求用户注意指定窗口。
  *
@@ -3296,7 +3240,7 @@ GLFWAPI void glfwFocusWindow(GLFWwindow* window);
  *
  *  @param[in] window The window to request attention to.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __macOS:__ Attention is requested to the application as a whole, not the
  *  specific window.
@@ -3309,7 +3253,7 @@ GLFWAPI void glfwFocusWindow(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwRequestWindowAttention(GLFWwindow* window);
+GLFWAPI void glfwRequestWindowAttention(sc_window* window);
 
 /*! @brief 返回窗口全屏模式使用的监视器。
  *
@@ -3319,7 +3263,7 @@ GLFWAPI void glfwRequestWindowAttention(GLFWwindow* window);
  *  @return The monitor, or `NULL` if the window is in windowed mode or an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3330,7 +3274,7 @@ GLFWAPI void glfwRequestWindowAttention(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI GLFWmonitor* glfwGetWindowMonitor(GLFWwindow* window);
+GLFWAPI sc_monitor* glfwGetWindowMonitor(sc_window* window);
 
 /*! @brief 设置窗口的模式、监视器、视频模式和位置。
  *
@@ -3363,9 +3307,9 @@ GLFWAPI GLFWmonitor* glfwGetWindowMonitor(GLFWwindow* window);
  *  @param[in] height The desired height, in screen coordinates, of the content
  *  area or video mode.
  *  @param[in] refreshRate The desired refresh rate, in Hz, of the video mode,
- *  or `GLFW_DONT_CARE`.
+ *  or `SC_DONT_CARE`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark The OpenGL or OpenGL ES context will not be destroyed or otherwise
  *  affected by any resizing or mode switching, although you may need to update
@@ -3385,7 +3329,7 @@ GLFWAPI GLFWmonitor* glfwGetWindowMonitor(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowMonitor(GLFWwindow* window, GLFWmonitor* monitor, int xpos, int ypos, int width, int height, int refreshRate);
+GLFWAPI void glfwSetWindowMonitor(sc_window* window, sc_monitor* monitor, int xpos, int ypos, int width, int height, int refreshRate);
 
 /*! @brief 返回指定窗口的属性。
  *
@@ -3398,7 +3342,7 @@ GLFWAPI void glfwSetWindowMonitor(GLFWwindow* window, GLFWmonitor* monitor, int 
  *  @return The value of the attribute, or zero if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED、@ref GLFW_INVALID_ENUM 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED、@ref SC_WIN_ERR_INVALID_ENUM 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark Framebuffer related hints are not window attributes.  See @ref
  *  window_attribs_fb for more information.
@@ -3409,7 +3353,7 @@ GLFWAPI void glfwSetWindowMonitor(GLFWwindow* window, GLFWmonitor* monitor, int 
  *  valid arguments and the library has been [initialized](@ref intro_init).
  *
  *  @remark __Wayland:__ Checking whether a window is iconified is not currently
- *  part of any common Wayland protocol, so the @ref GLFW_ICONIFIED attribute
+ *  part of any common Wayland protocol, so the @ref SC_WIN_ICONIFIED attribute
  *  cannot be implemented and is always `GLFW_FALSE`.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -3422,14 +3366,14 @@ GLFWAPI void glfwSetWindowMonitor(GLFWwindow* window, GLFWmonitor* monitor, int 
  *
  *  @ingroup window
  */
-GLFWAPI int glfwGetWindowAttrib(GLFWwindow* window, int attrib);
+GLFWAPI int glfwGetWindowAttrib(sc_window* window, int attrib);
 
 /*! @brief 设置指定窗口的属性。
  *
  *  此函数设置指定窗口的属性值。
  *
- *  支持的属性有 [GLFW_DECORATED](@ref GLFW_DECORATED_attrib)、[GLFW_RESIZABLE](@ref GLFW_RESIZABLE_attrib)、[GLFW_FLOATING](@ref GLFW_FLOATING_attrib)、[GLFW_AUTO_ICONIFY](@ref GLFW_AUTO_ICONIFY_attrib) 和 [GLFW_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_attrib)。
- *  [GLFW_MOUSE_PASSTHROUGH](@ref GLFW_MOUSE_PASSTHROUGH_attrib)
+ *  支持的属性有 [SC_WIN_DECORATED](@ref GLFW_DECORATED_attrib)、[SC_WIN_RESIZABLE](@ref GLFW_RESIZABLE_attrib)、[SC_WIN_FLOATING](@ref GLFW_FLOATING_attrib)、[SC_WIN_AUTO_ICONIFY](@ref GLFW_AUTO_ICONIFY_attrib) 和 [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_attrib)。
+ *  [SC_WIN_MOUSE_PASSTHROUGH](@ref SC_MOUSE_PASSTHROUGH_attrib)
  *
  *  Some of these attributes are ignored for full screen windows.  The new
  *  value will take effect if the window is later made windowed.
@@ -3441,15 +3385,15 @@ GLFWAPI int glfwGetWindowAttrib(GLFWwindow* window, int attrib);
  *  @param[in] attrib A supported window attribute.
  *  @param[in] value `GLFW_TRUE` or `GLFW_FALSE`.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_ENUM, @ref GLFW_INVALID_VALUE, @ref GLFW_PLATFORM_ERROR and @ref
- *  GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_ENUM, @ref SC_WIN_ERR_INVALID_VALUE, @ref GLFW_PLATFORM_ERROR and @ref
+ *  SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark Calling @ref glfwGetWindowAttrib will always return the latest
  *  value, even if that value is ignored by the current mode of the window.
  *
- *  @remark __Wayland:__ The [GLFW_FLOATING](@ref GLFW_FLOATING_attrib) window attribute is
- *  not supported.  Setting this will emit @ref GLFW_FEATURE_UNAVAILABLE.
+ *  @remark __Wayland:__ The [SC_WIN_FLOATING](@ref GLFW_FLOATING_attrib) window attribute is
+ *  not supported.  Setting this will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3460,7 +3404,7 @@ GLFWAPI int glfwGetWindowAttrib(GLFWwindow* window, int attrib);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowAttrib(GLFWwindow* window, int attrib, int value);
+GLFWAPI void glfwSetWindowAttrib(sc_window* window, int attrib, int value);
 
 /*! @brief 设置指定窗口的用户指针。
  *
@@ -3471,7 +3415,7 @@ GLFWAPI void glfwSetWindowAttrib(GLFWwindow* window, int attrib, int value);
  *  @param[in] window The window whose pointer to set.
  *  @param[in] pointer The new value.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -3483,7 +3427,7 @@ GLFWAPI void glfwSetWindowAttrib(GLFWwindow* window, int attrib, int value);
  *
  *  @ingroup window
  */
-GLFWAPI void glfwSetWindowUserPointer(GLFWwindow* window, void* pointer);
+GLFWAPI void glfwSetWindowUserPointer(sc_window* window, void* pointer);
 
 /*! @brief 返回指定窗口的用户指针。
  *
@@ -3492,7 +3436,7 @@ GLFWAPI void glfwSetWindowUserPointer(GLFWwindow* window, void* pointer);
  *
  *  @param[in] window The window whose pointer to return.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Access is not
  *  synchronized.
@@ -3504,7 +3448,7 @@ GLFWAPI void glfwSetWindowUserPointer(GLFWwindow* window, void* pointer);
  *
  *  @ingroup window
  */
-GLFWAPI void* glfwGetWindowUserPointer(GLFWwindow* window);
+GLFWAPI void* glfwGetWindowUserPointer(sc_window* window);
 
 /*! @brief 设置指定窗口的位置回调。
  *
@@ -3519,12 +3463,12 @@ GLFWAPI void* glfwGetWindowUserPointer(GLFWwindow* window);
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int xpos, int ypos)
+ *  void function_name(sc_window* window, int xpos, int ypos)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowposfun).
+ *  [function pointer type](@ref sc_win_pos_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @remark __Wayland:__ This callback will not be called.  The Wayland protocol
  *  provides no way to be notified of when a window is moved.
@@ -3537,7 +3481,7 @@ GLFWAPI void* glfwGetWindowUserPointer(GLFWwindow* window);
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowposfun glfwSetWindowPosCallback(GLFWwindow* window, GLFWwindowposfun callback);
+GLFWAPI sc_win_pos_cb glfwSetWindowPosCallback(sc_window* window, sc_win_pos_cb callback);
 
 /*! @brief 设置指定窗口的大小回调。
  *
@@ -3552,12 +3496,12 @@ GLFWAPI GLFWwindowposfun glfwSetWindowPosCallback(GLFWwindow* window, GLFWwindow
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int width, int height)
+ *  void function_name(sc_window* window, int width, int height)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowsizefun).
+ *  [function pointer type](@ref sc_win_size_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3568,7 +3512,7 @@ GLFWAPI GLFWwindowposfun glfwSetWindowPosCallback(GLFWwindow* window, GLFWwindow
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowsizefun glfwSetWindowSizeCallback(GLFWwindow* window, GLFWwindowsizefun callback);
+GLFWAPI sc_win_size_cb glfwSetWindowSizeCallback(sc_window* window, sc_win_size_cb callback);
 
 /*! @brief 设置指定窗口的关闭回调。
  *
@@ -3586,12 +3530,12 @@ GLFWAPI GLFWwindowsizefun glfwSetWindowSizeCallback(GLFWwindow* window, GLFWwind
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window)
+ *  void function_name(sc_window* window)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowclosefun).
+ *  [function pointer type](@ref sc_win_close_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @remark __macOS:__ Selecting Quit from the application menu will trigger the
  *  close callback for all windows.
@@ -3605,7 +3549,7 @@ GLFWAPI GLFWwindowsizefun glfwSetWindowSizeCallback(GLFWwindow* window, GLFWwind
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowclosefun glfwSetWindowCloseCallback(GLFWwindow* window, GLFWwindowclosefun callback);
+GLFWAPI sc_win_close_cb glfwSetWindowCloseCallback(sc_window* window, sc_win_close_cb callback);
 
 /*! @brief 设置指定窗口的刷新回调。
  *
@@ -3622,12 +3566,12 @@ GLFWAPI GLFWwindowclosefun glfwSetWindowCloseCallback(GLFWwindow* window, GLFWwi
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window);
+ *  void function_name(sc_window* window);
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowrefreshfun).
+ *  [function pointer type](@ref sc_win_refresh_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3638,7 +3582,7 @@ GLFWAPI GLFWwindowclosefun glfwSetWindowCloseCallback(GLFWwindow* window, GLFWwi
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowrefreshfun glfwSetWindowRefreshCallback(GLFWwindow* window, GLFWwindowrefreshfun callback);
+GLFWAPI sc_win_refresh_cb glfwSetWindowRefreshCallback(sc_window* window, sc_win_refresh_cb callback);
 
 /*! @brief 设置指定窗口的焦点回调。
  *
@@ -3656,12 +3600,12 @@ GLFWAPI GLFWwindowrefreshfun glfwSetWindowRefreshCallback(GLFWwindow* window, GL
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int focused)
+ *  void function_name(sc_window* window, int focused)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowfocusfun).
+ *  [function pointer type](@ref sc_win_focus_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3671,7 +3615,7 @@ GLFWAPI GLFWwindowrefreshfun glfwSetWindowRefreshCallback(GLFWwindow* window, GL
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowfocusfun glfwSetWindowFocusCallback(GLFWwindow* window, GLFWwindowfocusfun callback);
+GLFWAPI sc_win_focus_cb glfwSetWindowFocusCallback(sc_window* window, sc_win_focus_cb callback);
 
 /*! @brief 设置指定窗口的最小化回调。
  *
@@ -3685,12 +3629,12 @@ GLFWAPI GLFWwindowfocusfun glfwSetWindowFocusCallback(GLFWwindow* window, GLFWwi
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int iconified)
+ *  void function_name(sc_window* window, int iconified)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowiconifyfun).
+ *  [function pointer type](@ref sc_win_iconify_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @remark __Wayland:__ This callback will not be called.  The Wayland protocol
  *  provides no way to be notified of when a window is iconified, and no way to
@@ -3704,7 +3648,7 @@ GLFWAPI GLFWwindowfocusfun glfwSetWindowFocusCallback(GLFWwindow* window, GLFWwi
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowiconifyfun glfwSetWindowIconifyCallback(GLFWwindow* window, GLFWwindowiconifyfun callback);
+GLFWAPI sc_win_iconify_cb glfwSetWindowIconifyCallback(sc_window* window, sc_win_iconify_cb callback);
 
 /*! @brief 设置指定窗口的最大化回调。
  *
@@ -3718,12 +3662,12 @@ GLFWAPI GLFWwindowiconifyfun glfwSetWindowIconifyCallback(GLFWwindow* window, GL
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int maximized)
+ *  void function_name(sc_window* window, int maximized)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowmaximizefun).
+ *  [function pointer type](@ref sc_win_maximize_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3733,7 +3677,7 @@ GLFWAPI GLFWwindowiconifyfun glfwSetWindowIconifyCallback(GLFWwindow* window, GL
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowmaximizefun glfwSetWindowMaximizeCallback(GLFWwindow* window, GLFWwindowmaximizefun callback);
+GLFWAPI sc_win_maximize_cb glfwSetWindowMaximizeCallback(sc_window* window, sc_win_maximize_cb callback);
 
 
 /*! @brief 设置指定窗口的内容缩放回调。
@@ -3747,12 +3691,12 @@ GLFWAPI GLFWwindowmaximizefun glfwSetWindowMaximizeCallback(GLFWwindow* window, 
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, float xscale, float yscale)
+ *  void function_name(sc_window* window, float xscale, float yscale)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWwindowcontentscalefun).
+ *  [function pointer type](@ref sc_win_content_scale_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3763,7 +3707,7 @@ GLFWAPI GLFWwindowmaximizefun glfwSetWindowMaximizeCallback(GLFWwindow* window, 
  *
  *  @ingroup window
  */
-GLFWAPI GLFWwindowcontentscalefun glfwSetWindowContentScaleCallback(GLFWwindow* window, GLFWwindowcontentscalefun callback);
+GLFWAPI sc_win_content_scale_cb glfwSetWindowContentScaleCallback(sc_window* window, sc_win_content_scale_cb callback);
 
 /*! @brief 处理所有待处理事件。
  *
@@ -3784,7 +3728,7 @@ GLFWAPI GLFWwindowcontentscalefun glfwSetWindowContentScaleCallback(GLFWwindow* 
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @reentrancy 此函数禁止在回调中调用。
  *
@@ -3825,7 +3769,7 @@ GLFWAPI void glfwPollEvents(void);
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @reentrancy 此函数禁止在回调中调用。
  *
@@ -3873,7 +3817,7 @@ GLFWAPI void glfwWaitEvents(void);
  *
  *  @param[in] timeout The maximum amount of time, in seconds, to wait.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED、@ref GLFW_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED、@ref SC_WIN_ERR_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @reentrancy 此函数禁止在回调中调用。
  *
@@ -3893,7 +3837,7 @@ GLFWAPI void glfwWaitEventsTimeout(double timeout);
  *
  *  此函数从当前线程向事件队列发送一个空事件，导致 @ref glfwWaitEvents 或 @ref glfwWaitEventsTimeout 返回。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
@@ -3910,16 +3854,16 @@ GLFWAPI void glfwPostEmptyEvent(void);
 /*! @brief 返回指定窗口的输入选项值。
  *
  *  This function returns the value of an input option for the specified window.
- *  The mode must be one of @ref GLFW_CURSOR, @ref GLFW_STICKY_KEYS,
- *  @ref GLFW_STICKY_MOUSE_BUTTONS, @ref GLFW_LOCK_KEY_MODS or
- *  @ref GLFW_RAW_MOUSE_MOTION.
+ *  The mode must be one of @ref SC_CURSOR, @ref SC_STICKY_KEYS,
+ *  @ref SC_STICKY_MOUSE_BUTTONS, @ref SC_LOCK_KEY_MODS or
+ *  @ref SC_RAW_MOUSE_MOTION.
  *
  *  @param[in] window 要查询的窗口。
- *  @param[in] mode One of `GLFW_CURSOR`, `GLFW_STICKY_KEYS`,
- *  `GLFW_STICKY_MOUSE_BUTTONS`, `GLFW_LOCK_KEY_MODS` or
- *  `GLFW_RAW_MOUSE_MOTION`.
+ *  @param[in] mode One of `SC_CURSOR`, `SC_STICKY_KEYS`,
+ *  `SC_STICKY_MOUSE_BUTTONS`, `SC_LOCK_KEY_MODS` or
+ *  `SC_RAW_MOUSE_MOTION`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3929,65 +3873,65 @@ GLFWAPI void glfwPostEmptyEvent(void);
  *
  *  @ingroup input
  */
-GLFWAPI int glfwGetInputMode(GLFWwindow* window, int mode);
+GLFWAPI int glfwGetInputMode(sc_window* window, int mode);
 
 /*! @brief 设置指定窗口的输入选项。
  *
  *  This function sets an input mode option for the specified window.  The mode
- *  must be one of @ref GLFW_CURSOR, @ref GLFW_STICKY_KEYS,
- *  @ref GLFW_STICKY_MOUSE_BUTTONS, @ref GLFW_LOCK_KEY_MODS
- *  @ref GLFW_RAW_MOUSE_MOTION, or @ref GLFW_UNLIMITED_MOUSE_BUTTONS.
+ *  must be one of @ref SC_CURSOR, @ref SC_STICKY_KEYS,
+ *  @ref SC_STICKY_MOUSE_BUTTONS, @ref SC_LOCK_KEY_MODS
+ *  @ref SC_RAW_MOUSE_MOTION, or @ref SC_UNLIMITED_MOUSE_BUTTONS.
  *
- *  If the mode is `GLFW_CURSOR`, the value must be one of the following cursor
+ *  If the mode is `SC_CURSOR`, the value must be one of the following cursor
  *  modes:
- *  - `GLFW_CURSOR_NORMAL` makes the cursor visible and behaving normally.
- *  - `GLFW_CURSOR_HIDDEN` makes the cursor invisible when it is over the
+ *  - `SC_CURSOR_NORMAL` makes the cursor visible and behaving normally.
+ *  - `SC_CURSOR_HIDDEN` makes the cursor invisible when it is over the
  *    content area of the window but does not restrict the cursor from leaving.
- *  - `GLFW_CURSOR_DISABLED` hides and grabs the cursor, providing virtual
+ *  - `SC_CURSOR_DISABLED` hides and grabs the cursor, providing virtual
  *    and unlimited cursor movement.  This is useful for implementing for
  *    example 3D camera controls.
- *  - `GLFW_CURSOR_CAPTURED` makes the cursor visible and confines it to the
+ *  - `SC_CURSOR_CAPTURED` makes the cursor visible and confines it to the
  *    content area of the window.
  *
- *  如果 mode 是 `GLFW_STICKY_KEYS`，值必须是 `GLFW_TRUE` 启用粘滞键，或 `GLFW_FALSE` 禁用。  If sticky keys are
- *  enabled, a key press will ensure that @ref glfwGetKey returns `GLFW_PRESS`
+ *  如果 mode 是 `SC_STICKY_KEYS`，值必须是 `GLFW_TRUE` 启用粘滞键，或 `GLFW_FALSE` 禁用。  If sticky keys are
+ *  enabled, a key press will ensure that @ref glfwGetKey returns `SC_PRESS`
  *  the next time it is called even if the key had been released before the
  *  call.  This is useful when you are only interested in whether keys have been
  *  pressed but not when or in which order.
  *
- *  如果 mode 是 `GLFW_STICKY_MOUSE_BUTTONS`，值必须是 `GLFW_TRUE` 启用粘滞鼠标按钮，或 `GLFW_FALSE` 禁用。
+ *  如果 mode 是 `SC_STICKY_MOUSE_BUTTONS`，值必须是 `GLFW_TRUE` 启用粘滞鼠标按钮，或 `GLFW_FALSE` 禁用。
  *  If sticky mouse buttons are enabled, a mouse button press will ensure that
- *  @ref glfwGetMouseButton returns `GLFW_PRESS` the next time it is called even
+ *  @ref glfwGetMouseButton returns `SC_PRESS` the next time it is called even
  *  if the mouse button had been released before the call.  This is useful when
  *  you are only interested in whether mouse buttons have been pressed but not
  *  when or in which order.
  *
- *  If the mode is `GLFW_LOCK_KEY_MODS`, the value must be either `GLFW_TRUE` to
+ *  If the mode is `SC_LOCK_KEY_MODS`, the value must be either `GLFW_TRUE` to
  *  enable lock key modifier bits, or `GLFW_FALSE` to disable them.  If enabled,
  *  callbacks that receive modifier bits will also have the @ref
- *  GLFW_MOD_CAPS_LOCK bit set when the event was generated with Caps Lock on,
- *  and the @ref GLFW_MOD_NUM_LOCK bit when Num Lock was on.
+ *  SC_MOD_CAPS_LOCK bit set when the event was generated with Caps Lock on,
+ *  and the @ref SC_MOD_NUM_LOCK bit when Num Lock was on.
  *
- *  If the mode is `GLFW_RAW_MOUSE_MOTION`, the value must be either `GLFW_TRUE`
+ *  If the mode is `SC_RAW_MOUSE_MOTION`, the value must be either `GLFW_TRUE`
  *  to enable raw (unscaled and unaccelerated) mouse motion when the cursor is
  *  disabled, or `GLFW_FALSE` to disable it.  If raw motion is not supported,
- *  attempting to set this will emit @ref GLFW_FEATURE_UNAVAILABLE.  Call @ref
+ *  attempting to set this will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.  Call @ref
  *  glfwRawMouseMotionSupported to check for support.
  *
- *  If the mode is `GLFW_UNLIMITED_MOUSE_BUTTONS`, the value must be either
+ *  If the mode is `SC_UNLIMITED_MOUSE_BUTTONS`, the value must be either
  *  `GLFW_TRUE` to disable the mouse button limit when calling the mouse button
  *  callback, or `GLFW_FALSE` to limit the mouse buttons sent to the callback
- *  to the mouse button token values up to `GLFW_MOUSE_BUTTON_LAST`.
+ *  to the mouse button token values up to `SC_MOUSE_BUTTON_LAST`.
  *
  *  @param[in] window The window whose input mode to set.
- *  @param[in] mode One of `GLFW_CURSOR`, `GLFW_STICKY_KEYS`,
- *  `GLFW_STICKY_MOUSE_BUTTONS`, `GLFW_LOCK_KEY_MODS` or
- *  `GLFW_RAW_MOUSE_MOTION`.
+ *  @param[in] mode One of `SC_CURSOR`, `SC_STICKY_KEYS`,
+ *  `SC_STICKY_MOUSE_BUTTONS`, `SC_LOCK_KEY_MODS` or
+ *  `SC_RAW_MOUSE_MOTION`.
  *  @param[in] value 指定输入模式的新值。
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_ENUM, @ref GLFW_PLATFORM_ERROR and @ref
- *  GLFW_FEATURE_UNAVAILABLE (see above).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_ENUM, @ref GLFW_PLATFORM_ERROR and @ref
+ *  SC_WIN_ERR_FEATURE_UNAVAILABLE (see above).
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -3997,7 +3941,7 @@ GLFWAPI int glfwGetInputMode(GLFWwindow* window, int mode);
  *
  *  @ingroup input
  */
-GLFWAPI void glfwSetInputMode(GLFWwindow* window, int mode, int value);
+GLFWAPI void glfwSetInputMode(sc_window* window, int mode, int value);
 
 /*! @brief 返回是否支持原始鼠标运动。
  *
@@ -4014,7 +3958,7 @@ GLFWAPI void glfwSetInputMode(GLFWwindow* window, int mode, int value);
  *  @return `GLFW_TRUE` if raw mouse motion is supported on the current machine,
  *  or `GLFW_FALSE` otherwise.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4037,47 +3981,47 @@ GLFWAPI int glfwRawMouseMotionSupported(void);
  *  __Do not use this function__ for [text input](@ref input_char).  You will
  *  break text input for many languages even if it happens to work for yours.
  *
- *  If the key is `GLFW_KEY_UNKNOWN`, the scancode is used to identify the key,
+ *  If the key is `SC_KEY_UNKNOWN`, the scancode is used to identify the key,
  *  otherwise the scancode is ignored.  If you specify a non-printable key, or
- *  `GLFW_KEY_UNKNOWN` and a scancode that maps to a non-printable key, this
+ *  `SC_KEY_UNKNOWN` and a scancode that maps to a non-printable key, this
  *  function returns `NULL` but does not emit an error.
  *
  *  This behavior allows you to always pass in the arguments in the
  *  [key callback](@ref input_key) without modification.
  *
  *  The printable keys are:
- *  - `GLFW_KEY_APOSTROPHE`
- *  - `GLFW_KEY_COMMA`
- *  - `GLFW_KEY_MINUS`
- *  - `GLFW_KEY_PERIOD`
- *  - `GLFW_KEY_SLASH`
- *  - `GLFW_KEY_SEMICOLON`
- *  - `GLFW_KEY_EQUAL`
- *  - `GLFW_KEY_LEFT_BRACKET`
- *  - `GLFW_KEY_RIGHT_BRACKET`
- *  - `GLFW_KEY_BACKSLASH`
- *  - `GLFW_KEY_WORLD_1`
- *  - `GLFW_KEY_WORLD_2`
- *  - `GLFW_KEY_0` to `GLFW_KEY_9`
- *  - `GLFW_KEY_A` to `GLFW_KEY_Z`
- *  - `GLFW_KEY_KP_0` to `GLFW_KEY_KP_9`
- *  - `GLFW_KEY_KP_DECIMAL`
- *  - `GLFW_KEY_KP_DIVIDE`
- *  - `GLFW_KEY_KP_MULTIPLY`
- *  - `GLFW_KEY_KP_SUBTRACT`
- *  - `GLFW_KEY_KP_ADD`
- *  - `GLFW_KEY_KP_EQUAL`
+ *  - `SC_KEY_APOSTROPHE`
+ *  - `SC_KEY_COMMA`
+ *  - `SC_KEY_MINUS`
+ *  - `SC_KEY_PERIOD`
+ *  - `SC_KEY_SLASH`
+ *  - `SC_KEY_SEMICOLON`
+ *  - `SC_KEY_EQUAL`
+ *  - `SC_KEY_LEFT_BRACKET`
+ *  - `SC_KEY_RIGHT_BRACKET`
+ *  - `SC_KEY_BACKSLASH`
+ *  - `SC_KEY_WORLD_1`
+ *  - `SC_KEY_WORLD_2`
+ *  - `SC_KEY_0` to `SC_KEY_9`
+ *  - `SC_KEY_A` to `SC_KEY_Z`
+ *  - `SC_KEY_KP_0` to `SC_KEY_KP_9`
+ *  - `SC_KEY_KP_DECIMAL`
+ *  - `SC_KEY_KP_DIVIDE`
+ *  - `SC_KEY_KP_MULTIPLY`
+ *  - `SC_KEY_KP_SUBTRACT`
+ *  - `SC_KEY_KP_ADD`
+ *  - `SC_KEY_KP_EQUAL`
  *
  *  Names for printable keys depend on keyboard layout, while names for
  *  non-printable keys are the same across layouts but depend on the application
  *  language and should be localized along with other user interface text.
  *
- *  @param[in] key The key to query, or `GLFW_KEY_UNKNOWN`.
+ *  @param[in] key The key to query, or `SC_KEY_UNKNOWN`.
  *  @param[in] scancode The scancode of the key to query.
  *  @return The UTF-8 encoded, layout-specific name of the key, or `NULL`.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_VALUE, @ref GLFW_INVALID_ENUM and @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_VALUE, @ref SC_WIN_ERR_INVALID_ENUM and @ref GLFW_PLATFORM_ERROR.
  *
  *  @remark The contents of the returned string may change when a keyboard
  *  layout change event is received.
@@ -4102,14 +4046,14 @@ GLFWAPI const char* glfwGetKeyName(int key, int scancode);
  *  If the specified [key token](@ref keys) corresponds to a physical key not
  *  supported on the current platform then this method will return `-1`.
  *  Calling this function with anything other than a key token will return `-1`
- *  and generate a @ref GLFW_INVALID_ENUM error.
+ *  and generate a @ref SC_WIN_ERR_INVALID_ENUM error.
  *
  *  @param[in] key Any [key token](@ref keys).
  *  @return The platform-specific scancode for the key, or `-1` if the key is
  *  not supported on the current platform or an [error](@ref error_handling)
  *  occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
@@ -4124,10 +4068,10 @@ GLFWAPI int glfwGetKeyScancode(int key);
 /*! @brief Returns the last reported state of a keyboard key for the specified
  *  window.
  *
- *  此函数返回指定窗口中指定按键的最后报告状态。  返回的状态是 `GLFW_PRESS` 或 `GLFW_RELEASE` 之一。  The action `GLFW_REPEAT` is only reported to the key callback.
+ *  此函数返回指定窗口中指定按键的最后报告状态。  返回的状态是 `SC_PRESS` 或 `SC_RELEASE` 之一。  The action `SC_REPEAT` is only reported to the key callback.
  *
- *  If the @ref GLFW_STICKY_KEYS input mode is enabled, this function returns
- *  `GLFW_PRESS` the first time you call it for a key that was pressed, even if
+ *  If the @ref SC_STICKY_KEYS input mode is enabled, this function returns
+ *  `SC_PRESS` the first time you call it for a key that was pressed, even if
  *  that key has already been released.
  *
  *  The key functions deal with physical keys, with [key tokens](@ref keys)
@@ -4140,11 +4084,11 @@ GLFWAPI int glfwGetKeyScancode(int key);
  *  __Do not use this function__ to implement [text input](@ref input_char).
  *
  *  @param[in] window 目标窗口。
- *  @param[in] key 所需的 [键盘按键](@ref keys)。  `GLFW_KEY_UNKNOWN` is
+ *  @param[in] key 所需的 [键盘按键](@ref keys)。  `SC_KEY_UNKNOWN` is
  *  not a valid key for this function.
- *  @return One of `GLFW_PRESS` or `GLFW_RELEASE`.
+ *  @return One of `SC_PRESS` or `SC_RELEASE`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4155,25 +4099,25 @@ GLFWAPI int glfwGetKeyScancode(int key);
  *
  *  @ingroup input
  */
-GLFWAPI int glfwGetKey(GLFWwindow* window, int key);
+GLFWAPI int glfwGetKey(sc_window* window, int key);
 
 /*! @brief Returns the last reported state of a mouse button for the specified
  *  window.
  *
- *  此函数返回指定窗口中指定鼠标按钮的最后报告状态。  返回的状态是 `GLFW_PRESS` 或 `GLFW_RELEASE` 之一。
+ *  此函数返回指定窗口中指定鼠标按钮的最后报告状态。  返回的状态是 `SC_PRESS` 或 `SC_RELEASE` 之一。
  *
- *  If the @ref GLFW_STICKY_MOUSE_BUTTONS input mode is enabled, this function
- *  returns `GLFW_PRESS` the first time you call it for a mouse button that was
+ *  If the @ref SC_STICKY_MOUSE_BUTTONS input mode is enabled, this function
+ *  returns `SC_PRESS` the first time you call it for a mouse button that was
  *  pressed, even if that mouse button has already been released.
  *
- *  The @ref GLFW_UNLIMITED_MOUSE_BUTTONS input mode does not effect the
+ *  The @ref SC_UNLIMITED_MOUSE_BUTTONS input mode does not effect the
  *  limit on buttons which can be polled with this function.
  *
  *  @param[in] window 目标窗口。
  *  @param[in] button The desired [mouse button token](@ref buttons).
- *  @return One of `GLFW_PRESS` or `GLFW_RELEASE`.
+ *  @return One of `SC_PRESS` or `SC_RELEASE`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_ENUM。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_ENUM。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4184,14 +4128,14 @@ GLFWAPI int glfwGetKey(GLFWwindow* window, int key);
  *
  *  @ingroup input
  */
-GLFWAPI int glfwGetMouseButton(GLFWwindow* window, int button);
+GLFWAPI int glfwGetMouseButton(sc_window* window, int button);
 
 /*! @brief Retrieves the position of the cursor relative to the content area of
  *  the window.
  *
  *  此函数返回光标相对于指定窗口内容区域左上角的位置（屏幕坐标）。
  *
- *  如果光标被禁用（`GLFW_CURSOR_DISABLED`），光标位置不受限制，仅受 `double` 类型的最小值和最大值限制。
+ *  如果光标被禁用（`SC_CURSOR_DISABLED`），光标位置不受限制，仅受 `double` 类型的最小值和最大值限制。
  *
  *  The coordinate can be converted to their integer equivalents with the
  *  `floor` function.  Casting directly to an integer type works for positive
@@ -4206,7 +4150,7 @@ GLFWAPI int glfwGetMouseButton(GLFWwindow* window, int button);
  *  @param[out] ypos Where to store the cursor y-coordinate, relative to the to
  *  top edge of the content area, or `NULL`.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4217,7 +4161,7 @@ GLFWAPI int glfwGetMouseButton(GLFWwindow* window, int button);
  *
  *  @ingroup input
  */
-GLFWAPI void glfwGetCursorPos(GLFWwindow* window, double* xpos, double* ypos);
+GLFWAPI void glfwGetCursorPos(sc_window* window, double* xpos, double* ypos);
 
 /*! @brief Sets the position of the cursor, relative to the content area of the
  *  window.
@@ -4226,11 +4170,11 @@ GLFWAPI void glfwGetCursorPos(GLFWwindow* window, double* xpos, double* ypos);
  *  input focus when this function is called, it fails silently.
  *
  *  __Do not use this function__ to implement things like camera controls.  GLFW
- *  already provides the `GLFW_CURSOR_DISABLED` cursor mode that hides the
+ *  already provides the `SC_CURSOR_DISABLED` cursor mode that hides the
  *  cursor, transparently re-centers it and provides unconstrained cursor
  *  motion.  See @ref glfwSetInputMode for more information.
  *
- *  If the cursor mode is `GLFW_CURSOR_DISABLED` then the cursor position is
+ *  If the cursor mode is `SC_CURSOR_DISABLED` then the cursor position is
  *  unconstrained and limited only by the minimum and maximum values of
  *  a `double`.
  *
@@ -4240,11 +4184,11 @@ GLFWAPI void glfwGetCursorPos(GLFWwindow* window, double* xpos, double* ypos);
  *  @param[in] ypos The desired y-coordinate, relative to the top edge of the
  *  content area.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_PLATFORM_ERROR and @ref GLFW_FEATURE_UNAVAILABLE (see remarks).
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  GLFW_PLATFORM_ERROR and @ref SC_WIN_ERR_FEATURE_UNAVAILABLE (see remarks).
  *
  *  @remark __Wayland:__ This function will only work when the cursor mode is
- *  `GLFW_CURSOR_DISABLED`, otherwise it will emit @ref GLFW_FEATURE_UNAVAILABLE.
+ *  `SC_CURSOR_DISABLED`, otherwise it will emit @ref SC_WIN_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4255,13 +4199,13 @@ GLFWAPI void glfwGetCursorPos(GLFWwindow* window, double* xpos, double* ypos);
  *
  *  @ingroup input
  */
-GLFWAPI void glfwSetCursorPos(GLFWwindow* window, double xpos, double ypos);
+GLFWAPI void glfwSetCursorPos(sc_window* window, double xpos, double ypos);
 
 /*! @brief 创建自定义光标。
  *
  *  Creates a new custom cursor image that can be set for a window with @ref
  *  glfwSetCursor.  The cursor can be destroyed with @ref glfwDestroyCursor.
- *  Any remaining cursors are destroyed by @ref glfwTerminate.
+ *  Any remaining cursors are destroyed by @ref sc_win_terminate.
  *
  *  The pixels are 32-bit, little-endian, non-premultiplied RGBA, i.e. eight
  *  bits per channel with the red channel first.  They are arranged canonically
@@ -4277,7 +4221,7 @@ GLFWAPI void glfwSetCursorPos(GLFWwindow* window, double xpos, double ypos);
  *  @return The handle of the created cursor, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED、@ref GLFW_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED、@ref SC_WIN_ERR_INVALID_VALUE 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @pointer_lifetime The specified image data is copied before this function
  *  returns.
@@ -4292,7 +4236,7 @@ GLFWAPI void glfwSetCursorPos(GLFWwindow* window, double xpos, double ypos);
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot);
+GLFWAPI sc_cursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot);
 
 /*! @brief Creates a cursor with a standard shape.
  *
@@ -4305,15 +4249,15 @@ GLFWAPI GLFWcursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot)
  *
  *  Cursor shape                   | Windows | macOS | X11    | Wayland
  *  ------------------------------ | ------- | ----- | ------ | -------
- *  @ref GLFW_ARROW_CURSOR         | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_IBEAM_CURSOR         | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_CROSSHAIR_CURSOR     | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_POINTING_HAND_CURSOR | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_RESIZE_EW_CURSOR     | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_RESIZE_NS_CURSOR     | Yes     | Yes   | Yes    | Yes
- *  @ref GLFW_RESIZE_NWSE_CURSOR   | Yes     | Yes<sup>1</sup> | Maybe<sup>2</sup> | Maybe<sup>2</sup>
- *  @ref GLFW_RESIZE_NESW_CURSOR   | Yes     | Yes<sup>1</sup> | Maybe<sup>2</sup> | Maybe<sup>2</sup>
- *  @ref GLFW_RESIZE_ALL_CURSOR    | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_ARROW_CURSOR         | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_IBEAM_CURSOR         | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_CROSSHAIR_CURSOR     | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_POINTING_HAND_CURSOR | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_RESIZE_EW_CURSOR     | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_RESIZE_NS_CURSOR     | Yes     | Yes   | Yes    | Yes
+ *  @ref SC_RESIZE_NWSE_CURSOR   | Yes     | Yes<sup>1</sup> | Maybe<sup>2</sup> | Maybe<sup>2</sup>
+ *  @ref SC_RESIZE_NESW_CURSOR   | Yes     | Yes<sup>1</sup> | Maybe<sup>2</sup> | Maybe<sup>2</sup>
+ *  @ref SC_RESIZE_ALL_CURSOR    | Yes     | Yes   | Yes    | Yes
  *  @ref GLFW_NOT_ALLOWED_CURSOR   | Yes     | Yes   | Maybe<sup>2</sup> | Maybe<sup>2</sup>
  *
  *  1) This uses a private system API and may fail in the future.
@@ -4321,14 +4265,14 @@ GLFWAPI GLFWcursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot)
  *  2) This uses a newer standard that not all cursor themes support.
  *
  *  If the requested shape is not available, this function emits a @ref
- *  GLFW_CURSOR_UNAVAILABLE error and returns `NULL`.
+ *  SC_WIN_ERR_CURSOR_UNAVAILABLE error and returns `NULL`.
  *
  *  @param[in] shape One of the [standard shapes](@ref shapes).
  *  @return A new cursor ready to use or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_INVALID_ENUM, @ref GLFW_CURSOR_UNAVAILABLE and @ref
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_INVALID_ENUM, @ref SC_WIN_ERR_CURSOR_UNAVAILABLE and @ref
  *  GLFW_PLATFORM_ERROR.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -4340,19 +4284,19 @@ GLFWAPI GLFWcursor* glfwCreateCursor(const GLFWimage* image, int xhot, int yhot)
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcursor* glfwCreateStandardCursor(int shape);
+GLFWAPI sc_cursor* glfwCreateStandardCursor(int shape);
 
 /*! @brief 销毁光标。
  *
  *  此函数销毁之前通过 @ref glfwCreateCursor 创建的光标。  Any remaining cursors will be destroyed by @ref
- *  glfwTerminate.
+ *  sc_win_terminate.
  *
  *  If the specified cursor is current for any window, that window will be
  *  reverted to the default cursor.  This does not affect the cursor mode.
  *
  *  @param[in] cursor The cursor object to destroy.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @reentrancy 此函数禁止在回调中调用。
  *
@@ -4365,20 +4309,20 @@ GLFWAPI GLFWcursor* glfwCreateStandardCursor(int shape);
  *
  *  @ingroup input
  */
-GLFWAPI void glfwDestroyCursor(GLFWcursor* cursor);
+GLFWAPI void glfwDestroyCursor(sc_cursor* cursor);
 
 /*! @brief 设置窗口的光标。
  *
  *  此函数设置光标在指定窗口内容区域上方时使用的光标图像。  The set cursor will only be visible
  *  when the [cursor mode](@ref cursor_mode) of the window is
- *  `GLFW_CURSOR_NORMAL`.
+ *  `SC_CURSOR_NORMAL`.
  *
  *  在某些平台上，除非窗口有输入焦点，否则设置的光标可能不可见。
  *
  *  @param[in] window 要设置光标的窗口。
  *  @param[in] cursor 要设置的光标，或 `NULL` 切换回默认箭头光标。
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4388,7 +4332,7 @@ GLFWAPI void glfwDestroyCursor(GLFWcursor* cursor);
  *
  *  @ingroup input
  */
-GLFWAPI void glfwSetCursor(GLFWwindow* window, GLFWcursor* cursor);
+GLFWAPI void glfwSetCursor(sc_window* window, sc_cursor* cursor);
 
 /*! @brief 设置按键回调。
  *
@@ -4399,7 +4343,7 @@ GLFWAPI void glfwSetCursor(GLFWwindow* window, GLFWcursor* cursor);
  *  当窗口失去输入焦点时，会为所有按下的关联按键生成合成释放事件。  可以通过合成事件在焦点丢失事件处理之后生成这一事实，将这些事件与用户生成的事件区分开来， i.e. after the
  *  [window focus callback](@ref glfwSetWindowFocusCallback) has been called.
  *
- *  按键的扫描码是平台相关的，有时甚至与特定机器相关。  扫描码旨在允许用户绑定没有 GLFW 按键标记的按键。  此类按键的 `key` 被设为 `GLFW_KEY_UNKNOWN`，其状态不会被保存，因此无法通过 @ref glfwGetKey 查询。
+ *  按键的扫描码是平台相关的，有时甚至与特定机器相关。  扫描码旨在允许用户绑定没有 GLFW 按键标记的按键。  此类按键的 `key` 被设为 `SC_KEY_UNKNOWN`，其状态不会被保存，因此无法通过 @ref glfwGetKey 查询。
  *
  *  Sometimes GLFW needs to generate synthetic key events, in which case the
  *  scancode may be zero.
@@ -4412,12 +4356,12 @@ GLFWAPI void glfwSetCursor(GLFWwindow* window, GLFWcursor* cursor);
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int key, int scancode, int action, int mods)
+ *  void function_name(sc_window* window, int key, int scancode, int action, int mods)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWkeyfun).
+ *  [function pointer type](@ref sc_key_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4428,7 +4372,7 @@ GLFWAPI void glfwSetCursor(GLFWwindow* window, GLFWcursor* cursor);
  *
  *  @ingroup input
  */
-GLFWAPI GLFWkeyfun glfwSetKeyCallback(GLFWwindow* window, GLFWkeyfun callback);
+GLFWAPI sc_key_cb glfwSetKeyCallback(sc_window* window, sc_key_cb callback);
 
 /*! @brief 设置 Unicode 字符回调。
  *
@@ -4453,12 +4397,12 @@ GLFWAPI GLFWkeyfun glfwSetKeyCallback(GLFWwindow* window, GLFWkeyfun callback);
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, unsigned int codepoint)
+ *  void function_name(sc_window* window, unsigned int codepoint)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWcharfun).
+ *  [function pointer type](@ref sc_char_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4469,7 +4413,7 @@ GLFWAPI GLFWkeyfun glfwSetKeyCallback(GLFWwindow* window, GLFWkeyfun callback);
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcharfun glfwSetCharCallback(GLFWwindow* window, GLFWcharfun callback);
+GLFWAPI sc_char_cb glfwSetCharCallback(sc_window* window, sc_char_cb callback);
 
 /*! @brief 设置带修饰键的 Unicode 字符回调。
  *
@@ -4493,14 +4437,14 @@ GLFWAPI GLFWcharfun glfwSetCharCallback(GLFWwindow* window, GLFWcharfun callback
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, unsigned int codepoint, int mods)
+ *  void function_name(sc_window* window, unsigned int codepoint, int mods)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWcharmodsfun).
+ *  [function pointer type](@ref sc_char_mods_cb).
  *
  *  @deprecated Scheduled for removal in version 4.0.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4510,7 +4454,7 @@ GLFWAPI GLFWcharfun glfwSetCharCallback(GLFWwindow* window, GLFWcharfun callback
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcharmodsfun glfwSetCharModsCallback(GLFWwindow* window, GLFWcharmodsfun callback);
+GLFWAPI sc_char_mods_cb glfwSetCharModsCallback(sc_window* window, sc_char_mods_cb callback);
 
 /*! @brief 设置鼠标按钮回调。
  *
@@ -4523,9 +4467,9 @@ GLFWAPI GLFWcharmodsfun glfwSetCharModsCallback(GLFWwindow* window, GLFWcharmods
  *  i.e. after the [window focus callback](@ref glfwSetWindowFocusCallback) has
  *  been called.
  *
- *  The reported `button` value can be higher than `GLFW_MOUSE_BUTTON_LAST` if
+ *  The reported `button` value can be higher than `SC_MOUSE_BUTTON_LAST` if
  *  the button does not have an associated [button token](@ref buttons) and the
- *  @ref GLFW_UNLIMITED_MOUSE_BUTTONS input mode is set.
+ *  @ref SC_UNLIMITED_MOUSE_BUTTONS input mode is set.
  *
  *  @param[in] window 要设置回调的窗口。
  *  @param[in] callback 新的回调函数，或 `NULL` 移除当前设置的回调。
@@ -4534,12 +4478,12 @@ GLFWAPI GLFWcharmodsfun glfwSetCharModsCallback(GLFWwindow* window, GLFWcharmods
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int button, int action, int mods)
+ *  void function_name(sc_window* window, int button, int action, int mods)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWmousebuttonfun).
+ *  [function pointer type](@ref sc_win_mouse_button_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4550,7 +4494,7 @@ GLFWAPI GLFWcharmodsfun glfwSetCharModsCallback(GLFWwindow* window, GLFWcharmods
  *
  *  @ingroup input
  */
-GLFWAPI GLFWmousebuttonfun glfwSetMouseButtonCallback(GLFWwindow* window, GLFWmousebuttonfun callback);
+GLFWAPI sc_win_mouse_button_cb glfwSetMouseButtonCallback(sc_window* window, sc_win_mouse_button_cb callback);
 
 /*! @brief 设置光标位置回调。
  *
@@ -4565,12 +4509,12 @@ GLFWAPI GLFWmousebuttonfun glfwSetMouseButtonCallback(GLFWwindow* window, GLFWmo
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, double xpos, double ypos);
+ *  void function_name(sc_window* window, double xpos, double ypos);
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWcursorposfun).
+ *  [function pointer type](@ref sc_cursor_pos_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4580,7 +4524,7 @@ GLFWAPI GLFWmousebuttonfun glfwSetMouseButtonCallback(GLFWwindow* window, GLFWmo
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcursorposfun glfwSetCursorPosCallback(GLFWwindow* window, GLFWcursorposfun callback);
+GLFWAPI sc_cursor_pos_cb glfwSetCursorPosCallback(sc_window* window, sc_cursor_pos_cb callback);
 
 /*! @brief 设置光标进入/离开回调。
  *
@@ -4595,12 +4539,12 @@ GLFWAPI GLFWcursorposfun glfwSetCursorPosCallback(GLFWwindow* window, GLFWcursor
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int entered)
+ *  void function_name(sc_window* window, int entered)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWcursorenterfun).
+ *  [function pointer type](@ref sc_cursor_enter_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4610,7 +4554,7 @@ GLFWAPI GLFWcursorposfun glfwSetCursorPosCallback(GLFWwindow* window, GLFWcursor
  *
  *  @ingroup input
  */
-GLFWAPI GLFWcursorenterfun glfwSetCursorEnterCallback(GLFWwindow* window, GLFWcursorenterfun callback);
+GLFWAPI sc_cursor_enter_cb glfwSetCursorEnterCallback(sc_window* window, sc_cursor_enter_cb callback);
 
 /*! @brief 设置滚轮回调。
  *
@@ -4627,12 +4571,12 @@ GLFWAPI GLFWcursorenterfun glfwSetCursorEnterCallback(GLFWwindow* window, GLFWcu
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, double xoffset, double yoffset)
+ *  void function_name(sc_window* window, double xoffset, double yoffset)
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWscrollfun).
+ *  [function pointer type](@ref sc_scroll_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4642,7 +4586,7 @@ GLFWAPI GLFWcursorenterfun glfwSetCursorEnterCallback(GLFWwindow* window, GLFWcu
  *
  *  @ingroup input
  */
-GLFWAPI GLFWscrollfun glfwSetScrollCallback(GLFWwindow* window, GLFWscrollfun callback);
+GLFWAPI sc_scroll_cb glfwSetScrollCallback(sc_window* window, sc_scroll_cb callback);
 
 /*! @brief 设置文件拖放回调。
  *
@@ -4661,12 +4605,12 @@ GLFWAPI GLFWscrollfun glfwSetScrollCallback(GLFWwindow* window, GLFWscrollfun ca
  *
  *  @callback_signature
  *  @code
- *  void function_name(GLFWwindow* window, int path_count, const char* paths[])
+ *  void function_name(sc_window* window, int path_count, const char* paths[])
  *  @endcode
  *  For more information about the callback parameters, see the
- *  [function pointer type](@ref GLFWdropfun).
+ *  [function pointer type](@ref sc_drop_cb).
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -4676,7 +4620,7 @@ GLFWAPI GLFWscrollfun glfwSetScrollCallback(GLFWwindow* window, GLFWscrollfun ca
  *
  *  @ingroup input
  */
-GLFWAPI GLFWdropfun glfwSetDropCallback(GLFWwindow* window, GLFWdropfun callback);
+GLFWAPI sc_drop_cb glfwSetDropCallback(sc_window* window, sc_drop_cb callback);
 
 
 /*! @brief 将剪贴板设置为指定字符串。
@@ -4687,7 +4631,7 @@ GLFWAPI GLFWdropfun glfwSetDropCallback(GLFWwindow* window, GLFWdropfun callback
  *  @param[in] window Deprecated.  Any valid window or `NULL`.
  *  @param[in] string A UTF-8 encoded string.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref GLFW_PLATFORM_ERROR。
  *
  *  @remark __Win32:__ The clipboard on Windows has a single global lock for reading and
  *  writing.  GLFW tries to acquire it a few times, which is almost always enough.  If it
@@ -4706,20 +4650,20 @@ GLFWAPI GLFWdropfun glfwSetDropCallback(GLFWwindow* window, GLFWdropfun callback
  *
  *  @ingroup input
  */
-GLFWAPI void glfwSet剪贴板String(GLFWwindow* window, const char* string);
+GLFWAPI void glfwSet剪贴板String(sc_window* window, const char* string);
 
 /*! @brief 以字符串形式返回剪贴板内容。
  *
  *  此函数返回系统剪贴板的内容（如果包含或可转换为 UTF-8 编码字符串）。  If the clipboard is empty or
  *  if its contents cannot be converted, `NULL` is returned and a @ref
- *  GLFW_FORMAT_UNAVAILABLE error is generated.
+ *  SC_WIN_ERR_FORMAT_UNAVAILABLE error is generated.
  *
  *  @param[in] window Deprecated.  Any valid window or `NULL`.
  *  @return The contents of the clipboard as a UTF-8 encoded string, or `NULL`
  *  if an [error](@ref error_handling) occurred.
  *
- *  @errors Possible errors include @ref GLFW_NOT_INITIALIZED, @ref
- *  GLFW_FORMAT_UNAVAILABLE and @ref GLFW_PLATFORM_ERROR.
+ *  @errors Possible errors include @ref SC_WIN_ERR_NOT_INITIALIZED, @ref
+ *  SC_WIN_ERR_FORMAT_UNAVAILABLE and @ref GLFW_PLATFORM_ERROR.
  *
  *  @remark __Win32:__ The clipboard on Windows has a single global lock for reading and
  *  writing.  GLFW tries to acquire it a few times, which is almost always enough.  If it
@@ -4740,7 +4684,7 @@ GLFWAPI void glfwSet剪贴板String(GLFWwindow* window, const char* string);
  *
  *  @ingroup input
  */
-GLFWAPI const char* glfwGet剪贴板String(GLFWwindow* window);
+GLFWAPI const char* glfwGet剪贴板String(sc_window* window);
 
 /*! @brief Returns the GLFW time.
  *
@@ -4758,7 +4702,7 @@ GLFWAPI const char* glfwGet剪贴板String(GLFWwindow* window);
  *  @return The current time, in seconds, or zero if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。  Reading and
  *  writing of the internal base time is not atomic, so it needs to be
@@ -4783,7 +4727,7 @@ GLFWAPI double glfwGetTime(void);
  *
  *  @param[in] time The new value, in seconds.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED 和 @ref GLFW_INVALID_VALUE。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED 和 @ref SC_WIN_ERR_INVALID_VALUE。
  *
  *  @remark The upper limit of GLFW time is calculated as
  *  floor((2<sup>64</sup> - 1) / 10<sup>9</sup>) and is due to implementations
@@ -4810,7 +4754,7 @@ GLFWAPI void glfwSetTime(double time);
  *  @return The value of the timer, or zero if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
@@ -4830,7 +4774,7 @@ GLFWAPI uint64_t glfwGetTimerValue(void);
  *  @return The frequency of the timer, in Hz, or zero if an
  *  [error](@ref error_handling) occurred.
  *
- *  @errors 可能的错误包括 @ref GLFW_NOT_INITIALIZED。
+ *  @errors 可能的错误包括 @ref SC_WIN_ERR_NOT_INITIALIZED。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *

@@ -19,12 +19,12 @@ _GLFWlibrary _glfw = { GLFW_FALSE };
 // after termination without special handling when _glfw is cleared to zero
 //
 static _GLFWerror _glfwMainThreadError;
-static GLFWerrorfun _glfwErrorCallback;
-static GLFWallocator _glfwInitAllocator;
+static sc_error_cb _glfwErrorCallback;
+static sc_allocator_cb _glfwInitAllocator;
 static _GLFWinitconfig _glfwInitHints =
 {
     .hatButtons = true,
-    .platformID = GLFW_ANY_PLATFORM,
+    .platformID = SC_PLATFORM_ANY,
     .ns =
     {
         .menubar = true,
@@ -35,7 +35,7 @@ static _GLFWinitconfig _glfwInitHints =
     },
     .wl =
     {
-        .libdecorMode = GLFW_WAYLAND_PREFER_LIBDECOR
+        .libdecorMode = SC_WAYLAND_PREFER_LIBDECOR
     },
 };
 
@@ -69,14 +69,14 @@ static void terminate(void)
     memset(&_glfw.callbacks, 0, sizeof(_glfw.callbacks));
 
     while (_glfw.windowListHead)
-        glfwDestroyWindow((GLFWwindow*) _glfw.windowListHead);
+        glfwDestroyWindow((sc_window*) _glfw.windowListHead);
 
     while (_glfw.cursorListHead)
-        glfwDestroyCursor((GLFWcursor*) _glfw.cursorListHead);
+        glfwDestroyCursor((sc_cursor*) _glfw.cursorListHead);
 
     for (i = 0;  i < _glfw.monitorCount;  i++)
     {
-        _GLFWmonitor* monitor = _glfw.monitors[i];
+        _sc_monitor* monitor = _glfw.monitors[i];
         if (monitor->originalRamp.size)
             _glfw.platform.setGammaRamp(monitor, &monitor->originalRamp);
         _glfwFreeMonitor(monitor);
@@ -219,7 +219,7 @@ void* _glfw_calloc(size_t count, size_t size)
 
         if (count > SIZE_MAX / size)
         {
-            _glfwInputError(GLFW_INVALID_VALUE, "Allocation size overflow");
+            _glfwInputError(SC_WIN_ERR_INVALID_VALUE, "Allocation size overflow");
             return NULL;
         }
 
@@ -228,7 +228,7 @@ void* _glfw_calloc(size_t count, size_t size)
             return memset(block, 0, count * size);
         else
         {
-            _glfwInputError(GLFW_OUT_OF_MEMORY, NULL);
+            _glfwInputError(SC_WIN_ERR_OUT_OF_MEMORY, NULL);
             return NULL;
         }
     }
@@ -245,7 +245,7 @@ void* _glfw_realloc(void* block, size_t size)
             return resized;
         else
         {
-            _glfwInputError(GLFW_OUT_OF_MEMORY, NULL);
+            _glfwInputError(SC_WIN_ERR_OUT_OF_MEMORY, NULL);
             return NULL;
         }
     }
@@ -288,33 +288,33 @@ void _glfwInputError(int code, const char* format, ...)
     }
     else
     {
-        if (code == GLFW_NOT_INITIALIZED)
+        if (code == SC_WIN_ERR_NOT_INITIALIZED)
             strcpy(description, "The GLFW library is not initialized");
-        else if (code == GLFW_NO_CURRENT_CONTEXT)
+        else if (code == SC_WIN_ERR_NO_CURRENT_CONTEXT)
             strcpy(description, "There is no current context");
-        else if (code == GLFW_INVALID_ENUM)
+        else if (code == SC_WIN_ERR_INVALID_ENUM)
             strcpy(description, "Invalid argument for enum parameter");
-        else if (code == GLFW_INVALID_VALUE)
+        else if (code == SC_WIN_ERR_INVALID_VALUE)
             strcpy(description, "Invalid value for parameter");
-        else if (code == GLFW_OUT_OF_MEMORY)
+        else if (code == SC_WIN_ERR_OUT_OF_MEMORY)
             strcpy(description, "Out of memory");
-        else if (code == GLFW_API_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_API_UNAVAILABLE)
             strcpy(description, "The requested API is unavailable");
-        else if (code == GLFW_VERSION_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_VERSION_UNAVAILABLE)
             strcpy(description, "The requested API version is unavailable");
-        else if (code == GLFW_PLATFORM_ERROR)
+        else if (code == SC_WIN_ERR_PLATFORM_ERROR)
             strcpy(description, "A platform-specific error occurred");
-        else if (code == GLFW_FORMAT_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_FORMAT_UNAVAILABLE)
             strcpy(description, "The requested format is unavailable");
-        else if (code == GLFW_NO_WINDOW_CONTEXT)
+        else if (code == SC_WIN_ERR_NO_WINDOW_CONTEXT)
             strcpy(description, "The specified window has no context");
-        else if (code == GLFW_CURSOR_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_CURSOR_UNAVAILABLE)
             strcpy(description, "The specified cursor shape is unavailable");
-        else if (code == GLFW_FEATURE_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_FEATURE_UNAVAILABLE)
             strcpy(description, "The requested feature cannot be implemented for this platform");
-        else if (code == GLFW_FEATURE_UNIMPLEMENTED)
+        else if (code == SC_WIN_ERR_FEATURE_UNIMPLEMENTED)
             strcpy(description, "The requested feature has not yet been implemented for this platform");
-        else if (code == GLFW_PLATFORM_UNAVAILABLE)
+        else if (code == SC_WIN_ERR_PLATFORM_UNAVAILABLE)
             strcpy(description, "The requested platform is unavailable");
         else
             strcpy(description, "ERROR: UNKNOWN GLFW ERROR");
@@ -348,7 +348,7 @@ void _glfwInputError(int code, const char* format, ...)
 //////                        GLFW public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
-GLFWAPI int glfwInit(void)
+GLFWAPI int sc_win_init(void)
 {
     if (_glfw.initialized)
         return GLFW_TRUE;
@@ -392,7 +392,7 @@ GLFWAPI int glfwInit(void)
     return GLFW_TRUE;
 }
 
-GLFWAPI void glfwTerminate(void)
+GLFWAPI void sc_win_terminate(void)
 {
     if (!_glfw.initialized)
         return;
@@ -400,45 +400,45 @@ GLFWAPI void glfwTerminate(void)
     terminate();
 }
 
-GLFWAPI void glfwInitHint(int hint, int value)
+GLFWAPI void sc_win_init_hint(int hint, int value)
 {
     switch (hint)
     {
-        case GLFW_ANGLE_PLATFORM_TYPE:
+        case SC_ANGLE_PLATFORM_TYPE:
             _glfwInitHints.angleType = value;
             return;
-        case GLFW_PLATFORM:
+        case SC_PLATFORM:
             _glfwInitHints.platformID = value;
             return;
-        case GLFW_COCOA_CHDIR_RESOURCES:
+        case SC_COCOA_CHDIR_RESOURCES:
             _glfwInitHints.ns.chdir = value;
             return;
-        case GLFW_COCOA_MENUBAR:
+        case SC_COCOA_MENUBAR:
             _glfwInitHints.ns.menubar = value;
             return;
-        case GLFW_WAYLAND_LIBDECOR:
+        case SC_WAYLAND_LIBDECOR:
             _glfwInitHints.wl.libdecorMode = value;
             return;
     }
 
-    _glfwInputError(GLFW_INVALID_ENUM,
+    _glfwInputError(SC_WIN_ERR_INVALID_ENUM,
                     "Invalid init hint 0x%08X", hint);
 }
 
-GLFWAPI void glfwInitAllocator(const GLFWallocator* allocator)
+GLFWAPI void sc_win_init_allocator(const sc_allocator_cb* allocator)
 {
     if (allocator)
     {
         if (allocator->allocate && allocator->reallocate && allocator->deallocate)
             _glfwInitAllocator = *allocator;
         else
-            _glfwInputError(GLFW_INVALID_VALUE, "Missing function in allocator");
+            _glfwInputError(SC_WIN_ERR_INVALID_VALUE, "Missing function in allocator");
     }
     else
-        memset(&_glfwInitAllocator, 0, sizeof(GLFWallocator));
+        memset(&_glfwInitAllocator, 0, sizeof(sc_allocator_cb));
 }
 
-GLFWAPI void glfwGetVersion(int* major, int* minor, int* rev)
+GLFWAPI void sc_win_get_version(int* major, int* minor, int* rev)
 {
     if (major != NULL)
         *major = GLFW_VERSION_MAJOR;
@@ -448,10 +448,10 @@ GLFWAPI void glfwGetVersion(int* major, int* minor, int* rev)
         *rev = GLFW_VERSION_REVISION;
 }
 
-GLFWAPI int glfwGetError(const char** description)
+GLFWAPI int sc_win_get_error(const char** description)
 {
     _GLFWerror* error;
-    int code = GLFW_NO_ERROR;
+    int code = SC_WIN_ERR_NONE;
 
     if (description)
         *description = NULL;
@@ -464,7 +464,7 @@ GLFWAPI int glfwGetError(const char** description)
     if (error)
     {
         code = error->code;
-        error->code = GLFW_NO_ERROR;
+        error->code = SC_WIN_ERR_NONE;
         if (description && code)
             *description = error->description;
     }
@@ -472,9 +472,9 @@ GLFWAPI int glfwGetError(const char** description)
     return code;
 }
 
-GLFWAPI GLFWerrorfun glfwSetErrorCallback(GLFWerrorfun cbfun)
+GLFWAPI sc_error_cb sc_win_set_error_callback(sc_error_cb cbfun)
 {
-    _GLFW_SWAP(GLFWerrorfun, _glfwErrorCallback, cbfun);
+    _GLFW_SWAP(sc_error_cb, _glfwErrorCallback, cbfun);
     return cbfun;
 }
 

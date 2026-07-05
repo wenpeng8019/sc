@@ -4,26 +4,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void applySizeLimits(_GLFWwindow* window, int* width, int* height)
+static void applySizeLimits(_sc_window* window, int* width, int* height)
 {
-    if (window->numer != GLFW_DONT_CARE && window->denom != GLFW_DONT_CARE)
+    if (window->numer != SC_DONT_CARE && window->denom != SC_DONT_CARE)
     {
         const float ratio = (float) window->numer / (float) window->denom;
         *height = (int) (*width / ratio);
     }
 
-    if (window->minwidth != GLFW_DONT_CARE)
+    if (window->minwidth != SC_DONT_CARE)
         *width = _glfw_max(*width, window->minwidth);
-    else if (window->maxwidth != GLFW_DONT_CARE)
+    else if (window->maxwidth != SC_DONT_CARE)
         *width = _glfw_min(*width, window->maxwidth);
 
-    if (window->minheight != GLFW_DONT_CARE)
+    if (window->minheight != SC_DONT_CARE)
         *height = _glfw_min(*height, window->minheight);
-    else if (window->maxheight != GLFW_DONT_CARE)
+    else if (window->maxheight != SC_DONT_CARE)
         *height = _glfw_max(*height, window->maxheight);
 }
 
-static void fitToMonitor(_GLFWwindow* window)
+static void fitToMonitor(_sc_window* window)
 {
     GLFWvidmode mode;
     _glfwGetVideoModeNull(window->monitor, &mode);
@@ -34,12 +34,12 @@ static void fitToMonitor(_GLFWwindow* window)
     window->null.height = mode.height;
 }
 
-static void acquireMonitor(_GLFWwindow* window)
+static void acquireMonitor(_sc_window* window)
 {
     _glfwInputMonitorWindow(window->monitor, window);
 }
 
-static void releaseMonitor(_GLFWwindow* window)
+static void releaseMonitor(_sc_window* window)
 {
     if (window->monitor->window != window)
         return;
@@ -47,7 +47,7 @@ static void releaseMonitor(_GLFWwindow* window)
     _glfwInputMonitorWindow(window->monitor, NULL);
 }
 
-static int createNativeWindow(_GLFWwindow* window,
+static int createNativeWindow(_sc_window* window,
                               const _GLFWwndconfig* wndconfig,
                               const _GLFWfbconfig* fbconfig)
 {
@@ -55,7 +55,7 @@ static int createNativeWindow(_GLFWwindow* window,
         fitToMonitor(window);
     else
     {
-        if (wndconfig->xpos == GLFW_ANY_POSITION && wndconfig->ypos == GLFW_ANY_POSITION)
+        if (wndconfig->xpos == SC_ANY_POSITION && wndconfig->ypos == SC_ANY_POSITION)
         {
             window->null.xpos = 17;
             window->null.ypos = 17;
@@ -85,7 +85,7 @@ static int createNativeWindow(_GLFWwindow* window,
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-GLFWbool _glfwCreateWindowNull(_GLFWwindow* window,
+GLFWbool _glfwCreateWindowNull(_sc_window* window,
                                const _GLFWwndconfig* wndconfig,
                                const _GLFWctxconfig* ctxconfig,
                                const _GLFWfbconfig* fbconfig)
@@ -140,7 +140,7 @@ GLFWbool _glfwCreateWindowNull(_GLFWwindow* window,
     return GLFW_TRUE;
 }
 
-void _glfwDestroyWindowNull(_GLFWwindow* window)
+void _glfwDestroyWindowNull(_sc_window* window)
 {
     if (window->monitor)
         releaseMonitor(window);
@@ -152,16 +152,16 @@ void _glfwDestroyWindowNull(_GLFWwindow* window)
         window->context.destroy(window);
 }
 
-void _glfwSetWindowTitleNull(_GLFWwindow* window, const char* title)
+void _glfwSetWindowTitleNull(_sc_window* window, const char* title)
 {
 }
 
-void _glfwSetWindowIconNull(_GLFWwindow* window, int count, const GLFWimage* images)
+void _glfwSetWindowIconNull(_sc_window* window, int count, const GLFWimage* images)
 {
 }
 
-void _glfwSetWindowMonitorNull(_GLFWwindow* window,
-                               _GLFWmonitor* monitor,
+void _glfwSetWindowMonitorNull(_sc_window* window,
+                               _sc_monitor* monitor,
                                int xpos, int ypos,
                                int width, int height,
                                int refreshRate)
@@ -195,7 +195,7 @@ void _glfwSetWindowMonitorNull(_GLFWwindow* window,
     }
 }
 
-void _glfwGetWindowPosNull(_GLFWwindow* window, int* xpos, int* ypos)
+void _glfwGetWindowPosNull(_sc_window* window, int* xpos, int* ypos)
 {
     if (xpos)
         *xpos = window->null.xpos;
@@ -203,7 +203,7 @@ void _glfwGetWindowPosNull(_GLFWwindow* window, int* xpos, int* ypos)
         *ypos = window->null.ypos;
 }
 
-void _glfwSetWindowPosNull(_GLFWwindow* window, int xpos, int ypos)
+void _glfwSetWindowPosNull(_sc_window* window, int xpos, int ypos)
 {
     if (window->monitor)
         return;
@@ -216,7 +216,7 @@ void _glfwSetWindowPosNull(_GLFWwindow* window, int xpos, int ypos)
     }
 }
 
-void _glfwGetWindowSizeNull(_GLFWwindow* window, int* width, int* height)
+void _glfwGetWindowSizeNull(_sc_window* window, int* width, int* height)
 {
     if (width)
         *width = window->null.width;
@@ -224,7 +224,7 @@ void _glfwGetWindowSizeNull(_GLFWwindow* window, int* width, int* height)
         *height = window->null.height;
 }
 
-void _glfwSetWindowSizeNull(_GLFWwindow* window, int width, int height)
+void _glfwSetWindowSizeNull(_sc_window* window, int width, int height)
 {
     if (window->monitor)
         return;
@@ -239,7 +239,7 @@ void _glfwSetWindowSizeNull(_GLFWwindow* window, int width, int height)
     }
 }
 
-void _glfwSetWindowSizeLimitsNull(_GLFWwindow* window,
+void _glfwSetWindowSizeLimitsNull(_sc_window* window,
                                   int minwidth, int minheight,
                                   int maxwidth, int maxheight)
 {
@@ -249,7 +249,7 @@ void _glfwSetWindowSizeLimitsNull(_GLFWwindow* window,
     _glfwSetWindowSizeNull(window, width, height);
 }
 
-void _glfwSetWindowAspectRatioNull(_GLFWwindow* window, int n, int d)
+void _glfwSetWindowAspectRatioNull(_sc_window* window, int n, int d)
 {
     int width = window->null.width;
     int height = window->null.height;
@@ -257,7 +257,7 @@ void _glfwSetWindowAspectRatioNull(_GLFWwindow* window, int n, int d)
     _glfwSetWindowSizeNull(window, width, height);
 }
 
-void _glfwGetFramebufferSizeNull(_GLFWwindow* window, int* width, int* height)
+void _glfwGetFramebufferSizeNull(_sc_window* window, int* width, int* height)
 {
     if (width)
         *width = window->null.width;
@@ -265,7 +265,7 @@ void _glfwGetFramebufferSizeNull(_GLFWwindow* window, int* width, int* height)
         *height = window->null.height;
 }
 
-void _glfwGetWindowFrameSizeNull(_GLFWwindow* window,
+void _glfwGetWindowFrameSizeNull(_sc_window* window,
                                  int* left, int* top,
                                  int* right, int* bottom)
 {
@@ -293,7 +293,7 @@ void _glfwGetWindowFrameSizeNull(_GLFWwindow* window,
     }
 }
 
-void _glfwGetWindowContentScaleNull(_GLFWwindow* window, float* xscale, float* yscale)
+void _glfwGetWindowContentScaleNull(_sc_window* window, float* xscale, float* yscale)
 {
     if (xscale)
         *xscale = 1.f;
@@ -301,7 +301,7 @@ void _glfwGetWindowContentScaleNull(_GLFWwindow* window, float* xscale, float* y
         *yscale = 1.f;
 }
 
-void _glfwIconifyWindowNull(_GLFWwindow* window)
+void _glfwIconifyWindowNull(_sc_window* window)
 {
     if (_glfw.null.focusedWindow == window)
     {
@@ -319,7 +319,7 @@ void _glfwIconifyWindowNull(_GLFWwindow* window)
     }
 }
 
-void _glfwRestoreWindowNull(_GLFWwindow* window)
+void _glfwRestoreWindowNull(_sc_window* window)
 {
     if (window->null.iconified)
     {
@@ -336,7 +336,7 @@ void _glfwRestoreWindowNull(_GLFWwindow* window)
     }
 }
 
-void _glfwMaximizeWindowNull(_GLFWwindow* window)
+void _glfwMaximizeWindowNull(_sc_window* window)
 {
     if (!window->null.maximized)
     {
@@ -345,12 +345,12 @@ void _glfwMaximizeWindowNull(_GLFWwindow* window)
     }
 }
 
-GLFWbool _glfwWindowMaximizedNull(_GLFWwindow* window)
+GLFWbool _glfwWindowMaximizedNull(_sc_window* window)
 {
     return window->null.maximized;
 }
 
-GLFWbool _glfwWindowHoveredNull(_GLFWwindow* window)
+GLFWbool _glfwWindowHoveredNull(_sc_window* window)
 {
     return _glfw.null.xcursor >= window->null.xpos &&
            _glfw.null.ycursor >= window->null.ypos &&
@@ -358,41 +358,41 @@ GLFWbool _glfwWindowHoveredNull(_GLFWwindow* window)
            _glfw.null.ycursor <= window->null.ypos + window->null.height - 1;
 }
 
-GLFWbool _glfwFramebufferTransparentNull(_GLFWwindow* window)
+GLFWbool _glfwFramebufferTransparentNull(_sc_window* window)
 {
     return window->null.transparent;
 }
 
-void _glfwSetWindowResizableNull(_GLFWwindow* window, GLFWbool enabled)
+void _glfwSetWindowResizableNull(_sc_window* window, GLFWbool enabled)
 {
     window->null.resizable = enabled;
 }
 
-void _glfwSetWindowDecoratedNull(_GLFWwindow* window, GLFWbool enabled)
+void _glfwSetWindowDecoratedNull(_sc_window* window, GLFWbool enabled)
 {
     window->null.decorated = enabled;
 }
 
-void _glfwSetWindowFloatingNull(_GLFWwindow* window, GLFWbool enabled)
+void _glfwSetWindowFloatingNull(_sc_window* window, GLFWbool enabled)
 {
     window->null.floating = enabled;
 }
 
-void _glfwSetWindowMousePassthroughNull(_GLFWwindow* window, GLFWbool enabled)
+void _glfwSetWindowMousePassthroughNull(_sc_window* window, GLFWbool enabled)
 {
 }
 
-float _glfwGetWindowOpacityNull(_GLFWwindow* window)
+float _glfwGetWindowOpacityNull(_sc_window* window)
 {
     return window->null.opacity;
 }
 
-void _glfwSetWindowOpacityNull(_GLFWwindow* window, float opacity)
+void _glfwSetWindowOpacityNull(_sc_window* window, float opacity)
 {
     window->null.opacity = opacity;
 }
 
-void _glfwSetRawMouseMotionNull(_GLFWwindow *window, GLFWbool enabled)
+void _glfwSetRawMouseMotionNull(_sc_window *window, GLFWbool enabled)
 {
 }
 
@@ -401,16 +401,16 @@ GLFWbool _glfwRawMouseMotionSupportedNull(void)
     return GLFW_TRUE;
 }
 
-void _glfwShowWindowNull(_GLFWwindow* window)
+void _glfwShowWindowNull(_sc_window* window)
 {
     window->null.visible = GLFW_TRUE;
 }
 
-void _glfwRequestWindowAttentionNull(_GLFWwindow* window)
+void _glfwRequestWindowAttentionNull(_sc_window* window)
 {
 }
 
-void _glfwHideWindowNull(_GLFWwindow* window)
+void _glfwHideWindowNull(_sc_window* window)
 {
     if (_glfw.null.focusedWindow == window)
     {
@@ -421,9 +421,9 @@ void _glfwHideWindowNull(_GLFWwindow* window)
     window->null.visible = GLFW_FALSE;
 }
 
-void _glfwFocusWindowNull(_GLFWwindow* window)
+void _glfwFocusWindowNull(_sc_window* window)
 {
-    _GLFWwindow* previous;
+    _sc_window* previous;
 
     if (_glfw.null.focusedWindow == window)
         return;
@@ -444,17 +444,17 @@ void _glfwFocusWindowNull(_GLFWwindow* window)
     _glfwInputWindowFocus(window, GLFW_TRUE);
 }
 
-GLFWbool _glfwWindowFocusedNull(_GLFWwindow* window)
+GLFWbool _glfwWindowFocusedNull(_sc_window* window)
 {
     return _glfw.null.focusedWindow == window;
 }
 
-GLFWbool _glfwWindowIconifiedNull(_GLFWwindow* window)
+GLFWbool _glfwWindowIconifiedNull(_sc_window* window)
 {
     return window->null.iconified;
 }
 
-GLFWbool _glfwWindowVisibleNull(_GLFWwindow* window)
+GLFWbool _glfwWindowVisibleNull(_sc_window* window)
 {
     return window->null.visible;
 }
@@ -475,7 +475,7 @@ void _glfwPostEmptyEventNull(void)
 {
 }
 
-void _glfwGetCursorPosNull(_GLFWwindow* window, double* xpos, double* ypos)
+void _glfwGetCursorPosNull(_sc_window* window, double* xpos, double* ypos)
 {
     if (xpos)
         *xpos = _glfw.null.xcursor - window->null.xpos;
@@ -483,33 +483,33 @@ void _glfwGetCursorPosNull(_GLFWwindow* window, double* xpos, double* ypos)
         *ypos = _glfw.null.ycursor - window->null.ypos;
 }
 
-void _glfwSetCursorPosNull(_GLFWwindow* window, double x, double y)
+void _glfwSetCursorPosNull(_sc_window* window, double x, double y)
 {
     _glfw.null.xcursor = window->null.xpos + (int) x;
     _glfw.null.ycursor = window->null.ypos + (int) y;
 }
 
-void _glfwSetCursorModeNull(_GLFWwindow* window, int mode)
+void _glfwSetCursorModeNull(_sc_window* window, int mode)
 {
 }
 
-GLFWbool _glfwCreateCursorNull(_GLFWcursor* cursor,
+GLFWbool _glfwCreateCursorNull(_sc_cursor* cursor,
                                const GLFWimage* image,
                                int xhot, int yhot)
 {
     return GLFW_TRUE;
 }
 
-GLFWbool _glfwCreateStandardCursorNull(_GLFWcursor* cursor, int shape)
+GLFWbool _glfwCreateStandardCursorNull(_sc_cursor* cursor, int shape)
 {
     return GLFW_TRUE;
 }
 
-void _glfwDestroyCursorNull(_GLFWcursor* cursor)
+void _glfwDestroyCursorNull(_sc_cursor* cursor)
 {
 }
 
-void _glfwSetCursorNull(_GLFWwindow* window, _GLFWcursor* cursor)
+void _glfwSetCursorNull(_sc_window* window, _sc_cursor* cursor)
 {
 }
 
@@ -538,7 +538,7 @@ EGLNativeDisplayType _glfwGetEGLNativeDisplayNull(void)
     return EGL_DEFAULT_DISPLAY;
 }
 
-EGLNativeWindowType _glfwGetEGLNativeWindowNull(_GLFWwindow* window)
+EGLNativeWindowType _glfwGetEGLNativeWindowNull(_sc_window* window)
 {
     return 0;
 }
@@ -547,7 +547,7 @@ const char* _glfwGetScancodeNameNull(int scancode)
 {
     if (scancode < GLFW_NULL_SC_FIRST || scancode > GLFW_NULL_SC_LAST)
     {
-        _glfwInputError(GLFW_INVALID_VALUE, "Invalid scancode %i", scancode);
+        _glfwInputError(SC_WIN_ERR_INVALID_VALUE, "Invalid scancode %i", scancode);
         return NULL;
     }
 
@@ -692,7 +692,7 @@ GLFWbool _glfwGetPhysicalDevicePresentationSupportNull(VkInstance instance,
 }
 
 VkResult _glfwCreateWindowSurfaceNull(VkInstance instance,
-                                      _GLFWwindow* window,
+                                      _sc_window* window,
                                       const VkAllocationCallbacks* allocator,
                                       VkSurfaceKHR* surface)
 {
@@ -701,7 +701,7 @@ VkResult _glfwCreateWindowSurfaceNull(VkInstance instance,
         vkGetInstanceProcAddr(instance, "vkCreateHeadlessSurfaceEXT");
     if (!vkCreateHeadlessSurfaceEXT)
     {
-        _glfwInputError(GLFW_API_UNAVAILABLE,
+        _glfwInputError(SC_WIN_ERR_API_UNAVAILABLE,
                         "Null: Vulkan instance missing VK_EXT_headless_surface extension");
         return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
@@ -713,7 +713,7 @@ VkResult _glfwCreateWindowSurfaceNull(VkInstance instance,
     const VkResult err = vkCreateHeadlessSurfaceEXT(instance, &sci, allocator, surface);
     if (err)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "Null: Failed to create Vulkan surface: %s",
                         _glfwGetVulkanResultString(err));
     }

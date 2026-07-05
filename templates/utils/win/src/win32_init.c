@@ -50,7 +50,7 @@ static GLFWbool loadLibraries(void)
                             (const WCHAR*) &_glfw,
                             (HMODULE*) &_glfw.win32.instance))
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to retrieve own module handle");
         return GLFW_FALSE;
     }
@@ -58,7 +58,7 @@ static GLFWbool loadLibraries(void)
     _glfw.win32.user32.instance = _glfwPlatformLoadModule("user32.dll");
     if (!_glfw.win32.user32.instance)
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to load user32.dll");
         return GLFW_FALSE;
     }
@@ -149,127 +149,127 @@ static void createKeyTables(void)
     memset(_glfw.win32.keycodes, -1, sizeof(_glfw.win32.keycodes));
     memset(_glfw.win32.scancodes, -1, sizeof(_glfw.win32.scancodes));
 
-    _glfw.win32.keycodes[0x00B] = GLFW_KEY_0;
-    _glfw.win32.keycodes[0x002] = GLFW_KEY_1;
-    _glfw.win32.keycodes[0x003] = GLFW_KEY_2;
-    _glfw.win32.keycodes[0x004] = GLFW_KEY_3;
-    _glfw.win32.keycodes[0x005] = GLFW_KEY_4;
-    _glfw.win32.keycodes[0x006] = GLFW_KEY_5;
-    _glfw.win32.keycodes[0x007] = GLFW_KEY_6;
-    _glfw.win32.keycodes[0x008] = GLFW_KEY_7;
-    _glfw.win32.keycodes[0x009] = GLFW_KEY_8;
-    _glfw.win32.keycodes[0x00A] = GLFW_KEY_9;
-    _glfw.win32.keycodes[0x01E] = GLFW_KEY_A;
-    _glfw.win32.keycodes[0x030] = GLFW_KEY_B;
-    _glfw.win32.keycodes[0x02E] = GLFW_KEY_C;
-    _glfw.win32.keycodes[0x020] = GLFW_KEY_D;
-    _glfw.win32.keycodes[0x012] = GLFW_KEY_E;
-    _glfw.win32.keycodes[0x021] = GLFW_KEY_F;
-    _glfw.win32.keycodes[0x022] = GLFW_KEY_G;
-    _glfw.win32.keycodes[0x023] = GLFW_KEY_H;
-    _glfw.win32.keycodes[0x017] = GLFW_KEY_I;
-    _glfw.win32.keycodes[0x024] = GLFW_KEY_J;
-    _glfw.win32.keycodes[0x025] = GLFW_KEY_K;
-    _glfw.win32.keycodes[0x026] = GLFW_KEY_L;
-    _glfw.win32.keycodes[0x032] = GLFW_KEY_M;
-    _glfw.win32.keycodes[0x031] = GLFW_KEY_N;
-    _glfw.win32.keycodes[0x018] = GLFW_KEY_O;
-    _glfw.win32.keycodes[0x019] = GLFW_KEY_P;
-    _glfw.win32.keycodes[0x010] = GLFW_KEY_Q;
-    _glfw.win32.keycodes[0x013] = GLFW_KEY_R;
-    _glfw.win32.keycodes[0x01F] = GLFW_KEY_S;
-    _glfw.win32.keycodes[0x014] = GLFW_KEY_T;
-    _glfw.win32.keycodes[0x016] = GLFW_KEY_U;
-    _glfw.win32.keycodes[0x02F] = GLFW_KEY_V;
-    _glfw.win32.keycodes[0x011] = GLFW_KEY_W;
-    _glfw.win32.keycodes[0x02D] = GLFW_KEY_X;
-    _glfw.win32.keycodes[0x015] = GLFW_KEY_Y;
-    _glfw.win32.keycodes[0x02C] = GLFW_KEY_Z;
+    _glfw.win32.keycodes[0x00B] = SC_KEY_0;
+    _glfw.win32.keycodes[0x002] = SC_KEY_1;
+    _glfw.win32.keycodes[0x003] = SC_KEY_2;
+    _glfw.win32.keycodes[0x004] = SC_KEY_3;
+    _glfw.win32.keycodes[0x005] = SC_KEY_4;
+    _glfw.win32.keycodes[0x006] = SC_KEY_5;
+    _glfw.win32.keycodes[0x007] = SC_KEY_6;
+    _glfw.win32.keycodes[0x008] = SC_KEY_7;
+    _glfw.win32.keycodes[0x009] = SC_KEY_8;
+    _glfw.win32.keycodes[0x00A] = SC_KEY_9;
+    _glfw.win32.keycodes[0x01E] = SC_KEY_A;
+    _glfw.win32.keycodes[0x030] = SC_KEY_B;
+    _glfw.win32.keycodes[0x02E] = SC_KEY_C;
+    _glfw.win32.keycodes[0x020] = SC_KEY_D;
+    _glfw.win32.keycodes[0x012] = SC_KEY_E;
+    _glfw.win32.keycodes[0x021] = SC_KEY_F;
+    _glfw.win32.keycodes[0x022] = SC_KEY_G;
+    _glfw.win32.keycodes[0x023] = SC_KEY_H;
+    _glfw.win32.keycodes[0x017] = SC_KEY_I;
+    _glfw.win32.keycodes[0x024] = SC_KEY_J;
+    _glfw.win32.keycodes[0x025] = SC_KEY_K;
+    _glfw.win32.keycodes[0x026] = SC_KEY_L;
+    _glfw.win32.keycodes[0x032] = SC_KEY_M;
+    _glfw.win32.keycodes[0x031] = SC_KEY_N;
+    _glfw.win32.keycodes[0x018] = SC_KEY_O;
+    _glfw.win32.keycodes[0x019] = SC_KEY_P;
+    _glfw.win32.keycodes[0x010] = SC_KEY_Q;
+    _glfw.win32.keycodes[0x013] = SC_KEY_R;
+    _glfw.win32.keycodes[0x01F] = SC_KEY_S;
+    _glfw.win32.keycodes[0x014] = SC_KEY_T;
+    _glfw.win32.keycodes[0x016] = SC_KEY_U;
+    _glfw.win32.keycodes[0x02F] = SC_KEY_V;
+    _glfw.win32.keycodes[0x011] = SC_KEY_W;
+    _glfw.win32.keycodes[0x02D] = SC_KEY_X;
+    _glfw.win32.keycodes[0x015] = SC_KEY_Y;
+    _glfw.win32.keycodes[0x02C] = SC_KEY_Z;
 
-    _glfw.win32.keycodes[0x028] = GLFW_KEY_APOSTROPHE;
-    _glfw.win32.keycodes[0x02B] = GLFW_KEY_BACKSLASH;
-    _glfw.win32.keycodes[0x033] = GLFW_KEY_COMMA;
-    _glfw.win32.keycodes[0x00D] = GLFW_KEY_EQUAL;
-    _glfw.win32.keycodes[0x029] = GLFW_KEY_GRAVE_ACCENT;
-    _glfw.win32.keycodes[0x01A] = GLFW_KEY_LEFT_BRACKET;
-    _glfw.win32.keycodes[0x00C] = GLFW_KEY_MINUS;
-    _glfw.win32.keycodes[0x034] = GLFW_KEY_PERIOD;
-    _glfw.win32.keycodes[0x01B] = GLFW_KEY_RIGHT_BRACKET;
-    _glfw.win32.keycodes[0x027] = GLFW_KEY_SEMICOLON;
-    _glfw.win32.keycodes[0x035] = GLFW_KEY_SLASH;
-    _glfw.win32.keycodes[0x056] = GLFW_KEY_WORLD_2;
+    _glfw.win32.keycodes[0x028] = SC_KEY_APOSTROPHE;
+    _glfw.win32.keycodes[0x02B] = SC_KEY_BACKSLASH;
+    _glfw.win32.keycodes[0x033] = SC_KEY_COMMA;
+    _glfw.win32.keycodes[0x00D] = SC_KEY_EQUAL;
+    _glfw.win32.keycodes[0x029] = SC_KEY_GRAVE_ACCENT;
+    _glfw.win32.keycodes[0x01A] = SC_KEY_LEFT_BRACKET;
+    _glfw.win32.keycodes[0x00C] = SC_KEY_MINUS;
+    _glfw.win32.keycodes[0x034] = SC_KEY_PERIOD;
+    _glfw.win32.keycodes[0x01B] = SC_KEY_RIGHT_BRACKET;
+    _glfw.win32.keycodes[0x027] = SC_KEY_SEMICOLON;
+    _glfw.win32.keycodes[0x035] = SC_KEY_SLASH;
+    _glfw.win32.keycodes[0x056] = SC_KEY_WORLD_2;
 
-    _glfw.win32.keycodes[0x00E] = GLFW_KEY_BACKSPACE;
-    _glfw.win32.keycodes[0x153] = GLFW_KEY_DELETE;
-    _glfw.win32.keycodes[0x14F] = GLFW_KEY_END;
-    _glfw.win32.keycodes[0x01C] = GLFW_KEY_ENTER;
-    _glfw.win32.keycodes[0x001] = GLFW_KEY_ESCAPE;
-    _glfw.win32.keycodes[0x147] = GLFW_KEY_HOME;
-    _glfw.win32.keycodes[0x152] = GLFW_KEY_INSERT;
-    _glfw.win32.keycodes[0x15D] = GLFW_KEY_MENU;
-    _glfw.win32.keycodes[0x151] = GLFW_KEY_PAGE_DOWN;
-    _glfw.win32.keycodes[0x149] = GLFW_KEY_PAGE_UP;
-    _glfw.win32.keycodes[0x045] = GLFW_KEY_PAUSE;
-    _glfw.win32.keycodes[0x039] = GLFW_KEY_SPACE;
-    _glfw.win32.keycodes[0x00F] = GLFW_KEY_TAB;
-    _glfw.win32.keycodes[0x03A] = GLFW_KEY_CAPS_LOCK;
-    _glfw.win32.keycodes[0x145] = GLFW_KEY_NUM_LOCK;
-    _glfw.win32.keycodes[0x046] = GLFW_KEY_SCROLL_LOCK;
-    _glfw.win32.keycodes[0x03B] = GLFW_KEY_F1;
-    _glfw.win32.keycodes[0x03C] = GLFW_KEY_F2;
-    _glfw.win32.keycodes[0x03D] = GLFW_KEY_F3;
-    _glfw.win32.keycodes[0x03E] = GLFW_KEY_F4;
-    _glfw.win32.keycodes[0x03F] = GLFW_KEY_F5;
-    _glfw.win32.keycodes[0x040] = GLFW_KEY_F6;
-    _glfw.win32.keycodes[0x041] = GLFW_KEY_F7;
-    _glfw.win32.keycodes[0x042] = GLFW_KEY_F8;
-    _glfw.win32.keycodes[0x043] = GLFW_KEY_F9;
-    _glfw.win32.keycodes[0x044] = GLFW_KEY_F10;
-    _glfw.win32.keycodes[0x057] = GLFW_KEY_F11;
-    _glfw.win32.keycodes[0x058] = GLFW_KEY_F12;
-    _glfw.win32.keycodes[0x064] = GLFW_KEY_F13;
-    _glfw.win32.keycodes[0x065] = GLFW_KEY_F14;
-    _glfw.win32.keycodes[0x066] = GLFW_KEY_F15;
-    _glfw.win32.keycodes[0x067] = GLFW_KEY_F16;
-    _glfw.win32.keycodes[0x068] = GLFW_KEY_F17;
-    _glfw.win32.keycodes[0x069] = GLFW_KEY_F18;
-    _glfw.win32.keycodes[0x06A] = GLFW_KEY_F19;
-    _glfw.win32.keycodes[0x06B] = GLFW_KEY_F20;
-    _glfw.win32.keycodes[0x06C] = GLFW_KEY_F21;
-    _glfw.win32.keycodes[0x06D] = GLFW_KEY_F22;
-    _glfw.win32.keycodes[0x06E] = GLFW_KEY_F23;
-    _glfw.win32.keycodes[0x076] = GLFW_KEY_F24;
-    _glfw.win32.keycodes[0x038] = GLFW_KEY_LEFT_ALT;
-    _glfw.win32.keycodes[0x01D] = GLFW_KEY_LEFT_CONTROL;
-    _glfw.win32.keycodes[0x02A] = GLFW_KEY_LEFT_SHIFT;
-    _glfw.win32.keycodes[0x15B] = GLFW_KEY_LEFT_SUPER;
-    _glfw.win32.keycodes[0x137] = GLFW_KEY_PRINT_SCREEN;
-    _glfw.win32.keycodes[0x138] = GLFW_KEY_RIGHT_ALT;
-    _glfw.win32.keycodes[0x11D] = GLFW_KEY_RIGHT_CONTROL;
-    _glfw.win32.keycodes[0x036] = GLFW_KEY_RIGHT_SHIFT;
-    _glfw.win32.keycodes[0x15C] = GLFW_KEY_RIGHT_SUPER;
-    _glfw.win32.keycodes[0x150] = GLFW_KEY_DOWN;
-    _glfw.win32.keycodes[0x14B] = GLFW_KEY_LEFT;
-    _glfw.win32.keycodes[0x14D] = GLFW_KEY_RIGHT;
-    _glfw.win32.keycodes[0x148] = GLFW_KEY_UP;
+    _glfw.win32.keycodes[0x00E] = SC_KEY_BACKSPACE;
+    _glfw.win32.keycodes[0x153] = SC_KEY_DELETE;
+    _glfw.win32.keycodes[0x14F] = SC_KEY_END;
+    _glfw.win32.keycodes[0x01C] = SC_KEY_ENTER;
+    _glfw.win32.keycodes[0x001] = SC_KEY_ESCAPE;
+    _glfw.win32.keycodes[0x147] = SC_KEY_HOME;
+    _glfw.win32.keycodes[0x152] = SC_KEY_INSERT;
+    _glfw.win32.keycodes[0x15D] = SC_KEY_MENU;
+    _glfw.win32.keycodes[0x151] = SC_KEY_PAGE_DOWN;
+    _glfw.win32.keycodes[0x149] = SC_KEY_PAGE_UP;
+    _glfw.win32.keycodes[0x045] = SC_KEY_PAUSE;
+    _glfw.win32.keycodes[0x039] = SC_KEY_SPACE;
+    _glfw.win32.keycodes[0x00F] = SC_KEY_TAB;
+    _glfw.win32.keycodes[0x03A] = SC_KEY_CAPS_LOCK;
+    _glfw.win32.keycodes[0x145] = SC_KEY_NUM_LOCK;
+    _glfw.win32.keycodes[0x046] = SC_KEY_SCROLL_LOCK;
+    _glfw.win32.keycodes[0x03B] = SC_KEY_F1;
+    _glfw.win32.keycodes[0x03C] = SC_KEY_F2;
+    _glfw.win32.keycodes[0x03D] = SC_KEY_F3;
+    _glfw.win32.keycodes[0x03E] = SC_KEY_F4;
+    _glfw.win32.keycodes[0x03F] = SC_KEY_F5;
+    _glfw.win32.keycodes[0x040] = SC_KEY_F6;
+    _glfw.win32.keycodes[0x041] = SC_KEY_F7;
+    _glfw.win32.keycodes[0x042] = SC_KEY_F8;
+    _glfw.win32.keycodes[0x043] = SC_KEY_F9;
+    _glfw.win32.keycodes[0x044] = SC_KEY_F10;
+    _glfw.win32.keycodes[0x057] = SC_KEY_F11;
+    _glfw.win32.keycodes[0x058] = SC_KEY_F12;
+    _glfw.win32.keycodes[0x064] = SC_KEY_F13;
+    _glfw.win32.keycodes[0x065] = SC_KEY_F14;
+    _glfw.win32.keycodes[0x066] = SC_KEY_F15;
+    _glfw.win32.keycodes[0x067] = SC_KEY_F16;
+    _glfw.win32.keycodes[0x068] = SC_KEY_F17;
+    _glfw.win32.keycodes[0x069] = SC_KEY_F18;
+    _glfw.win32.keycodes[0x06A] = SC_KEY_F19;
+    _glfw.win32.keycodes[0x06B] = SC_KEY_F20;
+    _glfw.win32.keycodes[0x06C] = SC_KEY_F21;
+    _glfw.win32.keycodes[0x06D] = SC_KEY_F22;
+    _glfw.win32.keycodes[0x06E] = SC_KEY_F23;
+    _glfw.win32.keycodes[0x076] = SC_KEY_F24;
+    _glfw.win32.keycodes[0x038] = SC_KEY_LEFT_ALT;
+    _glfw.win32.keycodes[0x01D] = SC_KEY_LEFT_CONTROL;
+    _glfw.win32.keycodes[0x02A] = SC_KEY_LEFT_SHIFT;
+    _glfw.win32.keycodes[0x15B] = SC_KEY_LEFT_SUPER;
+    _glfw.win32.keycodes[0x137] = SC_KEY_PRINT_SCREEN;
+    _glfw.win32.keycodes[0x138] = SC_KEY_RIGHT_ALT;
+    _glfw.win32.keycodes[0x11D] = SC_KEY_RIGHT_CONTROL;
+    _glfw.win32.keycodes[0x036] = SC_KEY_RIGHT_SHIFT;
+    _glfw.win32.keycodes[0x15C] = SC_KEY_RIGHT_SUPER;
+    _glfw.win32.keycodes[0x150] = SC_KEY_DOWN;
+    _glfw.win32.keycodes[0x14B] = SC_KEY_LEFT;
+    _glfw.win32.keycodes[0x14D] = SC_KEY_RIGHT;
+    _glfw.win32.keycodes[0x148] = SC_KEY_UP;
 
-    _glfw.win32.keycodes[0x052] = GLFW_KEY_KP_0;
-    _glfw.win32.keycodes[0x04F] = GLFW_KEY_KP_1;
-    _glfw.win32.keycodes[0x050] = GLFW_KEY_KP_2;
-    _glfw.win32.keycodes[0x051] = GLFW_KEY_KP_3;
-    _glfw.win32.keycodes[0x04B] = GLFW_KEY_KP_4;
-    _glfw.win32.keycodes[0x04C] = GLFW_KEY_KP_5;
-    _glfw.win32.keycodes[0x04D] = GLFW_KEY_KP_6;
-    _glfw.win32.keycodes[0x047] = GLFW_KEY_KP_7;
-    _glfw.win32.keycodes[0x048] = GLFW_KEY_KP_8;
-    _glfw.win32.keycodes[0x049] = GLFW_KEY_KP_9;
-    _glfw.win32.keycodes[0x04E] = GLFW_KEY_KP_ADD;
-    _glfw.win32.keycodes[0x053] = GLFW_KEY_KP_DECIMAL;
-    _glfw.win32.keycodes[0x135] = GLFW_KEY_KP_DIVIDE;
-    _glfw.win32.keycodes[0x11C] = GLFW_KEY_KP_ENTER;
-    _glfw.win32.keycodes[0x059] = GLFW_KEY_KP_EQUAL;
-    _glfw.win32.keycodes[0x037] = GLFW_KEY_KP_MULTIPLY;
-    _glfw.win32.keycodes[0x04A] = GLFW_KEY_KP_SUBTRACT;
+    _glfw.win32.keycodes[0x052] = SC_KEY_KP_0;
+    _glfw.win32.keycodes[0x04F] = SC_KEY_KP_1;
+    _glfw.win32.keycodes[0x050] = SC_KEY_KP_2;
+    _glfw.win32.keycodes[0x051] = SC_KEY_KP_3;
+    _glfw.win32.keycodes[0x04B] = SC_KEY_KP_4;
+    _glfw.win32.keycodes[0x04C] = SC_KEY_KP_5;
+    _glfw.win32.keycodes[0x04D] = SC_KEY_KP_6;
+    _glfw.win32.keycodes[0x047] = SC_KEY_KP_7;
+    _glfw.win32.keycodes[0x048] = SC_KEY_KP_8;
+    _glfw.win32.keycodes[0x049] = SC_KEY_KP_9;
+    _glfw.win32.keycodes[0x04E] = SC_KEY_KP_ADD;
+    _glfw.win32.keycodes[0x053] = SC_KEY_KP_DECIMAL;
+    _glfw.win32.keycodes[0x135] = SC_KEY_KP_DIVIDE;
+    _glfw.win32.keycodes[0x11C] = SC_KEY_KP_ENTER;
+    _glfw.win32.keycodes[0x059] = SC_KEY_KP_EQUAL;
+    _glfw.win32.keycodes[0x037] = SC_KEY_KP_MULTIPLY;
+    _glfw.win32.keycodes[0x04A] = SC_KEY_KP_SUBTRACT;
 
     for (scancode = 0;  scancode < 512;  scancode++)
     {
@@ -313,7 +313,7 @@ static GLFWbool createHelperWindow(void)
     _glfw.win32.helperWindowClass = RegisterClassExW(&wc);
     if (!_glfw.win32.helperWindowClass)
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to register helper window class");
         return GLFW_FALSE;
     }
@@ -330,7 +330,7 @@ static GLFWbool createHelperWindow(void)
 
     if (!_glfw.win32.helperWindowHandle)
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to create helper window");
         return GLFW_FALSE;
     }
@@ -376,7 +376,7 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
     count = MultiByteToWideChar(CP_UTF8, 0, source, -1, NULL, 0);
     if (!count)
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string from UTF-8");
         return NULL;
     }
@@ -385,7 +385,7 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
 
     if (!MultiByteToWideChar(CP_UTF8, 0, source, -1, target, count))
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string from UTF-8");
         _glfw_free(target);
         return NULL;
@@ -404,7 +404,7 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
     size = WideCharToMultiByte(CP_UTF8, 0, source, -1, NULL, 0, NULL, NULL);
     if (!size)
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string to UTF-8");
         return NULL;
     }
@@ -413,7 +413,7 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
 
     if (!WideCharToMultiByte(CP_UTF8, 0, source, -1, target, size, NULL, NULL))
     {
-        _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
+        _glfwInputErrorWin32(SC_WIN_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string to UTF-8");
         _glfw_free(target);
         return NULL;
@@ -452,7 +452,7 @@ void _glfwUpdateKeyNamesWin32(void)
 
     memset(_glfw.win32.keynames, 0, sizeof(_glfw.win32.keynames));
 
-    for (key = GLFW_KEY_SPACE;  key <= GLFW_KEY_LAST;  key++)
+    for (key = SC_KEY_SPACE;  key <= SC_KEY_LAST;  key++)
     {
         UINT vk;
         int scancode, length;
@@ -462,7 +462,7 @@ void _glfwUpdateKeyNamesWin32(void)
         if (scancode == -1)
             continue;
 
-        if (key >= GLFW_KEY_KP_0 && key <= GLFW_KEY_KP_ADD)
+        if (key >= SC_KEY_KP_0 && key <= SC_KEY_KP_ADD)
         {
             const UINT vks[] =
             {
@@ -472,7 +472,7 @@ void _glfwUpdateKeyNamesWin32(void)
                 VK_MULTIPLY, VK_SUBTRACT, VK_ADD
             };
 
-            vk = vks[key - GLFW_KEY_KP_0];
+            vk = vks[key - SC_KEY_KP_0];
         }
         else
             vk = MapVirtualKeyW(scancode, MAPVK_VSC_TO_VK);
@@ -535,7 +535,7 @@ GLFWbool _glfwConnectWin32(int platformID, _GLFWplatform* platform)
 {
     const _GLFWplatform win32 =
     {
-        .platformID = GLFW_PLATFORM_WIN32,
+        .platformID = SC_PLATFORM_WIN32,
         .init = _glfwInitWin32,
         .terminate = _glfwTerminateWin32,
         .getCursorPos = _glfwGetCursorPosWin32,

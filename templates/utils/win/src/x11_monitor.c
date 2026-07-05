@@ -78,7 +78,7 @@ void _glfwPollMonitorsX11(void)
     if (_glfw.x11.randr.available && !_glfw.x11.randr.monitorBroken)
     {
         int disconnectedCount, screenCount = 0;
-        _GLFWmonitor** disconnected = NULL;
+        _sc_monitor** disconnected = NULL;
         XineramaScreenInfo* screens = NULL;
         XRRScreenResources* sr = XRRGetScreenResourcesCurrent(_glfw.x11.display,
                                                               _glfw.x11.root);
@@ -91,10 +91,10 @@ void _glfwPollMonitorsX11(void)
         disconnectedCount = _glfw.monitorCount;
         if (disconnectedCount)
         {
-            disconnected = _glfw_calloc(_glfw.monitorCount, sizeof(_GLFWmonitor*));
+            disconnected = _glfw_calloc(_glfw.monitorCount, sizeof(_sc_monitor*));
             memcpy(disconnected,
                    _glfw.monitors,
-                   _glfw.monitorCount * sizeof(_GLFWmonitor*));
+                   _glfw.monitorCount * sizeof(_sc_monitor*));
         }
 
         for (int i = 0;  i < sr->noutput;  i++)
@@ -152,7 +152,7 @@ void _glfwPollMonitorsX11(void)
                 heightMM = (int) (ci->height * 25.4f / 96.f);
             }
 
-            _GLFWmonitor* monitor = _glfwAllocMonitor(oi->name, widthMM, heightMM);
+            _sc_monitor* monitor = _glfwAllocMonitor(oi->name, widthMM, heightMM);
             monitor->x11.output = sr->outputs[i];
             monitor->x11.crtc   = oi->crtc;
 
@@ -173,7 +173,7 @@ void _glfwPollMonitorsX11(void)
             else
                 type = _GLFW_INSERT_LAST;
 
-            _glfwInputMonitor(monitor, GLFW_CONNECTED, type);
+            _glfwInputMonitor(monitor, SC_CONNECTED, type);
 
             XRRFreeOutputInfo(oi);
             XRRFreeCrtcInfo(ci);
@@ -187,7 +187,7 @@ void _glfwPollMonitorsX11(void)
         for (int i = 0;  i < disconnectedCount;  i++)
         {
             if (disconnected[i])
-                _glfwInputMonitor(disconnected[i], GLFW_DISCONNECTED, 0);
+                _glfwInputMonitor(disconnected[i], SC_DISCONNECTED, 0);
         }
 
         _glfw_free(disconnected);
@@ -198,14 +198,14 @@ void _glfwPollMonitorsX11(void)
         const int heightMM = DisplayHeightMM(_glfw.x11.display, _glfw.x11.screen);
 
         _glfwInputMonitor(_glfwAllocMonitor("Display", widthMM, heightMM),
-                          GLFW_CONNECTED,
+                          SC_CONNECTED,
                           _GLFW_INSERT_FIRST);
     }
 }
 
 // Set the current video mode for the specified monitor
 //
-void _glfwSetVideoModeX11(_GLFWmonitor* monitor, const GLFWvidmode* desired)
+void _glfwSetVideoModeX11(_sc_monitor* monitor, const GLFWvidmode* desired)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.monitorBroken)
     {
@@ -259,7 +259,7 @@ void _glfwSetVideoModeX11(_GLFWmonitor* monitor, const GLFWvidmode* desired)
 
 // Restore the saved (original) video mode for the specified monitor
 //
-void _glfwRestoreVideoModeX11(_GLFWmonitor* monitor)
+void _glfwRestoreVideoModeX11(_sc_monitor* monitor)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.monitorBroken)
     {
@@ -291,11 +291,11 @@ void _glfwRestoreVideoModeX11(_GLFWmonitor* monitor)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-void _glfwFreeMonitorX11(_GLFWmonitor* monitor)
+void _glfwFreeMonitorX11(_sc_monitor* monitor)
 {
 }
 
-void _glfwGetMonitorPosX11(_GLFWmonitor* monitor, int* xpos, int* ypos)
+void _glfwGetMonitorPosX11(_sc_monitor* monitor, int* xpos, int* ypos)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.monitorBroken)
     {
@@ -317,7 +317,7 @@ void _glfwGetMonitorPosX11(_GLFWmonitor* monitor, int* xpos, int* ypos)
     }
 }
 
-void _glfwGetMonitorContentScaleX11(_GLFWmonitor* monitor,
+void _glfwGetMonitorContentScaleX11(_sc_monitor* monitor,
                                     float* xscale, float* yscale)
 {
     if (xscale)
@@ -326,7 +326,7 @@ void _glfwGetMonitorContentScaleX11(_GLFWmonitor* monitor,
         *yscale = _glfw.x11.contentScaleY;
 }
 
-void _glfwGetMonitorWorkareaX11(_GLFWmonitor* monitor,
+void _glfwGetMonitorWorkareaX11(_sc_monitor* monitor,
                                 int* xpos, int* ypos,
                                 int* width, int* height)
 {
@@ -420,7 +420,7 @@ void _glfwGetMonitorWorkareaX11(_GLFWmonitor* monitor,
         *height = areaHeight;
 }
 
-GLFWvidmode* _glfwGetVideoModesX11(_GLFWmonitor* monitor, int* count)
+GLFWvidmode* _glfwGetVideoModesX11(_sc_monitor* monitor, int* count)
 {
     GLFWvidmode* result;
 
@@ -472,7 +472,7 @@ GLFWvidmode* _glfwGetVideoModesX11(_GLFWmonitor* monitor, int* count)
     return result;
 }
 
-GLFWbool _glfwGetVideoModeX11(_GLFWmonitor* monitor, GLFWvidmode* mode)
+GLFWbool _glfwGetVideoModeX11(_sc_monitor* monitor, GLFWvidmode* mode)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.monitorBroken)
     {
@@ -494,7 +494,7 @@ GLFWbool _glfwGetVideoModeX11(_GLFWmonitor* monitor, GLFWvidmode* mode)
 
         if (!mi)
         {
-            _glfwInputError(GLFW_PLATFORM_ERROR, "X11: Failed to query video mode");
+            _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR, "X11: Failed to query video mode");
             return GLFW_FALSE;
         }
     }
@@ -511,7 +511,7 @@ GLFWbool _glfwGetVideoModeX11(_GLFWmonitor* monitor, GLFWvidmode* mode)
     return GLFW_TRUE;
 }
 
-GLFWbool _glfwGetGammaRampX11(_GLFWmonitor* monitor, GLFWgammaramp* ramp)
+GLFWbool _glfwGetGammaRampX11(_sc_monitor* monitor, GLFWgammaramp* ramp)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.gammaBroken)
     {
@@ -543,19 +543,19 @@ GLFWbool _glfwGetGammaRampX11(_GLFWmonitor* monitor, GLFWgammaramp* ramp)
     }
     else
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "X11: Gamma ramp access not supported by server");
         return GLFW_FALSE;
     }
 }
 
-void _glfwSetGammaRampX11(_GLFWmonitor* monitor, const GLFWgammaramp* ramp)
+void _glfwSetGammaRampX11(_sc_monitor* monitor, const GLFWgammaramp* ramp)
 {
     if (_glfw.x11.randr.available && !_glfw.x11.randr.gammaBroken)
     {
         if (XRRGetCrtcGammaSize(_glfw.x11.display, monitor->x11.crtc) != ramp->size)
         {
-            _glfwInputError(GLFW_PLATFORM_ERROR,
+            _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                             "X11: Gamma ramp size must match current ramp size");
             return;
         }
@@ -580,7 +580,7 @@ void _glfwSetGammaRampX11(_GLFWmonitor* monitor, const GLFWgammaramp* ramp)
     }
     else
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "X11: Gamma ramp access not supported by server");
     }
 }
@@ -590,33 +590,33 @@ void _glfwSetGammaRampX11(_GLFWmonitor* monitor, const GLFWgammaramp* ramp)
 //////                        GLFW native API                       //////
 //////////////////////////////////////////////////////////////////////////
 
-GLFWAPI RRCrtc glfwGetX11Adapter(GLFWmonitor* handle)
+GLFWAPI RRCrtc glfwGetX11Adapter(sc_monitor* handle)
 {
     _GLFW_REQUIRE_INIT_OR_RETURN(None);
 
-    if (_glfw.platform.platformID != GLFW_PLATFORM_X11)
+    if (_glfw.platform.platformID != SC_PLATFORM_X11)
     {
-        _glfwInputError(GLFW_PLATFORM_UNAVAILABLE, "X11: Platform not initialized");
+        _glfwInputError(SC_WIN_ERR_PLATFORM_UNAVAILABLE, "X11: Platform not initialized");
         return None;
     }
 
-    _GLFWmonitor* monitor = (_GLFWmonitor*) handle;
+    _sc_monitor* monitor = (_sc_monitor*) handle;
     assert(monitor != NULL);
 
     return monitor->x11.crtc;
 }
 
-GLFWAPI RROutput glfwGetX11Monitor(GLFWmonitor* handle)
+GLFWAPI RROutput glfwGetX11Monitor(sc_monitor* handle)
 {
     _GLFW_REQUIRE_INIT_OR_RETURN(None);
 
-    if (_glfw.platform.platformID != GLFW_PLATFORM_X11)
+    if (_glfw.platform.platformID != SC_PLATFORM_X11)
     {
-        _glfwInputError(GLFW_PLATFORM_UNAVAILABLE, "X11: Platform not initialized");
+        _glfwInputError(SC_WIN_ERR_PLATFORM_UNAVAILABLE, "X11: Platform not initialized");
         return None;
     }
 
-    _GLFWmonitor* monitor = (_GLFWmonitor*) handle;
+    _sc_monitor* monitor = (_sc_monitor*) handle;
     assert(monitor != NULL);
 
     return monitor->x11.output;

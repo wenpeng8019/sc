@@ -17,7 +17,7 @@ GLFWbool _glfwPlatformCreateTls(_GLFWtls* tls)
 
     if (pthread_key_create(&tls->posix.key, NULL) != 0)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR,
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR,
                         "POSIX: Failed to create context TLS");
         return GLFW_FALSE;
     }
@@ -51,7 +51,7 @@ GLFWbool _glfwPlatformCreateMutex(_GLFWmutex* mutex)
 
     if (pthread_mutex_init(&mutex->posix.handle, NULL) != 0)
     {
-        _glfwInputError(GLFW_PLATFORM_ERROR, "POSIX: Failed to create mutex");
+        _glfwInputError(SC_WIN_ERR_PLATFORM_ERROR, "POSIX: Failed to create mutex");
         return GLFW_FALSE;
     }
 
