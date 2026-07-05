@@ -355,8 +355,18 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     if (!cflags.empty()) tc.cflags += " " + cflags;
     for (auto& p : splitBy(configValue("SCC_INC", "inc"), ":"))
         tc.cflags += " -I " + p;
-    const std::string ldflags = configValue("SCC_LDFLAGS", "ldflags");
-    if (!ldflags.empty()) tc.ldflags += " " + ldflags;
+    // ldflags 累加：目标档/.sc 的 ldflags 作基线，环境 SCC_LDFLAGS 追加其后。
+    // 链接库天然可累加（不同于工具程序的"覆盖"语义）——否则命令行传 GUI 库会
+    // 丢失目标档里的基线库（如 Windows 的 ws2_32）。
+    {
+        std::string base;
+        auto it = g_profile.find("ldflags");
+        if (it != g_profile.end() && !it->second.empty()) base = it->second;
+        else base = readConfig("ldflags");
+        if (!base.empty()) tc.ldflags += " " + base;
+        const char* envld = std::getenv("SCC_LDFLAGS");
+        if (envld && *envld) tc.ldflags += std::string(" ") + envld;
+    }
     for (auto& p : splitBy(configValue("SCC_LIB", "lib"), ":"))
         tc.ldflags += " -L " + p;
     for (auto& l : splitBy(configValue("SCC_LIBS", "libs"), " ,"))
@@ -2006,11 +2016,13 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                 std::filesystem::path target(d->name);
                 if (!target.is_absolute()) target = srcDir / target;
                 std::error_code ec;
-                const std::filesystem::path canonT =
-                    std::filesystem::weakly_canonical(target, ec);
-                // 预编译库优先取目标变体 <名>.<suffix>.<ext>，不存在回退原名
-                const std::filesystem::path resolved =
-                    resolveAddArtifact(ec ? target : canonT, tc.targetSuffix);
+                // 先在未解符号链接的原路径上匹配目标变体 <名>.<suffix>.<ext>，再 canonical；
+                // 否则 libwsi.a 之类符号链接会先被解析为宿主变体，令后缀匹配失效。
+                const std::filesystem::path variant =
+                    resolveAddArtifact(target, tc.targetSuffix);
+                const std::filesystem::path canonV =
+                    std::filesystem::weakly_canonical(variant, ec);
+                const std::filesystem::path resolved = ec ? variant : canonV;
 
                 if (!std::filesystem::exists(resolved)) {
                     std::cerr << "错误: add 文件不存在: " << d->name
@@ -2069,11 +2081,12 @@ static bool gatherAddDeps(const std::filesystem::path& rootPath,
             std::filesystem::path target(d->name);
             if (!target.is_absolute()) target = srcDir / target;
             std::error_code ec;
-            const std::filesystem::path canonT =
-                std::filesystem::weakly_canonical(target, ec);
-            // 预编译库优先取目标变体 <名>.<suffix>.<ext>，不存在回退原名
-            const std::filesystem::path resolved =
-                resolveAddArtifact(ec ? target : canonT, targetSuffix);
+            // 先在未解符号链接的原路径上匹配目标变体，再 canonical（见 buildProject 同段注释）
+            const std::filesystem::path variant =
+                resolveAddArtifact(target, targetSuffix);
+            const std::filesystem::path canonV =
+                std::filesystem::weakly_canonical(variant, ec);
+            const std::filesystem::path resolved = ec ? variant : canonV;
             if (!std::filesystem::exists(resolved)) continue;
             if (!seen.insert(resolved.string()).second) continue;
             const std::string ext = resolved.extension().string();

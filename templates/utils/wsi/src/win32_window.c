@@ -1014,7 +1014,6 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
                 window->win32.width = width;
                 window->win32.height = height;
 
-                _glfwInputFramebufferSize(window, width, height);
                 impl_on_win_size(window, width, height);
             }
 
@@ -1244,8 +1243,7 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
 // Creates the GLFW window
 //
 static int createNativeWindow(window_st* window,
-                              const wnd_config_st* wndconfig,
-                              const _GLFWfbconfig* fbconfig)
+                              const wnd_config_st* wndconfig)
 {
     int frameX, frameY, frameWidth, frameHeight;
     WCHAR* wideTitle;
@@ -1445,52 +1443,16 @@ static int createNativeWindow(window_st* window,
 
     DragAcceptFiles(window->win32.handle, TRUE);
 
-    if (fbconfig->transparent)
-    {
-        updateFramebufferTransparency(window);
-        window->win32.transparent = true;
-    }
-
     _glfwGetWindowSizeWin32(window, &window->win32.width, &window->win32.height);
 
     return true;
 }
 
 bool _glfwCreateWindowWin32(window_st* window,
-                                const wnd_config_st* wndconfig,
-                                const _GLFWctxconfig* ctxconfig,
-                                const _GLFWfbconfig* fbconfig)
+                                const wnd_config_st* wndconfig)
 {
-    if (!createNativeWindow(window, wndconfig, fbconfig))
+    if (!createNativeWindow(window, wndconfig))
         return false;
-
-    if (ctxconfig->client != GLFW_NO_API)
-    {
-        if (ctxconfig->source == WSI_NATIVE_CONTEXT_API)
-        {
-            if (!_glfwInitWGL())
-                return false;
-            if (!_glfwCreateContextWGL(window, ctxconfig, fbconfig))
-                return false;
-        }
-        else if (ctxconfig->source == GLFW_EGL_CONTEXT_API)
-        {
-            if (!_glfwInitEGL())
-                return false;
-            if (!_glfwCreateContextEGL(window, ctxconfig, fbconfig))
-                return false;
-        }
-        else if (ctxconfig->source == GLFW_OSMESA_CONTEXT_API)
-        {
-            if (!_glfwInitOSMesa())
-                return false;
-            if (!_glfwCreateContextOSMesa(window, ctxconfig, fbconfig))
-                return false;
-        }
-
-        if (!_glfwRefreshContextAttribs(window, ctxconfig))
-            return false;
-    }
 
     if (wndconfig->mousePassthrough)
         _glfwSetWindowMousePassthroughWin32(window, true);
@@ -1522,9 +1484,6 @@ void _glfwDestroyWindowWin32(window_st* window)
 {
     if (window->monitor)
         releaseMonitor(window);
-
-    if (window->context.destroy)
-        window->context.destroy(window);
 
     if (g_wsi.win32.disabledCursorWindow == window)
         enableCursor(window);
@@ -2422,118 +2381,6 @@ const char* _glfwGetClipboardStringWin32(void)
     CloseClipboard();
 
     return g_wsi.win32.clipboardString;
-}
-
-EGLenum _glfwGetEGLPlatformWin32(EGLint** attribs)
-{
-    if (g_wsi.egl.ANGLE_platform_angle)
-    {
-        int type = 0;
-
-        if (g_wsi.egl.ANGLE_platform_angle_opengl)
-        {
-            if (g_wsi.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_OPENGL)
-                type = EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE;
-            else if (g_wsi.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_OPENGLES)
-                type = EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE;
-        }
-
-        if (g_wsi.egl.ANGLE_platform_angle_d3d)
-        {
-            if (g_wsi.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_D3D9)
-                type = EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE;
-            else if (g_wsi.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_D3D11)
-                type = EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE;
-        }
-
-        if (g_wsi.egl.ANGLE_platform_angle_vulkan)
-        {
-            if (g_wsi.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_VULKAN)
-                type = EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE;
-        }
-
-        if (type)
-        {
-            *attribs = wsi_calloc(3, sizeof(EGLint));
-            (*attribs)[0] = EGL_PLATFORM_ANGLE_TYPE_ANGLE;
-            (*attribs)[1] = type;
-            (*attribs)[2] = EGL_NONE;
-            return EGL_PLATFORM_ANGLE_ANGLE;
-        }
-    }
-
-    return 0;
-}
-
-EGLNativeDisplayType _glfwGetEGLNativeDisplayWin32(void)
-{
-    return GetDC(g_wsi.win32.helperWindowHandle);
-}
-
-EGLNativeWindowType _glfwGetEGLNativeWindowWin32(window_st* window)
-{
-    return window->win32.handle;
-}
-
-void _glfwGetRequiredInstanceExtensionsWin32(char** extensions)
-{
-    if (!g_wsi.vk.KHR_surface || !g_wsi.vk.KHR_win32_surface)
-        return;
-
-    extensions[0] = "VK_KHR_surface";
-    extensions[1] = "VK_KHR_win32_surface";
-}
-
-bool _glfwGetPhysicalDevicePresentationSupportWin32(VkInstance instance,
-                                                        VkPhysicalDevice device,
-                                                        uint32_t queuefamily)
-{
-    PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR
-        vkGetPhysicalDeviceWin32PresentationSupportKHR =
-        (PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR)
-        vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceWin32PresentationSupportKHR");
-    if (!vkGetPhysicalDeviceWin32PresentationSupportKHR)
-    {
-        impl_on_error(SC_WSI_ERR_API_UNAVAILABLE,
-                        "Win32: Vulkan instance missing VK_KHR_win32_surface extension");
-        return false;
-    }
-
-    return vkGetPhysicalDeviceWin32PresentationSupportKHR(device, queuefamily);
-}
-
-VkResult _glfwCreateWindowSurfaceWin32(VkInstance instance,
-                                       window_st* window,
-                                       const VkAllocationCallbacks* allocator,
-                                       VkSurfaceKHR* surface)
-{
-    VkResult err;
-    VkWin32SurfaceCreateInfoKHR sci;
-    PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
-
-    vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)
-        vkGetInstanceProcAddr(instance, "vkCreateWin32SurfaceKHR");
-    if (!vkCreateWin32SurfaceKHR)
-    {
-        impl_on_error(SC_WSI_ERR_API_UNAVAILABLE,
-                        "Win32: Vulkan instance missing VK_KHR_win32_surface extension");
-        return VK_ERROR_EXTENSION_NOT_PRESENT;
-    }
-
-    memset(&sci, 0, sizeof(sci));
-    sci.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-    sci.hinstance = g_wsi.win32.instance;
-    sci.hwnd = window->win32.handle;
-
-    err = vkCreateWin32SurfaceKHR(instance, &sci, allocator, surface);
-    if (err)
-    {
-        impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                        "Win32: Failed to create Vulkan surface: %s",
-                        _glfwGetVulkanResultString(err));
-    }
-
-    return err;
 }
 
 WSI_API HWND wsi_get_win32_window(sc_window* handle)

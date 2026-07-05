@@ -3,8 +3,8 @@
 # 用其原生 cc 编译，再取回产物（--build）或在远端直接运行（run 模式）。
 #
 # 用法：
-#   scc app.sc        --target examples/targets/remote-linux.target   # 远端编译并运行，输出回传
-#   scc app.sc --build -o app --target examples/targets/remote-linux.target  # 远端编译，产物取回 ./app
+#   scc app.sc        --target templates/targets/remote-linux.target   # 远端编译并运行，输出回传
+#   scc app.sc --build -o app --target templates/targets/remote-linux.target  # 远端编译，产物取回 ./app
 #
 # 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
 # 认证沿用 SSH：build_key 指定私钥，或留空走 ssh-agent / ~/.ssh/id_rsa(.pub)。

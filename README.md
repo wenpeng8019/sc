@@ -53,8 +53,8 @@ cc feature1.c -o feature1 && ./feature1
 ./build/scc ../examples/test_demo.sc --test
 
 # 交叉编译：把工具链整套换成目标工具链，配置写进 .target 目标档（详见 cross-compile.md）
-./build/scc app.sc --build -o app --target ../examples/targets/aarch64-linux.target
-./build/scc fw.sc  --build -o fw.bin --target ../examples/targets/cortex-m4.target \
+./build/scc app.sc --build -o app --target ../templates/targets/aarch64-linux.target
+./build/scc fw.sc  --build -o fw.bin --target ../templates/targets/cortex-m4.target \
             --builtins boards/m4/builtins      # 裸机：.bin 镜像 + 目标适配库
 ```
 

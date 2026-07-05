@@ -1,0 +1,108 @@
+# wsi Windows 平台验证：Ubuntu 侧交叉编译出 .exe，Windows runner 侧运行并截图。
+#
+# 设计要点：
+#  - 不在 Windows 上原生构建 scc（C++ 编译器本体，依赖较多、未验证），
+#    而是在 ubuntu-latest 上用 mingw-w64 交叉编译，已本地验证可行。
+#  - Windows runner 仅下载 .exe 运行；demo 用 CI 变体（wsi_demo_ci.sc），
+#    开窗后定时泵事件约 12 秒自动退出，期间截图为 artifact，不会挂死。
+name: wsi-windows
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "templates/utils/wsi/**"
+      - "templates/demo/wsi_demo*.sc"
+      - "templates/targets/windows-x64-mingw.target"
+      - "compiler/**"
+      - ".github/workflows/wsi-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-exe:
+    name: 交叉编译 wsi_demo_ci.exe（Ubuntu + mingw-w64）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装构建依赖（cmake / g++ / mingw-w64）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ mingw-w64
+
+      - name: 构建 scc 编译器
+        run: ./build.sh build
+
+      - name: 交叉编译 libwsi（Windows / mingw）
+        working-directory: templates/utils/wsi
+        run: |
+          ./build.sh \
+            --cc x86_64-w64-mingw32-gcc \
+            --ar x86_64-w64-mingw32-ar \
+            --target x86_64-windows-gnu
+
+      - name: 交叉编译 wsi_demo_ci -> .exe
+        env:
+          # win32 后端所需 GUI 系统库 + 静态链接 libgcc/winpthread（产物自包含，
+          # Windows runner 无需额外 mingw 运行时 DLL）。ws2_32 由 target 基线提供。
+          SCC_LDFLAGS: "-lgdi32 -luser32 -lshell32 -limm32 -lole32 -loleaut32 -lversion -luuid -ldwmapi -static"
+        run: |
+          ./compiler/build/scc templates/demo/wsi_demo_ci.sc \
+            --build -o wsi_demo_ci.exe \
+            --target templates/targets/windows-x64-mingw.target
+          file wsi_demo_ci.exe
+
+      - name: 上传 .exe 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsi_demo_ci-exe
+          path: wsi_demo_ci.exe
+          if-no-files-found: error
+
+  run-windows:
+    name: 在 Windows runner 上运行并截图
+    needs: build-exe
+    runs-on: windows-latest
+    steps:
+      - name: 下载 .exe 产物
+        uses: actions/download-artifact@v4
+        with:
+          name: wsi_demo_ci-exe
+
+      - name: 运行 wsi_demo_ci.exe 并截取桌面
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+
+          # 后台启动开窗程序（其自身约 12 秒后退出）
+          $proc = Start-Process -FilePath ".\wsi_demo_ci.exe" -PassThru
+          Write-Host "started wsi_demo_ci.exe pid=$($proc.Id)"
+
+          # 等窗口显示稳定后截图整块虚拟桌面
+          Start-Sleep -Seconds 4
+          $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bmp.Save("$PWD\wsi_screenshot.png")
+          $gfx.Dispose()
+          $bmp.Dispose()
+          Write-Host "screenshot saved: wsi_screenshot.png ($($bounds.Width)x$($bounds.Height))"
+
+          # 等程序自行退出；超时（15 秒）则强制结束，避免占用 runner
+          if (-not $proc.WaitForExit(15000)) {
+            Write-Host "process still running, killing"
+            $proc.Kill()
+          }
+          Write-Host "exit code: $($proc.ExitCode)"
+
+      - name: 上传截图 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsi-screenshot
+          path: wsi_screenshot.png
+          if-no-files-found: error

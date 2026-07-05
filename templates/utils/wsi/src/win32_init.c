@@ -569,7 +569,6 @@ bool _glfwConnectWin32(int platformID, platform_st* platform)
         .setWindowSize = _glfwSetWindowSizeWin32,
         .setWindowSizeLimits = _glfwSetWindowSizeLimitsWin32,
         .setWindowAspectRatio = _glfwSetWindowAspectRatioWin32,
-        .getFramebufferSize = _glfwGetFramebufferSizeWin32,
         .getWindowFrameSize = _glfwGetWindowFrameSizeWin32,
         .getWindowContentScale = _glfwGetWindowContentScaleWin32,
         .iconifyWindow = _glfwIconifyWindowWin32,
@@ -585,7 +584,6 @@ bool _glfwConnectWin32(int platformID, platform_st* platform)
         .windowVisible = _glfwWindowVisibleWin32,
         .windowMaximized = _glfwWindowMaximizedWin32,
         .windowHovered = _glfwWindowHoveredWin32,
-        .framebufferTransparent = _glfwFramebufferTransparentWin32,
         .getWindowOpacity = _glfwGetWindowOpacityWin32,
         .setWindowResizable = _glfwSetWindowResizableWin32,
         .setWindowDecorated = _glfwSetWindowDecoratedWin32,
@@ -596,12 +594,6 @@ bool _glfwConnectWin32(int platformID, platform_st* platform)
         .waitEvents = _glfwWaitEventsWin32,
         .waitEventsTimeout = _glfwWaitEventsTimeoutWin32,
         .postEmptyEvent = _glfwPostEmptyEventWin32,
-        .getEGLPlatform = _glfwGetEGLPlatformWin32,
-        .getEGLNativeDisplay = _glfwGetEGLNativeDisplayWin32,
-        .getEGLNativeWindow = _glfwGetEGLNativeWindowWin32,
-        .getRequiredInstanceExtensions = _glfwGetRequiredInstanceExtensionsWin32,
-        .getPhysicalDevicePresentationSupport = _glfwGetPhysicalDevicePresentationSupportWin32,
-        .createWindowSurface = _glfwCreateWindowSurfaceWin32
     };
 
     *platform = win32;
@@ -647,10 +639,6 @@ void _glfwTerminateWin32(void)
 
     wsi_free(g_wsi.win32.clipboardString);
     wsi_free(g_wsi.win32.rawInput);
-
-    _glfwTerminateWGL();
-    _glfwTerminateEGL();
-    _glfwTerminateOSMesa();
 
     impl_platform_unload_module(g_wsi.win32.xinput.instance);
     impl_platform_unload_module(g_wsi.win32.dinput8.instance);

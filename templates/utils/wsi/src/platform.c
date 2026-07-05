@@ -4,6 +4,45 @@
 #include <string.h>
 #include <stdlib.h>
 
+//////////////////////////////////////////////////////////////////////////
+//////              平台模块动态加载（跨平台，各后端共用）          //////
+//////////////////////////////////////////////////////////////////////////
+// 供各后端（win32/x11/wayland）按名加载系统库并取符号；cocoa 后端不依赖，
+// 但定义为平台无关，随 platform.c 一并编入，避免各后端各自实现一份。
+#if defined(_WIN32)
+ #include <windows.h>
+void* impl_platform_load_module(const char* path)
+{
+    return LoadLibraryA(path);
+}
+
+void impl_platform_unload_module(void* module)
+{
+    FreeLibrary((HMODULE) module);
+}
+
+GLFWproc impl_platform_get_module_symbol(void* module, const char* name)
+{
+    return (GLFWproc) GetProcAddress((HMODULE) module, name);
+}
+#else
+ #include <dlfcn.h>
+void* impl_platform_load_module(const char* path)
+{
+    return dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+}
+
+void impl_platform_unload_module(void* module)
+{
+    dlclose(module);
+}
+
+GLFWproc impl_platform_get_module_symbol(void* module, const char* name)
+{
+    return (GLFWproc) dlsym(module, name);
+}
+#endif
+
 // These construct a string literal from individual numeric constants
 #define WSI_MAKE_VERSION(m, n, r) #m "." #n "." #r
 

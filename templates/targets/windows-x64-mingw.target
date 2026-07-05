@@ -1,0 +1,47 @@
+# 目标档：Windows x64 / MinGW-w64（本地交叉编译，无需远程主机）
+# 在 macOS/Linux 上用 x86_64-w64-mingw32-gcc 直接交叉编译出 Windows PE 可执行文件，
+# 与 windows-x64.target（远程 MSVC，走 SSH）不同——这是本地工具链交叉编译，全程离线。
+#
+# 前置：安装 mingw-w64 交叉工具链
+#   macOS：brew install mingw-w64
+#   Debian/Ubuntu：apt install mingw-w64
+#
+# 用法：
+#   scc app.sc --build -o app.exe --target templates/targets/windows-x64-mingw.target
+#
+# 注意：产物是 Windows PE，本机（macOS/Linux）不能直接执行；
+#   需拷到 Windows 运行，或经 Wine（run = wine，见下）在本机跑。
+#
+# 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
+
+# ---- 交叉工具链程序 ----
+cc = x86_64-w64-mingw32-gcc        # MinGW-w64 交叉 C 编译器（SCC_CC 覆盖）
+ar = x86_64-w64-mingw32-ar         # 静态库归档器（SCC_AR 覆盖）
+
+# ---- 目标平台 ----
+# windows 族三元组：令生成 C 走 Windows 分支（_WIN32 由 mingw 自动定义），
+# 平台表自动推导 threads/debug 为 none；-gnu 表明是 mingw ABI（区别于 -msvc）。
+triple = x86_64-windows-gnu        # SCC_TARGET_TRIPLE 覆盖
+
+# ---- 基线链接库 ----
+# sc 的 io/socket builtins（op_impl.c / platform.h 里的 select/recv/send/
+# closesocket/ioctlsocket 等）在 Windows 上由 WinSock2 提供，须链接 ws2_32。
+# 这是任何用到 io/网络的 sc 程序在 Windows 上的基线依赖（GUI 库另经 SCC_LDFLAGS 传入）。
+ldflags = -lws2_32
+
+# ---- add 预编译库的目标变体后缀 ----
+# 留空即回退 triple。add libwsi.a 会优先匹配同目录的 libwsi.x86_64-windows-gnu.a
+# （wsi build.sh --target x86_64-windows-gnu 的产物名），与本三元组逐字符一致。
+# target_suffix = x86_64-windows-gnu
+
+# ---- 在本机用 Wine 运行 PE 产物（可选）----
+# 装了 wine（brew install --cask wine-stable / apt install wine64）后取消注释，
+# run 模式即可在 macOS/Linux 上直接跑交叉出的 .exe（含开窗 GUI）。
+# run = wine
+
+# 说明：
+#  - 链接窗口/GUI 库（如 wsi 的 win32 后端需 gdi32/user32/shell32 等）用 SCC_LDFLAGS 传入，
+#    与 macOS 传 -framework Cocoa 同理，例如：
+#      SCC_LDFLAGS="-lgdi32 -luser32 -lshell32 -limm32 -lole32 -loleaut32 -lversion -luuid -ldwmapi" \
+#        scc app.sc --build -o app.exe --target templates/targets/windows-x64-mingw.target
+#  - 只做纯计算/stdio 的程序无需额外 ldflags，mingw 默认已带 C 运行时。

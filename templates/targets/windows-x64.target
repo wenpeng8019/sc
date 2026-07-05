@@ -3,8 +3,8 @@
 # 再取回产物（--build）或在远端直接运行（run 模式）。无需本地装 MinGW/clang。
 #
 # 用法：
-#   scc app.sc        --target examples/targets/windows-x64.target          # 远端编译并运行
-#   scc app.sc --build -o app.exe --target examples/targets/windows-x64.target  # 远端编译，取回 app.exe
+#   scc app.sc        --target templates/targets/windows-x64.target          # 远端编译并运行
+#   scc app.sc --build -o app.exe --target templates/targets/windows-x64.target  # 远端编译，取回 app.exe
 #
 # 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
 # 认证沿用 SSH：build_key 指定私钥，或留空走 ssh-agent / ~/.ssh/id_rsa。

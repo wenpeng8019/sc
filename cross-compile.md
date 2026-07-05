@@ -14,15 +14,15 @@ scc 转译为 C 后调用 C 工具链，因此交叉编译的本质就是**把 s
 
 ```sh
 # 64 位 ARM Linux（托管 OS）
-scc app.sc --build -o app --target examples/targets/aarch64-linux.target
+scc app.sc --build -o app --target templates/targets/aarch64-linux.target
 
 # Cortex-M4 裸机，产出可烧录镜像
-scc fw.sc --build -o fw.bin --target examples/targets/cortex-m4.target \
+scc fw.sc --build -o fw.bin --target templates/targets/cortex-m4.target \
           --builtins path/to/m4-builtins
 ```
 
-示例目标档见 [examples/targets/aarch64-linux.target](examples/targets/aarch64-linux.target)
-与 [examples/targets/cortex-m4.target](examples/targets/cortex-m4.target)。
+示例目标档见 [templates/targets/aarch64-linux.target](templates/targets/aarch64-linux.target)
+与 [templates/targets/cortex-m4.target](templates/targets/cortex-m4.target)。
 
 ---
 
@@ -95,7 +95,7 @@ myrtos       :           : none
 
 ```sh
 # 经 qemu 在本机跑 aarch64 产物
-scc app.sc --target examples/targets/aarch64-linux.target -- arg1 arg2
+scc app.sc --target templates/targets/aarch64-linux.target -- arg1 arg2
 ```
 
 ---
@@ -123,7 +123,7 @@ scc app.sc --target examples/targets/aarch64-linux.target -- arg1 arg2
 
 ```sh
 scc fw.sc --build -o fw.bin \
-    --target examples/targets/cortex-m4.target \
+    --target templates/targets/cortex-m4.target \
     --builtins boards/m4/builtins
 ```
 
@@ -170,5 +170,5 @@ SCC_SYSROOT=/other/sysroot scc app.sc --build -o app --target my.target
 
 ```sh
 # 不装 Linux 交叉工具链，借一台 Linux 主机产出 Linux 可执行文件
-scc --build -o app-linux --target examples/targets/remote-linux.target app.sc
+scc --build -o app-linux --target templates/targets/remote-linux.target app.sc
 ```

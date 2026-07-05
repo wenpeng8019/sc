@@ -4,7 +4,7 @@
 set -u
 cd "$(dirname "$0")/.."
 SCC=./compiler/build/scc
-TGT=examples/targets/windows-x64.target
+TGT=templates/targets/windows-x64.target
 
 CASES=("$@")
 if [ ${#CASES[@]} -eq 0 ]; then

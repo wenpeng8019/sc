@@ -261,7 +261,7 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 # 目录下同时备： libssh2.a（本机） 与 libssh2.aarch64-linux.a（目标）
 # 源码里只写 `add libssh2.a`；设了 suffix 后远端/交叉构建自动选变体
 SCC_TARGET_SUFFIX=aarch64-linux \
-  scc --build -o app --target examples/targets/remote-linux.target app.sc
+  scc --build -o app --target templates/targets/remote-linux.target app.sc
 ```
 
 *取值约定（标准）*
@@ -300,9 +300,9 @@ SCC_TARGET_SUFFIX=aarch64-linux \
 **示例**
 
 ```sh
-# 目标档 examples/targets/remote-linux.target 写好 build_host/user/port/key
-scc --target examples/targets/remote-linux.target app.sc            # 远端编译并运行
-scc --build -o app-linux --target examples/targets/remote-linux.target app.sc  # 取回 Linux 产物
+# 目标档 templates/targets/remote-linux.target 写好 build_host/user/port/key
+scc --target templates/targets/remote-linux.target app.sc            # 远端编译并运行
+scc --build -o app-linux --target templates/targets/remote-linux.target app.sc  # 取回 Linux 产物
 
 # 纯环境变量一次性远程构建
 SCC_BUILD_HOST=build.lan SCC_BUILD_USER=ci SCC_REMOTE_CC=gcc scc app.sc

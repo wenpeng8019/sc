@@ -237,7 +237,7 @@ void _glfwSetVideoModeWin32(monitor_st* monitor, const GLFWvidmode* desired)
                             DM_DISPLAYFREQUENCY;
     dm.dmPelsWidth        = best->width;
     dm.dmPelsHeight       = best->height;
-    dm.dmBitsPerPel       = best->redBits + best->greenBits + best->blueBits;
+    dm.dmBitsPerPel       = 32;
     dm.dmDisplayFrequency = best->refreshRate;
 
     if (dm.dmBitsPerPel < 15 || dm.dmBitsPerPel >= 24)
@@ -395,10 +395,6 @@ GLFWvidmode* _glfwGetVideoModesWin32(monitor_st* monitor, int* count)
         mode.width  = dm.dmPelsWidth;
         mode.height = dm.dmPelsHeight;
         mode.refreshRate = dm.dmDisplayFrequency;
-        wsi_split_bpp(dm.dmBitsPerPel,
-                      &mode.redBits,
-                      &mode.greenBits,
-                      &mode.blueBits);
 
         for (i = 0;  i < *count;  i++)
         {
@@ -459,10 +455,6 @@ bool _glfwGetVideoModeWin32(monitor_st* monitor, GLFWvidmode* mode)
     mode->width  = dm.dmPelsWidth;
     mode->height = dm.dmPelsHeight;
     mode->refreshRate = dm.dmDisplayFrequency;
-    wsi_split_bpp(dm.dmBitsPerPel,
-                  &mode->redBits,
-                  &mode->greenBits,
-                  &mode->blueBits);
 
     return true;
 }
