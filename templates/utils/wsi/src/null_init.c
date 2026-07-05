@@ -218,7 +218,7 @@ int _glfwInitNull(void)
 
 void _glfwTerminateNull(void)
 {
-    free(g_wsi.null.clipboardString);
+    wsi_free(g_wsi.null.clipboardString);
     memset(&g_wsi.null, 0, sizeof(g_wsi.null));
 }
 

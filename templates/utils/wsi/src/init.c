@@ -1,5 +1,7 @@
 
 #include "internal.h"
+#include "platform.h"   // sc 跨平台层：编译期 TLS 宏 + 单调时钟 P_clock_now
+#include "mem/mem.h"    // sc 池化内存：sc_chunk0 / sc_refit / sc_recycle
 
 #include <string.h>
 #include <stdlib.h>
@@ -15,12 +17,10 @@
 //
 library_st g_wsi = { false };
 
-// These are outside of g_wsi so they can be used before initialization and
-// after termination without special handling when g_wsi is cleared to zero
-//
-static error_st _glfwMainThreadError;
+// 每线程一份「最近错误」：用 sc platform.h 的编译期 TLS 存储类修饰符，
+// 无堆分配、无锁、无链表，初始化前/终止后亦可安全读写。
+static TLS error_st t_thread_error;
 static sc_error_cb _glfwErrorCallback;
-static sc_allocator_cb _glfwInitAllocator;
 static init_config_st _glfwInitHints =
 {
     .hatButtons = true,
@@ -38,27 +38,6 @@ static init_config_st _glfwInitHints =
         .libdecorMode = SC_WAYLAND_PREFER_LIBDECOR
     },
 };
-
-// The allocation function used when no custom allocator is set
-//
-static void* defaultAllocate(size_t size, void* user)
-{
-    return malloc(size);
-}
-
-// The deallocation function used when no custom allocator is set
-//
-static void defaultDeallocate(void* block, void* user)
-{
-    free(block);
-}
-
-// The reallocation function used when no custom allocator is set
-//
-static void* defaultReallocate(void* block, size_t size, void* user)
-{
-    return realloc(block, size);
-}
 
 // Terminate the library
 //
@@ -86,22 +65,19 @@ static void terminate(void)
     g_wsi.monitors = NULL;
     g_wsi.monitorCount = 0;
 
-
     g_wsi.platform.terminate();
 
     g_wsi.initialized = false;
 
-    while (g_wsi.errorListHead)
-    {
-        error_st* error = g_wsi.errorListHead;
-        g_wsi.errorListHead = error->next;
-        wsi_free(error);
-    }
-
-    impl_platform_destroy_tls(&g_wsi.errorSlot);
-    impl_platform_destroy_mutex(&g_wsi.errorLock);
-
     memset(&g_wsi, 0, sizeof(g_wsi));
+}
+
+// 单调时钟当前值（纳秒），经 sc 跨平台层 P_clock_now。
+uint64_t wsi_clock_ns(void)
+{
+    clk_t c;
+    P_clock_now(&c);
+    return (uint64_t) c.tv_sec * 1000000000ULL + (uint64_t) c.tv_nsec;
 }
 
 
@@ -223,9 +199,9 @@ void* wsi_calloc(size_t count, size_t size)
             return NULL;
         }
 
-        block = g_wsi.allocator.allocate(count * size, g_wsi.allocator.user);
+        block = sc_chunk0((uint64_t) (count * size));
         if (block)
-            return memset(block, 0, count * size);
+            return block;
         else
         {
             impl_on_error(SC_WSI_ERR_OUT_OF_MEMORY, NULL);
@@ -240,7 +216,7 @@ void* wsi_realloc(void* block, size_t size)
 {
     if (block && size)
     {
-        void* resized = g_wsi.allocator.reallocate(block, size, g_wsi.allocator.user);
+        void* resized = sc_refit(block, (uint64_t) size);
         if (resized)
             return resized;
         else
@@ -261,7 +237,7 @@ void* wsi_realloc(void* block, size_t size)
 void wsi_free(void* block)
 {
     if (block)
-        g_wsi.allocator.deallocate(block, g_wsi.allocator.user);
+        sc_recycle(block);
 }
 
 
@@ -273,7 +249,7 @@ void wsi_free(void* block)
 //
 void impl_on_error(int code, const char* format, ...)
 {
-    error_st* error;
+    error_st* error = &t_thread_error;
     char description[_SC_MESSAGE_SIZE];
 
     if (format)
@@ -320,22 +296,6 @@ void impl_on_error(int code, const char* format, ...)
             strcpy(description, "ERROR: UNKNOWN GLFW ERROR");
     }
 
-    if (g_wsi.initialized)
-    {
-        error = impl_platform_get_tls(&g_wsi.errorSlot);
-        if (!error)
-        {
-            error = wsi_calloc(1, sizeof(error_st));
-            impl_platform_set_tls(&g_wsi.errorSlot, error);
-            impl_platform_lock_mutex(&g_wsi.errorLock);
-            error->next = g_wsi.errorListHead;
-            g_wsi.errorListHead = error;
-            impl_platform_unlock_mutex(&g_wsi.errorLock);
-        }
-    }
-    else
-        error = &_glfwMainThreadError;
-
     error->code = code;
     strcpy(error->description, description);
 
@@ -356,14 +316,6 @@ WSI_API int sc_wsi_init(void)
     memset(&g_wsi, 0, sizeof(g_wsi));
     g_wsi.hints.init = _glfwInitHints;
 
-    g_wsi.allocator = _glfwInitAllocator;
-    if (!g_wsi.allocator.allocate)
-    {
-        g_wsi.allocator.allocate   = defaultAllocate;
-        g_wsi.allocator.reallocate = defaultReallocate;
-        g_wsi.allocator.deallocate = defaultDeallocate;
-    }
-
     if (!wsi_select_platform(g_wsi.hints.init.platformID, &g_wsi.platform))
         return false;
 
@@ -373,18 +325,7 @@ WSI_API int sc_wsi_init(void)
         return false;
     }
 
-    if (!impl_platform_create_mutex(&g_wsi.errorLock) ||
-        !impl_platform_create_tls(&g_wsi.errorSlot))
-    {
-        terminate();
-        return false;
-    }
-
-    impl_platform_set_tls(&g_wsi.errorSlot, &_glfwMainThreadError);
-
-
-    impl_platform_init_timer();
-    g_wsi.timer.offset = impl_platform_get_timer_value();
+    g_wsi.timer.offset = wsi_clock_ns();
 
     g_wsi.initialized = true;
 
@@ -425,19 +366,6 @@ WSI_API void sc_wsi_init_hint(int hint, int value)
                     "Invalid init hint 0x%08X", hint);
 }
 
-WSI_API void sc_wsi_init_allocator(const sc_allocator_cb* allocator)
-{
-    if (allocator)
-    {
-        if (allocator->allocate && allocator->reallocate && allocator->deallocate)
-            _glfwInitAllocator = *allocator;
-        else
-            impl_on_error(SC_WSI_ERR_INVALID_VALUE, "Missing function in allocator");
-    }
-    else
-        memset(&_glfwInitAllocator, 0, sizeof(sc_allocator_cb));
-}
-
 WSI_API void sc_wsi_get_version(int* major, int* minor, int* rev)
 {
     if (major != NULL)
@@ -450,16 +378,11 @@ WSI_API void sc_wsi_get_version(int* major, int* minor, int* rev)
 
 WSI_API int sc_wsi_get_error(const char** description)
 {
-    error_st* error;
+    error_st* error = &t_thread_error;
     int code = SC_WSI_ERR_NONE;
 
     if (description)
         *description = NULL;
-
-    if (g_wsi.initialized)
-        error = impl_platform_get_tls(&g_wsi.errorSlot);
-    else
-        error = &_glfwMainThreadError;
 
     if (error)
     {

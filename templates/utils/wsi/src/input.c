@@ -636,8 +636,7 @@ WSI_API double sc_wsi_get_time(void)
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
         return 0.0;
     }
-    return (double) (impl_platform_get_timer_value() - g_wsi.timer.offset) /
-        impl_platform_get_timer_frequency();
+    return (double) (wsi_clock_ns() - g_wsi.timer.offset) / 1e9;
 }
 
 WSI_API void sc_wsi_set_time(double time)
@@ -653,8 +652,7 @@ WSI_API void sc_wsi_set_time(double time)
         return;
     }
 
-    g_wsi.timer.offset = impl_platform_get_timer_value() -
-        (uint64_t) (time * impl_platform_get_timer_frequency());
+    g_wsi.timer.offset = wsi_clock_ns() - (uint64_t) (time * 1e9);
 }
 
 WSI_API uint64_t sc_wsi_timer_value(void)
@@ -663,7 +661,7 @@ WSI_API uint64_t sc_wsi_timer_value(void)
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
         return 0;
     }
-    return impl_platform_get_timer_value();
+    return wsi_clock_ns();
 }
 
 WSI_API uint64_t sc_wsi_timer_frequency(void)
@@ -672,6 +670,6 @@ WSI_API uint64_t sc_wsi_timer_frequency(void)
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
         return 0;
     }
-    return impl_platform_get_timer_frequency();
+    return 1000000000ULL;
 }
 

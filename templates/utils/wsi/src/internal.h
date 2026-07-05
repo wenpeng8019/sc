@@ -18,16 +18,12 @@ typedef struct cursor_t         cursor_st;
 typedef struct platform_t       platform_st;
 typedef struct library_t        library_st;
 
-typedef struct _GLFWtls         _GLFWtls;
-typedef struct _GLFWmutex       _GLFWmutex;
-
-#include "platform.h"
+#include "wsi_platform.h"
 
 // Per-thread error structure
 //
 struct error_t
 {
-    error_st*     next;
     int             code;
     char            description[_SC_MESSAGE_SIZE];
 };
@@ -186,22 +182,6 @@ struct cursor_t
     GLFW_PLATFORM_CURSOR_STATE
 };
 
-// Thread local storage structure
-//
-struct _GLFWtls
-{
-    // This is defined in platform.h
-    GLFW_PLATFORM_TLS_STATE
-};
-
-// Mutex structure
-//
-struct _GLFWmutex
-{
-    // This is defined in platform.h
-    GLFW_PLATFORM_MUTEX_STATE
-};
-
 // Platform API structure
 //
 struct platform_t
@@ -276,7 +256,6 @@ struct platform_t
 struct library_t
 {
     bool                initialized;
-    sc_allocator_cb     allocator;
 
     platform_st         platform;
 
@@ -286,21 +265,14 @@ struct library_t
         int             refreshRate;
     } hints;
 
-    error_st*           errorListHead;
     cursor_st*          cursorListHead;
     window_st*          windowListHead;
 
     monitor_st**        monitors;
     int                 monitorCount;
 
-
-    _GLFWtls            errorSlot;
-    _GLFWmutex          errorLock;
-
     struct {
-        uint64_t        offset;
-        // This is defined in platform.h
-        GLFW_PLATFORM_LIBRARY_TIMER_STATE
+        uint64_t        offset;   // 基准时刻（单调时钟纳秒），get_time 以此为零点
     } timer;
 
     struct {
@@ -319,20 +291,6 @@ extern library_st g_wsi;
 //////////////////////////////////////////////////////////////////////////
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
-
-void impl_platform_init_timer(void);
-uint64_t impl_platform_get_timer_value(void);
-uint64_t impl_platform_get_timer_frequency(void);
-
-bool impl_platform_create_tls(_GLFWtls* tls);
-void impl_platform_destroy_tls(_GLFWtls* tls);
-void* impl_platform_get_tls(_GLFWtls* tls);
-void impl_platform_set_tls(_GLFWtls* tls, void* value);
-
-bool impl_platform_create_mutex(_GLFWmutex* mutex);
-void impl_platform_destroy_mutex(_GLFWmutex* mutex);
-void impl_platform_lock_mutex(_GLFWmutex* mutex);
-void impl_platform_unlock_mutex(_GLFWmutex* mutex);
 
 void* impl_platform_load_module(const char* path);
 void impl_platform_unload_module(void* module);
@@ -399,6 +357,9 @@ char** wsi_parse_url_list(char* text, int* count);
 char* wsi_strdup(const char* source);
 int wsi_min(int a, int b);
 int wsi_max(int a, int b);
+
+// 单调时钟当前值（纳秒）。定义于 init.c，经 sc builtins/platform.h 的 P_clock_now 实现。
+uint64_t wsi_clock_ns(void);
 
 void* wsi_calloc(size_t count, size_t size);
 void* wsi_realloc(void* pointer, size_t size);

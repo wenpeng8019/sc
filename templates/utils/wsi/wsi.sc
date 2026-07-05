@@ -27,13 +27,13 @@ inc wsi.h
 add libwsi.a
 
 # 指针约定：不透明句柄与结构体指针引用 wsi.h 内的 C 域类型（::sc_window /
-#   ::sc_monitor / ::sc_cursor / ::GLFWvidmode / ::GLFWgammaramp / ::GLFWimage /
-#   ::sc_allocator_cb），令生成的 extern 原型与手写头逐字对齐（本单元为头支撑单元，
+#   ::sc_monitor / ::sc_cursor / ::GLFWvidmode / ::GLFWgammaramp / ::GLFWimage），
+#   令生成的 extern 原型与手写头逐字对齐（本单元为头支撑单元，
 #   .c 已 #include wsi.h，消费单元 inc wsi.sc 亦直接见 wsi.h）。回调函数指针 typedef
 #   同样以 ::sc_error_cb / ::sc_monitor_cb 引用。void* 用户数据映射裸指针 &；
 #   出参基础类型用 i4& / f4& / f8&；char** 用 const char&&。NULL 传 nil。
 
-# ---------------- 版本 / 初始化 / 错误 / 分配器 ----------------
+# ---------------- 版本 / 初始化 / 错误 ----------------
 @fnc wsi_get_version:: major: i4&, minor: i4&, rev: i4&   # 运行时版本
 @fnc wsi_get_version_string:: const char&                 # 版本描述串
 @fnc wsi_init:: i4                                        # 初始化（成功非 0）
@@ -41,7 +41,6 @@ add libwsi.a
 @fnc wsi_init_hint:: hint: i4, value: i4                  # 初始化前设置 hint
 @fnc wsi_get_error:: i4, description: const char&&        # 取最近错误码 + 描述
 @fnc wsi_set_error_callback:: ::sc_error_cb, callback: ::sc_error_cb   # 设置错误回调，返回旧回调
-@fnc wsi_init_allocator:: allocator: const ::sc_allocator_cb&          # 自定义内存分配器
 
 # ---------------- 事件 ----------------
 @fnc wsi_poll_events::                                    # 处理挂起事件后立即返回

@@ -13,9 +13,11 @@
 #   交叉编译只生成带后缀版本（sc 通过 targetSuffix 匹配）
 #
 # 平台适配：
-#   darwin  → Cocoa   (WSI_COCOA)   + posix 线程/时间
-#   linux   → X11     (WSI_X11)     + posix 线程/时间/poll
-#   windows → Win32   (WSI_WIN32)   + win32 线程/时间
+#   darwin  → Cocoa   (WSI_COCOA)
+#   linux   → X11     (WSI_X11)     + posix poll
+#   windows → Win32   (WSI_WIN32)
+#
+#   线程/TLS/时钟统一由 sc 的 builtins/platform.h 跨平台层提供。
 #
 # 工具链：
 #   gcc/clang  — Unix 系默认；macOS 用 -x objective-c 编译 .m
@@ -26,6 +28,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 SRC_DIR="src"
+# sc 跨平台层头（platform.h：编译期 TLS + 单调时钟等）
+BUILTINS_DIR="$(cd "${SCRIPT_DIR}/../../../builtins" && pwd)"
 
 # ---- 参数解析 ----
 TARGET=""
@@ -115,25 +119,19 @@ case "$TARGET" in
     *-apple-darwin*)
         PLAT="darwin"
         PLAT_DEFINE="WSI_COCOA"
-        PLAT_SRCS="cocoa_init.m cocoa_monitor.m cocoa_window.m macos_time.c"
-        THREAD_SRCS="posix_thread.c"
-        TIME_SRCS=""  # macos_time.c already in PLAT_SRCS
+        PLAT_SRCS="cocoa_init.m cocoa_monitor.m cocoa_window.m"
         POLL_SRCS=""
         EXTRA_CFLAGS="-x objective-c" ;;
     *-linux-*|*-linux)
         PLAT="linux"
         PLAT_DEFINE="WSI_X11"
         PLAT_SRCS="x11_init.c x11_monitor.c x11_window.c xkb_unicode.c"
-        THREAD_SRCS="posix_thread.c"
-        TIME_SRCS="posix_time.c"
         POLL_SRCS="posix_poll.c"
         EXTRA_CFLAGS="" ;;
     *-windows-*|*-mingw*|*-msys*|*-cygwin*|*-msvc*)
         PLAT="windows"
         PLAT_DEFINE="WSI_WIN32"
         PLAT_SRCS="win32_init.c win32_monitor.c win32_window.c"
-        THREAD_SRCS="win32_thread.c"
-        TIME_SRCS="win32_time.c"
         POLL_SRCS=""
         EXTRA_CFLAGS="" ;;
     *)
@@ -159,7 +157,7 @@ ALL_OBJS=""
 compile_gnu() {
     local src="$1"
     local obj="${OBJ_DIR}/$(basename "${src%.*}").o"
-    local cflags="-c -I${SRC_DIR} -D${PLAT_DEFINE} -DWSI_BUILD_DLL"
+    local cflags="-c -I${SRC_DIR} -I${BUILTINS_DIR} -D${PLAT_DEFINE} -DWSI_BUILD_DLL"
     case "${src}" in
         *.m) cflags="$cflags -x objective-c" ;;
     esac
@@ -172,18 +170,18 @@ compile_msvc() {
     local src="$1"
     local obj="${OBJ_DIR}/$(basename "${src%.*}").obj"
     echo "  CC $src"
-    $CC /nologo /c /I"${SRC_DIR}" /D"${PLAT_DEFINE}" /DWSI_BUILD_DLL "${SRC_DIR}/${src}" /Fo"$obj"
+    $CC /nologo /c /I"${SRC_DIR}" /I"${BUILTINS_DIR}" /D"${PLAT_DEFINE}" /DWSI_BUILD_DLL "${SRC_DIR}/${src}" /Fo"$obj"
     ALL_OBJS="$ALL_OBJS $obj"
 }
 
 case "$TOOLCHAIN" in
     gnu)
-        for src in $SHARED_SRCS $PLAT_SRCS $THREAD_SRCS $TIME_SRCS $POLL_SRCS $NULL_SRCS; do
+        for src in $SHARED_SRCS $PLAT_SRCS $POLL_SRCS $NULL_SRCS; do
             [[ -f "${SRC_DIR}/${src}" ]] && compile_gnu "$src"
         done
         ;;
     msvc)
-        for src in $SHARED_SRCS $PLAT_SRCS $THREAD_SRCS $TIME_SRCS $POLL_SRCS $NULL_SRCS; do
+        for src in $SHARED_SRCS $PLAT_SRCS $POLL_SRCS $NULL_SRCS; do
             [[ -f "${SRC_DIR}/${src}" ]] && compile_msvc "$src"
         done
         ;;

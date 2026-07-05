@@ -5,7 +5,7 @@
  * 内容：常用标准 C 头（scc 生成的 C 统一由本头带入）、平台判定宏、
  *       平台基础头、路径分隔符、TLS、字节序、
  *       时钟（墙钟/单调/CPU 耗时）、原子操作、
- *       互斥/条件变量/线程 id（跨平台 pthread ↔ Win32）。
+ *       互斥/条件变量/线程 id/动态 TLS（跨平台 pthread ↔ Win32）。
  * 发行：与其他 builtins 资源一样内嵌进 scc 二进制并随用释放。
  */
 #ifndef SC_PLATFORM_H
@@ -998,7 +998,7 @@ static inline uint64_t P_rand64(void) { uint64_t r; P_rand_bytes(&r, sizeof r); 
 #endif /* P_RAND_IMPL && !SC_PLATFORM_RAND_DONE */
 
 ///////////////////////////////////////////////////////////////////////////////
-// 互斥 / 条件变量 / 线程 / 屏障（延迟展开，置于主 include guard 之外）
+// 互斥 / 条件变量 / 线程 / 屏障 / 动态 TLS（延迟展开，置于主 include guard 之外）
 ///////////////////////////////////////////////////////////////////////////////
 // 仅当 TU 在包含本头前定义了 P_MT_IMPL 时展开（mt_impl.c / op_impl.c 等 builtins
 // 实现 opt-in），避免给不用线程的普通生成单元凭空拉入 <pthread.h> 等线程头。与 socket
@@ -1006,10 +1006,11 @@ static inline uint64_t P_rand64(void) { uint64_t r; P_rand_bytes(&r, sizeof r); 
 // 独立于 SC_PLATFORM_H；依赖的平台判定宏（P_WIN/P_DARWIN/P_LINUX/...）由主体首次包含时
 // 已定义并留存。
 //
-// 命名：类型为 mutex_t / cond_t / barrier_t（平台句柄类型，无 sc_ 前缀——sc 无法暴露
-// C 侧类型声明，故本层类型仅经 '::' 逃逸供 mt 的 @def 直接作字段）；操作一律 P_ 前缀
-//（平台适配层，非 sc 命名域）——sc 命名域的 mutex/cond/barrier 方法由 mt 模块
-//（mt.h / mt_impl.c）以 sc_mutex_* 等薄包装转调本层 P_* 提供。
+// 命名：类型为 mutex_t / cond_t / barrier_t / tls_t（平台句柄类型，无 sc_ 前缀——sc
+// 无法暴露 C 侧类型声明，故本层类型仅经 '::' 逃逸供 mt 的 @def 直接作字段）；操作一律
+// P_ 前缀（平台适配层，非 sc 命名域）——sc 命名域的 mutex/cond/barrier 方法由 mt 模块
+//（mt.h / mt_impl.c）以 sc_mutex_* 等薄包装转调本层 P_* 提供。动态 TLS（tls_t/P_tls_*，
+// pthread_key ↔ TlsAlloc）作为跨平台原语一并收录，与主体编译期 TLS 宏互补。
 #if defined(P_MT_IMPL) && !defined(SC_PLATFORM_MT_DONE)
 #define SC_PLATFORM_MT_DONE
 
@@ -1092,6 +1093,24 @@ static inline uint64_t P_thread_id(void) {
     return (uint64_t)(uintptr_t)pthread_self();
 #endif
 }
+
+/* 动态线程局部存储（运行时 key 式 TLS，pthread_key_t ↔ TlsAlloc）。
+ * 与主体的编译期 TLS 存储类修饰符互补：TLS 宏（__thread/_Thread_local/__declspec）
+ * 适合「编译期已知的固定线程局部变量」；本 tls_t/P_tls_* 则适合「运行时按需创建/销毁
+ * 槽位」（槽数或生命周期需运行时决定，或槽位随对象动态分配）。全部 0=成功 / -1=失败。 */
+#if P_WIN
+typedef DWORD tls_t;
+static inline int  P_tls_create(tls_t* key)       { *key = TlsAlloc(); return *key == TLS_OUT_OF_INDEXES ? -1 : 0; }
+static inline void P_tls_final(tls_t* key)        { TlsFree(*key); }
+static inline void* P_tls_get(tls_t key)          { return TlsGetValue(key); }
+static inline void P_tls_set(tls_t key, void* v)  { TlsSetValue(key, v); }
+#else
+typedef pthread_key_t tls_t;
+static inline int  P_tls_create(tls_t* key)       { return pthread_key_create(key, NULL) == 0 ? 0 : -1; }
+static inline void P_tls_final(tls_t* key)        { pthread_key_delete(*key); }
+static inline void* P_tls_get(tls_t key)          { return pthread_getspecific(key); }
+static inline void P_tls_set(tls_t key, void* v)  { pthread_setspecific(key, v); }
+#endif
 
 /* 屏障：N 方汇合。自实现（mutex + cond），因 macOS 无 pthread_barrier_t、
  * Windows 无 pthread；代际 phase 防本轮唤醒被下一轮抢用，并天然抗虚假唤醒。 */

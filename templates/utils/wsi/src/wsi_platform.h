@@ -1,11 +1,6 @@
 
-#if defined(GLFW_BUILD_WIN32_TIMER) || \
-    defined(GLFW_BUILD_WIN32_MODULE) || \
-    defined(GLFW_BUILD_WIN32_THREAD) || \
-    defined(GLFW_BUILD_MACOS_TIMER) || \
-    defined(GLFW_BUILD_POSIX_TIMER) || \
+#if defined(GLFW_BUILD_WIN32_MODULE) || \
     defined(GLFW_BUILD_POSIX_MODULE) || \
-    defined(GLFW_BUILD_POSIX_THREAD) || \
     defined(GLFW_BUILD_POSIX_POLL)
  #error "You must not define these; define zero or more _GLFW_<platform> macros instead"
 #endif
@@ -86,40 +81,8 @@
 #define GLFW_PLATFORM_CONTEXT_STATE
 #define GLFW_PLATFORM_LIBRARY_CONTEXT_STATE
 
-#if defined(_WIN32)
- #define GLFW_BUILD_WIN32_THREAD
-#else
- #define GLFW_BUILD_POSIX_THREAD
-#endif
-
-#if defined(GLFW_BUILD_WIN32_THREAD)
- #include "win32_thread.h"
- #define GLFW_PLATFORM_TLS_STATE    GLFW_WIN32_TLS_STATE
- #define GLFW_PLATFORM_MUTEX_STATE  GLFW_WIN32_MUTEX_STATE
-#elif defined(GLFW_BUILD_POSIX_THREAD)
- #include "posix_thread.h"
- #define GLFW_PLATFORM_TLS_STATE    GLFW_POSIX_TLS_STATE
- #define GLFW_PLATFORM_MUTEX_STATE  GLFW_POSIX_MUTEX_STATE
-#endif
-
-#if defined(_WIN32)
- #define GLFW_BUILD_WIN32_TIMER
-#elif defined(__APPLE__)
- #define GLFW_BUILD_MACOS_TIMER
-#else
- #define GLFW_BUILD_POSIX_TIMER
-#endif
-
-#if defined(GLFW_BUILD_WIN32_TIMER)
- #include "win32_time.h"
- #define GLFW_PLATFORM_LIBRARY_TIMER_STATE  GLFW_WIN32_LIBRARY_TIMER_STATE
-#elif defined(GLFW_BUILD_MACOS_TIMER)
- #include "macos_time.h"
- #define GLFW_PLATFORM_LIBRARY_TIMER_STATE  GLFW_MACOS_LIBRARY_TIMER_STATE
-#elif defined(GLFW_BUILD_POSIX_TIMER)
- #include "posix_time.h"
- #define GLFW_PLATFORM_LIBRARY_TIMER_STATE  GLFW_POSIX_LIBRARY_TIMER_STATE
-#endif
+// 线程/TLS/互斥与时钟不再由 wsi 自带的平台文件提供，统一由 sc 的 builtins/platform.h
+// 跨平台层承担（编译期 TLS 宏 + 单调时钟）；相应的 posix/macos/win32 thread/time 源已删除。
 
 #if defined(_WIN32)
  #define GLFW_BUILD_WIN32_MODULE

@@ -15,7 +15,7 @@ bool _glfwPollPOSIX(struct pollfd* fds, nfds_t count, double* timeout)
     {
         if (timeout)
         {
-            const uint64_t base = impl_platform_get_timer_value();
+            const uint64_t base = wsi_clock_ns();
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__CYGWIN__)
             const time_t seconds = (time_t) *timeout;
@@ -33,8 +33,7 @@ bool _glfwPollPOSIX(struct pollfd* fds, nfds_t count, double* timeout)
 #endif
             const int error = errno; // clock_gettime may overwrite our error
 
-            *timeout -= (impl_platform_get_timer_value() - base) /
-                (double) impl_platform_get_timer_frequency();
+            *timeout -= (wsi_clock_ns() - base) / 1e9;
 
             if (result > 0)
                 return true;
