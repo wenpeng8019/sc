@@ -39,9 +39,10 @@ extern "C" {
  *   而不需了解 ui 内部结构。即：ui 定标准，外部引用。
  *   拿 sink：sc_ui_window_sink() / sc_ui_control_sink()。
  *
- * 与 surface 的衔接：
+ * 与 gpu 的衔接：
  *   sc_ui_window 携带 platform + nativeDisplay + nativeWindow 三元组，
- *   供 surface 模块的 sc_surface_create_from_native(...) 消费。
+ *   供 gpu 模块的 sc_gpu_make_surface(...)（sc_gpu_surface_desc 的
+ *   native_window / native_display）消费。
  *   取/挂句柄见「子窗口：原生句柄绑定」区段。
  * ============================================================ */
 
@@ -164,10 +165,10 @@ UI_API int sc_ui_window_get_flags(sc_ui_window* win);
 UI_API void sc_ui_window_set_flags(sc_ui_window* win, int flags);
 
 /* ============================================================
- * 子窗口：原生句柄绑定（★ surface 绑定入口）
+ * 子窗口：原生句柄绑定（★ gpu surface 绑定入口）
  * ============================================================
- * 这组接口是 ui 与 surface 模块的衔接点：
- *   取句柄 → sc_surface_create_from_native(platform, display, window)。
+ * 这组接口是 ui 与 gpu 模块的衔接点：
+ *   取句柄 → sc_gpu_make_surface(&desc)（native_window/native_display）。
  * ============================================================ */
 
 /* 返回该窗口的平台 ID（SC_PLATFORM_*）。 */
