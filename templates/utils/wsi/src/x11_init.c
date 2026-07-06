@@ -803,23 +803,6 @@ static bool initExtensions(void)
                               XkbGroupStateMask, XkbGroupStateMask);
     }
 
-    if (g_wsi.hints.init.x11.xcbVulkanSurface)
-    {
-#if defined(__CYGWIN__)
-        g_wsi.x11.x11xcb.handle = impl_platform_load_module("libX11-xcb-1.so");
-#elif defined(__OpenBSD__) || defined(__NetBSD__)
-        g_wsi.x11.x11xcb.handle = impl_platform_load_module("libX11-xcb.so");
-#else
-        g_wsi.x11.x11xcb.handle = impl_platform_load_module("libX11-xcb.so.1");
-#endif
-    }
-
-    if (g_wsi.x11.x11xcb.handle)
-    {
-        g_wsi.x11.x11xcb.GetXCBConnection = (PFN_XGetXCBConnection)
-            impl_platform_get_module_symbol(g_wsi.x11.x11xcb.handle, "XGetXCBConnection");
-    }
-
 #if defined(__CYGWIN__)
     g_wsi.x11.xrender.handle = impl_platform_load_module("libXrender-1.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
@@ -1175,7 +1158,6 @@ bool _glfwConnectX11(int platformID, platform_st* platform)
         .setWindowSize = _glfwSetWindowSizeX11,
         .setWindowSizeLimits = _glfwSetWindowSizeLimitsX11,
         .setWindowAspectRatio = _glfwSetWindowAspectRatioX11,
-        .getFramebufferSize = _glfwGetFramebufferSizeX11,
         .getWindowFrameSize = _glfwGetWindowFrameSizeX11,
         .getWindowContentScale = _glfwGetWindowContentScaleX11,
         .iconifyWindow = _glfwIconifyWindowX11,
@@ -1191,7 +1173,6 @@ bool _glfwConnectX11(int platformID, platform_st* platform)
         .windowVisible = _glfwWindowVisibleX11,
         .windowMaximized = _glfwWindowMaximizedX11,
         .windowHovered = _glfwWindowHoveredX11,
-        .framebufferTransparent = _glfwFramebufferTransparentX11,
         .getWindowOpacity = _glfwGetWindowOpacityX11,
         .setWindowResizable = _glfwSetWindowResizableX11,
         .setWindowDecorated = _glfwSetWindowDecoratedX11,
@@ -1201,13 +1182,7 @@ bool _glfwConnectX11(int platformID, platform_st* platform)
         .pollEvents = _glfwPollEventsX11,
         .waitEvents = _glfwWaitEventsX11,
         .waitEventsTimeout = _glfwWaitEventsTimeoutX11,
-        .postEmptyEvent = _glfwPostEmptyEventX11,
-        .getEGLPlatform = _glfwGetEGLPlatformX11,
-        .getEGLNativeDisplay = _glfwGetEGLNativeDisplayX11,
-        .getEGLNativeWindow = _glfwGetEGLNativeWindowX11,
-        .getRequiredInstanceExtensions = _glfwGetRequiredInstanceExtensionsX11,
-        .getPhysicalDevicePresentationSupport = _glfwGetPhysicalDevicePresentationSupportX11,
-        .createWindowSurface = _glfwCreateWindowSurfaceX11
+        .postEmptyEvent = _glfwPostEmptyEventX11
     };
 
     // HACK: If the application has left the locale as "C" then both wide
@@ -1553,13 +1528,6 @@ void _glfwTerminateX11(void)
         g_wsi.x11.display = NULL;
     }
 
-    _glfwTerminateOSMesa();
-    // NOTE: These need to be unloaded after XCloseDisplay, as they register
-    //       cleanup callbacks that get called by that function
-    _glfwTerminateEGL();
-    _glfwTerminateGLX();
-
-    impl_platform_unload_module(g_wsi.x11.x11xcb.handle);
     impl_platform_unload_module(g_wsi.x11.xcursor.handle);
     impl_platform_unload_module(g_wsi.x11.randr.handle);
     impl_platform_unload_module(g_wsi.x11.xinerama.handle);

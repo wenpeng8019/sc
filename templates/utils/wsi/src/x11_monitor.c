@@ -60,9 +60,6 @@ static GLFWvidmode vidmodeFromModeInfo(const XRRModeInfo* mi,
 
     mode.refreshRate = calculateRefreshRate(mi);
 
-    wsi_split_bpp(DefaultDepth(g_wsi.x11.display, g_wsi.x11.screen),
-                  &mode.redBits, &mode.greenBits, &mode.blueBits);
-
     return mode;
 }
 
@@ -503,9 +500,6 @@ bool _glfwGetVideoModeX11(monitor_st* monitor, GLFWvidmode* mode)
         mode->width = DisplayWidth(g_wsi.x11.display, g_wsi.x11.screen);
         mode->height = DisplayHeight(g_wsi.x11.display, g_wsi.x11.screen);
         mode->refreshRate = 0;
-
-        wsi_split_bpp(DefaultDepth(g_wsi.x11.display, g_wsi.x11.screen),
-                      &mode->redBits, &mode->greenBits, &mode->blueBits);
     }
 
     return true;

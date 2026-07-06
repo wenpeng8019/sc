@@ -4,6 +4,8 @@ compiler/build/
 compiler/build-uv/
 compiler/build-dist/
 compiler/build-ssl/
+compiler/build-linux/
+templates/utils/wsi/build/
 *.o
 *.out
 *.exe

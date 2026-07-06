@@ -435,7 +435,6 @@ bool _glfwConnectWayland(int platformID, platform_st* platform)
         .setWindowSize = _glfwSetWindowSizeWayland,
         .setWindowSizeLimits = _glfwSetWindowSizeLimitsWayland,
         .setWindowAspectRatio = _glfwSetWindowAspectRatioWayland,
-        .getFramebufferSize = _glfwGetFramebufferSizeWayland,
         .getWindowFrameSize = _glfwGetWindowFrameSizeWayland,
         .getWindowContentScale = _glfwGetWindowContentScaleWayland,
         .iconifyWindow = _glfwIconifyWindowWayland,
@@ -451,7 +450,6 @@ bool _glfwConnectWayland(int platformID, platform_st* platform)
         .windowVisible = _glfwWindowVisibleWayland,
         .windowMaximized = _glfwWindowMaximizedWayland,
         .windowHovered = _glfwWindowHoveredWayland,
-        .framebufferTransparent = _glfwFramebufferTransparentWayland,
         .getWindowOpacity = _glfwGetWindowOpacityWayland,
         .setWindowResizable = _glfwSetWindowResizableWayland,
         .setWindowDecorated = _glfwSetWindowDecoratedWayland,
@@ -461,13 +459,7 @@ bool _glfwConnectWayland(int platformID, platform_st* platform)
         .pollEvents = _glfwPollEventsWayland,
         .waitEvents = _glfwWaitEventsWayland,
         .waitEventsTimeout = _glfwWaitEventsTimeoutWayland,
-        .postEmptyEvent = _glfwPostEmptyEventWayland,
-        .getEGLPlatform = _glfwGetEGLPlatformWayland,
-        .getEGLNativeDisplay = _glfwGetEGLNativeDisplayWayland,
-        .getEGLNativeWindow = _glfwGetEGLNativeWindowWayland,
-        .getRequiredInstanceExtensions = _glfwGetRequiredInstanceExtensionsWayland,
-        .getPhysicalDevicePresentationSupport = _glfwGetPhysicalDevicePresentationSupportWayland,
-        .createWindowSurface = _glfwCreateWindowSurfaceWayland
+        .postEmptyEvent = _glfwPostEmptyEventWayland
     };
 
     void* module = impl_platform_load_module("libwayland-client.so.0");
@@ -620,21 +612,6 @@ int _glfwInitWayland(void)
         impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_theme_get_cursor");
     g_wsi.wl.cursor.image_get_buffer = (PFN_wl_cursor_image_get_buffer)
         impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_image_get_buffer");
-
-    g_wsi.wl.egl.handle = impl_platform_load_module("libwayland-egl.so.1");
-    if (!g_wsi.wl.egl.handle)
-    {
-        impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                        "Wayland: Failed to load libwayland-egl");
-        return false;
-    }
-
-    g_wsi.wl.egl.window_create = (PFN_wl_egl_window_create)
-        impl_platform_get_module_symbol(g_wsi.wl.egl.handle, "wl_egl_window_create");
-    g_wsi.wl.egl.window_destroy = (PFN_wl_egl_window_destroy)
-        impl_platform_get_module_symbol(g_wsi.wl.egl.handle, "wl_egl_window_destroy");
-    g_wsi.wl.egl.window_resize = (PFN_wl_egl_window_resize)
-        impl_platform_get_module_symbol(g_wsi.wl.egl.handle, "wl_egl_window_resize");
 
     g_wsi.wl.xkb.handle = impl_platform_load_module("libxkbcommon.so.0");
     if (!g_wsi.wl.xkb.handle)
@@ -878,9 +855,6 @@ int _glfwInitWayland(void)
 
 void _glfwTerminateWayland(void)
 {
-    _glfwTerminateEGL();
-    _glfwTerminateOSMesa();
-
     if (g_wsi.wl.libdecor.context)
     {
         // Allow libdecor to finish receiving all its requested globals
@@ -965,9 +939,7 @@ void _glfwTerminateWayland(void)
 
     // Free modules only after all Wayland termination functions are called
 
-    impl_platform_unload_module(g_wsi.egl.handle);
     impl_platform_unload_module(g_wsi.wl.libdecor.handle);
-    impl_platform_unload_module(g_wsi.wl.egl.handle);
     impl_platform_unload_module(g_wsi.wl.xkb.handle);
     impl_platform_unload_module(g_wsi.wl.cursor.handle);
     impl_platform_unload_module(g_wsi.wl.client.handle);

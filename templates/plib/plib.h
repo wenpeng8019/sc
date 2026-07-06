@@ -7,12 +7,23 @@
 #ifndef PLIB_H
 #define PLIB_H
 
+#include "../../builtins/platform.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-const char* sc_plib_hello(void);
-int sc_plib_add(int a, int b);
+#ifndef PLIB_SHARED
+ #define PLIB_SHARED 0
+#endif
+#ifndef PLIB_EXPORTS
+ #define PLIB_EXPORTS 0
+#endif
+
+#define PLIB_API SC_API(PLIB)
+
+PLIB_API const char* sc_plib_hello(void);
+PLIB_API int sc_plib_add(int a, int b);
 
 #ifdef __cplusplus
 }

@@ -23,7 +23,13 @@
 #include <assert.h>     /* assert：ret 调用语法糖 !! func() 的失败中止 */
 #include <inttypes.h>   /* PRId64 / PRIu64：64 位整数 printf 说明符跨平台适配（print 关键字用） */
 
-typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
+#define SC_MACRO_STR_(x) #x
+#define SC_MACRO_STR(x)  SC_MACRO_STR_(x)
+
+#define SC_MACRO_CAT2_(a, b) a##b
+#define SC_MACRO_CAT2(a, b) SC_MACRO_CAT2_(a, b)
+#define SC_MACRO_CAT3_(a, b, c) a##b##c
+#define SC_MACRO_CAT3(a, b, c) SC_MACRO_CAT3_(a, b, c)
 
 /* ---------------- 平台判定 ---------------- */
 
@@ -172,6 +178,63 @@ typedef struct { void* p; uint32_t sz; uint32_t off; } ptr;
 #else
 #error "TLS not supported on this compiler"
 #endif
+
+///////////////////////////////////////////////////////////////////////////////
+// 动态库符号可见性（跨平台统一）
+///////////////////////////////////////////////////////////////////////////////
+
+#if P_WIN
+#define SC_API_EXPORT __declspec(dllexport)
+#define SC_API_IMPORT __declspec(dllimport)
+#elif defined(__GNUC__) || defined(__clang__)
+#define SC_API_EXPORT __attribute__((visibility("default")))
+#define SC_API_IMPORT
+#else
+#define SC_API_EXPORT
+#define SC_API_IMPORT
+#endif
+
+/* SC_API 统一导入/导出可见性（项目级约定）
+ *
+ * 用法（各库公开头）:
+ *   1) 约定库前缀（如 WSI / UI / SURFACE / PLIB）
+ *   2) 给出两个开关（通常在头内兜底为 0；由构建系统按需覆盖）
+ *        <PREFIX>_SHARED   : 是否构建/使用共享库（0/1）
+ *        <PREFIX>_EXPORTS  : 当前编译单元是否在“导出侧”（0/1）
+ *   3) 定义 API 宏
+ *        #define <PREFIX>_API SC_API(<PREFIX>)
+ *
+ * 目的:
+ *   - 把“平台差异”（Windows 的 dllexport/dllimport 与 Unix 可见性）集中在 platform.h。
+ *   - 把“模块差异”（不同库前缀）统一成同一套写法，避免每个库重复写条件分支。
+ *   - 让头文件作者只关心 <PREFIX>_API，不关心底层平台细节。
+ *
+ * 原理:
+ *   - SC_API(shared,exports) 先映射到 4 种状态：00/01/10/11 -> 空/导出/导入/导出。
+ *   - SC_API(prefix) 通过前缀派生出 <PREFIX>_SHARED 与 <PREFIX>_EXPORTS，再走上面映射。
+ *   - 其中 SC_MACRO_CAT3 是 token 拼接基础设施（把 prefix 与后缀拼成宏名）。
+ *     采用两层 CAT 宏（*_ 与非 *_）确保“参数先展开，再 ## 拼接”。
+ *
+ * 最小示例（以 UI 为例）:
+ *   #ifndef UI_SHARED
+ *   #define UI_SHARED 0
+ *   #endif
+ *   #ifndef UI_EXPORTS
+ *   #define UI_EXPORTS 0
+ *   #endif
+ *   #define UI_API SC_API(UI) */
+
+#define SC_API_KIND_00
+#define SC_API_KIND_01 SC_API_EXPORT
+#define SC_API_KIND_10 SC_API_IMPORT
+#define SC_API_KIND_11 SC_API_EXPORT
+
+#define SC_API_FROM_FLAGS_(shared, exports) SC_MACRO_CAT3(SC_API_KIND_, shared, exports)
+#define SC_API_FROM_FLAGS(shared, exports) SC_API_FROM_FLAGS_(shared, exports)
+
+#define SC_API_SHARED_FLAG(prefix) SC_MACRO_CAT3(prefix, _, SHARED)
+#define SC_API_EXPORTS_FLAG(prefix) SC_MACRO_CAT3(prefix, _, EXPORTS)
+#define SC_API(prefix) SC_API_FROM_FLAGS(SC_API_SHARED_FLAG(prefix), SC_API_EXPORTS_FLAG(prefix))
 
 ///////////////////////////////////////////////////////////////////////////////
 // 启动 / 退出钩子（constructor / destructor）

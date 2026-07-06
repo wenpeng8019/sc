@@ -2,6 +2,7 @@
 #ifndef wsi_h_
 #define wsi_h_
 
+#include "../../../builtins/platform.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -30,28 +31,15 @@ extern "C" {
 #include <stdint.h>
 
 
-#if defined(WSI_DLL) && defined(WSI_BUILD_DLL)
- /* WSI_DLL 必须由链接到 GLFW 库 DLL 版本的应用程序定义。
-  * WSI_BUILD_DLL 在编译库的 DLL 版本时由 GLFW 配置头文件定义。
-  */
- #error "You must not have both WSI_DLL and WSI_BUILD_DLL defined"
+#ifndef WSI_SHARED
+ #define WSI_SHARED 0
+#endif
+#ifndef WSI_EXPORTS
+ #define WSI_EXPORTS 0
 #endif
 
-/* WSI_API 用于声明需要从 DLL / 共享库 / 动态库中导出的公共 API 函数。
- */
-#if defined(_WIN32) && defined(WSI_BUILD_DLL)
- /* We are building GLFW as a Win32 DLL */
- #define WSI_API __declspec(dllexport)
-#elif defined(_WIN32) && defined(WSI_DLL)
- /* We are calling a GLFW Win32 DLL */
- #define WSI_API __declspec(dllimport)
-#elif defined(__GNUC__) && defined(WSI_BUILD_DLL)
- /* We are building GLFW as a Unix shared library */
- #define WSI_API __attribute__((visibility("default")))
-#else
- #define WSI_API
-#endif
-
+/* WSI_API 用于声明需要从 DLL / 共享库 / 动态库中导出的公共 API 函数。 */
+#define WSI_API SC_API(WSI)
 
 /*************************************************************************
  * GLFW API 标记
@@ -2163,6 +2151,18 @@ WSI_API void sc_wsi_window_hint_string(int hint, const char* value);
  */
 WSI_API sc_window* sc_wsi_win_create(int width, int height, const char* title, sc_monitor* monitor, sc_window* share);
 
+/*! @brief 返回当前 WSI 已选择的平台 ID。
+ *
+ *  返回值为 `SC_PLATFORM_*` 常量之一；若未初始化则返回 `SC_PLATFORM_ANY`。
+ *
+ *  @return 平台 ID，失败返回 `SC_PLATFORM_ANY`。
+ *
+ *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED。
+ *
+ *  @ingroup window
+ */
+WSI_API int sc_wsi_get_platform(void);
+
 /*! @brief 销毁指定窗口及其上下文。
  *
  *  此函数销毁指定窗口及其上下文。  On calling
@@ -2780,6 +2780,36 @@ WSI_API void sc_wsi_win_set_attrib(sc_window* window, int attrib, int value);
  */
 WSI_API void* sc_wsi_win_get_user_data(sc_window* window);
 WSI_API void sc_wsi_win_set_user_data(sc_window* window, void* pointer);
+
+/*! @brief 返回指定窗口的原生 display 句柄。
+ *
+ *  例如 X11 的 `Display*`、Wayland 的 `wl_display*`。在不需要 display
+ *  句柄的平台返回 `NULL`。
+ *
+ *  @param[in] window 要查询的窗口。
+ *  @return 原生 display 句柄，若无或失败返回 `NULL`。
+ *
+ *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED、@ref SC_WSI_ERR_INVALID_VALUE 与
+ *  @ref SC_WSI_ERR_PLATFORM_UNAVAILABLE。
+ *
+ *  @ingroup window
+ */
+WSI_API void* sc_wsi_win_get_native_display(sc_window* window);
+
+/*! @brief 返回指定窗口的原生 window/surface 句柄。
+ *
+ *  例如 Win32 的 `HWND`、Cocoa 的 `NSView*`、X11 的 `Window`（经 `uintptr_t`
+ *  转换为指针值）、Wayland 的 `wl_surface*`。
+ *
+ *  @param[in] window 要查询的窗口。
+ *  @return 原生 window/surface 句柄，失败返回 `NULL`。
+ *
+ *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED、@ref SC_WSI_ERR_INVALID_VALUE 与
+ *  @ref SC_WSI_ERR_PLATFORM_UNAVAILABLE。
+ *
+ *  @ingroup window
+ */
+WSI_API void* sc_wsi_win_get_native_window(sc_window* window);
 
 /*************************************************************************
  * GLFW API functions

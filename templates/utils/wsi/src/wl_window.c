@@ -462,18 +462,8 @@ static void resizeFramebuffer(window_st* window)
         window->wl.fbHeight = window->wl.height * window->wl.bufferScale;
     }
 
-    if (window->wl.egl.window)
-    {
-        wl_egl_window_resize(window->wl.egl.window,
-                             window->wl.fbWidth,
-                             window->wl.fbHeight,
-                             0, 0);
-    }
-
     if (!window->wl.transparent)
         setContentAreaOpaque(window);
-
-    _glfwInputFramebufferSize(window, window->wl.fbWidth, window->wl.fbHeight);
 }
 
 static bool resizeWindow(window_st* window, int width, int height)
@@ -1163,8 +1153,7 @@ static void destroyShellObjects(window_st* window)
 }
 
 static bool createNativeSurface(window_st* window,
-                                    const wnd_config_st* wndconfig,
-                                    const _GLFWfbconfig* fbconfig)
+                                    const wnd_config_st* wndconfig)
 {
     window->wl.surface = wl_compositor_create_surface(g_wsi.wl.compositor);
     if (!window->wl.surface)
@@ -1186,11 +1175,10 @@ static bool createNativeSurface(window_st* window,
 
     window->wl.bufferScale = 1;
     window->wl.scalingNumerator = 120;
-    window->wl.scaleFramebuffer = wndconfig->scaleFramebuffer;
+    window->wl.scaleFramebuffer = true;
 
     window->wl.maximized = wndconfig->maximized;
 
-    window->wl.transparent = fbconfig->transparent;
     if (!window->wl.transparent)
         setContentAreaOpaque(window);
 
@@ -2287,18 +2275,6 @@ static const struct xdg_activation_token_v1_listener xdgActivationListener =
     xdgActivationHandleDone
 };
 
-static void callbackHandleFrame(void* userData, struct wl_callback* callback, uint32_t data)
-{
-    window_st* window = userData;
-    wl_callback_destroy(callback);
-    window->wl.egl.callback = NULL;
-}
-
-static const struct wl_callback_listener frameCallbackListener =
-{
-    callbackHandleFrame
-};
-
 void _glfwAddSeatListenerWayland(struct wl_seat* seat)
 {
     wl_seat_add_listener(seat, &seatListener, NULL);
@@ -2309,107 +2285,15 @@ void _glfwAddDataDeviceListenerWayland(struct wl_data_device* device)
     wl_data_device_add_listener(device, &dataDeviceListener, NULL);
 }
 
-bool _glfwWaitForEGLFrameWayland(window_st* window)
-{
-    double timeout = 0.02;
-
-    while (window->wl.egl.callback)
-    {
-        if (wl_display_prepare_read_queue(g_wsi.wl.display, window->wl.egl.queue) != 0)
-        {
-            wl_display_dispatch_queue_pending(g_wsi.wl.display, window->wl.egl.queue);
-            continue;
-        }
-
-        if (!flushDisplay())
-        {
-            wl_display_cancel_read(g_wsi.wl.display);
-            return false;
-        }
-
-        struct pollfd fd = { wl_display_get_fd(g_wsi.wl.display), POLLIN };
-
-        if (!_glfwPollPOSIX(&fd, 1, &timeout))
-        {
-            wl_display_cancel_read(g_wsi.wl.display);
-            return false;
-        }
-
-        wl_display_read_events(g_wsi.wl.display);
-        wl_display_dispatch_queue_pending(g_wsi.wl.display, window->wl.egl.queue);
-    }
-
-    window->wl.egl.callback = wl_surface_frame(window->wl.egl.wrapper);
-    wl_callback_add_listener(window->wl.egl.callback, &frameCallbackListener, window);
-
-    // If the window is hidden when the wait is over then don't swap
-    return window->wl.visible;
-}
-
 //////////////////////////////////////////////////////////////////////////
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 bool _glfwCreateWindowWayland(window_st* window,
-                                  const wnd_config_st* wndconfig,
-                                  const _GLFWctxconfig* ctxconfig,
-                                  const _GLFWfbconfig* fbconfig)
+                                  const wnd_config_st* wndconfig)
 {
-    if (!createNativeSurface(window, wndconfig, fbconfig))
+    if (!createNativeSurface(window, wndconfig))
         return false;
-
-    if (ctxconfig->client != GLFW_NO_API)
-    {
-        if (ctxconfig->source == GLFW_EGL_CONTEXT_API ||
-            ctxconfig->source == WSI_NATIVE_CONTEXT_API)
-        {
-            window->wl.egl.window = wl_egl_window_create(window->wl.surface,
-                                                         window->wl.fbWidth,
-                                                         window->wl.fbHeight);
-            if (!window->wl.egl.window)
-            {
-                impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                                "Wayland: Failed to create EGL window");
-                return false;
-            }
-
-            window->wl.egl.queue = wl_display_create_queue(g_wsi.wl.display);
-            if (!window->wl.egl.queue)
-            {
-                impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                                "Wayland: Failed to create EGL frame queue");
-                return false;
-            }
-
-            window->wl.egl.wrapper = wl_proxy_create_wrapper(window->wl.surface);
-            if (!window->wl.egl.wrapper)
-            {
-                impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                                "Wayland: Failed to create surface wrapper");
-                return false;
-            }
-
-            wl_proxy_set_queue((struct wl_proxy*) window->wl.egl.wrapper,
-                               window->wl.egl.queue);
-
-            window->wl.egl.interval = 1;
-
-            if (!_glfwInitEGL())
-                return false;
-            if (!_glfwCreateContextEGL(window, ctxconfig, fbconfig))
-                return false;
-        }
-        else if (ctxconfig->source == GLFW_OSMESA_CONTEXT_API)
-        {
-            if (!_glfwInitOSMesa())
-                return false;
-            if (!_glfwCreateContextOSMesa(window, ctxconfig, fbconfig))
-                return false;
-        }
-
-        if (!_glfwRefreshContextAttribs(window, ctxconfig))
-            return false;
-    }
 
     if (wndconfig->mousePassthrough)
         _glfwSetWindowMousePassthroughWayland(window, true);
@@ -2457,25 +2341,10 @@ void _glfwDestroyWindowWayland(window_st* window)
     if (window->wl.confinedPointer)
         zwp_confined_pointer_v1_destroy(window->wl.confinedPointer);
 
-    if (window->context.destroy)
-        window->context.destroy(window);
-
     destroyShellObjects(window);
 
     if (window->wl.fallback.buffer)
         wl_buffer_destroy(window->wl.fallback.buffer);
-
-    if (window->wl.egl.callback)
-        wl_callback_destroy(window->wl.egl.callback);
-
-    if (window->wl.egl.wrapper)
-        wl_proxy_wrapper_destroy(window->wl.egl.wrapper);
-
-    if (window->wl.egl.queue)
-        wl_event_queue_destroy(window->wl.egl.queue);
-
-    if (window->wl.egl.window)
-        wl_egl_window_destroy(window->wl.egl.window);
 
     if (window->wl.surface)
         wl_surface_destroy(window->wl.surface);
@@ -2601,14 +2470,6 @@ void _glfwSetWindowAspectRatioWayland(window_st* window, int numer, int denom)
         if (window->wl.visible)
             impl_on_win_damage(window);
     }
-}
-
-void _glfwGetFramebufferSizeWayland(window_st* window, int* width, int* height)
-{
-    if (width)
-        *width = window->wl.fbWidth;
-    if (height)
-        *height = window->wl.fbHeight;
 }
 
 void _glfwGetWindowFrameSizeWayland(window_st* window,
@@ -2814,11 +2675,6 @@ bool _glfwWindowMaximizedWayland(window_st* window)
 bool _glfwWindowHoveredWayland(window_st* window)
 {
     return window->wl.surface == g_wsi.wl.pointerSurface;
-}
-
-bool _glfwFramebufferTransparentWayland(window_st* window)
-{
-    return window->wl.transparent;
 }
 
 void _glfwSetWindowResizableWayland(window_st* window, bool enabled)
@@ -3467,87 +3323,6 @@ const char* _glfwGetClipboardStringWayland(void)
     g_wsi.wl.clipboardString =
         readDataOfferAsString(g_wsi.wl.selectionOffer, "text/plain;charset=utf-8");
     return g_wsi.wl.clipboardString;
-}
-
-EGLenum _glfwGetEGLPlatformWayland(EGLint** attribs)
-{
-    if (g_wsi.egl.EXT_platform_base && g_wsi.egl.EXT_platform_wayland)
-        return EGL_PLATFORM_WAYLAND_EXT;
-    else
-        return 0;
-}
-
-EGLNativeDisplayType _glfwGetEGLNativeDisplayWayland(void)
-{
-    return g_wsi.wl.display;
-}
-
-EGLNativeWindowType _glfwGetEGLNativeWindowWayland(window_st* window)
-{
-    return window->wl.egl.window;
-}
-
-void _glfwGetRequiredInstanceExtensionsWayland(char** extensions)
-{
-    if (!g_wsi.vk.KHR_surface || !g_wsi.vk.KHR_wayland_surface)
-        return;
-
-    extensions[0] = "VK_KHR_surface";
-    extensions[1] = "VK_KHR_wayland_surface";
-}
-
-bool _glfwGetPhysicalDevicePresentationSupportWayland(VkInstance instance,
-                                                          VkPhysicalDevice device,
-                                                          uint32_t queuefamily)
-{
-    PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR
-        vkGetPhysicalDeviceWaylandPresentationSupportKHR =
-        (PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)
-        vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceWaylandPresentationSupportKHR");
-    if (!vkGetPhysicalDeviceWaylandPresentationSupportKHR)
-    {
-        impl_on_error(SC_WSI_ERR_API_UNAVAILABLE,
-                        "Wayland: Vulkan instance missing VK_KHR_wayland_surface extension");
-        return VK_NULL_HANDLE;
-    }
-
-    return vkGetPhysicalDeviceWaylandPresentationSupportKHR(device,
-                                                            queuefamily,
-                                                            g_wsi.wl.display);
-}
-
-VkResult _glfwCreateWindowSurfaceWayland(VkInstance instance,
-                                         window_st* window,
-                                         const VkAllocationCallbacks* allocator,
-                                         VkSurfaceKHR* surface)
-{
-    VkResult err;
-    VkWaylandSurfaceCreateInfoKHR sci;
-    PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR;
-
-    vkCreateWaylandSurfaceKHR = (PFN_vkCreateWaylandSurfaceKHR)
-        vkGetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR");
-    if (!vkCreateWaylandSurfaceKHR)
-    {
-        impl_on_error(SC_WSI_ERR_API_UNAVAILABLE,
-                        "Wayland: Vulkan instance missing VK_KHR_wayland_surface extension");
-        return VK_ERROR_EXTENSION_NOT_PRESENT;
-    }
-
-    memset(&sci, 0, sizeof(sci));
-    sci.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
-    sci.display = g_wsi.wl.display;
-    sci.surface = window->wl.surface;
-
-    err = vkCreateWaylandSurfaceKHR(instance, &sci, allocator, surface);
-    if (err)
-    {
-        impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
-                        "Wayland: Failed to create Vulkan surface: %s",
-                        _glfwGetVulkanResultString(err));
-    }
-
-    return err;
 }
 
 

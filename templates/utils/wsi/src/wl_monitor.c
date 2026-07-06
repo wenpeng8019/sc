@@ -24,7 +24,7 @@ static void outputHandleGeometry(void* userData,
                                  const char* model,
                                  int32_t transform)
 {
-    struct monitor_st* monitor = userData;
+    monitor_st* monitor = userData;
 
     monitor->wl.x = x;
     monitor->wl.y = y;
@@ -42,14 +42,11 @@ static void outputHandleMode(void* userData,
                              int32_t height,
                              int32_t refresh)
 {
-    struct monitor_st* monitor = userData;
+    monitor_st* monitor = userData;
     GLFWvidmode mode;
 
     mode.width = width;
     mode.height = height;
-    mode.redBits = 8;
-    mode.greenBits = 8;
-    mode.blueBits = 8;
     mode.refreshRate = (int) round(refresh / 1000.0);
 
     monitor->modeCount++;
@@ -63,7 +60,7 @@ static void outputHandleMode(void* userData,
 
 static void outputHandleDone(void* userData, struct wl_output* output)
 {
-    struct monitor_st* monitor = userData;
+    monitor_st* monitor = userData;
 
     if (monitor->widthMM <= 0 || monitor->heightMM <= 0)
     {
@@ -86,7 +83,7 @@ static void outputHandleScale(void* userData,
                               struct wl_output* output,
                               int32_t factor)
 {
-    struct monitor_st* monitor = userData;
+    monitor_st* monitor = userData;
 
     monitor->wl.scale = factor;
 
@@ -106,7 +103,7 @@ static void outputHandleScale(void* userData,
 
 void outputHandleName(void* userData, struct wl_output* wl_output, const char* name)
 {
-    struct monitor_st* monitor = userData;
+    monitor_st* monitor = userData;
 
     strncpy(monitor->name, name, sizeof(monitor->name) - 1);
 }

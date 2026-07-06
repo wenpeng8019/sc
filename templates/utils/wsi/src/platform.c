@@ -81,7 +81,7 @@ WSI_API const char* sc_wsi_get_version_string(void)
 #if defined(_POSIX_MONOTONIC_CLOCK)
         " monotonic"
 #endif
-#if defined(WSI_BUILD_DLL)
+#if defined(WSI_SHARED)
 #if defined(_WIN32)
         " DLL"
 #elif defined(__APPLE__)

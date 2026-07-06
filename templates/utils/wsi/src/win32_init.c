@@ -12,7 +12,7 @@ static const GUID _glfw_GUID_DEVINTERFACE_HID =
 
 #if defined(WSI_USE_HYBRID_HPG) || defined(WSI_USE_OPTIMUS_HPG)
 
-#if defined(WSI_BUILD_DLL)
+#if defined(WSI_EXPORTS)
  #pragma message("These symbols must be exported by the executable and have no effect in a DLL")
 #endif
 
@@ -30,7 +30,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 #endif // WSI_USE_HYBRID_HPG
 
-#if defined(WSI_BUILD_DLL)
+#if defined(WSI_EXPORTS)
 
 // GLFW DLL entry point
 //
@@ -39,7 +39,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
-#endif // WSI_BUILD_DLL
+#endif // WSI_EXPORTS
 
 // Load necessary libraries (DLLs)
 //

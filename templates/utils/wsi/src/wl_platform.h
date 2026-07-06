@@ -3,20 +3,6 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
 
-typedef VkFlags VkWaylandSurfaceCreateFlagsKHR;
-
-typedef struct VkWaylandSurfaceCreateInfoKHR
-{
-    VkStructureType                 sType;
-    const void*                     pNext;
-    VkWaylandSurfaceCreateFlagsKHR  flags;
-    struct wl_display*              display;
-    struct wl_surface*              surface;
-} VkWaylandSurfaceCreateInfoKHR;
-
-typedef VkResult (APIENTRY *PFN_vkCreateWaylandSurfaceKHR)(VkInstance,const VkWaylandSurfaceCreateInfoKHR*,const VkAllocationCallbacks*,VkSurfaceKHR*);
-typedef VkBool32 (APIENTRY *PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR)(VkPhysicalDevice,uint32_t,struct wl_display*);
-
 typedef int (* PFN_wl_display_flush)(struct wl_display* display);
 typedef void (* PFN_wl_display_cancel_read)(struct wl_display* display);
 typedef int (* PFN_wl_display_dispatch_pending)(struct wl_display* display);
@@ -148,13 +134,6 @@ typedef struct wl_buffer* (* PFN_wl_cursor_image_get_buffer)(struct wl_cursor_im
 #define wl_cursor_theme_get_cursor g_wsi.wl.cursor.theme_get_cursor
 #define wl_cursor_image_get_buffer g_wsi.wl.cursor.image_get_buffer
 
-typedef struct wl_egl_window* (* PFN_wl_egl_window_create)(struct wl_surface*, int, int);
-typedef void (* PFN_wl_egl_window_destroy)(struct wl_egl_window*);
-typedef void (* PFN_wl_egl_window_resize)(struct wl_egl_window*, int, int, int, int);
-#define wl_egl_window_create g_wsi.wl.egl.window_create
-#define wl_egl_window_destroy g_wsi.wl.egl.window_destroy
-#define wl_egl_window_resize g_wsi.wl.egl.window_resize
-
 typedef struct xkb_context* (* PFN_xkb_context_new)(enum xkb_context_flags);
 typedef void (* PFN_xkb_context_unref)(struct xkb_context*);
 typedef struct xkb_keymap* (* PFN_xkb_keymap_new_from_string)(struct xkb_context*, const char*, enum xkb_keymap_format, enum xkb_keymap_compile_flags);
@@ -205,6 +184,7 @@ struct libdecor;
 struct libdecor_frame;
 struct libdecor_state;
 struct libdecor_configuration;
+struct wl_surface;
 
 enum libdecor_error
 {
@@ -352,14 +332,6 @@ typedef struct _sc_windowWayland
     bool                    transparent;
     bool                    scaleFramebuffer;
     struct wl_surface*          surface;
-
-    struct {
-        struct wl_event_queue*  queue;
-        struct wl_egl_window*   window;
-        struct wl_callback*     callback;
-        struct wl_surface*      wrapper;
-        int                     interval;
-    } egl;
 
     struct {
         int                     width, height;
@@ -562,14 +534,6 @@ typedef struct _GLFWlibraryWayland
 
     struct {
         void*                   handle;
-
-        PFN_wl_egl_window_create window_create;
-        PFN_wl_egl_window_destroy window_destroy;
-        PFN_wl_egl_window_resize window_resize;
-    } egl;
-
-    struct {
-        void*                   handle;
         struct libdecor*        context;
         bool                ready;
         PFN_libdecor_new        libdecor_new_;
@@ -630,7 +594,7 @@ bool _glfwConnectWayland(int platformID, platform_st* platform);
 int _glfwInitWayland(void);
 void _glfwTerminateWayland(void);
 
-bool _glfwCreateWindowWayland(window_st* window, const wnd_config_st* wndconfig, const _GLFWctxconfig* ctxconfig, const _GLFWfbconfig* fbconfig);
+bool _glfwCreateWindowWayland(window_st* window, const wnd_config_st* wndconfig);
 void _glfwDestroyWindowWayland(window_st* window);
 void _glfwSetWindowTitleWayland(window_st* window, const char* title);
 void _glfwSetWindowIconWayland(window_st* window, int count, const GLFWimage* images);
@@ -640,7 +604,6 @@ void _glfwGetWindowSizeWayland(window_st* window, int* width, int* height);
 void _glfwSetWindowSizeWayland(window_st* window, int width, int height);
 void _glfwSetWindowSizeLimitsWayland(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
 void _glfwSetWindowAspectRatioWayland(window_st* window, int numer, int denom);
-void _glfwGetFramebufferSizeWayland(window_st* window, int* width, int* height);
 void _glfwGetWindowFrameSizeWayland(window_st* window, int* left, int* top, int* right, int* bottom);
 void _glfwGetWindowContentScaleWayland(window_st* window, float* xscale, float* yscale);
 void _glfwIconifyWindowWayland(window_st* window);
@@ -656,7 +619,6 @@ bool _glfwWindowIconifiedWayland(window_st* window);
 bool _glfwWindowVisibleWayland(window_st* window);
 bool _glfwWindowMaximizedWayland(window_st* window);
 bool _glfwWindowHoveredWayland(window_st* window);
-bool _glfwFramebufferTransparentWayland(window_st* window);
 void _glfwSetWindowResizableWayland(window_st* window, bool enabled);
 void _glfwSetWindowDecoratedWayland(window_st* window, bool enabled);
 void _glfwSetWindowFloatingWayland(window_st* window, bool enabled);
@@ -684,14 +646,6 @@ void _glfwSetCursorWayland(window_st* window, cursor_st* cursor);
 void _glfwSetClipboardStringWayland(const char* string);
 const char* _glfwGetClipboardStringWayland(void);
 
-EGLenum _glfwGetEGLPlatformWayland(EGLint** attribs);
-EGLNativeDisplayType _glfwGetEGLNativeDisplayWayland(void);
-EGLNativeWindowType _glfwGetEGLNativeWindowWayland(window_st* window);
-
-void _glfwGetRequiredInstanceExtensionsWayland(char** extensions);
-bool _glfwGetPhysicalDevicePresentationSupportWayland(VkInstance instance, VkPhysicalDevice device, uint32_t queuefamily);
-VkResult _glfwCreateWindowSurfaceWayland(VkInstance instance, window_st* window, const VkAllocationCallbacks* allocator, VkSurfaceKHR* surface);
-
 void wsi_free_monitorWayland(monitor_st* monitor);
 void _glfwGetMonitorPosWayland(monitor_st* monitor, int* xpos, int* ypos);
 void _glfwGetMonitorContentScaleWayland(monitor_st* monitor, float* xscale, float* yscale);
@@ -706,6 +660,4 @@ void _glfwUpdateBufferScaleFromOutputsWayland(window_st* window);
 
 void _glfwAddSeatListenerWayland(struct wl_seat* seat);
 void _glfwAddDataDeviceListenerWayland(struct wl_data_device* device);
-
-bool _glfwWaitForEGLFrameWayland(window_st* window);
 

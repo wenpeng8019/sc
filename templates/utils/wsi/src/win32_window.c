@@ -1661,11 +1661,6 @@ void _glfwSetWindowAspectRatioWin32(window_st* window, int numer, int denom)
                area.bottom - area.top, TRUE);
 }
 
-void _glfwGetFramebufferSizeWin32(window_st* window, int* width, int* height)
-{
-    _glfwGetWindowSizeWin32(window, width, height);
-}
-
 void _glfwGetWindowFrameSizeWin32(window_st* window,
                                   int* left, int* top,
                                   int* right, int* bottom)
@@ -1894,30 +1889,6 @@ bool _glfwWindowMaximizedWin32(window_st* window)
 bool _glfwWindowHoveredWin32(window_st* window)
 {
     return cursorInContentArea(window);
-}
-
-bool _glfwFramebufferTransparentWin32(window_st* window)
-{
-    BOOL composition, opaque;
-    DWORD color;
-
-    if (!window->win32.transparent)
-        return false;
-
-    if (FAILED(DwmIsCompositionEnabled(&composition)) || !composition)
-        return false;
-
-    if (!IsWindows8OrGreater())
-    {
-        // HACK: Disable framebuffer transparency on Windows 7 when the
-        //       colorization color is opaque, because otherwise the window
-        //       contents is blended additively with the previous frame instead
-        //       of replacing it
-        if (FAILED(DwmGetColorizationColor(&color, &opaque)) || opaque)
-            return false;
-    }
-
-    return true;
 }
 
 void _glfwSetWindowResizableWin32(window_st* window, bool enabled)

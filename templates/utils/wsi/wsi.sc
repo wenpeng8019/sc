@@ -2,7 +2,8 @@
 #
 # 定位：sc 通用 utils 组件。抽象自 glfw（剔除游戏摇杆 joystick 与 gfx/GL/Vulkan
 #   上下文创建），只做纯粹的 WSI —— 窗口 / 显示器 / 输入 / 事件 / 计时。
-#   既可用于 UI 方向，又可通过 surface 绑定到 gfx（原生窗口句柄经 nwh 传出）。
+#   仅作为 root window 层：只暴露窗口的原生句柄（native display/window），
+#   surface 封装由独立的 surface 模块经 create_from_native 完成。
 #
 # 集成方式（参考 templates/plib）：库经 build.sh 独立编译为 libwsi.<triple>.a，
 #   sc 侧只做 FFI 声明 + add 链接。C API 全部以 sc_wsi_ 前缀导出（见 wsi.h）；
@@ -38,6 +39,7 @@ add libwsi.a
 @fnc wsi_get_version_string:: const char&                 # 版本描述串
 @fnc wsi_init:: i4                                        # 初始化（成功非 0）
 @fnc wsi_terminate::                                      # 反初始化，释放全部资源
+@fnc wsi_get_platform:: i4                                # 当前已选择平台（SC_PLATFORM_*）
 @fnc wsi_init_hint:: hint: i4, value: i4                  # 初始化前设置 hint
 @fnc wsi_get_error:: i4, description: const char&&        # 取最近错误码 + 描述
 @fnc wsi_set_error_callback:: ::sc_error_cb, callback: ::sc_error_cb   # 设置错误回调，返回旧回调
@@ -101,6 +103,8 @@ add libwsi.a
 @fnc wsi_win_set_attrib:: window: ::sc_window&, attrib: i4, value: i4
 @fnc wsi_win_get_user_data:: &, window: ::sc_window&
 @fnc wsi_win_set_user_data:: window: ::sc_window&, pointer: &
+@fnc wsi_win_get_native_display:: &, window: ::sc_window&
+@fnc wsi_win_get_native_window:: &, window: ::sc_window&
 
 # 注：sc_wsi_win_set_callback(sc_window*, sc_wsi_win_cb) 按值传结构体，
 #     sc FFI 无法表达（需 C 侧胶水填充回调表），故此处不导出。
