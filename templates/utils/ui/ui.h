@@ -84,6 +84,20 @@ enum
     SC_UI_LIST
 };
 
+/* 控件事件类型（传入 sc_ui_control_cb 的 event 参数）。 */
+enum
+{
+    SC_UI_EVENT_CLICK = 1, /* button 被点击 */
+    SC_UI_EVENT_TOGGLE,    /* checkbox/radiobox 勾选态变化（新态见 get_checked） */
+    SC_UI_EVENT_TEXT,      /* edit 文本变化（新值见 get_text） */
+    SC_UI_EVENT_SELECT     /* combo/list 选中项变化（新下标见 get_selected_index） */
+};
+
+/* 控件事件回调：control 为触发源，event 为 SC_UI_EVENT_*，user 为注册时透传。
+ * 仅在支持交互的后端（如 Linux Nuklear 后端）中触发；原生控件后端
+ * （cocoa/win32）当前不派发本回调。 */
+typedef void (*sc_ui_control_cb)(sc_ui_control* control, int event, void* user);
+
 /* ============================================================
  * 上下文（ctx）：生命周期与访问器
  * ============================================================ */
@@ -100,6 +114,17 @@ UI_API sc_window* sc_ui_get_window(sc_ui_ctx* ctx);
 
 /* 返回根子窗口（绑定到整个 root window 的顶层 sc_ui_window）。 */
 UI_API sc_ui_window* sc_ui_get_root_window(sc_ui_ctx* ctx);
+
+/* ============================================================
+ * 字体（可选）
+ * ============================================================
+ * scc 不内置任何字库（尤其 CJK 字库体积巨大）。默认字体仅含 ASCII，
+ * 中文/CJK 会显示为 ?/方块。如需 CJK，调用本接口加载一个系统字体：
+ *   - path 指向 TTF/TTC/OTF 文件；size<=0 时用默认字号；
+ *   - path 传 NULL 时，后端在常见系统路径中自动探测含 CJK 的字体兜底。
+ * 成功返回 1，失败返回 0（保持原字体）。仅在软件渲染后端（Linux
+ * Nuklear）生效；原生控件后端（cocoa/win32）由系统字体渲染，返回 0。 */
+UI_API int sc_ui_set_font(sc_ui_ctx* ctx, const char* path, float size);
 
 /* ============================================================
  * 子窗口（window）：树结构与几何
@@ -235,6 +260,14 @@ UI_API const char* sc_ui_control_get_item(sc_ui_control* control, int index);
 /* 当前选中项下标：读取（空为 -1）/ 设置（-1 或越界则忽略）。 */
 UI_API int sc_ui_control_get_selected_index(sc_ui_control* control);
 UI_API void sc_ui_control_set_selected_index(sc_ui_control* control, int index);
+
+/* ============================================================
+ * 控件：事件回调
+ * ============================================================
+ * 注册控件交互回调（click/toggle/text/select）。cb 传 NULL 清除。
+ * 回调在事件处理期间（wsi_wait_events/poll_events 内）被后端调用。
+ * ============================================================ */
+UI_API void sc_ui_control_set_callback(sc_ui_control* control, sc_ui_control_cb cb, void* user);
 
 /* ============================================================
  * 驱动 sink 提供者（★ 供 layout 等外部组件操作 ui）

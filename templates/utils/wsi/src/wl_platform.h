@@ -303,7 +303,7 @@ typedef struct _GLFWfallbackEdgeWayland
 {
     struct wl_surface*          surface;
     struct wl_subsurface*       subsurface;
-    struct wp_viewport*         viewport;
+    struct wl_buffer*           buffer;
 } _GLFWfallbackEdgeWayland;
 
 typedef struct _GLFWofferWayland
@@ -376,7 +376,6 @@ typedef struct _sc_windowWayland
 
     struct {
         bool                    decorations;
-        struct wl_buffer*           buffer;
         _GLFWfallbackEdgeWayland    top, left, right, bottom;
         double                      pointerX, pointerY;
         uint32_t                    buttonPressSerial;

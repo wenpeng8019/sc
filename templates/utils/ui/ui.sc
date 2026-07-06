@@ -17,6 +17,9 @@ add libui.a
 @fnc ui_get_window:: ::sc_window&, ctx: ::sc_ui_ctx&
 @fnc ui_get_root_window:: ::sc_ui_window&, ctx: ::sc_ui_ctx&
 
+# 字体（可选）：加载系统字体以支持 CJK；path 传 nil 时后端自动探测。返回 1 成功 / 0 失败。
+@fnc ui_set_font:: i4, ctx: ::sc_ui_ctx&, path: const char&, size: f4
+
 # === 子窗口（window）：几何和父子关系 ===
 @fnc ui_window_create:: ::sc_ui_window&, ctx: ::sc_ui_ctx&, parent: ::sc_ui_window&, x: i4, y: i4, width: i4, height: i4, flags: i4
 @fnc ui_window_destroy:: win: ::sc_ui_window&
@@ -74,6 +77,11 @@ add libui.a
 
 @fnc ui_control_get_selected_index:: i4, control: ::sc_ui_control&
 @fnc ui_control_set_selected_index:: control: ::sc_ui_control&, index: i4
+
+# === 控件：事件回调 ===
+# 回调 typedef ::sc_ui_control_cb 定义于 ui.h，签名 void(*)(sc_ui_control*, int event, void*)。
+# 事件常量 SC_UI_EVENT_CLICK/TOGGLE/TEXT/SELECT 见 ui.h；user 数据映射裸指针 &。
+@fnc ui_control_set_callback:: control: ::sc_ui_control&, cb: ::sc_ui_control_cb, user: &
 
 # === 驱动 sink 提供者（★ 供 layout 等外部组件操作 ui） ===
 @fnc ui_window_sink:: const ::sc_ui_sink&

@@ -22,6 +22,9 @@ scc
 .venv/
 .tmp/
 
+# 本地备份目录
+.backup/
+
 # 示例编译产物（--build 产物：无后缀可执行文件与生成的 C/头文件）
 examples/feature[0-9]
 examples/*.c

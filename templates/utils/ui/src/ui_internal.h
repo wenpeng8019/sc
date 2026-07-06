@@ -61,6 +61,9 @@ struct sc_ui_control
     int itemCount;
     int selectedIndex;
 
+    sc_ui_control_cb onEvent;
+    void* onEventUser;
+
     void* backend; /* 后端原生对象（cocoa: NSControl 或 NSScrollView） */
 };
 
@@ -95,5 +98,16 @@ void ui_backend_control_set_text(sc_ui_control* control);
 void ui_backend_control_set_checked(sc_ui_control* control);
 void ui_backend_control_set_items(sc_ui_control* control);
 void ui_backend_control_set_selected_index(sc_ui_control* control);
+
+/* 字体：请求后端加载字体（path 为 NULL 时后端自动探测系统字体）。
+ * 仅支持字体的后端（Linux Nuklear）会真正生效；其余后端返回 0。 */
+int ui_backend_set_font(sc_ui_ctx* ctx, const char* path, float size);
+
+/* 后端在检测到控件交互时调用，派发已注册的事件回调。 */
+static inline void ui_emit_event(sc_ui_control* control, int event)
+{
+    if (control && control->onEvent)
+        control->onEvent(control, event, control->onEventUser);
+}
 
 #endif /* SC_UI_INTERNAL_H */

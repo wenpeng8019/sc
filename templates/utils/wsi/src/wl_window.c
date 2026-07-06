@@ -186,10 +186,45 @@ static const struct wl_callback_listener noopCallbackListener =
     callbackHandleDone
 };
 
+/* 回退装饰（fallback CSD）的边框 buffer 策略——不要改回上游 GLFW 的
+ * 1×1 buffer + wp_viewport 放大方案！
+ *
+ * 上游做法：所有边共享一个 1×1 灰色 wl_shm buffer，靠
+ * wp_viewport_set_destination 放大到边框尺寸。协议合法，常规合成器
+ * （weston/GNOME/KDE 服务端合成）没有问题。
+ *
+ * 但 WSLg 上每个子表面被 rdprail 映射为 Windows 端 msrdc 的独立
+ * RAIL_WINDOW，buffer 原样（1×1）经 RDP 发给 msrdc，缩放由
+ * MapSurfaceToScaledWindow 交给 Windows 客户端执行。msrdc 对这种
+ * 极端倍率（1→数百）的缩放映射存在 bug：特定窗口尺寸下分层窗口
+ * 不绘制，表现为底边框随宽度阈值消失、左右边框随高度阈值消失、
+ * resize 后标题条整块透明（HWND 存在且可见，内容从未上屏）。
+ *
+ * 因此这里给每条边分配与自身逻辑尺寸一致的真实 buffer，完全不用
+ * viewport 放大。详见 wsi/README.md 第 7 节。 */
+static struct wl_buffer* createFallbackEdgeBuffer(int width, int height)
+{
+    unsigned char* pixels = malloc((size_t) width * height * 4);
+    if (!pixels)
+        return NULL;
+
+    for (int i = 0;  i < width * height;  i++)
+    {
+        pixels[i * 4 + 0] = 224;
+        pixels[i * 4 + 1] = 224;
+        pixels[i * 4 + 2] = 224;
+        pixels[i * 4 + 3] = 255;
+    }
+
+    const GLFWimage image = { width, height, pixels };
+    struct wl_buffer* buffer = createShmBuffer(&image);
+    free(pixels);
+    return buffer;
+}
+
 static void createFallbackEdge(window_st* window,
                                _GLFWfallbackEdgeWayland* edge,
                                struct wl_surface* parent,
-                               struct wl_buffer* buffer,
                                int x, int y,
                                int width, int height)
 {
@@ -199,10 +234,8 @@ static void createFallbackEdge(window_st* window,
     edge->subsurface = wl_subcompositor_get_subsurface(g_wsi.wl.subcompositor,
                                                        edge->surface, parent);
     wl_subsurface_set_position(edge->subsurface, x, y);
-    edge->viewport = wp_viewporter_get_viewport(g_wsi.wl.viewporter,
-                                                edge->surface);
-    wp_viewport_set_destination(edge->viewport, width, height);
-    wl_surface_attach(edge->surface, buffer, 0, 0);
+    edge->buffer = createFallbackEdgeBuffer(width, height);
+    wl_surface_attach(edge->surface, edge->buffer, 0, 0);
 
     struct wl_region* region = wl_compositor_create_region(g_wsi.wl.compositor);
     wl_region_add(region, 0, 0, width, height);
@@ -211,33 +244,39 @@ static void createFallbackEdge(window_st* window,
     wl_region_destroy(region);
 }
 
+static void resizeFallbackEdge(_GLFWfallbackEdgeWayland* edge,
+                               int x, int y,
+                               int width, int height)
+{
+    struct wl_buffer* oldBuffer = edge->buffer;
+
+    wl_subsurface_set_position(edge->subsurface, x, y);
+    edge->buffer = createFallbackEdgeBuffer(width, height);
+    wl_surface_attach(edge->surface, edge->buffer, 0, 0);
+
+    struct wl_region* region = wl_compositor_create_region(g_wsi.wl.compositor);
+    wl_region_add(region, 0, 0, width, height);
+    wl_surface_set_opaque_region(edge->surface, region);
+    wl_surface_damage(edge->surface, 0, 0, width, height);
+    wl_surface_commit(edge->surface);
+    wl_region_destroy(region);
+
+    if (oldBuffer)
+        wl_buffer_destroy(oldBuffer);
+}
+
 static void createFallbackDecorations(window_st* window)
 {
-    unsigned char data[] = { 224, 224, 224, 255 };
-    const GLFWimage image = { 1, 1, data };
-
-    if (!g_wsi.wl.viewporter)
-        return;
-
-    if (!window->wl.fallback.buffer)
-        window->wl.fallback.buffer = createShmBuffer(&image);
-    if (!window->wl.fallback.buffer)
-        return;
-
     createFallbackEdge(window, &window->wl.fallback.top, window->wl.surface,
-                       window->wl.fallback.buffer,
                        0, -GLFW_CAPTION_HEIGHT,
                        window->wl.width, GLFW_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.left, window->wl.surface,
-                       window->wl.fallback.buffer,
                        -GLFW_BORDER_SIZE, -GLFW_CAPTION_HEIGHT,
                        GLFW_BORDER_SIZE, window->wl.height + GLFW_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.right, window->wl.surface,
-                       window->wl.fallback.buffer,
                        window->wl.width, -GLFW_CAPTION_HEIGHT,
                        GLFW_BORDER_SIZE, window->wl.height + GLFW_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.bottom, window->wl.surface,
-                       window->wl.fallback.buffer,
                        -GLFW_BORDER_SIZE, window->wl.height,
                        window->wl.width + GLFW_BORDER_SIZE * 2, GLFW_BORDER_SIZE);
 
@@ -253,12 +292,12 @@ static void destroyFallbackEdge(_GLFWfallbackEdgeWayland* edge)
         wl_subsurface_destroy(edge->subsurface);
     if (edge->surface)
         wl_surface_destroy(edge->surface);
-    if (edge->viewport)
-        wp_viewport_destroy(edge->viewport);
+    if (edge->buffer)
+        wl_buffer_destroy(edge->buffer);
 
     edge->surface = NULL;
     edge->subsurface = NULL;
-    edge->viewport = NULL;
+    edge->buffer = NULL;
 }
 
 static void destroyFallbackDecorations(window_st* window)
@@ -488,29 +527,21 @@ static bool resizeWindow(window_st* window, int width, int height)
 
     if (window->wl.fallback.decorations)
     {
-        wp_viewport_set_destination(window->wl.fallback.top.viewport,
-                                    window->wl.width,
-                                    GLFW_CAPTION_HEIGHT);
-        wl_surface_commit(window->wl.fallback.top.surface);
-
-        wp_viewport_set_destination(window->wl.fallback.left.viewport,
-                                    GLFW_BORDER_SIZE,
-                                    window->wl.height + GLFW_CAPTION_HEIGHT);
-        wl_surface_commit(window->wl.fallback.left.surface);
-
-        wl_subsurface_set_position(window->wl.fallback.right.subsurface,
-                                window->wl.width, -GLFW_CAPTION_HEIGHT);
-        wp_viewport_set_destination(window->wl.fallback.right.viewport,
-                                    GLFW_BORDER_SIZE,
-                                    window->wl.height + GLFW_CAPTION_HEIGHT);
-        wl_surface_commit(window->wl.fallback.right.surface);
-
-        wl_subsurface_set_position(window->wl.fallback.bottom.subsurface,
-                                -GLFW_BORDER_SIZE, window->wl.height);
-        wp_viewport_set_destination(window->wl.fallback.bottom.viewport,
-                                    window->wl.width + GLFW_BORDER_SIZE * 2,
-                                    GLFW_BORDER_SIZE);
-        wl_surface_commit(window->wl.fallback.bottom.surface);
+        resizeFallbackEdge(&window->wl.fallback.top,
+                           0, -GLFW_CAPTION_HEIGHT,
+                           window->wl.width, GLFW_CAPTION_HEIGHT);
+        resizeFallbackEdge(&window->wl.fallback.left,
+                           -GLFW_BORDER_SIZE, -GLFW_CAPTION_HEIGHT,
+                           GLFW_BORDER_SIZE,
+                           window->wl.height + GLFW_CAPTION_HEIGHT);
+        resizeFallbackEdge(&window->wl.fallback.right,
+                           window->wl.width, -GLFW_CAPTION_HEIGHT,
+                           GLFW_BORDER_SIZE,
+                           window->wl.height + GLFW_CAPTION_HEIGHT);
+        resizeFallbackEdge(&window->wl.fallback.bottom,
+                           -GLFW_BORDER_SIZE, window->wl.height,
+                           window->wl.width + GLFW_BORDER_SIZE * 2,
+                           GLFW_BORDER_SIZE);
     }
 
     return true;
@@ -2342,9 +2373,6 @@ void _glfwDestroyWindowWayland(window_st* window)
         zwp_confined_pointer_v1_destroy(window->wl.confinedPointer);
 
     destroyShellObjects(window);
-
-    if (window->wl.fallback.buffer)
-        wl_buffer_destroy(window->wl.fallback.buffer);
 
     if (window->wl.surface)
         wl_surface_destroy(window->wl.surface);

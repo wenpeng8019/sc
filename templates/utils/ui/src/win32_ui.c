@@ -646,4 +646,11 @@ void ui_backend_control_set_selected_index(sc_ui_control* control)
         SendMessageW(hwnd, LB_SETCURSEL, (WPARAM) idx, 0);
 }
 
+int ui_backend_set_font(sc_ui_ctx* ctx, const char* path, float size)
+{
+    /* Win32 后端使用系统原生控件，已支持 CJK，无需自行加载字体。 */
+    (void) ctx; (void) path; (void) size;
+    return 0;
+}
+
 #endif /* SC_UI_WIN32 */

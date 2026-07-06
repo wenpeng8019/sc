@@ -87,6 +87,10 @@ case "$TARGET" in
         PLAT="win32"
         PLAT_DEFINES="SC_UI_WIN32"
         PLAT_SRCS="win32_ui.c" ;;
+    *-linux-*|*-linux)
+        PLAT="nk"
+        PLAT_DEFINES="SC_UI_NK"
+        PLAT_SRCS="nk_ui.c" ;;
     *)
         PLAT="null"
         PLAT_DEFINES=""

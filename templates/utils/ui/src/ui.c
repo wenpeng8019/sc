@@ -191,6 +191,13 @@ UI_API sc_ui_window* sc_ui_get_root_window(sc_ui_ctx* ctx)
     return ctx ? ctx->rootWindow : NULL;
 }
 
+UI_API int sc_ui_set_font(sc_ui_ctx* ctx, const char* path, float size)
+{
+    if (!ctx)
+        return 0;
+    return ui_backend_set_font(ctx, path, size);
+}
+
 /* ============================================================
  * 子窗口（window）：树结构与几何
  * ============================================================ */
@@ -586,6 +593,19 @@ UI_API void sc_ui_control_set_selected_index(sc_ui_control* control, int index)
 
     control->selectedIndex = index;
     ui_backend_control_set_selected_index(control);
+}
+
+/* ============================================================
+ * 控件：事件回调
+ * ============================================================ */
+
+UI_API void sc_ui_control_set_callback(sc_ui_control* control, sc_ui_control_cb cb, void* user)
+{
+    if (!control)
+        return;
+
+    control->onEvent = cb;
+    control->onEventUser = user;
 }
 
 /* ============================================================
