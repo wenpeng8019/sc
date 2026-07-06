@@ -217,6 +217,12 @@ void sc_wsi_default_window_hints(void)
     g_wsi.hints.window.autoIconify  = true;
     g_wsi.hints.window.centerCursor = true;
     g_wsi.hints.window.focusOnShow  = true;
+    // 默认开启「随显示器缩放」：窗口的物理尺寸按所在屏幕的 DPI/内容缩放
+    // 比例自动放大或缩小（创建时按屏计算，跨屏移动时经 WM_DPICHANGED 动态
+    // 重算），从而在 Retina / HiDPI 屏上不会显得过小、在普通屏上不会过大。
+    // 需要固定物理像素（如自行管理帧缓冲的渲染器）的调用方可显式关闭该
+    // 提示（SC_SCALE_TO_MONITOR = false）。
+    g_wsi.hints.window.scaleToMonitor = true;
     g_wsi.hints.window.xpos         = SC_ANY_POSITION;
     g_wsi.hints.window.ypos         = SC_ANY_POSITION;
 }

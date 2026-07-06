@@ -39,7 +39,13 @@ add_executable(scc
 # builtins 根入 -I：使 src 可 #include "graph/graph.h" 引用图算法规范接口
 target_include_directories(scc PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../builtins)
 
-target_compile_options(scc PRIVATE -Wall -Wextra)
+# 告警选项按工具链区分：MSVC 不识别 GCC/Clang 的 -Wall -Wextra（-Wextra 会触发 D8021 致命错误）
+# /utf-8：源码含中文注释，MSVC 默认按系统代码页（如 GBK）解析 UTF-8 会报 C2001/C1907，强制 UTF-8
+if(MSVC)
+    target_compile_options(scc PRIVATE /W3 /utf-8)
+else()
+    target_compile_options(scc PRIVATE -Wall -Wextra)
+endif()
 
 # 运行时 dlopen libclang（解析 C 头外部描述符）：链接 dl（Linux 需 -ldl，macOS 在 libSystem 内）
 target_link_libraries(scc PRIVATE ${CMAKE_DL_LIBS})

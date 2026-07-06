@@ -220,8 +220,12 @@ SCC_INC=vendor/inc SCC_LIB=vendor/lib scc t.sc -l mylib -lm
 | `SCC_BUILD_PORT` | `build_port` | SSH 端口 | 22 |
 | `SCC_BUILD_DIR`  | `build_dir`  | 远端工作根目录 | `/tmp/scc-remote` |
 | `SCC_BUILD_KEY`  | `build_key`  | 私钥路径（公钥认证） | ssh-agent / `~/.ssh/id_rsa` 等默认密钥 |
-| `SCC_REMOTE_CC`  | `remote_cc`  | 远端编译器名 | `cc` |
+| `SCC_REMOTE_CC`  | `remote_cc`  | 远端编译器名 | `cc`（MSVC 风味默认 `cl`） |
 | `SCC_SSH_BACKEND`| `ssh_backend`| SSH 实现：`libssh2` 或 `system` | 编译进 libssh2 时为 `libssh2`，否则 `system` |
+| `SCC_REMOTE_OS`  | `remote_os`  | 远端操作系统：`windows`（cmd.exe shell）\| 空=POSIX | 空（目标三元组为 windows 族时自动判定） |
+| `SCC_CC_STYLE`   | `cc_style`   | 编译器命令风格：`msvc`（`cl.exe` 的 `/I /c /Fo`）\| 空=gcc 风格 | 空（windows 或 `remote_cc=cl` 时自动 `msvc`） |
+| `SCC_VCVARS`     | `vcvars`     | MSVC `vcvars64.bat` 路径（远端 `cl` 前 `call`，置 `INCLUDE`/`LIB`） | 空 |
+| `SCC_RUN_INTERACTIVE` | `run_interactive` | 仅 Windows：run 模式经计划任务把 GUI 投递到当前登录用户的交互会话启动（见下） | 空（关闭） |
 | `SCC_TARGET_SUFFIX` | `target_suffix` | `add` 预编译库的目标变体后缀 | 空时回退 `triple` |
 
 **两种 SSH 后端**
@@ -297,6 +301,32 @@ SCC_TARGET_SUFFIX=aarch64-linux \
 - `--build` 远程模式目前**仅支持可执行产物**（不支持 `.a`/`.so`/`.bin`/`.hex`）。
 - 依赖远端已装好 `tar` 与 `remote_cc` 指定的编译器。
 
+**Windows 远端（MSVC）**
+
+远端为 Windows 时（`remote_os=windows` 或目标三元组为 windows 族）走 `cmd.exe` shell、
+默认 `cl.exe`（`cc_style=msvc`）：需配 `vcvars` 指向 `vcvars64.bat`（`cl` 前 `call` 以置
+`INCLUDE`/`LIB`）。用户模块（FFI）的手写头按「项目根相对路径」随包上传，令生成 C 里
+`#include "templates/utils/wsi/wsi.h"` 及头内 `../../../builtins/…` 相对包含在远端一并解析。
+`add` 的预编译库须为**目标 ABI**（MSVC 与 mingw 的 `.a` 不可混链）；`.a` 传入 `cl` 会有
+`D9024`（无法识别 `.a` 源类型）告警，但 `link.exe` 照常接受归档，可忽略。
+
+**交互会话运行（`run_interactive`，仅 Windows）**
+
+OpenSSH 在 Windows 上启动的进程隶属**会话 0**（Session 0，服务/非交互会话），自 Vista 起
+它与用户交互会话（物理控制台、每个 RDP 连接各一会话）彼此隔离——**会话 0 里创建的 GUI
+窗口位于不可见的独立窗口站**，用户在控制台/RDP 桌面上看不到，且事件循环会一直阻塞。故默认
+的远端 run 对控制台程序完好（回传 stdout/退出码），但对 GUI「不可见」。
+
+置 `SCC_RUN_INTERACTIVE=1` 后，run 模式改用计划任务把产物投递到**当前登录用户的交互会话**
+启动（`schtasks /create … /it` → `/run` → `/delete`），窗口即出现在其控制台/RDP 桌面。
+代价（有意为之）：**发射即忘**——不回传程序 stdout/退出码；且产物运行中其 `.exe` 被占用，
+远端会话目录不清理（保留待产物退出后手清）。
+
+> **跨平台性**：会话 0 不可见是 **Windows 专有**问题。POSIX 远端（Linux/macOS）无此机制，
+> 忽略本开关：Linux 图形程序经 SSH 需 `DISPLAY`/X11 转发（`ssh -X` 把窗口转到**本机**显示，
+> 或设 `DISPLAY` 显示在远端 X 服务器）；macOS/Cocoa 无内建 GUI 转发。真正**跨平台一致**的
+> 看图方案是 VNC/RDP 等远程桌面（直接观看远端屏幕）；「投递到交互会话」只是各 OS 各自的实现。
+
 **示例**
 
 ```sh
@@ -306,6 +336,14 @@ scc --build -o app-linux --target templates/targets/remote-linux.target app.sc  
 
 # 纯环境变量一次性远程构建
 SCC_BUILD_HOST=build.lan SCC_BUILD_USER=ci SCC_REMOTE_CC=gcc scc app.sc
+
+# Windows 远端（MSVC）：在其 RDP/控制台桌面直接弹出 GUI 窗口
+SCC_BUILD_HOST=10.0.0.9 SCC_BUILD_USER=me SCC_BUILD_PORT=2222 \
+  SCC_REMOTE_OS=windows SCC_CC_STYLE=msvc SCC_REMOTE_CC=cl \
+  SCC_VCVARS="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" \
+  SCC_SSH_BACKEND=system SCC_TARGET_TRIPLE=x86_64-windows-msvc \
+  SCC_LDFLAGS="-luser32 -lgdi32 -lshell32" SCC_RUN_INTERACTIVE=1 \
+  scc templates/demo/ui_demo.sc
 ```
 
 ## 5. C 代码生成（codegen_c）

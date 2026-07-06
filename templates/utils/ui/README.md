@@ -38,11 +38,12 @@
 模块内负责：
 - UI 上下文、子窗口树、控件生命周期。
 - 控件基础属性（位置、尺寸、层叠、文本、勾选态、选项列表）。
+- 各平台原生子视图/控件的创建、销毁与属性下发（当前 macOS 已实现）。
 - 为每个子窗口挂载 native display/window 句柄（可由平台后端填充）。
 - 定义并实现 `sc_ui_sink` 驱动接口，供外部组件驱动 pos/size/z-order。
 
 模块暂不负责：
-- 真正绘制控件。
+- 逻辑视图树 / 布局计算（属于 `layout` 模块）。
 - 系统主题适配。
 - 字体排版与文本测量。
 - 完整输入法、焦点链与无障碍。
@@ -51,8 +52,11 @@
 
 - `ui.h`：公共 C API。
 - `ui.sc`：sc FFI 封装。
-- `src/ui.c`：通用骨架实现。
-- `build.sh`：独立静态库构建脚本。
+- `src/ui.c`：平台无关的共享逻辑（对象树/控件链表 + 调用后端 hook）。
+- `src/ui_internal.h`：共享数据结构 + 平台后端 hook 契约。
+- `src/cocoa_ui.m`：macOS(Cocoa) 后端（NSView/NSControl，参考 wsi）。
+- `src/null_ui.c`：其他平台的空实现（仅维护逻辑树，不建原生控件）。
+- `build.sh`：独立静态库构建脚本（按三元组选后端）。
 
 ## 5. 构建
 
@@ -68,6 +72,9 @@ cd templates/utils/ui
 说明：
 - 该模块依赖 `wsi.h`（`sc_window*` 与平台常量）。
 - 链接阶段需同时具备 `libui.a` 与 `libwsi.a`。
+- macOS 后端使用 Cocoa，最终可执行文件链接时需带框架：
+  `SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation"`。
+- 平台后端现状：macOS(Cocoa) 已实现；X11/Win32/Wayland 走 null 空实现待补。
 
 ## 6. 典型用法
 

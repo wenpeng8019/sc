@@ -485,6 +485,16 @@ static bool makeBundle(const RemoteJob& job, const fs::path& tgz,
                   fs::remove_all(stage, ec); return false; }
     }
 
+    // 用户模块手写头（项目根相对路径入包）：令生成 C 的相对根 #include 与头内
+    //   "../../../builtins/…" 相对包含在远端（/I . + builtins/）一并解析。
+    for (auto& h : job.extraHeaders) {
+        const fs::path dst = stage / h.remoteRel;
+        fs::create_directories(dst.parent_path(), ec);
+        fs::copy_file(h.localPath, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec) { err = "复制模块头失败: " + h.localPath + "（" + ec.message() + "）";
+                  fs::remove_all(stage, ec); return false; }
+    }
+
     // add 依赖：源码按 srcDir 去重分组（deps/d<N>/，连同同目录头），库放 deps/libs/
     if (!job.deps.empty()) {
         std::map<std::string, std::string> dirSlot;   // srcDir → "deps/dN"
@@ -698,6 +708,60 @@ int runRemoteJob(const RemoteJob& job) {
     }
 
     // run：远端运行，透传参数，回传退出码
+    //
+    // Windows 会话隔离与交互运行（runInteractive）：
+    //   OpenSSH 在 Windows 上启动的进程隶属「会话 0」（Session 0，服务/非交互会话）。
+    //   自 Vista 起会话 0 与用户交互会话（物理控制台=Session 1、每个 RDP 连接各自一
+    //   会话）彼此隔离——会话 0 中创建的窗口位于独立且不可见的窗口站，用户在控制台/
+    //   RDP 桌面上永远看不到，且 GUI 事件循环会一直阻塞。故默认 run（直接 exec 产物）
+    //   对控制台程序完好（stdout/退出码回传），但对 GUI 程序「不可见」。
+    //
+    //   runInteractive 置真时：不直接 exec，而是用计划任务把产物投递到「当前登录用户的
+    //   交互会话」启动——
+    //     schtasks /create ... /it   （/it=仅在用户登录时以其交互身份运行）
+    //     schtasks /run ...          （在该用户的活动会话内拉起，窗口即现于其桌面）
+    //     schtasks /delete ...       （删任务定义；已拉起的进程独立续跑，不受影响）
+    //   产物绝对路径用 %USERPROFILE% 拼接（cmd.exe 在建任务时即展开为登录用户主目录，
+    //   与 ssh 登录用户同一人，故解析正确）；build_dir 为绝对路径时直接用。
+    //
+    //   代价（有意为之，文档明示）：计划任务方式无法回传子进程 stdout/退出码（发射即忘，
+    //   GUI 程序本无控制台输出，影响甚微）；且产物在交互会话中运行，其 .exe 被占用，
+    //   无法删除，故此模式跳过远端会话目录清理（仅清本机临时打包），会话目录残留待后清。
+    //
+    // 跨平台性：会话 0 不可见是 Windows 专有问题。POSIX 远端（Linux/macOS）无此机制，
+    //   故忽略 runInteractive：Linux 图形程序经 SSH 需 DISPLAY/X11 转发（ssh -X 把窗口
+    //   转到「本机」显示，或设 DISPLAY 指向远端 X 服务器显示在远端）；macOS/Cocoa 无内建
+    //   GUI 转发。真正「跨平台一致」的看图方案是 VNC/RDP 等远程桌面（直接观看远端屏幕）
+    //   ——即用户此处所用；而「投递到交互会话」这一步是各 OS 各自的实现细节。
+    if (job.target.windows && job.runInteractive) {
+        // 会话目录相对（默认 scc-remote/<uniq>，位于登录用户主目录下）→ 以 %USERPROFILE%
+        //   拼绝对；已是绝对（含盘符/UNC）则直接用。分隔符转反斜杠。
+        const std::string& sd = rb->sessionDir();
+        const bool rel = sd.find(':') == std::string::npos && sd.rfind("\\\\", 0) != 0
+                                                           && sd.rfind("//", 0) != 0;
+        std::string exe = (rel ? std::string("%USERPROFILE%\\") : std::string())
+                        + natPath(sd, true) + "\\" + artifact;
+        std::string tr = "\\\"" + exe + "\\\"";           // schtasks /tr 内嵌引号用 \"
+        for (auto& a : job.progArgs) tr += " " + a;       // 参数原样附加（不含特殊字符）
+        const std::string sched =
+            "schtasks /create /tn scc_run /tr \"" + tr + "\" /sc once /st 00:00 /it /f"
+            " && schtasks /run /tn scc_run"
+            " && schtasks /delete /tn scc_run /f";
+        int src = rb->exec(sched, err);
+        if (src != 0) {
+            std::fprintf(stderr, "错误: 交互会话启动失败（退出码 %d）%s%s\n", src,
+                         err.empty() ? "" : "：", err.c_str());
+            return cleanup(1);
+        }
+        std::fprintf(stderr,
+            "提示: 已在远端当前登录用户的交互会话启动 GUI（窗口应出现在其控制台/RDP 桌面）。\n"
+            "      交互运行为发射即忘：未回传程序 stdout/退出码；产物运行中，远端会话目录\n"
+            "      保留未清理（%s）——可稍后手动删除。\n",
+            rb->sessionDir().c_str());
+        std::error_code rec;
+        fs::remove(tgz, rec);   // 仅清本机临时打包；远端会话目录留待产物退出后手清
+        return 0;
+    }
     for (auto& a : job.progArgs) runCmd += " " + (job.target.windows ? cmdq(a) : shq(a));
     int rrc = rb->exec(runCmd, err);
     return cleanup(rrc < 0 ? 1 : rrc);

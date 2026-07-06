@@ -82,8 +82,18 @@ struct RemoteJob {
     // 多单元构建：非空时取代 csrc 单 TU——unitsDir 整目录入包，逐 .c 远端编译链接。
     std::string unitsDir;               // 本机单元 .c/.h 临时目录（推送到 bundle/units/）
     std::vector<RemoteUnit> units;      // 单元清单（含 root）；非空=多单元模式
+    // 用户模块（非 builtins）手写头：按「项目根相对路径」入包（remoteRel 即相对项目根，
+    //   如 "templates/utils/wsi/wsi.h"），令生成 C 的相对根 #include 及头内 "../../../builtins/…"
+    //   相对包含在远端（/I . + builtins/）一并解析。
+    std::vector<RemoteFile> extraHeaders;
     std::string output;                 // 非空=--build（取回到此路径）；空=远端运行
     std::vector<std::string> progArgs;  // run 模式透传给产物的参数
+    // 交互会话运行（仅 Windows；run 模式）。SSH 启动的进程落在会话 0（服务会话），其
+    //   GUI 窗口在物理控制台/RDP 交互桌面不可见——这是 Windows 会话隔离的固有行为。
+    //   置真时经计划任务 schtasks /it 把产物投递到「当前登录用户的交互会话」启动，
+    //   令窗口出现在其桌面。代价：发射即忘——不回传 stdout/退出码；且产物运行中远端
+    //   会话目录不清理（exe 被占用无法删）。POSIX 远端忽略此项（见 runRemoteJob 说明）。
+    bool runInteractive = false;
 };
 
 // 执行远程构建作业。返回：--build 成功 0/失败 1；run 模式返回远端程序退出码。

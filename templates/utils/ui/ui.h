@@ -226,7 +226,7 @@ UI_API void sc_ui_control_set_checked(sc_ui_control* control, int checked);
 
 /* 用 items[0..count) 覆盖设置全部列表项（内部深拷贝）。
  * 成功返回 1，失败返回 0；count==0 清空。设置后选中项归 0。 */
-UI_API int sc_ui_control_set_items(sc_ui_control* control, const char* const* items, int count);
+UI_API int sc_ui_control_set_items(sc_ui_control* control, const char** items, int count);
 
 /* 列表项数量 / 按下标取项（越界返回 NULL）。 */
 UI_API int sc_ui_control_get_item_count(sc_ui_control* control);

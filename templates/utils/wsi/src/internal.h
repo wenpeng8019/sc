@@ -42,6 +42,7 @@ struct init_config_t
         bool      chdir;
     } ns;
     struct {
+        char      _unused; // MSVC(C) 不允许零成员结构体，占位（x11 字段在 Linux 后端另行扩展）
     } x11;
     struct {
         int       libdecorMode;

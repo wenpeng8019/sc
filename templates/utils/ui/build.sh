@@ -75,6 +75,32 @@ echo "  AR:        $AR"
 echo "  TARGET:    $TARGET"
 [[ $IS_HOST -eq 1 ]] && echo "  MODE:      host"
 
+# ---- 从三元组判定平台后端（参考 wsi）----
+# 共享逻辑 ui.c + 平台后端（cocoa 已实现；其余用 null 空实现占位）
+SHARED_SRCS="ui.c"
+case "$TARGET" in
+    *-apple-darwin*)
+        PLAT="darwin"
+        PLAT_DEFINES="SC_UI_COCOA"
+        PLAT_SRCS="cocoa_ui.m" ;;
+    *-windows-*|*-win32|*-msvc|*-mingw*|*-cygwin*)
+        PLAT="win32"
+        PLAT_DEFINES="SC_UI_WIN32"
+        PLAT_SRCS="win32_ui.c" ;;
+    *)
+        PLAT="null"
+        PLAT_DEFINES=""
+        PLAT_SRCS="null_ui.c" ;;
+esac
+
+DEFINE_FLAGS=""
+for d in $PLAT_DEFINES; do DEFINE_FLAGS="$DEFINE_FLAGS -D$d"; done
+MSVC_DEFS=""
+for d in $PLAT_DEFINES; do MSVC_DEFS="$MSVC_DEFS /D$d"; done
+
+echo "  PLAT:      $PLAT ($PLAT_DEFINES)"
+echo "  PLAT_SRCS: $PLAT_SRCS"
+
 OBJ_DIR="build/$TARGET"
 rm -rf "$OBJ_DIR"
 mkdir -p "$OBJ_DIR"
@@ -82,24 +108,30 @@ mkdir -p "$OBJ_DIR"
 compile_gnu() {
     local src="$1"
     local obj="$OBJ_DIR/$(basename "${src%.*}").o"
-    "$CC" -c -I. "$SRC_DIR/$src" -o "$obj"
+    local cflags="-c -I. $DEFINE_FLAGS"
+    case "$src" in
+        *.m) cflags="$cflags -x objective-c" ;;
+    esac
+    echo "  CC $src"
+    "$CC" $cflags "$SRC_DIR/$src" -o "$obj"
     ALL_OBJS="$ALL_OBJS $obj"
 }
 
 compile_msvc() {
     local src="$1"
     local obj="$OBJ_DIR/$(basename "${src%.*}").obj"
-    "$CC" /nologo /c /I. "$SRC_DIR/$src" /Fo"$obj"
+    echo "  CC $src"
+    "$CC" /nologo /utf-8 /c /I. $MSVC_DEFS "$SRC_DIR/$src" /Fo"$obj"
     ALL_OBJS="$ALL_OBJS $obj"
 }
 
 ALL_OBJS=""
 case "$TOOLCHAIN" in
     gnu)
-        compile_gnu "ui.c"
+        for src in $SHARED_SRCS $PLAT_SRCS; do compile_gnu "$src"; done
         ;;
     msvc)
-        compile_msvc "ui.c"
+        for src in $SHARED_SRCS $PLAT_SRCS; do compile_msvc "$src"; done
         ;;
 esac
 

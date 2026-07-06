@@ -17,7 +17,7 @@ add libui.a
 @fnc ui_get_window:: ::sc_window&, ctx: ::sc_ui_ctx&
 @fnc ui_get_root_window:: ::sc_ui_window&, ctx: ::sc_ui_ctx&
 
-# === 子窗口（window）：树结构与几何 ===
+# === 子窗口（window）：几何和父子关系 ===
 @fnc ui_window_create:: ::sc_ui_window&, ctx: ::sc_ui_ctx&, parent: ::sc_ui_window&, x: i4, y: i4, width: i4, height: i4, flags: i4
 @fnc ui_window_destroy:: win: ::sc_ui_window&
 @fnc ui_window_first_child:: ::sc_ui_window&, win: ::sc_ui_window&
@@ -76,5 +76,5 @@ add libui.a
 @fnc ui_control_set_selected_index:: control: ::sc_ui_control&, index: i4
 
 # === 驱动 sink 提供者（★ 供 layout 等外部组件操作 ui） ===
-@fnc ui_window_sink:: ::sc_ui_sink&
-@fnc ui_control_sink:: ::sc_ui_sink&
+@fnc ui_window_sink:: const ::sc_ui_sink&
+@fnc ui_control_sink:: const ::sc_ui_sink&

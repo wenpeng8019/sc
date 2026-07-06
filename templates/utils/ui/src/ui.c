@@ -1,69 +1,12 @@
-#include "../ui.h"
+#include "ui_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 /* ============================================================
  * ui 实现 —— 接口语义与参数说明见 ui.h（本文件仅做实现与区段划分）。
+ * 数据结构与平台后端 hook 契约见 src/ui_internal.h。
  * ============================================================ */
-
-/* ============================================================
- * 内部数据结构
- * ============================================================ */
-
-typedef struct sc_ui_window sc_ui_window;
-typedef struct sc_ui_control sc_ui_control;
-
-struct sc_ui_window
-{
-    struct sc_ui_ctx* ctx;
-    sc_ui_window* parent;
-    sc_ui_window* firstChild;
-    sc_ui_window* lastChild;
-    sc_ui_window* nextSibling;
-
-    int x;
-    int y;
-    int width;
-    int height;
-    int z;
-    int flags;
-
-    int platform;
-    void* nativeDisplay;
-    void* nativeWindow;
-};
-
-struct sc_ui_control
-{
-    struct sc_ui_ctx* ctx;
-    sc_ui_window* window;
-    sc_ui_control* next;
-
-    int id;
-    int kind;
-    int x;
-    int y;
-    int width;
-    int height;
-    int z;
-
-    char* text;
-    int checked;
-
-    char** items;
-    int itemCount;
-    int selectedIndex;
-};
-
-struct sc_ui_ctx
-{
-    sc_window* window;
-    sc_ui_window* rootWindow;
-    sc_ui_control* controlsHead;
-    sc_ui_control* controlsTail;
-    int nextControlId;
-};
 
 /* ============================================================
  * 内部辅助
@@ -138,6 +81,7 @@ static void ui_destroy_window_tree(sc_ui_window* win)
         child = next;
     }
 
+    ui_backend_window_destroy(win);
     free(win);
 }
 
@@ -173,6 +117,8 @@ static sc_ui_control* ui_create_control(sc_ui_ctx* ctx,
         ctx->controlsTail->next = control;
 
     ctx->controlsTail = control;
+
+    ui_backend_control_create(control);
     return control;
 }
 
@@ -211,6 +157,7 @@ UI_API sc_ui_ctx* sc_ui_create(sc_window* window)
     root->width = w;
     root->height = h;
 
+    ui_backend_window_create(root);
     return ctx;
 }
 
@@ -223,6 +170,7 @@ UI_API void sc_ui_destroy(sc_ui_ctx* ctx)
     while (c)
     {
         sc_ui_control* next = c->next;
+        ui_backend_control_destroy(c);
         ui_free_items(c);
         free(c->text);
         free(c);
@@ -280,6 +228,8 @@ UI_API sc_ui_window* sc_ui_window_create(sc_ui_ctx* ctx,
         parent->lastChild->nextSibling = win;
 
     parent->lastChild = win;
+
+    ui_backend_window_create(win);
     return win;
 }
 
@@ -345,6 +295,7 @@ UI_API void sc_ui_window_set_frame(sc_ui_window* win, int x, int y, int width, i
     win->y = y;
     win->width = width;
     win->height = height;
+    ui_backend_window_set_frame(win);
 }
 
 UI_API int sc_ui_window_get_z(sc_ui_window* win)
@@ -358,6 +309,7 @@ UI_API void sc_ui_window_set_z(sc_ui_window* win, int z)
         return;
 
     win->z = z;
+    ui_backend_window_set_z(win);
 }
 
 UI_API int sc_ui_window_get_flags(sc_ui_window* win)
@@ -460,6 +412,7 @@ UI_API void sc_ui_control_destroy(sc_ui_control* control)
 
     sc_ui_ctx* ctx = control->ctx;
     ui_remove_control_from_list(ctx, control);
+    ui_backend_control_destroy(control);
     ui_free_items(control);
     free(control->text);
     free(control);
@@ -514,6 +467,7 @@ UI_API void sc_ui_control_set_frame(sc_ui_control* control, int x, int y, int wi
     control->y = y;
     control->width = width;
     control->height = height;
+    ui_backend_control_set_frame(control);
 }
 
 UI_API int sc_ui_control_get_z(sc_ui_control* control)
@@ -527,6 +481,7 @@ UI_API void sc_ui_control_set_z(sc_ui_control* control, int z)
         return;
 
     control->z = z;
+    ui_backend_control_set_z(control);
 }
 
 /* ============================================================
@@ -545,6 +500,7 @@ UI_API void sc_ui_control_set_text(sc_ui_control* control, const char* text)
 
     free(control->text);
     control->text = ui_strdup(text ? text : "");
+    ui_backend_control_set_text(control);
 }
 
 /* ============================================================
@@ -562,20 +518,24 @@ UI_API void sc_ui_control_set_checked(sc_ui_control* control, int checked)
         return;
 
     control->checked = checked ? 1 : 0;
+    ui_backend_control_set_checked(control);
 }
 
 /* ============================================================
  * 控件：列表项（combo/list）
  * ============================================================ */
 
-UI_API int sc_ui_control_set_items(sc_ui_control* control, const char* const* items, int count)
+UI_API int sc_ui_control_set_items(sc_ui_control* control, const char** items, int count)
 {
     if (!control || count < 0)
         return 0;
 
     ui_free_items(control);
     if (count == 0)
+    {
+        ui_backend_control_set_items(control);
         return 1;
+    }
 
     control->items = (char**) calloc((size_t) count, sizeof(char*));
     if (!control->items)
@@ -594,6 +554,7 @@ UI_API int sc_ui_control_set_items(sc_ui_control* control, const char* const* it
 
     control->itemCount = count;
     control->selectedIndex = count > 0 ? 0 : -1;
+    ui_backend_control_set_items(control);
     return 1;
 }
 
@@ -624,6 +585,7 @@ UI_API void sc_ui_control_set_selected_index(sc_ui_control* control, int index)
         return;
 
     control->selectedIndex = index;
+    ui_backend_control_set_selected_index(control);
 }
 
 /* ============================================================

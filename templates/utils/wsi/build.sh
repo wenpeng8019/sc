@@ -137,7 +137,9 @@ case "$TARGET" in
         WAYLAND=1 ;;
     *-windows-*|*-mingw*|*-msys*|*-cygwin*|*-msvc*)
         PLAT="windows"
-        PLAT_DEFINES="WSI_WIN32"
+        # OEMRESOURCE：暴露 OCR_* 标准光标资源常量；须在任何 <windows.h> 之前生效，
+        # 而 platform.h 会先行引入 <windows.h>，故经命令行 -D 保证最先定义（MSVC 必需）。
+        PLAT_DEFINES="WSI_WIN32 OEMRESOURCE"
         PLAT_SRCS="win32_init.c win32_monitor.c win32_window.c"
         POLL_SRCS=""
         EXTRA_CFLAGS="" ;;
@@ -215,8 +217,11 @@ compile_msvc() {
     local obj="${OBJ_DIR}/$(basename "${src%.*}").obj"
     local defs=""
     for d in $PLAT_DEFINES; do defs="$defs /D$d"; done
+    # MSYS/Git Bash 下 cl 需 Windows 形式的绝对包含路径：有 cygpath 则转换
+    local binc="${BUILTINS_DIR}"
+    command -v cygpath >/dev/null 2>&1 && binc="$(cygpath -w "${BUILTINS_DIR}")"
     echo "  CC $src"
-    $CC /nologo /c /I"${SRC_DIR}" /I"${BUILTINS_DIR}" $defs /DWSI_SHARED /DWSI_EXPORTS "${SRC_DIR}/${src}" /Fo"$obj"
+    $CC /nologo /utf-8 /c /I"${SRC_DIR}" /I"${binc}" $defs /DWSI_SHARED /DWSI_EXPORTS "${SRC_DIR}/${src}" /Fo"$obj"
     ALL_OBJS="$ALL_OBJS $obj"
 }
 

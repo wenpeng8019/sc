@@ -179,6 +179,12 @@ struct ToolConfig {
     std::string vcvars;      // vcvars：MSVC vcvars64.bat 路径（远端 cl 前 call，置 INCLUDE/LIB）
     std::string sshBackend;  // ssh_backend：system（调系统 ssh/scp）| libssh2（内置，默认）
     std::string builtinsDir; // 本机 builtins 目录（远程构建时整目录推送，重写 -I）
+    // run_interactive（仅 Windows 远端有效）：远端「运行」模式下，把产物经计划任务
+    //   （schtasks /it）投递到「当前登录用户的交互会话」启动，令 GUI 窗口出现在其
+    //   物理控制台 / RDP 桌面。默认关闭——SSH 启动的进程落在会话 0（服务会话），
+    //   其窗口在交互桌面不可见（Windows 会话隔离，非 scc 缺陷）。开启后为「发射即忘」：
+    //   不回传 stdout/退出码，且产物运行中会话目录不清理（exe 被占用无法删）。见 remote.h。
+    bool runInteractive = false; // SCC_RUN_INTERACTIVE / run_interactive
     bool remoteBuild() const { return !buildHost.empty(); }
 };
 
@@ -449,6 +455,10 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     tc.ccStyle    = configValue("SCC_CC_STYLE",   "cc_style");
     tc.vcvars     = configValue("SCC_VCVARS",     "vcvars");
     tc.sshBackend = configValue("SCC_SSH_BACKEND","ssh_backend");
+    // 交互会话运行开关（真值：1/true/yes/on）。仅 Windows 远端 run 模式生效。
+    const std::string riVal = configValue("SCC_RUN_INTERACTIVE", "run_interactive");
+    tc.runInteractive = (riVal == "1" || riVal == "true" ||
+                         riVal == "yes" || riVal == "on");
 
     // 命令行 -D/--cflags：最高优先级，追加在末尾（同名宏后者覆盖前者）
     for (auto& f : extraCflags)
@@ -504,6 +514,7 @@ static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
     job.output      = output;
     job.progArgs    = progArgs;
     job.deps        = deps;
+    job.runInteractive = tc.runInteractive;
     // 多单元构建：文件输入走完整单元图——为每个单元（含库模块 adt 等）生成 .c（含
     //   sc_mod_*_init/drop 定义、拼入 <stem>_impl.c），全部上传远端编译链接，根治自包含
     //   单 TU 漏掉库模块生命周期定义的链接错误。stdin（无文件图）回退单 TU csrc。
@@ -2223,18 +2234,43 @@ static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
     const std::filesystem::path broot = tc.builtinsDir.empty()
         ? std::filesystem::path{}
         : std::filesystem::weakly_canonical(std::filesystem::path(tc.builtinsDir), ec);
+    // 项目根（= builtins 上级）：用户模块手写头按「项目根相对」入包，与 codegen 的
+    //   手写头 #include 路径（如 templates/utils/wsi/wsi.h）一致，令其在远端 /I . 下解析。
+    const std::filesystem::path proot = broot.empty()
+        ? std::filesystem::path{} : broot.parent_path();
+    std::unordered_set<std::string> hdrDirsDone;
 
     for (auto& a : arts) {
         RemoteUnit u;
         u.cRel = "units/" + a.cpath.filename().string();
         u.cflags = a.unitCFlags;
         // srcDir → bundle 相对：builtins 单元映射到已入包的 builtins/<子目录>；
-        //   用户单元的同目录本地头暂不上传（测试集无），srcDir 留空。
+        //   用户模块（非 builtins）目录内的手写头按项目根相对路径一并入包（extraHeaders），
+        //   其 .c 用相对项目根 #include，故 srcDir 留空即可（远端 /I . 覆盖）。
         if (!broot.empty() && !a.srcDir.empty()) {
             const std::filesystem::path sd = std::filesystem::weakly_canonical(a.srcDir, ec);
             const std::filesystem::path rel = sd.lexically_relative(broot);
             if (!rel.empty() && rel.native().rfind("..", 0) != 0)
                 u.srcDir = rel == "." ? "builtins" : "builtins/" + rel.generic_string();
+            else if (!proot.empty()) {
+                const std::filesystem::path prel = sd.lexically_relative(proot);
+                if (!prel.empty() && prel.native().rfind("..", 0) != 0) {
+                    // 项目根相对目录（手写头入包所在）；令本单元 #include "wsi.h" 经 /I 解析
+                    u.srcDir = prel.generic_string();
+                    if (hdrDirsDone.insert(sd.string()).second) {
+                        std::error_code lec;
+                        for (auto& e : std::filesystem::directory_iterator(sd, lec)) {
+                            if (!e.is_regular_file()) continue;
+                            const std::string ext = e.path().extension().string();
+                            if (ext == ".h" || ext == ".hpp" || ext == ".hh"
+                                || ext == ".hxx" || ext == ".inc")
+                                job.extraHeaders.push_back(
+                                    {e.path().string(),
+                                     (prel / e.path().filename()).generic_string()});
+                        }
+                    }
+                }
+            }
         }
         // 二进制实现（.o/.a）远端暂不支持（需架构匹配）——告警，链接将缺符号。
         if (!a.linkImpl.empty())
