@@ -1,4 +1,9 @@
 
+#ifndef WL_PLATFORM_H
+#define WL_PLATFORM_H
+
+#include "../wsi.h"
+
 #include <wayland-client-core.h>
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
@@ -660,3 +665,4 @@ void wayland_UpdateBufferScaleFromOutputs(window_st* window);
 void wayland_AddSeatListener(struct wl_seat* seat);
 void wayland_AddDataDeviceListener(struct wl_data_device* device);
 
+#endif // WL_PLATFORM_H

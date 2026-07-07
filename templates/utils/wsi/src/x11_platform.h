@@ -1,7 +1,7 @@
 
-#include <unistd.h>
-#include <signal.h>
-#include <stdint.h>
+#ifndef X11_PLATFORM_H
+#define X11_PLATFORM_H
+#include "../wsi.h"
 
 #include <X11/Xlib.h>
 #include <X11/keysym.h>
@@ -313,135 +313,133 @@ typedef void (* PFN_XShapeCombineMask)(Display*,Window,int,int,int,Pixmap,int);
 #define XShapeCombineMask g_wsi.x11.xshape.ShapeCombineMask
 
 #define GLFW_X11_WINDOW_STATE           _sc_windowX11 x11;
-#define GLFW_X11_LIBRARY_WINDOW_STATE   _GLFWlibraryX11 x11;
+#define GLFW_X11_LIBRARY_WINDOW_STATE   _sc_libraryX11 x11;
 #define GLFW_X11_MONITOR_STATE          _sc_monitorX11 x11;
 #define GLFW_X11_CURSOR_STATE           _sc_cursorX11 x11;
 
 #define GLFW_INVALID_CODEPOINT 0xffffffffu
 
 // X11-specific per-window data
-//
 typedef struct _sc_windowX11
 {
-    Colormap        colormap;
-    Window          handle;
-    Window          parent;
-    XIC             ic;
+    Colormap            colormap;
+    Window              handle;
+    Window              parent;
+    XIC                 ic;
 
-    bool        overrideRedirect;
-    bool        iconified;
-    bool        maximized;
+    bool                overrideRedirect;
+    bool                iconified;
+    bool                maximized;
 
     // Whether the visual supports framebuffer transparency
-    bool        transparent;
+    bool                transparent;
 
     // Cached position and size used to filter out duplicate events
-    int             width, height;
-    int             xpos, ypos;
+    int                 width, height;
+    int                 xpos, ypos;
 
     // The last received cursor position, regardless of source
-    int             lastCursorPosX, lastCursorPosY;
+    int                 lastCursorPosX, lastCursorPosY;
     // The last position the cursor was warped to by GLFW
-    int             warpCursorPosX, warpCursorPosY;
+    int                 warpCursorPosX, warpCursorPosY;
 
     // The time of the last KeyPress event per keycode, for discarding
     // duplicate key events generated for some keys by ibus
-    Time            keyPressTimes[256];
+    Time                keyPressTimes[256];
 } _sc_windowX11;
 
 // X11-specific global data
-//
-typedef struct _GLFWlibraryX11
+typedef struct _sc_libraryX11
 {
-    Display*        display;
-    int             screen;
-    Window          root;
+    Display*            display;
+    int                 screen;
+    Window              root;
 
     // System content scale
-    float           contentScaleX, contentScaleY;
+    float               contentScaleX, contentScaleY;
     // Helper window for IPC
-    Window          helperWindowHandle;
+    Window              helperWindowHandle;
     // Invisible cursor for hidden cursor mode
-    Cursor          hiddenCursorHandle;
+    Cursor              hiddenCursorHandle;
     // Context for mapping window XIDs to window_st pointers
-    XContext        context;
+    XContext            context;
     // XIM input method
-    XIM             im;
+    XIM                 im;
     // The previous X error handler, to be restored later
-    XErrorHandler   errorHandler;
+    XErrorHandler       errorHandler;
     // Most recent error code received by X error handler
-    int             errorCode;
+    int                 errorCode;
     // Primary selection string (while the primary selection is owned)
-    char*           primarySelectionString;
+    char*               primarySelectionString;
     // Clipboard string (while the selection is owned)
-    char*           clipboardString;
+    char*               clipboardString;
     // Key name string
-    char            keynames[SC_KEY_LAST + 1][5];
+    char                keynames[SC_KEY_LAST + 1][5];
     // X11 keycode to GLFW key LUT
-    short int       keycodes[256];
+    short int           keycodes[256];
     // GLFW key to X11 keycode LUT
-    short int       scancodes[SC_KEY_LAST + 1];
+    short int           scancodes[SC_KEY_LAST + 1];
     // Where to place the cursor when re-enabled
-    double          restoreCursorPosX, restoreCursorPosY;
+    double              restoreCursorPosX, restoreCursorPosY;
     // The window whose disabled cursor mode is active
-    window_st*    disabledCursorWindow;
-    int             emptyEventPipe[2];
+    struct window_t*    disabledCursorWindow;
+    int                 emptyEventPipe[2];
 
     // Window manager atoms
-    Atom            NET_SUPPORTED;
-    Atom            NET_SUPPORTING_WM_CHECK;
-    Atom            WM_PROTOCOLS;
-    Atom            WM_STATE;
-    Atom            WM_DELETE_WINDOW;
-    Atom            NET_WM_NAME;
-    Atom            NET_WM_ICON_NAME;
-    Atom            NET_WM_ICON;
-    Atom            NET_WM_PID;
-    Atom            NET_WM_PING;
-    Atom            NET_WM_WINDOW_TYPE;
-    Atom            NET_WM_WINDOW_TYPE_NORMAL;
-    Atom            NET_WM_STATE;
-    Atom            NET_WM_STATE_ABOVE;
-    Atom            NET_WM_STATE_FULLSCREEN;
-    Atom            NET_WM_STATE_MAXIMIZED_VERT;
-    Atom            NET_WM_STATE_MAXIMIZED_HORZ;
-    Atom            NET_WM_STATE_DEMANDS_ATTENTION;
-    Atom            NET_WM_BYPASS_COMPOSITOR;
-    Atom            NET_WM_FULLSCREEN_MONITORS;
-    Atom            NET_WM_WINDOW_OPACITY;
-    Atom            NET_WM_CM_Sx;
-    Atom            NET_WORKAREA;
-    Atom            NET_CURRENT_DESKTOP;
-    Atom            NET_ACTIVE_WINDOW;
-    Atom            NET_FRAME_EXTENTS;
-    Atom            NET_REQUEST_FRAME_EXTENTS;
-    Atom            MOTIF_WM_HINTS;
+    Atom                NET_SUPPORTED;
+    Atom                NET_SUPPORTING_WM_CHECK;
+    Atom                WM_PROTOCOLS;
+    Atom                WM_STATE;
+    Atom                WM_DELETE_WINDOW;
+    Atom                NET_WM_NAME;
+    Atom                NET_WM_ICON_NAME;
+    Atom                NET_WM_ICON;
+    Atom                NET_WM_PID;
+    Atom                NET_WM_PING;
+    Atom                NET_WM_WINDOW_TYPE;
+    Atom                NET_WM_WINDOW_TYPE_NORMAL;
+    Atom                NET_WM_STATE;
+    Atom                NET_WM_STATE_ABOVE;
+    Atom                NET_WM_STATE_FULLSCREEN;
+    Atom                NET_WM_STATE_MAXIMIZED_VERT;
+    Atom                NET_WM_STATE_MAXIMIZED_HORZ;
+    Atom                NET_WM_STATE_DEMANDS_ATTENTION;
+    Atom                NET_WM_BYPASS_COMPOSITOR;
+    Atom                NET_WM_FULLSCREEN_MONITORS;
+    Atom                NET_WM_WINDOW_OPACITY;
+    Atom                NET_WM_CM_Sx;
+    Atom                NET_WORKAREA;
+    Atom                NET_CURRENT_DESKTOP;
+    Atom                NET_ACTIVE_WINDOW;
+    Atom                NET_FRAME_EXTENTS;
+    Atom                NET_REQUEST_FRAME_EXTENTS;
+    Atom                MOTIF_WM_HINTS;
 
     // Xdnd (drag and drop) atoms
-    Atom            XdndAware;
-    Atom            XdndEnter;
-    Atom            XdndPosition;
-    Atom            XdndStatus;
-    Atom            XdndActionCopy;
-    Atom            XdndDrop;
-    Atom            XdndFinished;
-    Atom            XdndSelection;
-    Atom            XdndTypeList;
-    Atom            text_uri_list;
+    Atom                XdndAware;
+    Atom                XdndEnter;
+    Atom                XdndPosition;
+    Atom                XdndStatus;
+    Atom                XdndActionCopy;
+    Atom                XdndDrop;
+    Atom                XdndFinished;
+    Atom                XdndSelection;
+    Atom                XdndTypeList;
+    Atom                text_uri_list;
 
     // Selection (clipboard) atoms
-    Atom            TARGETS;
-    Atom            MULTIPLE;
-    Atom            INCR;
-    Atom            CLIPBOARD;
-    Atom            PRIMARY;
-    Atom            CLIPBOARD_MANAGER;
-    Atom            SAVE_TARGETS;
-    Atom            NULL_;
-    Atom            UTF8_STRING;
-    Atom            COMPOUND_STRING;
-    Atom            ATOM_PAIR;
-    Atom            GLFW_SELECTION;
+    Atom                TARGETS;
+    Atom                MULTIPLE;
+    Atom                INCR;
+    Atom                CLIPBOARD;
+    Atom                PRIMARY;
+    Atom                CLIPBOARD_MANAGER;
+    Atom                SAVE_TARGETS;
+    Atom                NULL_;
+    Atom                UTF8_STRING;
+    Atom                COMPOUND_STRING;
+    Atom                ATOM_PAIR;
+    Atom                GLFW_SELECTION;
 
     struct {
         void*       handle;
@@ -670,10 +668,9 @@ typedef struct _GLFWlibraryX11
         PFN_XShapeQueryVersion QueryVersion;
         PFN_XShapeCombineMask ShapeCombineMask;
     } xshape;
-} _GLFWlibraryX11;
+} _sc_libraryX11;
 
 // X11-specific per-monitor data
-//
 typedef struct _sc_monitorX11
 {
     RROutput        output;
@@ -686,96 +683,13 @@ typedef struct _sc_monitorX11
 } _sc_monitorX11;
 
 // X11-specific per-cursor data
-//
 typedef struct _sc_cursorX11
 {
     Cursor handle;
 } _sc_cursorX11;
 
+uint32_t x11_KeySym2Unicode(unsigned int keysym);
 
-bool x11_connect(int platformID, platform_st* platform);
-int x11_init(void);
-void x11_terminate(void);
+bool x11_connect(int platformID, struct platform_t* platform);
 
-bool x11_create_window(window_st* window, const wnd_config_st* wndconfig);
-void x11_destroy_window(window_st* window);
-void x11_set_window_title(window_st* window, const char* title);
-void x11_set_window_icon(window_st* window, int count, const GLFWimage* images);
-void x11_get_window_pos(window_st* window, int* xpos, int* ypos);
-void x11_set_window_pos(window_st* window, int xpos, int ypos);
-void x11_get_window_size(window_st* window, int* width, int* height);
-void x11_set_window_size(window_st* window, int width, int height);
-void x11_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void x11_set_window_aspect_ratio(window_st* window, int numer, int denom);
-void x11_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
-void x11_get_window_content_scale(window_st* window, float* xscale, float* yscale);
-void x11_iconify_window(window_st* window);
-void x11_restore_window(window_st* window);
-void x11_maximize_window(window_st* window);
-void x11_show_window(window_st* window);
-void x11_hide_window(window_st* window);
-void x11_request_window_attention(window_st* window);
-void x11_focus_window(window_st* window);
-void x11_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool x11_window_focused(window_st* window);
-bool x11_window_iconified(window_st* window);
-bool x11_window_visible(window_st* window);
-bool x11_window_maximized(window_st* window);
-bool x11_window_hovered(window_st* window);
-void x11_set_window_resizable(window_st* window, bool enabled);
-void x11_set_window_decorated(window_st* window, bool enabled);
-void x11_set_window_floating(window_st* window, bool enabled);
-float x11_get_window_opacity(window_st* window);
-void x11_set_window_opacity(window_st* window, float opacity);
-void x11_set_window_mouse_passthrough(window_st* window, bool enabled);
-
-void x11_set_mouse_raw_motion(window_st *window, bool enabled);
-bool x11_mouse_raw_motion_supported(void);
-
-void x11_poll_events(void);
-void x11_wait_events(void);
-void x11_wait_eventsTimeout(double timeout);
-void x11_post_empty_event(void);
-
-void x11_get_cursor_pos(window_st* window, double* xpos, double* ypos);
-void x11_set_cursor_pos(window_st* window, double xpos, double ypos);
-void x11_set_cursorMode(window_st* window, int mode);
-const char* x11_get_scancode_name(int scancode);
-int x11_get_key_scancode(int key);
-bool x11_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool x11_create_standard_cursor(cursor_st* cursor, int shape);
-void x11_destroy_cursor(cursor_st* cursor);
-void x11_set_cursor(window_st* window, cursor_st* cursor);
-void x11_set_clipboard_string(const char* string);
-const char* x11_get_clipboard_string(void);
-
-void wsi_free_monitorX11(monitor_st* monitor);
-void x11_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
-void x11_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
-void x11_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count);
-bool x11_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
-bool x11_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
-void x11_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
-
-void x11_poll_monitors(void);
-void x11_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired);
-void x11_RestoreVideoMode(monitor_st* monitor);
-
-Cursor x11_CreateNativeCursor(const GLFWimage* image, int xhot, int yhot);
-
-unsigned long x11_GetWindowProperty(Window window,
-                                        Atom property,
-                                        Atom type,
-                                        unsigned char** value);
-bool _glfwIsVisualTransparentX11(Visual* visual);
-
-uint32_t _glfwKeySym2UnicodeX11(unsigned int keysym);
-
-void _glfwGrabErrorHandlerX11(void);
-void _glfwReleaseErrorHandlerX11(void);
-void _glfwInputErrorX11(int error, const char* message);
-
-void _glfwPushSelectionToManagerX11(void);
-void _glfwCreateInputContextX11(window_st* window);
-
+#endif // X11_PLATFORM_H

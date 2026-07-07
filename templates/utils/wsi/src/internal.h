@@ -1,6 +1,5 @@
 
 #pragma once
-#include "../wsi.h"
 
 #define _SC_INSERT_FIRST      0
 #define _SC_INSERT_LAST       1
@@ -18,6 +17,7 @@ typedef struct cursor_t         cursor_st;
 typedef struct platform_t       platform_st;
 typedef struct library_t        library_st;
 
+#include "../wsi.h"
 #include "wsi_platform.h"
 
 // Per-thread error structure

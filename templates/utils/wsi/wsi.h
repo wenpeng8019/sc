@@ -19,18 +19,6 @@ extern "C" {
  #define _WIN32
 #endif /* _WIN32 */
 
-/* 包含此头文件是因为大多数 Windows GLU 头文件需要 wchar_t，
- * 且 macOS OpenGL 头文件会阻止 glext.h 对 ptrdiff_t 的定义。
- * 无条件包含它以避免意外的副作用。
- */
-#include <stddef.h>
-
-/* 包含此头文件是因为 Vulkan 及相关函数需要它。
- * 无条件包含它以避免意外的副作用。
- */
-#include <stdint.h>
-
-
 #ifndef WSI_SHARED
  #define WSI_SHARED 0
 #endif

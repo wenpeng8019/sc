@@ -1,4 +1,9 @@
 
+#ifndef WIN32_PLATFORM_H
+#define WIN32_PLATFORM_H
+
+#include "../wsi.h"
+
 // We don't need all the fancy stuff
 #ifndef NOMINMAX
  #define NOMINMAX
@@ -36,7 +41,9 @@
 #define DIRECTINPUT_VERSION 0x0800
 
 // GLFW uses OEM cursor resources
+#ifndef OEMRESOURCE
 #define OEMRESOURCE
+#endif
 
 #include <wctype.h>
 #include <windows.h>
@@ -88,22 +95,6 @@ typedef enum
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((HANDLE) -4)
 #endif /*DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2*/
 
-// Replacement for versionhelpers.h macros, as we cannot rely on the
-// application having a correct embedded manifest
-//
-#define IsWindows8OrGreater()                                         \
-    win32_IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WIN8),    \
-                                        LOBYTE(_WIN32_WINNT_WIN8), 0)
-#define IsWindows8Point1OrGreater()                                   \
-    win32_IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINBLUE), \
-                                        LOBYTE(_WIN32_WINNT_WINBLUE), 0)
-
-// Windows 10 Anniversary Update
-#define win32_IsWindows10Version1607OrGreater() \
-    win32_IsWindows10BuildOrGreater(14393)
-// Windows 10 Creators Update
-#define win32_IsWindows10Version1703OrGreater() \
-    win32_IsWindows10BuildOrGreater(15063)
 
 // HACK: Define macros that some xinput.h variants don't
 #ifndef XINPUT_CAPS_WIRELESS
@@ -182,10 +173,9 @@ typedef LONG (WINAPI * PFN_RtlVerifyVersionInfo)(OSVERSIONINFOEXW*,ULONG,ULONGLO
 #define RtlVerifyVersionInfo g_wsi.win32.ntdll.RtlVerifyVersionInfo_
 
 #define GLFW_WIN32_WINDOW_STATE         _sc_windowWin32  win32;
-#define GLFW_WIN32_LIBRARY_WINDOW_STATE _GLFWlibraryWin32 win32;
+#define GLFW_WIN32_LIBRARY_WINDOW_STATE _sc_libraryWin32 win32;
 #define GLFW_WIN32_MONITOR_STATE        _sc_monitorWin32 win32;
 #define GLFW_WIN32_CURSOR_STATE         _sc_cursorWin32  win32;
-
 
 // Win32-specific per-window data
 //
@@ -195,15 +185,15 @@ typedef struct _sc_windowWin32
     HICON               bigIcon;
     HICON               smallIcon;
 
-    bool            cursorTracked;
-    bool            frameAction;
-    bool            iconified;
-    bool            maximized;
+    bool                cursorTracked;
+    bool                frameAction;
+    bool                iconified;
+    bool                maximized;
     // Whether to enable framebuffer transparency on DWM
-    bool            transparent;
-    bool            scaleToMonitor;
-    bool            keymenu;
-    bool            showDefault;
+    bool                transparent;
+    bool                scaleToMonitor;
+    bool                keymenu;
+    bool                showDefault;
 
     // Cached size used to filter out duplicate events
     int                 width, height;
@@ -216,7 +206,7 @@ typedef struct _sc_windowWin32
 
 // Win32-specific global data
 //
-typedef struct _GLFWlibraryWin32
+typedef struct _sc_libraryWin32
 {
     HINSTANCE           instance;
     HWND                helperWindowHandle;
@@ -231,9 +221,9 @@ typedef struct _GLFWlibraryWin32
     // Where to place the cursor when re-enabled
     double              restoreCursorPosX, restoreCursorPosY;
     // The window whose disabled cursor mode is active
-    window_st*        disabledCursorWindow;
+    struct window_t*    disabledCursorWindow;
     // The window the cursor is captured in
-    window_st*        capturedCursorWindow;
+    struct window_t*    capturedCursorWindow;
     RAWINPUT*           rawInput;
     int                 rawInputSize;
     UINT                mouseTrailSize;
@@ -279,7 +269,7 @@ typedef struct _GLFWlibraryWin32
         HINSTANCE                       instance;
         PFN_RtlVerifyVersionInfo        RtlVerifyVersionInfo_;
     } ntdll;
-} _GLFWlibraryWin32;
+} _sc_libraryWin32;
 
 // Win32-specific per-monitor data
 //
@@ -291,8 +281,8 @@ typedef struct _sc_monitorWin32
     WCHAR               displayName[32];
     char                publicAdapterName[32];
     char                publicDisplayName[32];
-    bool            modesPruned;
-    bool            modeChanged;
+    bool                modesPruned;
+    bool                modeChanged;
 } _sc_monitorWin32;
 
 // Win32-specific per-cursor data
@@ -303,80 +293,6 @@ typedef struct _sc_cursorWin32
 } _sc_cursorWin32;
 
 
-bool win32_connect(int platformID, platform_st* platform);
-int win32_init(void);
-void win32_terminate(void);
+bool win32_connect(int platformID, struct platform_t* platform);
 
-WCHAR* win32_CreateWideStringFromUTF8(const char* source);
-char* win32_CreateUTF8FromWideString(const WCHAR* source);
-BOOL win32_IsWindowsVersionOrGreater(WORD major, WORD minor, WORD sp);
-BOOL win32_IsWindows10BuildOrGreater(WORD build);
-void win32_InputError(int error, const char* description);
-void win32_UpdateKeyNames(void);
-
-void win32_poll_monitors(void);
-void win32_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired);
-void win32_RestoreVideoMode(monitor_st* monitor);
-void win32_GetHMONITORContentScale(HMONITOR handle, float* xscale, float* yscale);
-
-bool win32_create_window(window_st* window, const wnd_config_st* wndconfig);
-void win32_destroy_window(window_st* window);
-void win32_set_window_title(window_st* window, const char* title);
-void win32_set_window_icon(window_st* window, int count, const GLFWimage* images);
-void win32_get_window_pos(window_st* window, int* xpos, int* ypos);
-void win32_set_window_pos(window_st* window, int xpos, int ypos);
-void win32_get_window_size(window_st* window, int* width, int* height);
-void win32_set_window_size(window_st* window, int width, int height);
-void win32_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void win32_set_window_aspect_ratio(window_st* window, int numer, int denom);
-void win32_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
-void win32_get_window_content_scale(window_st* window, float* xscale, float* yscale);
-void win32_iconify_window(window_st* window);
-void win32_restore_window(window_st* window);
-void win32_maximize_window(window_st* window);
-void win32_show_window(window_st* window);
-void win32_hide_window(window_st* window);
-void win32_request_window_attention(window_st* window);
-void win32_focus_window(window_st* window);
-void win32_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool win32_window_focused(window_st* window);
-bool win32_window_iconified(window_st* window);
-bool win32_window_visible(window_st* window);
-bool win32_window_maximized(window_st* window);
-bool win32_window_hovered(window_st* window);
-void win32_set_window_resizable(window_st* window, bool enabled);
-void win32_set_window_decorated(window_st* window, bool enabled);
-void win32_set_window_floating(window_st* window, bool enabled);
-void win32_set_window_mouse_passthrough(window_st* window, bool enabled);
-float win32_get_window_opacity(window_st* window);
-void win32_set_window_opacity(window_st* window, float opacity);
-
-void win32_set_mouse_raw_motion(window_st *window, bool enabled);
-bool win32_mouse_raw_motion_supported(void);
-
-void win32_poll_events(void);
-void win32_wait_events(void);
-void win32_wait_eventsTimeout(double timeout);
-void win32_post_empty_event(void);
-
-void win32_get_cursor_pos(window_st* window, double* xpos, double* ypos);
-void win32_set_cursor_pos(window_st* window, double xpos, double ypos);
-void win32_set_cursorMode(window_st* window, int mode);
-const char* win32_get_scancode_name(int scancode);
-int win32_get_key_scancode(int key);
-bool win32_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool win32_create_standard_cursor(cursor_st* cursor, int shape);
-void win32_destroy_cursor(cursor_st* cursor);
-void win32_set_cursor(window_st* window, cursor_st* cursor);
-void win32_set_clipboard_string(const char* string);
-const char* win32_get_clipboard_string(void);
-
-void win32_free_monitor(monitor_st* monitor);
-void win32_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
-void win32_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
-void win32_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count);
-bool win32_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
-bool win32_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
-void win32_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
-
+#endif // WIN32_PLATFORM_H

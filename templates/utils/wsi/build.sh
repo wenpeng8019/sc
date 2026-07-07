@@ -7,6 +7,7 @@
 #   ./build.sh --target aarch64-linux-gnu  # 交叉编译
 #   ./build.sh --cc cl --ar lib      # Windows MSVC
 #   ./build.sh --cc x86_64-w64-mingw32-gcc --target x86_64-windows-gnu
+#   ./build.sh --target-file ../../targets/windows-x64-mingw.target
 #
 # 产出：libwsi.<triple>.a
 #   宿主构建另生成 libwsi.a（sc 本机构建直接解析）
@@ -38,21 +39,57 @@ BUILTINS_DIR="$(cd "${SCRIPT_DIR}/../../../builtins" && pwd)"
 TARGET=""
 CC=""
 AR=""
+TARGET_FILE=""
+NO_WAYLAND=0
+X11_INCLUDE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --target|-t) TARGET="$2"; shift 2 ;;
-        --cc)        CC="$2";     shift 2 ;;
-        --ar)        AR="$2";     shift 2 ;;
+        --target|-t)     TARGET="$2";      shift 2 ;;
+        --target-file|-f) TARGET_FILE="$2"; shift 2 ;;
+        --cc)            CC="$2";          shift 2 ;;
+        --ar)            AR="$2";          shift 2 ;;
+        --no-wayland)    NO_WAYLAND=1;     shift   ;;
+        --x11-include)  X11_INCLUDE="$2"; shift 2 ;;
         -h|--help)
-            echo "用法: $0 [--target <triple>] [--cc <compiler>] [--ar <archiver>]"
-            echo "  --target  目标三元组（默认自动检测）"
-            echo "  --cc      C 编译器（默认自动检测）"
-            echo "  --ar      打包工具（默认自动检测）"
+            echo "用法: $0 [--target <triple>] [--cc <compiler>] [--ar <archiver>] [--target-file <.target>]"
+            echo "  --target       目标三元组（默认自动检测）"
+            echo "  --target-file  从 .target 文件读取 cc/ar/triple（命令行参数可覆盖）"
+            echo "  --cc           C 编译器（默认自动检测）"
+            echo "  --ar           打包工具（默认自动检测）"
+            echo "  --no-wayland   Linux 平台跳过 Wayland 后端（仅 X11）"
+            echo "  --x11-include  手动指定 X11 头文件目录（如 /opt/homebrew/include）"
             exit 0 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
 done
+
+# ---- 从 .target 文件加载（命令行参数优先） ----
+load_target_file() {
+    local tf="$1"
+    if [[ ! -f "$tf" ]]; then
+        echo "错误: target 文件不存在: $tf"
+        exit 1
+    fi
+    echo "  [target-file] $tf"
+    while IFS='=' read -r key value; do
+        # 去掉前后空白
+        key=$(echo "$key" | xargs)
+        value=$(echo "$value" | xargs)
+        # 跳过空行和注释行
+        [[ -z "$key" || "$key" == \#* ]] && continue
+        # 去掉行内注释（value 中 # 之后的内容）
+        value="${value%%#*}"
+        value=$(echo "$value" | xargs)
+        case "$key" in
+            cc)     [[ -z "$CC" ]]     && CC="$value"     ;;
+            ar)     [[ -z "$AR" ]]     && AR="$value"     ;;
+            triple) [[ -z "$TARGET" ]] && TARGET="$value" ;;
+        esac
+    done < "$tf"
+}
+
+[[ -n "$TARGET_FILE" ]] && load_target_file "$TARGET_FILE"
 
 # ---- 工具链自动检测 ----
 detect_toolchain() {
@@ -124,23 +161,41 @@ case "$TARGET" in
     *-apple-darwin*)
         PLAT="darwin"
         PLAT_DEFINES="WSI_COCOA"
-        PLAT_SRCS="cocoa_init.m cocoa_monitor.m cocoa_window.m"
+        PLAT_SRCS="cocoa_platform.m"
         POLL_SRCS=""
         EXTRA_CFLAGS="-x objective-c" ;;
     *-linux-*|*-linux)
         # glfw 多后端：Linux 同时编入 X11 与 Wayland，运行时由 wsi_select_platform 选择
+        # --no-wayland 跳过 Wayland（仅 X11），用于 mac 等无 wayland-scanner 的环境
         PLAT="linux"
-        PLAT_DEFINES="WSI_X11 WSI_WAYLAND"
-        PLAT_SRCS="x11_init.c x11_monitor.c x11_window.c xkb_unicode.c wl_init.c wl_monitor.c wl_window.c"
-        POLL_SRCS="posix_poll.c"
         EXTRA_CFLAGS=""
-        WAYLAND=1 ;;
+        # X11 头文件路径：优先用 --x11-include 指定的目录，否则自动检测
+        if [[ -n "$X11_INCLUDE" ]]; then
+            EXTRA_CFLAGS="-I$X11_INCLUDE"
+        elif [[ ! -f "$($CC -print-sysroot 2>/dev/null)/usr/include/X11/Xlib.h" ]]; then
+            for x11dir in /opt/homebrew/include /usr/local/include /usr/include; do
+                if [[ -f "$x11dir/X11/Xlib.h" ]]; then
+                    EXTRA_CFLAGS="-I$x11dir"
+                    break
+                fi
+            done
+        fi
+        if [[ $NO_WAYLAND -eq 1 ]]; then
+            PLAT_DEFINES="WSI_X11"
+            PLAT_SRCS="x11_platform.c xkb_unicode.c"
+            WAYLAND=0
+        else
+            PLAT_DEFINES="WSI_X11 WSI_WAYLAND"
+            PLAT_SRCS="x11_platform.c xkb_unicode.c wl_init.c wl_monitor.c wl_window.c"
+            WAYLAND=1
+        fi
+        POLL_SRCS="posix_poll.c" ;;
     *-windows-*|*-mingw*|*-msys*|*-cygwin*|*-msvc*)
         PLAT="windows"
         # OEMRESOURCE：暴露 OCR_* 标准光标资源常量；须在任何 <windows.h> 之前生效，
         # 而 platform.h 会先行引入 <windows.h>，故经命令行 -D 保证最先定义（MSVC 必需）。
-        PLAT_DEFINES="WSI_WIN32 OEMRESOURCE"
-        PLAT_SRCS="win32_init.c win32_monitor.c win32_window.c"
+        PLAT_DEFINES="WSI_WIN32 UNICODE OEMRESOURCE"
+        PLAT_SRCS="win32_platform.c"
         POLL_SRCS=""
         EXTRA_CFLAGS="" ;;
     *)
@@ -151,7 +206,7 @@ esac
 
 # 共享源文件（所有平台）
 SHARED_SRCS="init.c input.c monitor.c window.c platform.c native.c"
-NULL_SRCS="null_monitor.c null_window.c"
+NULL_SRCS="null_platform.c"
 
 # 平台后端宏（可多个，glfw 多后端）→ 展开为 -D 传给编译器
 DEFINE_FLAGS=""
@@ -172,6 +227,7 @@ WL_INC=""
 if [[ "${WAYLAND}" -eq 1 ]]; then
     if ! command -v wayland-scanner &>/dev/null; then
         echo "错误: 编译 Wayland 后端需要 wayland-scanner"
+        echo "  或使用 --no-wayland 仅编译 X11 后端"
         echo "  Debian/Ubuntu: apt install libwayland-bin libwayland-dev wayland-protocols"
         echo "  Fedora:        dnf install wayland-devel wayland-protocols-devel"
         exit 1
@@ -203,7 +259,7 @@ ALL_OBJS=""
 compile_gnu() {
     local src="$1"
     local obj="${OBJ_DIR}/$(basename "${src%.*}").o"
-    local cflags="-c -I${SRC_DIR} -I${BUILTINS_DIR} ${WL_INC} ${DEFINE_FLAGS} -DWSI_SHARED -DWSI_EXPORTS"
+    local cflags="-c -I${SRC_DIR} -I${BUILTINS_DIR} ${WL_INC} ${EXTRA_CFLAGS} ${DEFINE_FLAGS} -DWSI_SHARED -DWSI_EXPORTS"
     case "${src}" in
         *.m) cflags="$cflags -x objective-c" ;;
     esac
@@ -228,12 +284,12 @@ compile_msvc() {
 case "$TOOLCHAIN" in
     gnu)
         for src in $SHARED_SRCS $PLAT_SRCS $POLL_SRCS $NULL_SRCS; do
-            [[ -f "${SRC_DIR}/${src}" ]] && compile_gnu "$src"
+            compile_gnu "$src"
         done
         ;;
     msvc)
         for src in $SHARED_SRCS $PLAT_SRCS $POLL_SRCS $NULL_SRCS; do
-            [[ -f "${SRC_DIR}/${src}" ]] && compile_msvc "$src"
+            compile_msvc "$src"
         done
         ;;
 esac

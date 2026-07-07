@@ -1415,7 +1415,7 @@ static void handleEvents(double* timeout)
         if (event)
             timeout = &immediate;
 
-        if (!_glfwPollPOSIX(fds, sizeof(fds) / sizeof(fds[0]), timeout))
+        if (!sc_poll_posix(fds, sizeof(fds) / sizeof(fds[0]), timeout))
         {
             wl_display_cancel_read(g_wsi.wl.display);
             return;

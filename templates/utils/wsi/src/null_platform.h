@@ -1,5 +1,8 @@
 
-#include "internal.h"
+#ifndef NULL_PLATFORM_H
+#define NULL_PLATFORM_H
+
+#include "../wsi.h"
 
 #define NULL_WINDOW_STATE          null_window_t null;
 #define NULL_LIBRARY_WINDOW_STATE  null_library_t null;
@@ -179,8 +182,8 @@ bool null_create_window(window_st* window, const wnd_config_st* wndconfig);
 void null_destroy_window(window_st* window);
 void null_set_window_title(window_st* window, const char* title);
 void null_set_window_icon(window_st* window, int count, const GLFWimage* images);
-void null_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
 void null_set_window_mouse_passthrough(window_st* window, bool enabled);
+void null_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
 
 void null_set_window_decorated(window_st* window, bool enabled);
 void null_set_window_resizable(window_st* window, bool enabled);
@@ -206,8 +209,8 @@ void null_iconify_window(window_st* window);
 void null_request_window_attention(window_st* window);
 
 bool null_window_visible(window_st* window);
-bool null_window_focused(window_st* window);
 bool null_window_maximized(window_st* window);
+bool null_window_focused(window_st* window);
 bool null_window_hovered(window_st* window);
 bool null_window_iconified(window_st* window);
 
@@ -234,3 +237,5 @@ GLFWvidmode* null_get_video_modes(monitor_st* monitor, int* found);
 bool null_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
 bool null_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
 void null_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
+
+#endif // NULL_PLATFORM_H
