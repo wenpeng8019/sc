@@ -252,7 +252,7 @@ static double getFallbackRefreshRate(CGDirectDisplayID displayID)
 
 // Poll for changes in the set of connected monitors
 //
-void _glfwPollMonitorsCocoa(void)
+void cocoa_poll_monitors(void)
 {
     uint32_t displayCount;
     CGGetOnlineDisplayList(0, NULL, &displayCount);
@@ -340,10 +340,10 @@ void _glfwPollMonitorsCocoa(void)
 
 // Change the current video mode
 //
-void _glfwSetVideoModeCocoa(monitor_st* monitor, const GLFWvidmode* desired)
+void cocoa_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired)
 {
     GLFWvidmode current;
-    _glfwGetVideoModeCocoa(monitor, &current);
+    cocoa_get_video_mode(monitor, &current);
 
     const GLFWvidmode* best = wsi_choose_video_mode(monitor, desired);
     if (wsi_compare_video_mode(&current, best) == 0)
@@ -383,7 +383,7 @@ void _glfwSetVideoModeCocoa(monitor_st* monitor, const GLFWvidmode* desired)
 
 // Restore the previously saved (original) video mode
 //
-void _glfwRestoreVideoModeCocoa(monitor_st* monitor)
+void cocoa_RestoreVideoMode(monitor_st* monitor)
 {
     if (monitor->ns.previousMode)
     {
@@ -402,11 +402,11 @@ void _glfwRestoreVideoModeCocoa(monitor_st* monitor)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-void wsi_free_monitorCocoa(monitor_st* monitor)
+void cocoa_free_monitor(monitor_st* monitor)
 {
 }
 
-void _glfwGetMonitorPosCocoa(monitor_st* monitor, int* xpos, int* ypos)
+void cocoa_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos)
 {
     @autoreleasepool {
 
@@ -420,7 +420,7 @@ void _glfwGetMonitorPosCocoa(monitor_st* monitor, int* xpos, int* ypos)
     } // autoreleasepool
 }
 
-void _glfwGetMonitorContentScaleCocoa(monitor_st* monitor,
+void cocoa_get_monitor_content_scale(monitor_st* monitor,
                                       float* xscale, float* yscale)
 {
     @autoreleasepool {
@@ -442,7 +442,7 @@ void _glfwGetMonitorContentScaleCocoa(monitor_st* monitor,
     } // autoreleasepool
 }
 
-void _glfwGetMonitorWorkareaCocoa(monitor_st* monitor,
+void cocoa_get_monitor_work_area(monitor_st* monitor,
                                   int* xpos, int* ypos,
                                   int* width, int* height)
 {
@@ -459,7 +459,7 @@ void _glfwGetMonitorWorkareaCocoa(monitor_st* monitor,
     if (xpos)
         *xpos = frameRect.origin.x;
     if (ypos)
-        *ypos = _glfwTransformYCocoa(frameRect.origin.y + frameRect.size.height - 1);
+        *ypos = cocoa_TransformY(frameRect.origin.y + frameRect.size.height - 1);
     if (width)
         *width = frameRect.size.width;
     if (height)
@@ -468,7 +468,7 @@ void _glfwGetMonitorWorkareaCocoa(monitor_st* monitor,
     } // autoreleasepool
 }
 
-GLFWvidmode* _glfwGetVideoModesCocoa(monitor_st* monitor, int* count)
+GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count)
 {
     @autoreleasepool {
 
@@ -508,7 +508,7 @@ GLFWvidmode* _glfwGetVideoModesCocoa(monitor_st* monitor, int* count)
     } // autoreleasepool
 }
 
-bool _glfwGetVideoModeCocoa(monitor_st* monitor, GLFWvidmode *mode)
+bool cocoa_get_video_mode(monitor_st* monitor, GLFWvidmode *mode)
 {
     @autoreleasepool {
 
@@ -526,7 +526,7 @@ bool _glfwGetVideoModeCocoa(monitor_st* monitor, GLFWvidmode *mode)
     } // autoreleasepool
 }
 
-bool _glfwGetGammaRampCocoa(monitor_st* monitor, GLFWgammaramp* ramp)
+bool cocoa_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
 {
     @autoreleasepool {
 
@@ -555,7 +555,7 @@ bool _glfwGetGammaRampCocoa(monitor_st* monitor, GLFWgammaramp* ramp)
     } // autoreleasepool
 }
 
-void _glfwSetGammaRampCocoa(monitor_st* monitor, const GLFWgammaramp* ramp)
+void cocoa_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
 {
     @autoreleasepool {
 

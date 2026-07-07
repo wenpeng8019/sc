@@ -50,7 +50,7 @@ static bool loadLibraries(void)
                             (const WCHAR*) &g_wsi,
                             (HMODULE*) &g_wsi.win32.instance))
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to retrieve own module handle");
         return false;
     }
@@ -58,7 +58,7 @@ static bool loadLibraries(void)
     g_wsi.win32.user32.instance = impl_platform_load_module("user32.dll");
     if (!g_wsi.win32.user32.instance)
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to load user32.dll");
         return false;
     }
@@ -285,7 +285,7 @@ static LRESULT CALLBACK helperWindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LP
     switch (uMsg)
     {
         case WM_DISPLAYCHANGE:
-            _glfwPollMonitorsWin32();
+            win32_poll_monitors();
             break;
 
         case WM_DEVICECHANGE:
@@ -313,7 +313,7 @@ static bool createHelperWindow(void)
     g_wsi.win32.helperWindowClass = RegisterClassExW(&wc);
     if (!g_wsi.win32.helperWindowClass)
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to register helper window class");
         return false;
     }
@@ -330,7 +330,7 @@ static bool createHelperWindow(void)
 
     if (!g_wsi.win32.helperWindowHandle)
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to create helper window");
         return false;
     }
@@ -368,7 +368,7 @@ static bool createHelperWindow(void)
 
 // Returns a wide string version of the specified UTF-8 string
 //
-WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
+WCHAR* win32_CreateWideStringFromUTF8(const char* source)
 {
     WCHAR* target;
     int count;
@@ -376,7 +376,7 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
     count = MultiByteToWideChar(CP_UTF8, 0, source, -1, NULL, 0);
     if (!count)
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string from UTF-8");
         return NULL;
     }
@@ -385,7 +385,7 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
 
     if (!MultiByteToWideChar(CP_UTF8, 0, source, -1, target, count))
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string from UTF-8");
         wsi_free(target);
         return NULL;
@@ -396,7 +396,7 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
 
 // Returns a UTF-8 string version of the specified wide string
 //
-char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
+char* win32_CreateUTF8FromWideString(const WCHAR* source)
 {
     char* target;
     int size;
@@ -404,7 +404,7 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
     size = WideCharToMultiByte(CP_UTF8, 0, source, -1, NULL, 0, NULL, NULL);
     if (!size)
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string to UTF-8");
         return NULL;
     }
@@ -413,7 +413,7 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
 
     if (!WideCharToMultiByte(CP_UTF8, 0, source, -1, target, size, NULL, NULL))
     {
-        _glfwInputErrorWin32(SC_WSI_ERR_PLATFORM_ERROR,
+        win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                              "Win32: Failed to convert string to UTF-8");
         wsi_free(target);
         return NULL;
@@ -424,7 +424,7 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
 
 // Reports the specified error, appending information about the last Win32 error
 //
-void _glfwInputErrorWin32(int error, const char* description)
+void win32_InputError(int error, const char* description)
 {
     WCHAR buffer[_SC_MESSAGE_SIZE] = L"";
     char message[_SC_MESSAGE_SIZE] = "";
@@ -445,7 +445,7 @@ void _glfwInputErrorWin32(int error, const char* description)
 
 // Updates key names according to the current keyboard layout
 //
-void _glfwUpdateKeyNamesWin32(void)
+void win32_UpdateKeyNames(void)
 {
     int key;
     BYTE state[256] = {0};
@@ -503,7 +503,7 @@ void _glfwUpdateKeyNamesWin32(void)
 // Replacement for IsWindowsVersionOrGreater, as we cannot rely on the
 // application having a correct embedded manifest
 //
-BOOL _glfwIsWindowsVersionOrGreaterWin32(WORD major, WORD minor, WORD sp)
+BOOL win32_IsWindowsVersionOrGreater(WORD major, WORD minor, WORD sp)
 {
     OSVERSIONINFOEXW osvi = { sizeof(osvi), major, minor, 0, 0, {0}, sp };
     DWORD mask = VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR;
@@ -518,7 +518,7 @@ BOOL _glfwIsWindowsVersionOrGreaterWin32(WORD major, WORD minor, WORD sp)
 
 // Checks whether we are on at least the specified build of Windows 10
 //
-BOOL _glfwIsWindows10BuildOrGreaterWin32(WORD build)
+BOOL win32_IsWindows10BuildOrGreater(WORD build)
 {
     OSVERSIONINFOEXW osvi = { sizeof(osvi), 10, 0, build };
     DWORD mask = VER_MAJORVERSION | VER_MINORVERSION | VER_BUILDNUMBER;
@@ -531,84 +531,84 @@ BOOL _glfwIsWindows10BuildOrGreaterWin32(WORD build)
     return RtlVerifyVersionInfo(&osvi, mask, cond) == 0;
 }
 
-bool _glfwConnectWin32(int platformID, platform_st* platform)
+bool win32_connect(int platformID, platform_st* platform)
 {
     const platform_st win32 =
     {
         .platformID = SC_PLATFORM_WIN32,
-        .init = _glfwInitWin32,
-        .terminate = _glfwTerminateWin32,
-        .getCursorPos = _glfwGetCursorPosWin32,
-        .setCursorPos = _glfwSetCursorPosWin32,
-        .setCursorMode = _glfwSetCursorModeWin32,
-        .setRawMouseMotion = _glfwSetRawMouseMotionWin32,
-        .rawMouseMotionSupported = _glfwRawMouseMotionSupportedWin32,
-        .createCursor = _glfwCreateCursorWin32,
-        .createStandardCursor = _glfwCreateStandardCursorWin32,
-        .destroyCursor = _glfwDestroyCursorWin32,
-        .setCursor = _glfwSetCursorWin32,
-        .getScancodeName = _glfwGetScancodeNameWin32,
-        .getKeyScancode = _glfwGetKeyScancodeWin32,
-        .setClipboardString = _glfwSetClipboardStringWin32,
-        .getClipboardString = _glfwGetClipboardStringWin32,
-        .freeMonitor = wsi_free_monitorWin32,
-        .getMonitorPos = _glfwGetMonitorPosWin32,
-        .getMonitorContentScale = _glfwGetMonitorContentScaleWin32,
-        .getMonitorWorkarea = _glfwGetMonitorWorkareaWin32,
-        .getVideoModes = _glfwGetVideoModesWin32,
-        .getVideoMode = _glfwGetVideoModeWin32,
-        .getGammaRamp = _glfwGetGammaRampWin32,
-        .setGammaRamp = _glfwSetGammaRampWin32,
-        .createWindow = _glfwCreateWindowWin32,
-        .destroyWindow = _glfwDestroyWindowWin32,
-        .setWindowTitle = _glfwSetWindowTitleWin32,
-        .setWindowIcon = _glfwSetWindowIconWin32,
-        .getWindowPos = _glfwGetWindowPosWin32,
-        .setWindowPos = _glfwSetWindowPosWin32,
-        .getWindowSize = _glfwGetWindowSizeWin32,
-        .setWindowSize = _glfwSetWindowSizeWin32,
-        .setWindowSizeLimits = _glfwSetWindowSizeLimitsWin32,
-        .setWindowAspectRatio = _glfwSetWindowAspectRatioWin32,
-        .getWindowFrameSize = _glfwGetWindowFrameSizeWin32,
-        .getWindowContentScale = _glfwGetWindowContentScaleWin32,
-        .iconifyWindow = _glfwIconifyWindowWin32,
-        .restoreWindow = _glfwRestoreWindowWin32,
-        .maximizeWindow = _glfwMaximizeWindowWin32,
-        .showWindow = _glfwShowWindowWin32,
-        .hideWindow = _glfwHideWindowWin32,
-        .requestWindowAttention = _glfwRequestWindowAttentionWin32,
-        .focusWindow = _glfwFocusWindowWin32,
-        .setWindowMonitor = _glfwSetWindowMonitorWin32,
-        .windowFocused = _glfwWindowFocusedWin32,
-        .windowIconified = _glfwWindowIconifiedWin32,
-        .windowVisible = _glfwWindowVisibleWin32,
-        .windowMaximized = _glfwWindowMaximizedWin32,
-        .windowHovered = _glfwWindowHoveredWin32,
-        .getWindowOpacity = _glfwGetWindowOpacityWin32,
-        .setWindowResizable = _glfwSetWindowResizableWin32,
-        .setWindowDecorated = _glfwSetWindowDecoratedWin32,
-        .setWindowFloating = _glfwSetWindowFloatingWin32,
-        .setWindowOpacity = _glfwSetWindowOpacityWin32,
-        .setWindowMousePassthrough = _glfwSetWindowMousePassthroughWin32,
-        .pollEvents = _glfwPollEventsWin32,
-        .waitEvents = _glfwWaitEventsWin32,
-        .waitEventsTimeout = _glfwWaitEventsTimeoutWin32,
-        .postEmptyEvent = _glfwPostEmptyEventWin32,
+        .init = win32_init,
+        .terminate = win32_terminate,
+        .getCursorPos = win32_get_cursor_pos,
+        .setCursorPos = win32_set_cursor_pos,
+        .setCursorMode = win32_set_cursorMode,
+        .setRawMouseMotion = win32_set_mouse_raw_motion,
+        .rawMouseMotionSupported = win32_mouse_raw_motion_supported,
+        .createCursor = win32_create_cursor,
+        .createStandardCursor = win32_create_standard_cursor,
+        .destroyCursor = win32_destroy_cursor,
+        .setCursor = win32_set_cursor,
+        .getScancodeName = win32_get_scancode_name,
+        .getKeyScancode = win32_get_key_scancode,
+        .setClipboardString = win32_set_clipboard_string,
+        .getClipboardString = win32_get_clipboard_string,
+        .freeMonitor = win32_free_monitor,
+        .getMonitorPos = win32_get_monitor_pos,
+        .getMonitorContentScale = win32_get_monitor_content_scale,
+        .getMonitorWorkarea = win32_get_monitor_work_area,
+        .getVideoModes = win32_get_video_modes,
+        .getVideoMode = win32_get_video_mode,
+        .getGammaRamp = win32_get_gamma_ramp,
+        .setGammaRamp = win32_set_gamma_ramp,
+        .createWindow = win32_create_window,
+        .destroyWindow = win32_destroy_window,
+        .setWindowTitle = win32_set_window_title,
+        .setWindowIcon = win32_set_window_icon,
+        .getWindowPos = win32_get_window_pos,
+        .setWindowPos = win32_set_window_pos,
+        .getWindowSize = win32_get_window_size,
+        .setWindowSize = win32_set_window_size,
+        .setWindowSizeLimits = win32_set_window_size_limits,
+        .setWindowAspectRatio = win32_set_window_aspect_ratio,
+        .getWindowFrameSize = win32_get_window_frame_size,
+        .getWindowContentScale = win32_get_window_content_scale,
+        .iconifyWindow = win32_iconify_window,
+        .restoreWindow = win32_restore_window,
+        .maximizeWindow = win32_maximize_window,
+        .showWindow = win32_show_window,
+        .hideWindow = win32_hide_window,
+        .requestWindowAttention = win32_request_window_attention,
+        .focusWindow = win32_focus_window,
+        .setWindowMonitor = win32_set_window_monitor,
+        .windowFocused = win32_window_focused,
+        .windowIconified = win32_window_iconified,
+        .windowVisible = win32_window_visible,
+        .windowMaximized = win32_window_maximized,
+        .windowHovered = win32_window_hovered,
+        .getWindowOpacity = win32_get_window_opacity,
+        .setWindowResizable = win32_set_window_resizable,
+        .setWindowDecorated = win32_set_window_decorated,
+        .setWindowFloating = win32_set_window_floating,
+        .setWindowOpacity = win32_set_window_opacity,
+        .setWindowMousePassthrough = win32_set_window_mouse_passthrough,
+        .pollEvents = win32_poll_events,
+        .waitEvents = win32_wait_events,
+        .waitEventsTimeout = win32_wait_eventsTimeout,
+        .postEmptyEvent = win32_post_empty_event,
     };
 
     *platform = win32;
     return true;
 }
 
-int _glfwInitWin32(void)
+int win32_init(void)
 {
     if (!loadLibraries())
         return false;
 
     createKeyTables();
-    _glfwUpdateKeyNamesWin32();
+    win32_UpdateKeyNames();
 
-    if (_glfwIsWindows10Version1703OrGreaterWin32())
+    if (win32_IsWindows10Version1703OrGreater())
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     else if (IsWindows8Point1OrGreater())
         SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
@@ -618,11 +618,11 @@ int _glfwInitWin32(void)
     if (!createHelperWindow())
         return false;
 
-    _glfwPollMonitorsWin32();
+    win32_poll_monitors();
     return true;
 }
 
-void _glfwTerminateWin32(void)
+void win32_terminate(void)
 {
     if (g_wsi.win32.blankCursor)
         DestroyIcon((HICON) g_wsi.win32.blankCursor);

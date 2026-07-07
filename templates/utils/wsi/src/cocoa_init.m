@@ -384,7 +384,7 @@ static bool initializeTIS(void)
 
 - (void)applicationDidChangeScreenParameters:(NSNotification *) notification
 {
-    _glfwPollMonitorsCocoa();
+    cocoa_poll_monitors();
 }
 
 - (void)applicationWillFinishLaunching:(NSNotification *)notification
@@ -407,14 +407,14 @@ static bool initializeTIS(void)
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
-    _glfwPostEmptyEventCocoa();
+    cocoa_post_empty_event();
     [NSApp stop:nil];
 }
 
 - (void)applicationDidHide:(NSNotification *)notification
 {
     for (int i = 0;  i < g_wsi.monitorCount;  i++)
-        _glfwRestoreVideoModeCocoa(g_wsi.monitors[i]);
+        cocoa_RestoreVideoMode(g_wsi.monitors[i]);
 }
 
 @end // GLFWApplicationDelegate
@@ -423,76 +423,76 @@ static bool initializeTIS(void)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-bool _glfwConnectCocoa(int platformID, platform_st* platform)
+bool cocoa_connect(int platformID, platform_st* platform)
 {
     const platform_st cocoa =
     {
         .platformID = SC_PLATFORM_COCOA,
-        .init = _glfwInitCocoa,
-        .terminate = _glfwTerminateCocoa,
-        .getCursorPos = _glfwGetCursorPosCocoa,
-        .setCursorPos = _glfwSetCursorPosCocoa,
-        .setCursorMode = _glfwSetCursorModeCocoa,
-        .setRawMouseMotion = _glfwSetRawMouseMotionCocoa,
-        .rawMouseMotionSupported = _glfwRawMouseMotionSupportedCocoa,
-        .createCursor = _glfwCreateCursorCocoa,
-        .createStandardCursor = _glfwCreateStandardCursorCocoa,
-        .destroyCursor = _glfwDestroyCursorCocoa,
-        .setCursor = _glfwSetCursorCocoa,
-        .getScancodeName = _glfwGetScancodeNameCocoa,
-        .getKeyScancode = _glfwGetKeyScancodeCocoa,
-        .setClipboardString = _glfwSetClipboardStringCocoa,
-        .getClipboardString = _glfwGetClipboardStringCocoa,
-        .freeMonitor = wsi_free_monitorCocoa,
-        .getMonitorPos = _glfwGetMonitorPosCocoa,
-        .getMonitorContentScale = _glfwGetMonitorContentScaleCocoa,
-        .getMonitorWorkarea = _glfwGetMonitorWorkareaCocoa,
-        .getVideoModes = _glfwGetVideoModesCocoa,
-        .getVideoMode = _glfwGetVideoModeCocoa,
-        .getGammaRamp = _glfwGetGammaRampCocoa,
-        .setGammaRamp = _glfwSetGammaRampCocoa,
-        .createWindow = _glfwCreateWindowCocoa,
-        .destroyWindow = _glfwDestroyWindowCocoa,
-        .setWindowTitle = _glfwSetWindowTitleCocoa,
-        .setWindowIcon = _glfwSetWindowIconCocoa,
-        .getWindowPos = _glfwGetWindowPosCocoa,
-        .setWindowPos = _glfwSetWindowPosCocoa,
-        .getWindowSize = _glfwGetWindowSizeCocoa,
-        .setWindowSize = _glfwSetWindowSizeCocoa,
-        .setWindowSizeLimits = _glfwSetWindowSizeLimitsCocoa,
-        .setWindowAspectRatio = _glfwSetWindowAspectRatioCocoa,
-        .getWindowFrameSize = _glfwGetWindowFrameSizeCocoa,
-        .getWindowContentScale = _glfwGetWindowContentScaleCocoa,
-        .iconifyWindow = _glfwIconifyWindowCocoa,
-        .restoreWindow = _glfwRestoreWindowCocoa,
-        .maximizeWindow = _glfwMaximizeWindowCocoa,
-        .showWindow = _glfwShowWindowCocoa,
-        .hideWindow = _glfwHideWindowCocoa,
-        .requestWindowAttention = _glfwRequestWindowAttentionCocoa,
-        .focusWindow = _glfwFocusWindowCocoa,
-        .setWindowMonitor = _glfwSetWindowMonitorCocoa,
-        .windowFocused = _glfwWindowFocusedCocoa,
-        .windowIconified = _glfwWindowIconifiedCocoa,
-        .windowVisible = _glfwWindowVisibleCocoa,
-        .windowMaximized = _glfwWindowMaximizedCocoa,
-        .windowHovered = _glfwWindowHoveredCocoa,
-        .getWindowOpacity = _glfwGetWindowOpacityCocoa,
-        .setWindowResizable = _glfwSetWindowResizableCocoa,
-        .setWindowDecorated = _glfwSetWindowDecoratedCocoa,
-        .setWindowFloating = _glfwSetWindowFloatingCocoa,
-        .setWindowOpacity = _glfwSetWindowOpacityCocoa,
-        .setWindowMousePassthrough = _glfwSetWindowMousePassthroughCocoa,
-        .pollEvents = _glfwPollEventsCocoa,
-        .waitEvents = _glfwWaitEventsCocoa,
-        .waitEventsTimeout = _glfwWaitEventsTimeoutCocoa,
-        .postEmptyEvent = _glfwPostEmptyEventCocoa
+        .init = cocoa_init,
+        .terminate = cocoa_terminate,
+        .getCursorPos = cocoa_get_cursor_pos,
+        .setCursorPos = cocoa_set_cursor_pos,
+        .setCursorMode = cocoa_set_cursorMode,
+        .setRawMouseMotion = cocoa_set_mouse_raw_motion,
+        .rawMouseMotionSupported = cocoa_mouse_raw_motion_supported,
+        .createCursor = cocoa_create_cursor,
+        .createStandardCursor = cocoa_create_standard_cursor,
+        .destroyCursor = cocoa_destroy_cursor,
+        .setCursor = cocoa_set_cursor,
+        .getScancodeName = cocoa_get_scancode_name,
+        .getKeyScancode = cocoa_get_key_scancode,
+        .setClipboardString = cocoa_set_clipboard_string,
+        .getClipboardString = cocoa_get_clipboard_string,
+        .freeMonitor = cocoa_free_monitor,
+        .getMonitorPos = cocoa_get_monitor_pos,
+        .getMonitorContentScale = cocoa_get_monitor_content_scale,
+        .getMonitorWorkarea = cocoa_get_monitor_work_area,
+        .getVideoModes = cocoa_get_video_modes,
+        .getVideoMode = cocoa_get_video_mode,
+        .getGammaRamp = cocoa_get_gamma_ramp,
+        .setGammaRamp = cocoa_set_gamma_ramp,
+        .createWindow = cocoa_create_window,
+        .destroyWindow = cocoa_destroy_window,
+        .setWindowTitle = cocoa_set_window_title,
+        .setWindowIcon = cocoa_set_window_icon,
+        .getWindowPos = cocoa_get_window_pos,
+        .setWindowPos = cocoa_set_window_pos,
+        .getWindowSize = cocoa_get_window_size,
+        .setWindowSize = cocoa_set_window_size,
+        .setWindowSizeLimits = cocoa_set_window_size_limits,
+        .setWindowAspectRatio = cocoa_set_window_aspect_ratio,
+        .getWindowFrameSize = cocoa_get_window_frame_size,
+        .getWindowContentScale = cocoa_get_window_content_scale,
+        .iconifyWindow = cocoa_iconify_window,
+        .restoreWindow = cocoa_restore_window,
+        .maximizeWindow = cocoa_maximize_window,
+        .showWindow = cocoa_show_window,
+        .hideWindow = cocoa_hide_window,
+        .requestWindowAttention = cocoa_request_window_attention,
+        .focusWindow = cocoa_focus_window,
+        .setWindowMonitor = cocoa_set_window_monitor,
+        .windowFocused = cocoa_window_focused,
+        .windowIconified = cocoa_window_iconified,
+        .windowVisible = cocoa_window_visible,
+        .windowMaximized = cocoa_window_maximized,
+        .windowHovered = cocoa_window_hovered,
+        .getWindowOpacity = cocoa_get_window_opacity,
+        .setWindowResizable = cocoa_set_window_resizable,
+        .setWindowDecorated = cocoa_set_window_decorated,
+        .setWindowFloating = cocoa_set_window_floating,
+        .setWindowOpacity = cocoa_set_window_opacity,
+        .setWindowMousePassthrough = cocoa_set_window_mouse_passthrough,
+        .pollEvents = cocoa_poll_events,
+        .waitEvents = cocoa_wait_events,
+        .waitEventsTimeout = cocoa_wait_eventsTimeout,
+        .postEmptyEvent = cocoa_post_empty_event
     };
 
     *platform = cocoa;
     return true;
 }
 
-int _glfwInitCocoa(void)
+int cocoa_init(void)
 {
     @autoreleasepool {
 
@@ -550,7 +550,7 @@ int _glfwInitCocoa(void)
     if (!initializeTIS())
         return false;
 
-    _glfwPollMonitorsCocoa();
+    cocoa_poll_monitors();
 
     if (![[NSRunningApplication currentApplication] isFinishedLaunching])
         [NSApp run];
@@ -564,7 +564,7 @@ int _glfwInitCocoa(void)
     } // autoreleasepool
 }
 
-void _glfwTerminateCocoa(void)
+void cocoa_terminate(void)
 {
     @autoreleasepool {
 

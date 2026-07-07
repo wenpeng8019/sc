@@ -133,7 +133,7 @@ static int getWindowState(window_st* window)
         Window icon;
     } *state = NULL;
 
-    if (_glfwGetWindowPropertyX11(window->x11.handle,
+    if (x11_GetWindowProperty(window->x11.handle,
                                   g_wsi.x11.WM_STATE,
                                   g_wsi.x11.WM_STATE,
                                   (unsigned char**) &state) >= 2)
@@ -500,7 +500,7 @@ static void disableCursor(window_st* window)
         enableRawMouseMotion(window);
 
     g_wsi.x11.disabledCursorWindow = window;
-    _glfwGetCursorPosX11(window,
+    x11_get_cursor_pos(window,
                          &g_wsi.x11.restoreCursorPosX,
                          &g_wsi.x11.restoreCursorPosY);
     updateCursorImage(window);
@@ -517,7 +517,7 @@ static void enableCursor(window_st* window)
 
     g_wsi.x11.disabledCursorWindow = NULL;
     releaseCursor();
-    _glfwSetCursorPosX11(window,
+    x11_set_cursor_pos(window,
                          g_wsi.x11.restoreCursorPosX,
                          g_wsi.x11.restoreCursorPosY);
     updateCursorImage(window);
@@ -564,7 +564,7 @@ static bool createNativeWindow(window_st* window,
                                            visual,
                                            AllocNone);
 
-    window->x11.transparent = _glfwIsVisualTransparentX11(visual);
+    window->x11.transparent = x11_IsVisualTransparent(visual);
 
     XSetWindowAttributes wa = { 0 };
     wa.colormap = window->x11.colormap;
@@ -573,7 +573,7 @@ static bool createNativeWindow(window_st* window,
                     ExposureMask | FocusChangeMask | VisibilityChangeMask |
                     EnterWindowMask | LeaveWindowMask | PropertyChangeMask;
 
-    _glfwGrabErrorHandlerX11();
+    x11_GrabErrorHandler();
 
     window->x11.parent = g_wsi.x11.root;
     window->x11.handle = XCreateWindow(g_wsi.x11.display,
@@ -587,11 +587,11 @@ static bool createNativeWindow(window_st* window,
                                        CWBorderPixel | CWColormap | CWEventMask,
                                        &wa);
 
-    _glfwReleaseErrorHandlerX11();
+    x11_ReleaseErrorHandler();
 
     if (!window->x11.handle)
     {
-        _glfwInputErrorX11(SC_WSI_ERR_PLATFORM_ERROR,
+        x11_InputError(SC_WSI_ERR_PLATFORM_ERROR,
                            "X11: Failed to create window");
         return false;
     }
@@ -602,7 +602,7 @@ static bool createNativeWindow(window_st* window,
                  (XPointer) window);
 
     if (!wndconfig->decorated)
-        _glfwSetWindowDecoratedX11(window, false);
+        x11_set_window_decorated(window, false);
 
     if (g_wsi.x11.NET_WM_STATE && !window->monitor)
     {
@@ -752,11 +752,11 @@ static bool createNativeWindow(window_st* window,
     }
 
     if (g_wsi.x11.im)
-        _glfwCreateInputContextX11(window);
+        x11_CreateInputContext(window);
 
-    _glfwSetWindowTitleX11(window, window->title);
-    _glfwGetWindowPosX11(window, &window->x11.xpos, &window->x11.ypos);
-    _glfwGetWindowSizeX11(window, &window->x11.width, &window->x11.height);
+    x11_set_window_title(window, window->title);
+    x11_get_window_pos(window, &window->x11.xpos, &window->x11.ypos);
+    x11_get_window_size(window, &window->x11.width, &window->x11.height);
 
     return true;
 }
@@ -808,7 +808,7 @@ static Atom writeTargetToProperty(const XSelectionRequestEvent* request)
 
         Atom* targets;
         const unsigned long count =
-            _glfwGetWindowPropertyX11(request->requestor,
+            x11_GetWindowProperty(request->requestor,
                                       request->property,
                                       g_wsi.x11.ATOM_PAIR,
                                       (unsigned char**) &targets);
@@ -1074,7 +1074,7 @@ static void acquireMonitor(window_st* window)
     if (!window->monitor->window)
         g_wsi.x11.saver.count++;
 
-    _glfwSetVideoModeX11(window->monitor, &window->videoMode);
+    x11_SetVideoMode(window->monitor, &window->videoMode);
 
     if (window->x11.overrideRedirect)
     {
@@ -1082,8 +1082,8 @@ static void acquireMonitor(window_st* window)
         GLFWvidmode mode;
 
         // Manually position the window over its monitor
-        _glfwGetMonitorPosX11(window->monitor, &xpos, &ypos);
-        _glfwGetVideoModeX11(window->monitor, &mode);
+        x11_get_monitor_pos(window->monitor, &xpos, &ypos);
+        x11_get_video_mode(window->monitor, &mode);
 
         XMoveResizeWindow(g_wsi.x11.display, window->x11.handle,
                           xpos, ypos, mode.width, mode.height);
@@ -1100,7 +1100,7 @@ static void releaseMonitor(window_st* window)
         return;
 
     impl_on_monitor_window(window->monitor, NULL);
-    _glfwRestoreVideoModeX11(window->monitor);
+    x11_RestoreVideoMode(window->monitor);
 
     g_wsi.x11.saver.count--;
 
@@ -1133,7 +1133,7 @@ static void processEvent(XEvent *event)
         if (event->type == g_wsi.x11.randr.eventBase + RRNotify)
         {
             XRRUpdateConfiguration(event);
-            _glfwPollMonitorsX11();
+            x11_poll_monitors();
             return;
         }
     }
@@ -1278,7 +1278,7 @@ static void processEvent(XEvent *event)
 
                 impl_on_key(window, key, keycode, SC_PRESS, mods);
 
-                const uint32_t codepoint = _glfwKeySym2UnicodeX11(keysym);
+                const uint32_t codepoint = x11_KeySym2Unicode(keysym);
                 if (codepoint != GLFW_INVALID_CODEPOINT)
                     impl_on_chr(window, codepoint, mods, plain);
             }
@@ -1478,7 +1478,7 @@ static void processEvent(XEvent *event)
             //       the position into root (screen) coordinates
             if (!event->xany.send_event && window->x11.parent != g_wsi.x11.root)
             {
-                _glfwGrabErrorHandlerX11();
+                x11_GrabErrorHandler();
 
                 Window dummy;
                 XTranslateCoordinates(g_wsi.x11.display,
@@ -1488,7 +1488,7 @@ static void processEvent(XEvent *event)
                                       &xpos, &ypos,
                                       &dummy);
 
-                _glfwReleaseErrorHandlerX11();
+                x11_ReleaseErrorHandler();
                 if (g_wsi.x11.errorCode == BadWindow)
                     return;
             }
@@ -1557,7 +1557,7 @@ static void processEvent(XEvent *event)
 
                 if (list)
                 {
-                    count = _glfwGetWindowPropertyX11(g_wsi.x11.xdnd.source,
+                    count = x11_GetWindowProperty(g_wsi.x11.xdnd.source,
                                                       g_wsi.x11.XdndTypeList,
                                                       XA_ATOM,
                                                       (unsigned char**) &formats);
@@ -1667,7 +1667,7 @@ static void processEvent(XEvent *event)
                 // The converted data from the drag operation has arrived
                 char* data;
                 const unsigned long result =
-                    _glfwGetWindowPropertyX11(event->xselection.requestor,
+                    x11_GetWindowProperty(event->xselection.requestor,
                                               event->xselection.property,
                                               event->xselection.target,
                                               (unsigned char**) &data);
@@ -1747,7 +1747,7 @@ static void processEvent(XEvent *event)
                 XUnsetICFocus(window->x11.ic);
 
             if (window->monitor && window->autoIconify)
-                _glfwIconifyWindowX11(window);
+                x11_iconify_window(window);
 
             impl_on_win_focus(window, false);
             return;
@@ -1787,7 +1787,7 @@ static void processEvent(XEvent *event)
             }
             else if (event->xproperty.atom == g_wsi.x11.NET_WM_STATE)
             {
-                const bool maximized = _glfwWindowMaximizedX11(window);
+                const bool maximized = x11_window_maximized(window);
                 if (window->x11.maximized != maximized)
                 {
                     window->x11.maximized = maximized;
@@ -1811,7 +1811,7 @@ static void processEvent(XEvent *event)
 // Retrieve a single window property of the specified type
 // Inspired by fghGetWindowProperty from freeglut
 //
-unsigned long _glfwGetWindowPropertyX11(Window window,
+unsigned long x11_GetWindowProperty(Window window,
                                         Atom property,
                                         Atom type,
                                         unsigned char** value)
@@ -1836,7 +1836,7 @@ unsigned long _glfwGetWindowPropertyX11(Window window,
     return itemCount;
 }
 
-bool _glfwIsVisualTransparentX11(Visual* visual)
+bool x11_IsVisualTransparent(Visual* visual)
 {
     if (!g_wsi.x11.xrender.available)
         return false;
@@ -1847,7 +1847,7 @@ bool _glfwIsVisualTransparentX11(Visual* visual)
 
 // Push contents of our selection to clipboard manager
 //
-void _glfwPushSelectionToManagerX11(void)
+void x11_PushSelectionToManager(void)
 {
     XConvertSelection(g_wsi.x11.display,
                       g_wsi.x11.CLIPBOARD_MANAGER,
@@ -1889,7 +1889,7 @@ void _glfwPushSelectionToManagerX11(void)
     }
 }
 
-void _glfwCreateInputContextX11(window_st* window)
+void x11_CreateInputContext(window_st* window)
 {
     XIMCallback callback;
     callback.callback = (XIMProc) inputContextDestroyCallback;
@@ -1926,7 +1926,7 @@ void _glfwCreateInputContextX11(window_st* window)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-bool _glfwCreateWindowX11(window_st* window,
+bool x11_create_window(window_st* window,
                               const wnd_config_st* wndconfig)
 {
     Visual* visual = DefaultVisual(g_wsi.x11.display, g_wsi.x11.screen);
@@ -1936,11 +1936,11 @@ bool _glfwCreateWindowX11(window_st* window,
         return false;
 
     if (wndconfig->mousePassthrough)
-        _glfwSetWindowMousePassthroughX11(window, true);
+        x11_set_window_mouse_passthrough(window, true);
 
     if (window->monitor)
     {
-        _glfwShowWindowX11(window);
+        x11_show_window(window);
         updateWindowMode(window);
         acquireMonitor(window);
 
@@ -1951,9 +1951,9 @@ bool _glfwCreateWindowX11(window_st* window,
     {
         if (wndconfig->visible)
         {
-            _glfwShowWindowX11(window);
+            x11_show_window(window);
             if (wndconfig->focused)
-                _glfwFocusWindowX11(window);
+                x11_focus_window(window);
         }
     }
 
@@ -1961,7 +1961,7 @@ bool _glfwCreateWindowX11(window_st* window,
     return true;
 }
 
-void _glfwDestroyWindowX11(window_st* window)
+void x11_destroy_window(window_st* window)
 {
     if (g_wsi.x11.disabledCursorWindow == window)
         enableCursor(window);
@@ -1992,7 +1992,7 @@ void _glfwDestroyWindowX11(window_st* window)
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwSetWindowTitleX11(window_st* window, const char* title)
+void x11_set_window_title(window_st* window, const char* title)
 {
     if (g_wsi.x11.xlib.utf8)
     {
@@ -2016,7 +2016,7 @@ void _glfwSetWindowTitleX11(window_st* window, const char* title)
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwSetWindowIconX11(window_st* window, int count, const GLFWimage* images)
+void x11_set_window_icon(window_st* window, int count, const GLFWimage* images)
 {
     if (count)
     {
@@ -2066,7 +2066,7 @@ void _glfwSetWindowIconX11(window_st* window, int count, const GLFWimage* images
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwGetWindowPosX11(window_st* window, int* xpos, int* ypos)
+void x11_get_window_pos(window_st* window, int* xpos, int* ypos)
 {
     Window dummy;
     int x, y;
@@ -2080,11 +2080,11 @@ void _glfwGetWindowPosX11(window_st* window, int* xpos, int* ypos)
         *ypos = y;
 }
 
-void _glfwSetWindowPosX11(window_st* window, int xpos, int ypos)
+void x11_set_window_pos(window_st* window, int xpos, int ypos)
 {
     // HACK: Explicitly setting PPosition to any value causes some WMs, notably
     //       Compiz and Metacity, to honor the position of unmapped windows
-    if (!_glfwWindowVisibleX11(window))
+    if (!x11_window_visible(window))
     {
         long supplied;
         XSizeHints* hints = XAllocSizeHints();
@@ -2104,7 +2104,7 @@ void _glfwSetWindowPosX11(window_st* window, int xpos, int ypos)
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwGetWindowSizeX11(window_st* window, int* width, int* height)
+void x11_get_window_size(window_st* window, int* width, int* height)
 {
     XWindowAttributes attribs;
     XGetWindowAttributes(g_wsi.x11.display, window->x11.handle, &attribs);
@@ -2115,7 +2115,7 @@ void _glfwGetWindowSizeX11(window_st* window, int* width, int* height)
         *height = attribs.height;
 }
 
-void _glfwSetWindowSizeX11(window_st* window, int width, int height)
+void x11_set_window_size(window_st* window, int width, int height)
 {
     // The dimensions must be nonzero, or a BadValue error results
     width = wsi_max(1, width);
@@ -2137,25 +2137,25 @@ void _glfwSetWindowSizeX11(window_st* window, int width, int height)
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwSetWindowSizeLimitsX11(window_st* window,
+void x11_set_window_size_limits(window_st* window,
                                  int minwidth, int minheight,
                                  int maxwidth, int maxheight)
 {
     int width, height;
-    _glfwGetWindowSizeX11(window, &width, &height);
+    x11_get_window_size(window, &width, &height);
     updateNormalHints(window, width, height);
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwSetWindowAspectRatioX11(window_st* window, int numer, int denom)
+void x11_set_window_aspect_ratio(window_st* window, int numer, int denom)
 {
     int width, height;
-    _glfwGetWindowSizeX11(window, &width, &height);
+    x11_get_window_size(window, &width, &height);
     updateNormalHints(window, width, height);
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwGetWindowFrameSizeX11(window_st* window,
+void x11_get_window_frame_size(window_st* window,
                                 int* left, int* top,
                                 int* right, int* bottom)
 {
@@ -2167,7 +2167,7 @@ void _glfwGetWindowFrameSizeX11(window_st* window,
     if (g_wsi.x11.NET_FRAME_EXTENTS == None)
         return;
 
-    if (!_glfwWindowVisibleX11(window) &&
+    if (!x11_window_visible(window) &&
         g_wsi.x11.NET_REQUEST_FRAME_EXTENTS)
     {
         XEvent event;
@@ -2197,7 +2197,7 @@ void _glfwGetWindowFrameSizeX11(window_st* window,
         }
     }
 
-    if (_glfwGetWindowPropertyX11(window->x11.handle,
+    if (x11_GetWindowProperty(window->x11.handle,
                                   g_wsi.x11.NET_FRAME_EXTENTS,
                                   XA_CARDINAL,
                                   (unsigned char**) &extents) == 4)
@@ -2216,7 +2216,7 @@ void _glfwGetWindowFrameSizeX11(window_st* window,
         XFree(extents);
 }
 
-void _glfwGetWindowContentScaleX11(window_st* window, float* xscale, float* yscale)
+void x11_get_window_content_scale(window_st* window, float* xscale, float* yscale)
 {
     if (xscale)
         *xscale = g_wsi.x11.contentScaleX;
@@ -2224,7 +2224,7 @@ void _glfwGetWindowContentScaleX11(window_st* window, float* xscale, float* ysca
         *yscale = g_wsi.x11.contentScaleY;
 }
 
-void _glfwIconifyWindowX11(window_st* window)
+void x11_iconify_window(window_st* window)
 {
     if (window->x11.overrideRedirect)
     {
@@ -2239,7 +2239,7 @@ void _glfwIconifyWindowX11(window_st* window)
     XFlush(g_wsi.x11.display);
 }
 
-void _glfwRestoreWindowX11(window_st* window)
+void x11_restore_window(window_st* window)
 {
     if (window->x11.overrideRedirect)
     {
@@ -2250,7 +2250,7 @@ void _glfwRestoreWindowX11(window_st* window)
         return;
     }
 
-    if (_glfwWindowIconifiedX11(window))
+    if (x11_window_iconified(window))
     {
         XMapWindow(g_wsi.x11.display, window->x11.handle);
         waitForVisibilityNotify(window);

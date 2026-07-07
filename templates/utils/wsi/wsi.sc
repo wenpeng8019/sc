@@ -117,11 +117,11 @@ add libwsi.a
 @fnc wsi_key_scancode:: i4, key: i4
 @fnc wsi_key:: i4, window: ::sc_window&, key: i4
 @fnc wsi_mouse_button:: i4, window: ::sc_window&, button: i4
-@fnc wsi_cursor_get_pos:: window: ::sc_window&, xpos: f8&, ypos: f8&
-@fnc wsi_cursor_set_pos:: window: ::sc_window&, xpos: f8, ypos: f8
-@fnc wsi_cursor_create:: ::sc_cursor&, image: const ::GLFWimage&, xhot: i4, yhot: i4
-@fnc wsi_cursor_create_standard:: ::sc_cursor&, shape: i4
-@fnc wsi_cursor_destroy:: cursor: ::sc_cursor&
+@fnc wsi_get_cursor_pos:: window: ::sc_window&, xpos: f8&, ypos: f8&
+@fnc wsi_set_cursor_pos:: window: ::sc_window&, xpos: f8, ypos: f8
+@fnc wsi_create_cursor:: ::sc_cursor&, image: const ::GLFWimage&, xhot: i4, yhot: i4
+@fnc wsi_create_standard_cursor:: ::sc_cursor&, shape: i4
+@fnc wsi_destroy_cursor:: cursor: ::sc_cursor&
 @fnc wsi_cursor_set:: window: ::sc_window&, cursor: ::sc_cursor&
 @fnc wsi_clipboard_get_string:: const char&, window: ::sc_window&
 @fnc wsi_clipboard_set_string:: window: ::sc_window&, string: const char&

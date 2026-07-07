@@ -3070,7 +3070,7 @@ WSI_API int sc_wsi_mouse_button(sc_window* window, int button);
  *
  *  @ingroup input
  */
-WSI_API void sc_wsi_cursor_get_pos(sc_window* window, double* xpos, double* ypos);
+WSI_API void sc_wsi_get_cursor_pos(sc_window* window, double* xpos, double* ypos);
 
 /*! @brief Sets the position of the cursor, relative to the content area of the
  *  window.
@@ -3103,12 +3103,12 @@ WSI_API void sc_wsi_cursor_get_pos(sc_window* window, double* xpos, double* ypos
  *
  *  @ingroup input
  */
-WSI_API void sc_wsi_cursor_set_pos(sc_window* window, double xpos, double ypos);
+WSI_API void sc_wsi_set_cursor_pos(sc_window* window, double xpos, double ypos);
 
 /*! @brief 创建自定义光标。
  *
  *  Creates a new custom cursor image that can be set for a window with @ref
- *  sc_wsi_cursor_set.  The cursor can be destroyed with @ref sc_wsi_cursor_destroy.
+ *  sc_wsi_cursor_set.  The cursor can be destroyed with @ref sc_wsi_destroy_cursor.
  *  Any remaining cursors are destroyed by @ref sc_wsi_terminate.
  *
  *  The pixels are 32-bit, little-endian, non-premultiplied RGBA, i.e. eight
@@ -3134,7 +3134,7 @@ WSI_API void sc_wsi_cursor_set_pos(sc_window* window, double xpos, double ypos);
  *
  *  @ingroup input
  */
-WSI_API sc_cursor* sc_wsi_cursor_create(const GLFWimage* image, int xhot, int yhot);
+WSI_API sc_cursor* sc_wsi_create_cursor(const GLFWimage* image, int xhot, int yhot);
 
 /*! @brief Creates a cursor with a standard shape.
  *
@@ -3177,11 +3177,11 @@ WSI_API sc_cursor* sc_wsi_cursor_create(const GLFWimage* image, int xhot, int yh
  *
  *  @ingroup input
  */
-WSI_API sc_cursor* sc_wsi_cursor_create_standard(int shape);
+WSI_API sc_cursor* sc_wsi_create_standard_cursor(int shape);
 
 /*! @brief 销毁光标。
  *
- *  此函数销毁之前通过 @ref sc_wsi_cursor_create 创建的光标。  Any remaining cursors will be destroyed by @ref
+ *  此函数销毁之前通过 @ref sc_wsi_create_cursor 创建的光标。  Any remaining cursors will be destroyed by @ref
  *  sc_wsi_terminate.
  *
  *  If the specified cursor is current for any window, that window will be
@@ -3197,7 +3197,7 @@ WSI_API sc_cursor* sc_wsi_cursor_create_standard(int shape);
  *
  *  @ingroup input
  */
-WSI_API void sc_wsi_cursor_destroy(sc_cursor* cursor);
+WSI_API void sc_wsi_destroy_cursor(sc_cursor* cursor);
 
 /*! @brief 设置窗口的光标。
  *

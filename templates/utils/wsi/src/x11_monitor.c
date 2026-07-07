@@ -70,7 +70,7 @@ static GLFWvidmode vidmodeFromModeInfo(const XRRModeInfo* mi,
 
 // Poll for changes in the set of connected monitors
 //
-void _glfwPollMonitorsX11(void)
+void x11_poll_monitors(void)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -202,7 +202,7 @@ void _glfwPollMonitorsX11(void)
 
 // Set the current video mode for the specified monitor
 //
-void _glfwSetVideoModeX11(monitor_st* monitor, const GLFWvidmode* desired)
+void x11_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -210,7 +210,7 @@ void _glfwSetVideoModeX11(monitor_st* monitor, const GLFWvidmode* desired)
         RRMode native = None;
 
         const GLFWvidmode* best = wsi_choose_video_mode(monitor, desired);
-        _glfwGetVideoModeX11(monitor, &current);
+        x11_get_video_mode(monitor, &current);
         if (wsi_compare_video_mode(&current, best) == 0)
             return;
 
@@ -256,7 +256,7 @@ void _glfwSetVideoModeX11(monitor_st* monitor, const GLFWvidmode* desired)
 
 // Restore the saved (original) video mode for the specified monitor
 //
-void _glfwRestoreVideoModeX11(monitor_st* monitor)
+void x11_RestoreVideoMode(monitor_st* monitor)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -292,7 +292,7 @@ void wsi_free_monitorX11(monitor_st* monitor)
 {
 }
 
-void _glfwGetMonitorPosX11(monitor_st* monitor, int* xpos, int* ypos)
+void x11_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -314,7 +314,7 @@ void _glfwGetMonitorPosX11(monitor_st* monitor, int* xpos, int* ypos)
     }
 }
 
-void _glfwGetMonitorContentScaleX11(monitor_st* monitor,
+void x11_get_monitor_content_scale(monitor_st* monitor,
                                     float* xscale, float* yscale)
 {
     if (xscale)
@@ -323,7 +323,7 @@ void _glfwGetMonitorContentScaleX11(monitor_st* monitor,
         *yscale = g_wsi.x11.contentScaleY;
 }
 
-void _glfwGetMonitorWorkareaX11(monitor_st* monitor,
+void x11_get_monitor_work_area(monitor_st* monitor,
                                 int* xpos, int* ypos,
                                 int* width, int* height)
 {
@@ -365,12 +365,12 @@ void _glfwGetMonitorWorkareaX11(monitor_st* monitor,
         Atom* extents = NULL;
         Atom* desktop = NULL;
         const unsigned long extentCount =
-            _glfwGetWindowPropertyX11(g_wsi.x11.root,
+            x11_GetWindowProperty(g_wsi.x11.root,
                                       g_wsi.x11.NET_WORKAREA,
                                       XA_CARDINAL,
                                       (unsigned char**) &extents);
 
-        if (_glfwGetWindowPropertyX11(g_wsi.x11.root,
+        if (x11_GetWindowProperty(g_wsi.x11.root,
                                       g_wsi.x11.NET_CURRENT_DESKTOP,
                                       XA_CARDINAL,
                                       (unsigned char**) &desktop) > 0)
@@ -417,7 +417,7 @@ void _glfwGetMonitorWorkareaX11(monitor_st* monitor,
         *height = areaHeight;
 }
 
-GLFWvidmode* _glfwGetVideoModesX11(monitor_st* monitor, int* count)
+GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count)
 {
     GLFWvidmode* result;
 
@@ -463,13 +463,13 @@ GLFWvidmode* _glfwGetVideoModesX11(monitor_st* monitor, int* count)
     {
         *count = 1;
         result = wsi_calloc(1, sizeof(GLFWvidmode));
-        _glfwGetVideoModeX11(monitor, result);
+        x11_get_video_mode(monitor, result);
     }
 
     return result;
 }
 
-bool _glfwGetVideoModeX11(monitor_st* monitor, GLFWvidmode* mode)
+bool x11_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -505,7 +505,7 @@ bool _glfwGetVideoModeX11(monitor_st* monitor, GLFWvidmode* mode)
     return true;
 }
 
-bool _glfwGetGammaRampX11(monitor_st* monitor, GLFWgammaramp* ramp)
+bool x11_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.gammaBroken)
     {
@@ -543,7 +543,7 @@ bool _glfwGetGammaRampX11(monitor_st* monitor, GLFWgammaramp* ramp)
     }
 }
 
-void _glfwSetGammaRampX11(monitor_st* monitor, const GLFWgammaramp* ramp)
+void x11_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.gammaBroken)
     {

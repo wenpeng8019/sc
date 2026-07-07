@@ -88,8 +88,8 @@ WSI 当前边界如下。
 - 输入与光标
   - sc_wsi_key
   - sc_wsi_mouse_button
-  - sc_wsi_cursor_get_pos / sc_wsi_cursor_set_pos
-  - sc_wsi_cursor_create / sc_wsi_cursor_destroy
+  - sc_wsi_get_cursor_pos / sc_wsi_set_cursor_pos
+  - sc_wsi_create_cursor / sc_wsi_destroy_cursor
   - sc_wsi_mouse_raw_motion_supported
 
 - 剪贴板与时间

@@ -428,7 +428,7 @@ WSI_API int sc_wsi_mouse_button(sc_window* handle, int button)
     return (int) window->mouseButtons[button];
 }
 
-WSI_API void sc_wsi_cursor_get_pos(sc_window* handle, double* xpos, double* ypos)
+WSI_API void sc_wsi_get_cursor_pos(sc_window* handle, double* xpos, double* ypos)
 {
     if (xpos)
         *xpos = 0;
@@ -454,7 +454,7 @@ WSI_API void sc_wsi_cursor_get_pos(sc_window* handle, double* xpos, double* ypos
         g_wsi.platform.getCursorPos(window, xpos, ypos);
 }
 
-WSI_API void sc_wsi_cursor_set_pos(sc_window* handle, double xpos, double ypos)
+WSI_API void sc_wsi_set_cursor_pos(sc_window* handle, double xpos, double ypos)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
@@ -488,7 +488,7 @@ WSI_API void sc_wsi_cursor_set_pos(sc_window* handle, double xpos, double ypos)
     }
 }
 
-WSI_API sc_cursor* sc_wsi_cursor_create(const GLFWimage* image, int xhot, int yhot)
+WSI_API sc_cursor* sc_wsi_create_cursor(const GLFWimage* image, int xhot, int yhot)
 {
     cursor_st* cursor;
 
@@ -512,14 +512,14 @@ WSI_API sc_cursor* sc_wsi_cursor_create(const GLFWimage* image, int xhot, int yh
 
     if (!g_wsi.platform.createCursor(cursor, image, xhot, yhot))
     {
-        sc_wsi_cursor_destroy((sc_cursor*) cursor);
+        sc_wsi_destroy_cursor((sc_cursor*) cursor);
         return NULL;
     }
 
     return (sc_cursor*) cursor;
 }
 
-WSI_API sc_cursor* sc_wsi_cursor_create_standard(int shape)
+WSI_API sc_cursor* sc_wsi_create_standard_cursor(int shape)
 {
     cursor_st* cursor;
 
@@ -549,14 +549,14 @@ WSI_API sc_cursor* sc_wsi_cursor_create_standard(int shape)
 
     if (!g_wsi.platform.createStandardCursor(cursor, shape))
     {
-        sc_wsi_cursor_destroy((sc_cursor*) cursor);
+        sc_wsi_destroy_cursor((sc_cursor*) cursor);
         return NULL;
     }
 
     return (sc_cursor*) cursor;
 }
 
-WSI_API void sc_wsi_cursor_destroy(sc_cursor* handle)
+WSI_API void sc_wsi_destroy_cursor(sc_cursor* handle)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);

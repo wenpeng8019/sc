@@ -547,7 +547,7 @@ static bool resizeWindow(window_st* window, int width, int height)
     return true;
 }
 
-void _glfwUpdateBufferScaleFromOutputsWayland(window_st* window)
+void wayland_UpdateBufferScaleFromOutputs(window_st* window)
 {
     if (wl_compositor_get_version(g_wsi.wl.compositor) <
         WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION)
@@ -605,7 +605,7 @@ static void surfaceHandleEnter(void* userData,
     window->wl.outputScales[window->wl.outputScaleCount - 1] =
         (_GLFWscaleWayland) { output, monitor->wl.scale };
 
-    _glfwUpdateBufferScaleFromOutputsWayland(window);
+    wayland_UpdateBufferScaleFromOutputs(window);
 }
 
 static void surfaceHandleLeave(void* userData,
@@ -628,7 +628,7 @@ static void surfaceHandleLeave(void* userData,
         }
     }
 
-    _glfwUpdateBufferScaleFromOutputsWayland(window);
+    wayland_UpdateBufferScaleFromOutputs(window);
 }
 
 static const struct wl_surface_listener surfaceListener =
@@ -964,7 +964,7 @@ static bool createLibdecorFrame(window_st* window)
 {
     // Allow libdecor to finish initialization of itself and its plugin
     while (!g_wsi.wl.libdecor.ready)
-        _glfwWaitEventsWayland();
+        wayland_wait_events();
 
     window->wl.libdecor.frame = libdecor_decorate(g_wsi.wl.libdecor.context,
                                                   window->wl.surface,
@@ -1537,7 +1537,7 @@ static void processPointerEnterSurface(struct wl_surface* surface)
     window_st* window = wl_surface_get_user_data(g_wsi.wl.pointerSurface);
     if (window->wl.surface == g_wsi.wl.pointerSurface)
     {
-        _glfwSetCursorWayland(window, window->cursor);
+        wayland_set_cursor(window, window->cursor);
         impl_on_cursor_enter(window, true);
     }
 }
@@ -2306,12 +2306,12 @@ static const struct xdg_activation_token_v1_listener xdgActivationListener =
     xdgActivationHandleDone
 };
 
-void _glfwAddSeatListenerWayland(struct wl_seat* seat)
+void wayland_AddSeatListener(struct wl_seat* seat)
 {
     wl_seat_add_listener(seat, &seatListener, NULL);
 }
 
-void _glfwAddDataDeviceListenerWayland(struct wl_data_device* device)
+void wayland_AddDataDeviceListener(struct wl_data_device* device)
 {
     wl_data_device_add_listener(device, &dataDeviceListener, NULL);
 }
@@ -2320,14 +2320,14 @@ void _glfwAddDataDeviceListenerWayland(struct wl_data_device* device)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-bool _glfwCreateWindowWayland(window_st* window,
+bool wayland_create_window(window_st* window,
                                   const wnd_config_st* wndconfig)
 {
     if (!createNativeSurface(window, wndconfig))
         return false;
 
     if (wndconfig->mousePassthrough)
-        _glfwSetWindowMousePassthroughWayland(window, true);
+        wayland_set_window_mouse_passthrough(window, true);
 
     if (window->monitor || wndconfig->visible)
     {
@@ -2338,7 +2338,7 @@ bool _glfwCreateWindowWayland(window_st* window,
     return true;
 }
 
-void _glfwDestroyWindowWayland(window_st* window)
+void wayland_destroy_window(window_st* window)
 {
     if (window->wl.surface == g_wsi.wl.pointerSurface)
         g_wsi.wl.pointerSurface = NULL;
@@ -2381,7 +2381,7 @@ void _glfwDestroyWindowWayland(window_st* window)
     wsi_free(window->wl.outputScales);
 }
 
-void _glfwSetWindowTitleWayland(window_st* window, const char* title)
+void wayland_set_window_title(window_st* window, const char* title)
 {
     if (window->wl.libdecor.frame)
         libdecor_frame_set_title(window->wl.libdecor.frame, title);
@@ -2389,14 +2389,14 @@ void _glfwSetWindowTitleWayland(window_st* window, const char* title)
         xdg_toplevel_set_title(window->wl.xdg.toplevel, title);
 }
 
-void _glfwSetWindowIconWayland(window_st* window,
+void wayland_set_window_icon(window_st* window,
                                int count, const GLFWimage* images)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: The platform does not support setting the window icon");
 }
 
-void _glfwGetWindowPosWayland(window_st* window, int* xpos, int* ypos)
+void wayland_get_window_pos(window_st* window, int* xpos, int* ypos)
 {
     // A Wayland client is not aware of its position, so just warn and leave it
     // as (0, 0)
@@ -2405,7 +2405,7 @@ void _glfwGetWindowPosWayland(window_st* window, int* xpos, int* ypos)
                     "Wayland: The platform does not provide the window position");
 }
 
-void _glfwSetWindowPosWayland(window_st* window, int xpos, int ypos)
+void wayland_set_window_pos(window_st* window, int xpos, int ypos)
 {
     // A Wayland client can not set its position, so just warn
 
@@ -2413,7 +2413,7 @@ void _glfwSetWindowPosWayland(window_st* window, int xpos, int ypos)
                     "Wayland: The platform does not support setting the window position");
 }
 
-void _glfwGetWindowSizeWayland(window_st* window, int* width, int* height)
+void wayland_get_window_size(window_st* window, int* width, int* height)
 {
     if (width)
         *width = window->wl.width;
@@ -2421,7 +2421,7 @@ void _glfwGetWindowSizeWayland(window_st* window, int* width, int* height)
         *height = window->wl.height;
 }
 
-void _glfwSetWindowSizeWayland(window_st* window, int width, int height)
+void wayland_set_window_size(window_st* window, int width, int height)
 {
     if (window->monitor)
     {
@@ -2445,7 +2445,7 @@ void _glfwSetWindowSizeWayland(window_st* window, int width, int height)
     }
 }
 
-void _glfwSetWindowSizeLimitsWayland(window_st* window,
+void wayland_set_window_size_limits(window_st* window,
                                      int minwidth, int minheight,
                                      int maxwidth, int maxheight)
 {
@@ -2466,7 +2466,7 @@ void _glfwSetWindowSizeLimitsWayland(window_st* window,
         updateXdgSizeLimits(window);
 }
 
-void _glfwSetWindowAspectRatioWayland(window_st* window, int numer, int denom)
+void wayland_set_window_aspect_ratio(window_st* window, int numer, int denom)
 {
     if (window->wl.maximized || window->wl.fullscreen)
         return;
@@ -2500,7 +2500,7 @@ void _glfwSetWindowAspectRatioWayland(window_st* window, int numer, int denom)
     }
 }
 
-void _glfwGetWindowFrameSizeWayland(window_st* window,
+void wayland_get_window_frame_size(window_st* window,
                                     int* left, int* top,
                                     int* right, int* bottom)
 {
@@ -2517,7 +2517,7 @@ void _glfwGetWindowFrameSizeWayland(window_st* window,
     }
 }
 
-void _glfwGetWindowContentScaleWayland(window_st* window,
+void wayland_get_window_content_scale(window_st* window,
                                        float* xscale, float* yscale)
 {
     if (window->wl.fractionalScale)
@@ -2536,7 +2536,7 @@ void _glfwGetWindowContentScaleWayland(window_st* window,
     }
 }
 
-void _glfwIconifyWindowWayland(window_st* window)
+void wayland_iconify_window(window_st* window)
 {
     if (window->wl.libdecor.frame)
         libdecor_frame_set_minimized(window->wl.libdecor.frame);
@@ -2544,7 +2544,7 @@ void _glfwIconifyWindowWayland(window_st* window)
         xdg_toplevel_set_minimized(window->wl.xdg.toplevel);
 }
 
-void _glfwRestoreWindowWayland(window_st* window)
+void wayland_restore_window(window_st* window)
 {
     if (window->monitor)
     {
@@ -2567,7 +2567,7 @@ void _glfwRestoreWindowWayland(window_st* window)
     }
 }
 
-void _glfwMaximizeWindowWayland(window_st* window)
+void wayland_maximize_window(window_st* window)
 {
     if (window->wl.libdecor.frame)
         libdecor_frame_set_maximized(window->wl.libdecor.frame);
@@ -2577,7 +2577,7 @@ void _glfwMaximizeWindowWayland(window_st* window)
         window->wl.maximized = true;
 }
 
-void _glfwShowWindowWayland(window_st* window)
+void wayland_show_window(window_st* window)
 {
     if (!window->wl.libdecor.frame && !window->wl.xdg.toplevel)
     {
@@ -2587,7 +2587,7 @@ void _glfwShowWindowWayland(window_st* window)
     }
 }
 
-void _glfwHideWindowWayland(window_st* window)
+void wayland_hide_window(window_st* window)
 {
     if (window->wl.visible)
     {
@@ -2601,7 +2601,7 @@ void _glfwHideWindowWayland(window_st* window)
     }
 }
 
-void _glfwRequestWindowAttentionWayland(window_st* window)
+void wayland_request_window_attention(window_st* window)
 {
     if (!g_wsi.wl.activationManager)
         return;
@@ -2619,7 +2619,7 @@ void _glfwRequestWindowAttentionWayland(window_st* window)
     xdg_activation_token_v1_commit(window->wl.activationToken);
 }
 
-void _glfwFocusWindowWayland(window_st* window)
+void wayland_focus_window(window_st* window)
 {
     if (!g_wsi.wl.activationManager)
         return;
@@ -2653,7 +2653,7 @@ void _glfwFocusWindowWayland(window_st* window)
     xdg_activation_token_v1_commit(window->wl.activationToken);
 }
 
-void _glfwSetWindowMonitorWayland(window_st* window,
+void wayland_set_window_monitor(window_st* window,
                                   monitor_st* monitor,
                                   int xpos, int ypos,
                                   int width, int height,
@@ -2662,7 +2662,7 @@ void _glfwSetWindowMonitorWayland(window_st* window,
     if (window->monitor == monitor)
     {
         if (!monitor)
-            _glfwSetWindowSizeWayland(window, width, height);
+            wayland_set_window_size(window, width, height);
 
         return;
     }
@@ -2675,37 +2675,37 @@ void _glfwSetWindowMonitorWayland(window_st* window,
     if (window->monitor)
         acquireMonitor(window);
     else
-        _glfwSetWindowSizeWayland(window, width, height);
+        wayland_set_window_size(window, width, height);
 }
 
-bool _glfwWindowFocusedWayland(window_st* window)
+bool wayland_window_focused(window_st* window)
 {
     return g_wsi.wl.keyboardFocus == window;
 }
 
-bool _glfwWindowIconifiedWayland(window_st* window)
+bool wayland_window_iconified(window_st* window)
 {
     // xdg-shell doesn’t give any way to request whether a surface is
     // iconified.
     return false;
 }
 
-bool _glfwWindowVisibleWayland(window_st* window)
+bool wayland_window_visible(window_st* window)
 {
     return window->wl.visible;
 }
 
-bool _glfwWindowMaximizedWayland(window_st* window)
+bool wayland_window_maximized(window_st* window)
 {
     return window->wl.maximized;
 }
 
-bool _glfwWindowHoveredWayland(window_st* window)
+bool wayland_window_hovered(window_st* window)
 {
     return window->wl.surface == g_wsi.wl.pointerSurface;
 }
 
-void _glfwSetWindowResizableWayland(window_st* window, bool enabled)
+void wayland_set_window_resizable(window_st* window, bool enabled)
 {
     if (window->wl.libdecor.frame)
     {
@@ -2724,7 +2724,7 @@ void _glfwSetWindowResizableWayland(window_st* window, bool enabled)
         updateXdgSizeLimits(window);
 }
 
-void _glfwSetWindowDecoratedWayland(window_st* window, bool enabled)
+void wayland_set_window_decorated(window_st* window, bool enabled)
 {
     if (window->wl.libdecor.frame)
     {
@@ -2750,13 +2750,13 @@ void _glfwSetWindowDecoratedWayland(window_st* window, bool enabled)
     }
 }
 
-void _glfwSetWindowFloatingWayland(window_st* window, bool enabled)
+void wayland_set_window_floating(window_st* window, bool enabled)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: Platform does not support making a window floating");
 }
 
-void _glfwSetWindowMousePassthroughWayland(window_st* window, bool enabled)
+void wayland_set_window_mouse_passthrough(window_st* window, bool enabled)
 {
     if (enabled)
     {
@@ -2768,44 +2768,44 @@ void _glfwSetWindowMousePassthroughWayland(window_st* window, bool enabled)
         wl_surface_set_input_region(window->wl.surface, NULL);
 }
 
-float _glfwGetWindowOpacityWayland(window_st* window)
+float wayland_get_window_opacity(window_st* window)
 {
     return 1.f;
 }
 
-void _glfwSetWindowOpacityWayland(window_st* window, float opacity)
+void wayland_set_window_opacity(window_st* window, float opacity)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: The platform does not support setting the window opacity");
 }
 
-void _glfwSetRawMouseMotionWayland(window_st* window, bool enabled)
+void wayland_set_mouse_raw_motion(window_st* window, bool enabled)
 {
     // This is handled in relativePointerHandleRelativeMotion
 }
 
-bool _glfwRawMouseMotionSupportedWayland(void)
+bool wayland_mouse_raw_motion_supported(void)
 {
     return true;
 }
 
-void _glfwPollEventsWayland(void)
+void wayland_poll_events(void)
 {
     double timeout = 0.0;
     handleEvents(&timeout);
 }
 
-void _glfwWaitEventsWayland(void)
+void wayland_wait_events(void)
 {
     handleEvents(NULL);
 }
 
-void _glfwWaitEventsTimeoutWayland(double timeout)
+void wayland_wait_eventsTimeout(double timeout)
 {
     handleEvents(&timeout);
 }
 
-void _glfwPostEmptyEventWayland(void)
+void wayland_post_empty_event(void)
 {
     struct wl_callback* callback = wl_display_sync(g_wsi.wl.display);
     wl_callback_add_listener(callback, &noopCallbackListener, NULL);
@@ -2813,7 +2813,7 @@ void _glfwPostEmptyEventWayland(void)
     flushDisplay();
 }
 
-void _glfwGetCursorPosWayland(window_st* window, double* xpos, double* ypos)
+void wayland_get_cursor_pos(window_st* window, double* xpos, double* ypos)
 {
     if (xpos)
         *xpos = window->wl.cursorPosX;
@@ -2821,18 +2821,18 @@ void _glfwGetCursorPosWayland(window_st* window, double* xpos, double* ypos)
         *ypos = window->wl.cursorPosY;
 }
 
-void _glfwSetCursorPosWayland(window_st* window, double x, double y)
+void wayland_set_cursor_pos(window_st* window, double x, double y)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: The platform does not support setting the cursor position");
 }
 
-void _glfwSetCursorModeWayland(window_st* window, int mode)
+void wayland_set_cursorMode(window_st* window, int mode)
 {
-    _glfwSetCursorWayland(window, window->cursor);
+    wayland_set_cursor(window, window->cursor);
 }
 
-const char* _glfwGetScancodeNameWayland(int scancode)
+const char* wayland_get_scancode_name(int scancode)
 {
     if (scancode < 0 || scancode > 255)
     {
@@ -2889,12 +2889,12 @@ const char* _glfwGetScancodeNameWayland(int scancode)
     return g_wsi.wl.keynames[key];
 }
 
-int _glfwGetKeyScancodeWayland(int key)
+int wayland_get_key_scancode(int key)
 {
     return g_wsi.wl.scancodes[key];
 }
 
-bool _glfwCreateCursorWayland(cursor_st* cursor,
+bool wayland_create_cursor(cursor_st* cursor,
                                   const GLFWimage* image,
                                   int xhot, int yhot)
 {
@@ -2909,7 +2909,7 @@ bool _glfwCreateCursorWayland(cursor_st* cursor,
     return true;
 }
 
-bool _glfwCreateStandardCursorWayland(cursor_st* cursor, int shape)
+bool wayland_create_standard_cursor(cursor_st* cursor, int shape)
 {
     const char* name = NULL;
 
@@ -3010,7 +3010,7 @@ bool _glfwCreateStandardCursorWayland(cursor_st* cursor, int shape)
     return true;
 }
 
-void _glfwDestroyCursorWayland(cursor_st* cursor)
+void wayland_destroy_cursor(cursor_st* cursor)
 {
     // If it's a standard cursor we don't need to do anything here
     if (cursor->wl.cursor)
@@ -3158,7 +3158,7 @@ static void unconfinePointer(window_st* window)
     window->wl.confinedPointer = NULL;
 }
 
-void _glfwSetCursorWayland(window_st* window, cursor_st* cursor)
+void wayland_set_cursor(window_st* window, cursor_st* cursor)
 {
     if (!g_wsi.wl.pointer)
         return;
@@ -3300,7 +3300,7 @@ static const struct wl_data_source_listener dataSourceListener =
     dataSourceHandleCancelled,
 };
 
-void _glfwSetClipboardStringWayland(const char* string)
+void wayland_set_clipboard_string(const char* string)
 {
     if (g_wsi.wl.selectionSource)
     {
@@ -3335,7 +3335,7 @@ void _glfwSetClipboardStringWayland(const char* string)
                                  g_wsi.wl.serial);
 }
 
-const char* _glfwGetClipboardStringWayland(void)
+const char* wayland_get_clipboard_string(void)
 {
     if (!g_wsi.wl.selectionOffer)
     {

@@ -100,16 +100,16 @@ static const struct
 } supportedPlatforms[] =
 {
 #if defined(WSI_WIN32)
-    { SC_PLATFORM_WIN32, _glfwConnectWin32 },
+    { SC_PLATFORM_WIN32, win32_connect },
 #endif
 #if defined(WSI_COCOA)
-    { SC_PLATFORM_COCOA, _glfwConnectCocoa },
+    { SC_PLATFORM_COCOA, cocoa_connect },
 #endif
 #if defined(WSI_WAYLAND)
-    { SC_PLATFORM_WAYLAND, _glfwConnectWayland },
+    { SC_PLATFORM_WAYLAND, wayland_connect },
 #endif
 #if defined(WSI_X11)
-    { SC_PLATFORM_X11, _glfwConnectX11 },
+    { SC_PLATFORM_X11, x11_connect },
 #endif
 };
 
@@ -131,7 +131,7 @@ bool wsi_select_platform(int desiredID, platform_st* platform)
 
     // Only allow the Null platform if specifically requested
     if (desiredID == SC_PLATFORM_NULL)
-        return _glfwConnectNull(desiredID, platform);
+        return null_connect(desiredID, platform);
     else if (count == 0)
     {
         impl_on_error(SC_WSI_ERR_PLATFORM_UNAVAILABLE, "This binary only supports the Null platform");

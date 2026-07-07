@@ -94,7 +94,7 @@ static void outputHandleScale(void* userData,
             if (window->wl.outputScales[i].output == monitor->wl.output)
             {
                 window->wl.outputScales[i].factor = monitor->wl.scale;
-                _glfwUpdateBufferScaleFromOutputsWayland(window);
+                wayland_UpdateBufferScaleFromOutputs(window);
                 break;
             }
         }
@@ -129,7 +129,7 @@ static const struct wl_output_listener outputListener =
 //////                       GLFW internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-void _glfwAddOutputWayland(uint32_t name, uint32_t version)
+void wayland_AddOutput(uint32_t name, uint32_t version)
 {
     if (version < 2)
     {
@@ -168,7 +168,7 @@ void wsi_free_monitorWayland(monitor_st* monitor)
         wl_output_destroy(monitor->wl.output);
 }
 
-void _glfwGetMonitorPosWayland(monitor_st* monitor, int* xpos, int* ypos)
+void wayland_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos)
 {
     if (xpos)
         *xpos = monitor->wl.x;
@@ -176,7 +176,7 @@ void _glfwGetMonitorPosWayland(monitor_st* monitor, int* xpos, int* ypos)
         *ypos = monitor->wl.y;
 }
 
-void _glfwGetMonitorContentScaleWayland(monitor_st* monitor,
+void wayland_get_monitor_content_scale(monitor_st* monitor,
                                         float* xscale, float* yscale)
 {
     if (xscale)
@@ -185,7 +185,7 @@ void _glfwGetMonitorContentScaleWayland(monitor_st* monitor,
         *yscale = (float) monitor->wl.scale;
 }
 
-void _glfwGetMonitorWorkareaWayland(monitor_st* monitor,
+void wayland_get_monitor_work_area(monitor_st* monitor,
                                     int* xpos, int* ypos,
                                     int* width, int* height)
 {
@@ -199,26 +199,26 @@ void _glfwGetMonitorWorkareaWayland(monitor_st* monitor,
         *height = monitor->modes[monitor->wl.currentMode].height;
 }
 
-GLFWvidmode* _glfwGetVideoModesWayland(monitor_st* monitor, int* found)
+GLFWvidmode* wayland_get_video_modes(monitor_st* monitor, int* found)
 {
     *found = monitor->modeCount;
     return monitor->modes;
 }
 
-bool _glfwGetVideoModeWayland(monitor_st* monitor, GLFWvidmode* mode)
+bool wayland_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
 {
     *mode = monitor->modes[monitor->wl.currentMode];
     return true;
 }
 
-bool _glfwGetGammaRampWayland(monitor_st* monitor, GLFWgammaramp* ramp)
+bool wayland_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: Gamma ramp access is not available");
     return false;
 }
 
-void _glfwSetGammaRampWayland(monitor_st* monitor, const GLFWgammaramp* ramp)
+void wayland_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: Gamma ramp access is not available");

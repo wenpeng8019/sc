@@ -102,7 +102,7 @@ static void registryHandleGlobal(void* userData,
     }
     else if (strcmp(interface, "wl_output") == 0)
     {
-        _glfwAddOutputWayland(name, version);
+        wayland_AddOutput(name, version);
     }
     else if (strcmp(interface, "wl_seat") == 0)
     {
@@ -111,7 +111,7 @@ static void registryHandleGlobal(void* userData,
             g_wsi.wl.seat =
                 wl_registry_bind(registry, name, &wl_seat_interface,
                                  wsi_min(8, version));
-            _glfwAddSeatListenerWayland(g_wsi.wl.seat);
+            wayland_AddSeatListener(g_wsi.wl.seat);
         }
     }
     else if (strcmp(interface, "wl_data_device_manager") == 0)
@@ -397,69 +397,69 @@ static bool loadCursorTheme(void)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-bool _glfwConnectWayland(int platformID, platform_st* platform)
+bool wayland_connect(int platformID, platform_st* platform)
 {
     const platform_st wayland =
     {
         .platformID = SC_PLATFORM_WAYLAND,
-        .init = _glfwInitWayland,
-        .terminate = _glfwTerminateWayland,
-        .getCursorPos = _glfwGetCursorPosWayland,
-        .setCursorPos = _glfwSetCursorPosWayland,
-        .setCursorMode = _glfwSetCursorModeWayland,
-        .setRawMouseMotion = _glfwSetRawMouseMotionWayland,
-        .rawMouseMotionSupported = _glfwRawMouseMotionSupportedWayland,
-        .createCursor = _glfwCreateCursorWayland,
-        .createStandardCursor = _glfwCreateStandardCursorWayland,
-        .destroyCursor = _glfwDestroyCursorWayland,
-        .setCursor = _glfwSetCursorWayland,
-        .getScancodeName = _glfwGetScancodeNameWayland,
-        .getKeyScancode = _glfwGetKeyScancodeWayland,
-        .setClipboardString = _glfwSetClipboardStringWayland,
-        .getClipboardString = _glfwGetClipboardStringWayland,
+        .init = wayland_init,
+        .terminate = wayland_terminate,
+        .getCursorPos = wayland_get_cursor_pos,
+        .setCursorPos = wayland_set_cursor_pos,
+        .setCursorMode = wayland_set_cursorMode,
+        .setRawMouseMotion = wayland_set_mouse_raw_motion,
+        .rawMouseMotionSupported = wayland_mouse_raw_motion_supported,
+        .createCursor = wayland_create_cursor,
+        .createStandardCursor = wayland_create_standard_cursor,
+        .destroyCursor = wayland_destroy_cursor,
+        .setCursor = wayland_set_cursor,
+        .getScancodeName = wayland_get_scancode_name,
+        .getKeyScancode = wayland_get_key_scancode,
+        .setClipboardString = wayland_set_clipboard_string,
+        .getClipboardString = wayland_get_clipboard_string,
         .freeMonitor = wsi_free_monitorWayland,
-        .getMonitorPos = _glfwGetMonitorPosWayland,
-        .getMonitorContentScale = _glfwGetMonitorContentScaleWayland,
-        .getMonitorWorkarea = _glfwGetMonitorWorkareaWayland,
-        .getVideoModes = _glfwGetVideoModesWayland,
-        .getVideoMode = _glfwGetVideoModeWayland,
-        .getGammaRamp = _glfwGetGammaRampWayland,
-        .setGammaRamp = _glfwSetGammaRampWayland,
-        .createWindow = _glfwCreateWindowWayland,
-        .destroyWindow = _glfwDestroyWindowWayland,
-        .setWindowTitle = _glfwSetWindowTitleWayland,
-        .setWindowIcon = _glfwSetWindowIconWayland,
-        .getWindowPos = _glfwGetWindowPosWayland,
-        .setWindowPos = _glfwSetWindowPosWayland,
-        .getWindowSize = _glfwGetWindowSizeWayland,
-        .setWindowSize = _glfwSetWindowSizeWayland,
-        .setWindowSizeLimits = _glfwSetWindowSizeLimitsWayland,
-        .setWindowAspectRatio = _glfwSetWindowAspectRatioWayland,
-        .getWindowFrameSize = _glfwGetWindowFrameSizeWayland,
-        .getWindowContentScale = _glfwGetWindowContentScaleWayland,
-        .iconifyWindow = _glfwIconifyWindowWayland,
-        .restoreWindow = _glfwRestoreWindowWayland,
-        .maximizeWindow = _glfwMaximizeWindowWayland,
-        .showWindow = _glfwShowWindowWayland,
-        .hideWindow = _glfwHideWindowWayland,
-        .requestWindowAttention = _glfwRequestWindowAttentionWayland,
-        .focusWindow = _glfwFocusWindowWayland,
-        .setWindowMonitor = _glfwSetWindowMonitorWayland,
-        .windowFocused = _glfwWindowFocusedWayland,
-        .windowIconified = _glfwWindowIconifiedWayland,
-        .windowVisible = _glfwWindowVisibleWayland,
-        .windowMaximized = _glfwWindowMaximizedWayland,
-        .windowHovered = _glfwWindowHoveredWayland,
-        .getWindowOpacity = _glfwGetWindowOpacityWayland,
-        .setWindowResizable = _glfwSetWindowResizableWayland,
-        .setWindowDecorated = _glfwSetWindowDecoratedWayland,
-        .setWindowFloating = _glfwSetWindowFloatingWayland,
-        .setWindowOpacity = _glfwSetWindowOpacityWayland,
-        .setWindowMousePassthrough = _glfwSetWindowMousePassthroughWayland,
-        .pollEvents = _glfwPollEventsWayland,
-        .waitEvents = _glfwWaitEventsWayland,
-        .waitEventsTimeout = _glfwWaitEventsTimeoutWayland,
-        .postEmptyEvent = _glfwPostEmptyEventWayland
+        .getMonitorPos = wayland_get_monitor_pos,
+        .getMonitorContentScale = wayland_get_monitor_content_scale,
+        .getMonitorWorkarea = wayland_get_monitor_work_area,
+        .getVideoModes = wayland_get_video_modes,
+        .getVideoMode = wayland_get_video_mode,
+        .getGammaRamp = wayland_get_gamma_ramp,
+        .setGammaRamp = wayland_set_gamma_ramp,
+        .createWindow = wayland_create_window,
+        .destroyWindow = wayland_destroy_window,
+        .setWindowTitle = wayland_set_window_title,
+        .setWindowIcon = wayland_set_window_icon,
+        .getWindowPos = wayland_get_window_pos,
+        .setWindowPos = wayland_set_window_pos,
+        .getWindowSize = wayland_get_window_size,
+        .setWindowSize = wayland_set_window_size,
+        .setWindowSizeLimits = wayland_set_window_size_limits,
+        .setWindowAspectRatio = wayland_set_window_aspect_ratio,
+        .getWindowFrameSize = wayland_get_window_frame_size,
+        .getWindowContentScale = wayland_get_window_content_scale,
+        .iconifyWindow = wayland_iconify_window,
+        .restoreWindow = wayland_restore_window,
+        .maximizeWindow = wayland_maximize_window,
+        .showWindow = wayland_show_window,
+        .hideWindow = wayland_hide_window,
+        .requestWindowAttention = wayland_request_window_attention,
+        .focusWindow = wayland_focus_window,
+        .setWindowMonitor = wayland_set_window_monitor,
+        .windowFocused = wayland_window_focused,
+        .windowIconified = wayland_window_iconified,
+        .windowVisible = wayland_window_visible,
+        .windowMaximized = wayland_window_maximized,
+        .windowHovered = wayland_window_hovered,
+        .getWindowOpacity = wayland_get_window_opacity,
+        .setWindowResizable = wayland_set_window_resizable,
+        .setWindowDecorated = wayland_set_window_decorated,
+        .setWindowFloating = wayland_set_window_floating,
+        .setWindowOpacity = wayland_set_window_opacity,
+        .setWindowMousePassthrough = wayland_set_window_mouse_passthrough,
+        .pollEvents = wayland_poll_events,
+        .waitEvents = wayland_wait_events,
+        .waitEventsTimeout = wayland_wait_eventsTimeout,
+        .postEmptyEvent = wayland_post_empty_event
     };
 
     void* module = impl_platform_load_module("libwayland-client.so.0");
@@ -505,7 +505,7 @@ bool _glfwConnectWayland(int platformID, platform_st* platform)
     return true;
 }
 
-int _glfwInitWayland(void)
+int wayland_init(void)
 {
     // These must be set before any failure checks
     g_wsi.wl.keyRepeatTimerfd = -1;
@@ -847,20 +847,20 @@ int _glfwInitWayland(void)
         g_wsi.wl.dataDevice =
             wl_data_device_manager_get_data_device(g_wsi.wl.dataDeviceManager,
                                                    g_wsi.wl.seat);
-        _glfwAddDataDeviceListenerWayland(g_wsi.wl.dataDevice);
+        wayland_AddDataDeviceListener(g_wsi.wl.dataDevice);
     }
 
     return true;
 }
 
-void _glfwTerminateWayland(void)
+void wayland_terminate(void)
 {
     if (g_wsi.wl.libdecor.context)
     {
         // Allow libdecor to finish receiving all its requested globals
         // and ensure the associated sync callback object is destroyed
         while (!g_wsi.wl.libdecor.ready)
-            _glfwWaitEventsWayland();
+            wayland_wait_events();
 
         libdecor_unref(g_wsi.wl.libdecor.context);
     }

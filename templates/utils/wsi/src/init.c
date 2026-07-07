@@ -51,7 +51,7 @@ static void terminate(void)
         sc_wsi_win_destroy((sc_window*) g_wsi.windowListHead);
 
     while (g_wsi.cursorListHead)
-        sc_wsi_cursor_destroy((sc_cursor*) g_wsi.cursorListHead);
+        sc_wsi_destroy_cursor((sc_cursor*) g_wsi.cursorListHead);
 
     for (i = 0;  i < g_wsi.monitorCount;  i++)
     {

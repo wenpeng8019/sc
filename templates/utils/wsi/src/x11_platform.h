@@ -693,78 +693,78 @@ typedef struct _sc_cursorX11
 } _sc_cursorX11;
 
 
-bool _glfwConnectX11(int platformID, platform_st* platform);
-int _glfwInitX11(void);
-void _glfwTerminateX11(void);
+bool x11_connect(int platformID, platform_st* platform);
+int x11_init(void);
+void x11_terminate(void);
 
-bool _glfwCreateWindowX11(window_st* window, const wnd_config_st* wndconfig);
-void _glfwDestroyWindowX11(window_st* window);
-void _glfwSetWindowTitleX11(window_st* window, const char* title);
-void _glfwSetWindowIconX11(window_st* window, int count, const GLFWimage* images);
-void _glfwGetWindowPosX11(window_st* window, int* xpos, int* ypos);
-void _glfwSetWindowPosX11(window_st* window, int xpos, int ypos);
-void _glfwGetWindowSizeX11(window_st* window, int* width, int* height);
-void _glfwSetWindowSizeX11(window_st* window, int width, int height);
-void _glfwSetWindowSizeLimitsX11(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void _glfwSetWindowAspectRatioX11(window_st* window, int numer, int denom);
-void _glfwGetWindowFrameSizeX11(window_st* window, int* left, int* top, int* right, int* bottom);
-void _glfwGetWindowContentScaleX11(window_st* window, float* xscale, float* yscale);
-void _glfwIconifyWindowX11(window_st* window);
-void _glfwRestoreWindowX11(window_st* window);
-void _glfwMaximizeWindowX11(window_st* window);
-void _glfwShowWindowX11(window_st* window);
-void _glfwHideWindowX11(window_st* window);
-void _glfwRequestWindowAttentionX11(window_st* window);
-void _glfwFocusWindowX11(window_st* window);
-void _glfwSetWindowMonitorX11(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool _glfwWindowFocusedX11(window_st* window);
-bool _glfwWindowIconifiedX11(window_st* window);
-bool _glfwWindowVisibleX11(window_st* window);
-bool _glfwWindowMaximizedX11(window_st* window);
-bool _glfwWindowHoveredX11(window_st* window);
-void _glfwSetWindowResizableX11(window_st* window, bool enabled);
-void _glfwSetWindowDecoratedX11(window_st* window, bool enabled);
-void _glfwSetWindowFloatingX11(window_st* window, bool enabled);
-float _glfwGetWindowOpacityX11(window_st* window);
-void _glfwSetWindowOpacityX11(window_st* window, float opacity);
-void _glfwSetWindowMousePassthroughX11(window_st* window, bool enabled);
+bool x11_create_window(window_st* window, const wnd_config_st* wndconfig);
+void x11_destroy_window(window_st* window);
+void x11_set_window_title(window_st* window, const char* title);
+void x11_set_window_icon(window_st* window, int count, const GLFWimage* images);
+void x11_get_window_pos(window_st* window, int* xpos, int* ypos);
+void x11_set_window_pos(window_st* window, int xpos, int ypos);
+void x11_get_window_size(window_st* window, int* width, int* height);
+void x11_set_window_size(window_st* window, int width, int height);
+void x11_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
+void x11_set_window_aspect_ratio(window_st* window, int numer, int denom);
+void x11_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
+void x11_get_window_content_scale(window_st* window, float* xscale, float* yscale);
+void x11_iconify_window(window_st* window);
+void x11_restore_window(window_st* window);
+void x11_maximize_window(window_st* window);
+void x11_show_window(window_st* window);
+void x11_hide_window(window_st* window);
+void x11_request_window_attention(window_st* window);
+void x11_focus_window(window_st* window);
+void x11_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
+bool x11_window_focused(window_st* window);
+bool x11_window_iconified(window_st* window);
+bool x11_window_visible(window_st* window);
+bool x11_window_maximized(window_st* window);
+bool x11_window_hovered(window_st* window);
+void x11_set_window_resizable(window_st* window, bool enabled);
+void x11_set_window_decorated(window_st* window, bool enabled);
+void x11_set_window_floating(window_st* window, bool enabled);
+float x11_get_window_opacity(window_st* window);
+void x11_set_window_opacity(window_st* window, float opacity);
+void x11_set_window_mouse_passthrough(window_st* window, bool enabled);
 
-void _glfwSetRawMouseMotionX11(window_st *window, bool enabled);
-bool _glfwRawMouseMotionSupportedX11(void);
+void x11_set_mouse_raw_motion(window_st *window, bool enabled);
+bool x11_mouse_raw_motion_supported(void);
 
-void _glfwPollEventsX11(void);
-void _glfwWaitEventsX11(void);
-void _glfwWaitEventsTimeoutX11(double timeout);
-void _glfwPostEmptyEventX11(void);
+void x11_poll_events(void);
+void x11_wait_events(void);
+void x11_wait_eventsTimeout(double timeout);
+void x11_post_empty_event(void);
 
-void _glfwGetCursorPosX11(window_st* window, double* xpos, double* ypos);
-void _glfwSetCursorPosX11(window_st* window, double xpos, double ypos);
-void _glfwSetCursorModeX11(window_st* window, int mode);
-const char* _glfwGetScancodeNameX11(int scancode);
-int _glfwGetKeyScancodeX11(int key);
-bool _glfwCreateCursorX11(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool _glfwCreateStandardCursorX11(cursor_st* cursor, int shape);
-void _glfwDestroyCursorX11(cursor_st* cursor);
-void _glfwSetCursorX11(window_st* window, cursor_st* cursor);
-void _glfwSetClipboardStringX11(const char* string);
-const char* _glfwGetClipboardStringX11(void);
+void x11_get_cursor_pos(window_st* window, double* xpos, double* ypos);
+void x11_set_cursor_pos(window_st* window, double xpos, double ypos);
+void x11_set_cursorMode(window_st* window, int mode);
+const char* x11_get_scancode_name(int scancode);
+int x11_get_key_scancode(int key);
+bool x11_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
+bool x11_create_standard_cursor(cursor_st* cursor, int shape);
+void x11_destroy_cursor(cursor_st* cursor);
+void x11_set_cursor(window_st* window, cursor_st* cursor);
+void x11_set_clipboard_string(const char* string);
+const char* x11_get_clipboard_string(void);
 
 void wsi_free_monitorX11(monitor_st* monitor);
-void _glfwGetMonitorPosX11(monitor_st* monitor, int* xpos, int* ypos);
-void _glfwGetMonitorContentScaleX11(monitor_st* monitor, float* xscale, float* yscale);
-void _glfwGetMonitorWorkareaX11(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* _glfwGetVideoModesX11(monitor_st* monitor, int* count);
-bool _glfwGetVideoModeX11(monitor_st* monitor, GLFWvidmode* mode);
-bool _glfwGetGammaRampX11(monitor_st* monitor, GLFWgammaramp* ramp);
-void _glfwSetGammaRampX11(monitor_st* monitor, const GLFWgammaramp* ramp);
+void x11_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
+void x11_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
+void x11_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
+GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count);
+bool x11_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
+bool x11_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
+void x11_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
 
-void _glfwPollMonitorsX11(void);
-void _glfwSetVideoModeX11(monitor_st* monitor, const GLFWvidmode* desired);
-void _glfwRestoreVideoModeX11(monitor_st* monitor);
+void x11_poll_monitors(void);
+void x11_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired);
+void x11_RestoreVideoMode(monitor_st* monitor);
 
-Cursor _glfwCreateNativeCursorX11(const GLFWimage* image, int xhot, int yhot);
+Cursor x11_CreateNativeCursor(const GLFWimage* image, int xhot, int yhot);
 
-unsigned long _glfwGetWindowPropertyX11(Window window,
+unsigned long x11_GetWindowProperty(Window window,
                                         Atom property,
                                         Atom type,
                                         unsigned char** value);

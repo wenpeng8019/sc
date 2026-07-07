@@ -92,18 +92,18 @@ typedef enum
 // application having a correct embedded manifest
 //
 #define IsWindows8OrGreater()                                         \
-    _glfwIsWindowsVersionOrGreaterWin32(HIBYTE(_WIN32_WINNT_WIN8),    \
+    win32_IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WIN8),    \
                                         LOBYTE(_WIN32_WINNT_WIN8), 0)
 #define IsWindows8Point1OrGreater()                                   \
-    _glfwIsWindowsVersionOrGreaterWin32(HIBYTE(_WIN32_WINNT_WINBLUE), \
+    win32_IsWindowsVersionOrGreater(HIBYTE(_WIN32_WINNT_WINBLUE), \
                                         LOBYTE(_WIN32_WINNT_WINBLUE), 0)
 
 // Windows 10 Anniversary Update
-#define _glfwIsWindows10Version1607OrGreaterWin32() \
-    _glfwIsWindows10BuildOrGreaterWin32(14393)
+#define win32_IsWindows10Version1607OrGreater() \
+    win32_IsWindows10BuildOrGreater(14393)
 // Windows 10 Creators Update
-#define _glfwIsWindows10Version1703OrGreaterWin32() \
-    _glfwIsWindows10BuildOrGreaterWin32(15063)
+#define win32_IsWindows10Version1703OrGreater() \
+    win32_IsWindows10BuildOrGreater(15063)
 
 // HACK: Define macros that some xinput.h variants don't
 #ifndef XINPUT_CAPS_WIRELESS
@@ -303,80 +303,80 @@ typedef struct _sc_cursorWin32
 } _sc_cursorWin32;
 
 
-bool _glfwConnectWin32(int platformID, platform_st* platform);
-int _glfwInitWin32(void);
-void _glfwTerminateWin32(void);
+bool win32_connect(int platformID, platform_st* platform);
+int win32_init(void);
+void win32_terminate(void);
 
-WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source);
-char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source);
-BOOL _glfwIsWindowsVersionOrGreaterWin32(WORD major, WORD minor, WORD sp);
-BOOL _glfwIsWindows10BuildOrGreaterWin32(WORD build);
-void _glfwInputErrorWin32(int error, const char* description);
-void _glfwUpdateKeyNamesWin32(void);
+WCHAR* win32_CreateWideStringFromUTF8(const char* source);
+char* win32_CreateUTF8FromWideString(const WCHAR* source);
+BOOL win32_IsWindowsVersionOrGreater(WORD major, WORD minor, WORD sp);
+BOOL win32_IsWindows10BuildOrGreater(WORD build);
+void win32_InputError(int error, const char* description);
+void win32_UpdateKeyNames(void);
 
-void _glfwPollMonitorsWin32(void);
-void _glfwSetVideoModeWin32(monitor_st* monitor, const GLFWvidmode* desired);
-void _glfwRestoreVideoModeWin32(monitor_st* monitor);
-void _glfwGetHMONITORContentScaleWin32(HMONITOR handle, float* xscale, float* yscale);
+void win32_poll_monitors(void);
+void win32_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired);
+void win32_RestoreVideoMode(monitor_st* monitor);
+void win32_GetHMONITORContentScale(HMONITOR handle, float* xscale, float* yscale);
 
-bool _glfwCreateWindowWin32(window_st* window, const wnd_config_st* wndconfig);
-void _glfwDestroyWindowWin32(window_st* window);
-void _glfwSetWindowTitleWin32(window_st* window, const char* title);
-void _glfwSetWindowIconWin32(window_st* window, int count, const GLFWimage* images);
-void _glfwGetWindowPosWin32(window_st* window, int* xpos, int* ypos);
-void _glfwSetWindowPosWin32(window_st* window, int xpos, int ypos);
-void _glfwGetWindowSizeWin32(window_st* window, int* width, int* height);
-void _glfwSetWindowSizeWin32(window_st* window, int width, int height);
-void _glfwSetWindowSizeLimitsWin32(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void _glfwSetWindowAspectRatioWin32(window_st* window, int numer, int denom);
-void _glfwGetWindowFrameSizeWin32(window_st* window, int* left, int* top, int* right, int* bottom);
-void _glfwGetWindowContentScaleWin32(window_st* window, float* xscale, float* yscale);
-void _glfwIconifyWindowWin32(window_st* window);
-void _glfwRestoreWindowWin32(window_st* window);
-void _glfwMaximizeWindowWin32(window_st* window);
-void _glfwShowWindowWin32(window_st* window);
-void _glfwHideWindowWin32(window_st* window);
-void _glfwRequestWindowAttentionWin32(window_st* window);
-void _glfwFocusWindowWin32(window_st* window);
-void _glfwSetWindowMonitorWin32(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool _glfwWindowFocusedWin32(window_st* window);
-bool _glfwWindowIconifiedWin32(window_st* window);
-bool _glfwWindowVisibleWin32(window_st* window);
-bool _glfwWindowMaximizedWin32(window_st* window);
-bool _glfwWindowHoveredWin32(window_st* window);
-void _glfwSetWindowResizableWin32(window_st* window, bool enabled);
-void _glfwSetWindowDecoratedWin32(window_st* window, bool enabled);
-void _glfwSetWindowFloatingWin32(window_st* window, bool enabled);
-void _glfwSetWindowMousePassthroughWin32(window_st* window, bool enabled);
-float _glfwGetWindowOpacityWin32(window_st* window);
-void _glfwSetWindowOpacityWin32(window_st* window, float opacity);
+bool win32_create_window(window_st* window, const wnd_config_st* wndconfig);
+void win32_destroy_window(window_st* window);
+void win32_set_window_title(window_st* window, const char* title);
+void win32_set_window_icon(window_st* window, int count, const GLFWimage* images);
+void win32_get_window_pos(window_st* window, int* xpos, int* ypos);
+void win32_set_window_pos(window_st* window, int xpos, int ypos);
+void win32_get_window_size(window_st* window, int* width, int* height);
+void win32_set_window_size(window_st* window, int width, int height);
+void win32_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
+void win32_set_window_aspect_ratio(window_st* window, int numer, int denom);
+void win32_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
+void win32_get_window_content_scale(window_st* window, float* xscale, float* yscale);
+void win32_iconify_window(window_st* window);
+void win32_restore_window(window_st* window);
+void win32_maximize_window(window_st* window);
+void win32_show_window(window_st* window);
+void win32_hide_window(window_st* window);
+void win32_request_window_attention(window_st* window);
+void win32_focus_window(window_st* window);
+void win32_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
+bool win32_window_focused(window_st* window);
+bool win32_window_iconified(window_st* window);
+bool win32_window_visible(window_st* window);
+bool win32_window_maximized(window_st* window);
+bool win32_window_hovered(window_st* window);
+void win32_set_window_resizable(window_st* window, bool enabled);
+void win32_set_window_decorated(window_st* window, bool enabled);
+void win32_set_window_floating(window_st* window, bool enabled);
+void win32_set_window_mouse_passthrough(window_st* window, bool enabled);
+float win32_get_window_opacity(window_st* window);
+void win32_set_window_opacity(window_st* window, float opacity);
 
-void _glfwSetRawMouseMotionWin32(window_st *window, bool enabled);
-bool _glfwRawMouseMotionSupportedWin32(void);
+void win32_set_mouse_raw_motion(window_st *window, bool enabled);
+bool win32_mouse_raw_motion_supported(void);
 
-void _glfwPollEventsWin32(void);
-void _glfwWaitEventsWin32(void);
-void _glfwWaitEventsTimeoutWin32(double timeout);
-void _glfwPostEmptyEventWin32(void);
+void win32_poll_events(void);
+void win32_wait_events(void);
+void win32_wait_eventsTimeout(double timeout);
+void win32_post_empty_event(void);
 
-void _glfwGetCursorPosWin32(window_st* window, double* xpos, double* ypos);
-void _glfwSetCursorPosWin32(window_st* window, double xpos, double ypos);
-void _glfwSetCursorModeWin32(window_st* window, int mode);
-const char* _glfwGetScancodeNameWin32(int scancode);
-int _glfwGetKeyScancodeWin32(int key);
-bool _glfwCreateCursorWin32(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool _glfwCreateStandardCursorWin32(cursor_st* cursor, int shape);
-void _glfwDestroyCursorWin32(cursor_st* cursor);
-void _glfwSetCursorWin32(window_st* window, cursor_st* cursor);
-void _glfwSetClipboardStringWin32(const char* string);
-const char* _glfwGetClipboardStringWin32(void);
+void win32_get_cursor_pos(window_st* window, double* xpos, double* ypos);
+void win32_set_cursor_pos(window_st* window, double xpos, double ypos);
+void win32_set_cursorMode(window_st* window, int mode);
+const char* win32_get_scancode_name(int scancode);
+int win32_get_key_scancode(int key);
+bool win32_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
+bool win32_create_standard_cursor(cursor_st* cursor, int shape);
+void win32_destroy_cursor(cursor_st* cursor);
+void win32_set_cursor(window_st* window, cursor_st* cursor);
+void win32_set_clipboard_string(const char* string);
+const char* win32_get_clipboard_string(void);
 
-void wsi_free_monitorWin32(monitor_st* monitor);
-void _glfwGetMonitorPosWin32(monitor_st* monitor, int* xpos, int* ypos);
-void _glfwGetMonitorContentScaleWin32(monitor_st* monitor, float* xscale, float* yscale);
-void _glfwGetMonitorWorkareaWin32(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* _glfwGetVideoModesWin32(monitor_st* monitor, int* count);
-bool _glfwGetVideoModeWin32(monitor_st* monitor, GLFWvidmode* mode);
-bool _glfwGetGammaRampWin32(monitor_st* monitor, GLFWgammaramp* ramp);
-void _glfwSetGammaRampWin32(monitor_st* monitor, const GLFWgammaramp* ramp);
+void win32_free_monitor(monitor_st* monitor);
+void win32_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
+void win32_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
+void win32_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
+GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count);
+bool win32_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
+bool win32_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
+void win32_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
 

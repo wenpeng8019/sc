@@ -462,7 +462,7 @@ static void inputMethodInstantiateCallback(Display* display,
         XSetIMValues(g_wsi.x11.im, XNDestroyCallback, &callback, NULL);
 
         for (window_st* window = g_wsi.windowListHead;  window;  window = window->next)
-            _glfwCreateInputContextX11(window);
+            x11_CreateInputContext(window);
     }
 }
 
@@ -490,7 +490,7 @@ static void detectEWMH(void)
     // First we read the _NET_SUPPORTING_WM_CHECK property on the root window
 
     Window* windowFromRoot = NULL;
-    if (!_glfwGetWindowPropertyX11(g_wsi.x11.root,
+    if (!x11_GetWindowProperty(g_wsi.x11.root,
                                    g_wsi.x11.NET_SUPPORTING_WM_CHECK,
                                    XA_WINDOW,
                                    (unsigned char**) &windowFromRoot))
@@ -498,23 +498,23 @@ static void detectEWMH(void)
         return;
     }
 
-    _glfwGrabErrorHandlerX11();
+    x11_GrabErrorHandler();
 
     // If it exists, it should be the XID of a top-level window
     // Then we look for the same property on that window
 
     Window* windowFromChild = NULL;
-    if (!_glfwGetWindowPropertyX11(*windowFromRoot,
+    if (!x11_GetWindowProperty(*windowFromRoot,
                                    g_wsi.x11.NET_SUPPORTING_WM_CHECK,
                                    XA_WINDOW,
                                    (unsigned char**) &windowFromChild))
     {
-        _glfwReleaseErrorHandlerX11();
+        x11_ReleaseErrorHandler();
         XFree(windowFromRoot);
         return;
     }
 
-    _glfwReleaseErrorHandlerX11();
+    x11_ReleaseErrorHandler();
 
     // If the property exists, it should contain the XID of the window
 
@@ -535,7 +535,7 @@ static void detectEWMH(void)
 
     Atom* supportedAtoms = NULL;
     const unsigned long atomCount =
-        _glfwGetWindowPropertyX11(g_wsi.x11.root,
+        x11_GetWindowProperty(g_wsi.x11.root,
                                   g_wsi.x11.NET_SUPPORTED,
                                   XA_ATOM,
                                   (unsigned char**) &supportedAtoms);
@@ -986,7 +986,7 @@ static Cursor createHiddenCursor(void)
 {
     unsigned char pixels[16 * 16 * 4] = { 0 };
     GLFWimage image = { 16, 16, pixels };
-    return _glfwCreateNativeCursorX11(&image, 0, 0);
+    return x11_CreateNativeCursor(&image, 0, 0);
 }
 
 // Create a helper window for IPC
@@ -1052,7 +1052,7 @@ static int errorHandler(Display *display, XErrorEvent* event)
 
 // Sets the X error handler callback
 //
-void _glfwGrabErrorHandlerX11(void)
+void x11_GrabErrorHandler(void)
 {
     assert(g_wsi.x11.errorHandler == NULL);
     g_wsi.x11.errorCode = Success;
@@ -1061,7 +1061,7 @@ void _glfwGrabErrorHandlerX11(void)
 
 // Clears the X error handler callback
 //
-void _glfwReleaseErrorHandlerX11(void)
+void x11_ReleaseErrorHandler(void)
 {
     // Synchronize to make sure all commands are processed
     XSync(g_wsi.x11.display, False);
@@ -1071,7 +1071,7 @@ void _glfwReleaseErrorHandlerX11(void)
 
 // Reports the specified error, appending information about the last X error
 //
-void _glfwInputErrorX11(int error, const char* message)
+void x11_InputError(int error, const char* message)
 {
     char buffer[_SC_MESSAGE_SIZE];
     XGetErrorText(g_wsi.x11.display, g_wsi.x11.errorCode,
@@ -1082,7 +1082,7 @@ void _glfwInputErrorX11(int error, const char* message)
 
 // Creates a native cursor object from the specified image and hotspot
 //
-Cursor _glfwCreateNativeCursorX11(const GLFWimage* image, int xhot, int yhot)
+Cursor x11_CreateNativeCursor(const GLFWimage* image, int xhot, int yhot)
 {
     Cursor cursor;
 
@@ -1120,67 +1120,67 @@ Cursor _glfwCreateNativeCursorX11(const GLFWimage* image, int xhot, int yhot)
 //////                       GLFW platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
-bool _glfwConnectX11(int platformID, platform_st* platform)
+bool x11_connect(int platformID, platform_st* platform)
 {
     const platform_st x11 =
     {
         .platformID = SC_PLATFORM_X11,
-        .init = _glfwInitX11,
-        .terminate = _glfwTerminateX11,
-        .getCursorPos = _glfwGetCursorPosX11,
-        .setCursorPos = _glfwSetCursorPosX11,
-        .setCursorMode = _glfwSetCursorModeX11,
-        .setRawMouseMotion = _glfwSetRawMouseMotionX11,
-        .rawMouseMotionSupported = _glfwRawMouseMotionSupportedX11,
-        .createCursor = _glfwCreateCursorX11,
-        .createStandardCursor = _glfwCreateStandardCursorX11,
-        .destroyCursor = _glfwDestroyCursorX11,
-        .setCursor = _glfwSetCursorX11,
-        .getScancodeName = _glfwGetScancodeNameX11,
-        .getKeyScancode = _glfwGetKeyScancodeX11,
-        .setClipboardString = _glfwSetClipboardStringX11,
-        .getClipboardString = _glfwGetClipboardStringX11,
+        .init = x11_init,
+        .terminate = x11_terminate,
+        .getCursorPos = x11_get_cursor_pos,
+        .setCursorPos = x11_set_cursor_pos,
+        .setCursorMode = x11_set_cursorMode,
+        .setRawMouseMotion = x11_set_mouse_raw_motion,
+        .rawMouseMotionSupported = x11_mouse_raw_motion_supported,
+        .createCursor = x11_create_cursor,
+        .createStandardCursor = x11_create_standard_cursor,
+        .destroyCursor = x11_destroy_cursor,
+        .setCursor = x11_set_cursor,
+        .getScancodeName = x11_get_scancode_name,
+        .getKeyScancode = x11_get_key_scancode,
+        .setClipboardString = x11_set_clipboard_string,
+        .getClipboardString = x11_get_clipboard_string,
         .freeMonitor = wsi_free_monitorX11,
-        .getMonitorPos = _glfwGetMonitorPosX11,
-        .getMonitorContentScale = _glfwGetMonitorContentScaleX11,
-        .getMonitorWorkarea = _glfwGetMonitorWorkareaX11,
-        .getVideoModes = _glfwGetVideoModesX11,
-        .getVideoMode = _glfwGetVideoModeX11,
-        .getGammaRamp = _glfwGetGammaRampX11,
-        .setGammaRamp = _glfwSetGammaRampX11,
-        .createWindow = _glfwCreateWindowX11,
-        .destroyWindow = _glfwDestroyWindowX11,
-        .setWindowTitle = _glfwSetWindowTitleX11,
-        .setWindowIcon = _glfwSetWindowIconX11,
-        .getWindowPos = _glfwGetWindowPosX11,
-        .setWindowPos = _glfwSetWindowPosX11,
-        .getWindowSize = _glfwGetWindowSizeX11,
-        .setWindowSize = _glfwSetWindowSizeX11,
-        .setWindowSizeLimits = _glfwSetWindowSizeLimitsX11,
-        .setWindowAspectRatio = _glfwSetWindowAspectRatioX11,
-        .getWindowFrameSize = _glfwGetWindowFrameSizeX11,
-        .getWindowContentScale = _glfwGetWindowContentScaleX11,
-        .iconifyWindow = _glfwIconifyWindowX11,
-        .restoreWindow = _glfwRestoreWindowX11,
-        .maximizeWindow = _glfwMaximizeWindowX11,
-        .showWindow = _glfwShowWindowX11,
-        .hideWindow = _glfwHideWindowX11,
-        .requestWindowAttention = _glfwRequestWindowAttentionX11,
-        .focusWindow = _glfwFocusWindowX11,
-        .setWindowMonitor = _glfwSetWindowMonitorX11,
-        .windowFocused = _glfwWindowFocusedX11,
-        .windowIconified = _glfwWindowIconifiedX11,
-        .windowVisible = _glfwWindowVisibleX11,
-        .windowMaximized = _glfwWindowMaximizedX11,
-        .windowHovered = _glfwWindowHoveredX11,
-        .getWindowOpacity = _glfwGetWindowOpacityX11,
-        .setWindowResizable = _glfwSetWindowResizableX11,
-        .setWindowDecorated = _glfwSetWindowDecoratedX11,
-        .setWindowFloating = _glfwSetWindowFloatingX11,
-        .setWindowOpacity = _glfwSetWindowOpacityX11,
-        .setWindowMousePassthrough = _glfwSetWindowMousePassthroughX11,
-        .pollEvents = _glfwPollEventsX11,
-        .waitEvents = _glfwWaitEventsX11,
+        .getMonitorPos = x11_get_monitor_pos,
+        .getMonitorContentScale = x11_get_monitor_content_scale,
+        .getMonitorWorkarea = x11_get_monitor_work_area,
+        .getVideoModes = x11_get_video_modes,
+        .getVideoMode = x11_get_video_mode,
+        .getGammaRamp = x11_get_gamma_ramp,
+        .setGammaRamp = x11_set_gamma_ramp,
+        .createWindow = x11_create_window,
+        .destroyWindow = x11_destroy_window,
+        .setWindowTitle = x11_set_window_title,
+        .setWindowIcon = x11_set_window_icon,
+        .getWindowPos = x11_get_window_pos,
+        .setWindowPos = x11_set_window_pos,
+        .getWindowSize = x11_get_window_size,
+        .setWindowSize = x11_set_window_size,
+        .setWindowSizeLimits = x11_set_window_size_limits,
+        .setWindowAspectRatio = x11_set_window_aspect_ratio,
+        .getWindowFrameSize = x11_get_window_frame_size,
+        .getWindowContentScale = x11_get_window_content_scale,
+        .iconifyWindow = x11_iconify_window,
+        .restoreWindow = x11_restore_window,
+        .maximizeWindow = x11_maximize_window,
+        .showWindow = x11_show_window,
+        .hideWindow = x11_hide_window,
+        .requestWindowAttention = x11_request_window_attention,
+        .focusWindow = x11_focus_window,
+        .setWindowMonitor = x11_set_window_monitor,
+        .windowFocused = x11_window_focused,
+        .windowIconified = x11_window_iconified,
+        .windowVisible = x11_window_visible,
+        .windowMaximized = x11_window_maximized,
+        .windowHovered = x11_window_hovered,
+        .getWindowOpacity = x11_get_window_opacity,
+        .setWindowResizable = x11_set_window_resizable,
+        .setWindowDecorated = x11_set_window_decorated,
+        .setWindowFloating = x11_set_window_floating,
+        .setWindowOpacity = x11_set_window_opacity,
+        .setWindowMousePassthrough = x11_set_window_mouse_passthrough,
+        .pollEvents = x11_poll_events,
+        .waitEvents = x11_wait_events,
         .waitEventsTimeout = _glfwWaitEventsTimeoutX11,
         .postEmptyEvent = _glfwPostEmptyEventX11
     };

@@ -880,7 +880,7 @@ static const struct codepair {
 
 // Convert XKB KeySym to Unicode
 //
-uint32_t _glfwKeySym2UnicodeX11(unsigned int keysym)
+uint32_t x11_KeySym2Unicode(unsigned int keysym)
 {
     int min = 0;
     int max = sizeof(keysymtab) / sizeof(struct codepair) - 1;
