@@ -2374,5 +2374,83 @@ WSI_API HWND wsi_get_win32_window(sc_window* handle)
     return window->win32.handle;
 }
 
+bool win32_connect(int platformID, platform_st* platform)
+{
+    const platform_st win32 =
+    {
+        .platformID = SC_PLATFORM_WIN32,
+        .init = win32_init,
+        .terminate = win32_terminate,
+
+        .pollEvents = win32_poll_events,
+        .waitEvents = win32_wait_events,
+        .waitEventsTimeout = win32_wait_eventsTimeout,
+        .postEmptyEvent = win32_post_empty_event,
+
+        .createWindow = win32_create_window,
+        .destroyWindow = win32_destroy_window,
+        .setWindowTitle = win32_set_window_title,
+        .setWindowIcon = win32_set_window_icon,
+        .setWindowMonitor = win32_set_window_monitor,
+        .setWindowMousePassthrough = win32_set_window_mouse_passthrough,
+
+        .setWindowDecorated = win32_set_window_decorated,
+        .setWindowResizable = win32_set_window_resizable,
+        .setWindowFloating = win32_set_window_floating,
+        .setWindowOpacity = win32_set_window_opacity,
+        .getWindowOpacity = win32_get_window_opacity,
+
+        .getWindowPos = win32_get_window_pos,
+        .setWindowPos = win32_set_window_pos,
+        .getWindowSize = win32_get_window_size,
+        .setWindowSize = win32_set_window_size,
+        .getWindowFrameSize = win32_get_window_frame_size,
+        .setWindowSizeLimits = win32_set_window_size_limits,
+        .getWindowContentScale = win32_get_window_content_scale,
+        .setWindowAspectRatio = win32_set_window_aspect_ratio,
+
+        .showWindow = win32_show_window,
+        .hideWindow = win32_hide_window,
+        .maximizeWindow = win32_maximize_window,
+        .restoreWindow = win32_restore_window,
+        .focusWindow = win32_focus_window,
+        .iconifyWindow = win32_iconify_window,
+        .requestWindowAttention = win32_request_window_attention,
+
+        .windowVisible = win32_window_visible,
+        .windowMaximized = win32_window_maximized,
+        .windowFocused = win32_window_focused,
+        .windowHovered = win32_window_hovered,
+        .windowIconified = win32_window_iconified,
+
+        .setCursor = win32_set_cursor,
+        .createStandardCursor = win32_create_standard_cursor,
+        .createCursor = win32_create_cursor,
+        .destroyCursor = win32_destroy_cursor,
+        .setCursorMode = win32_set_cursorMode,
+        .setCursorPos = win32_set_cursor_pos,
+        .getCursorPos = win32_get_cursor_pos,
+        .setRawMouseMotion = win32_set_mouse_raw_motion,
+        .rawMouseMotionSupported = win32_mouse_raw_motion_supported,
+
+        .getKeyScancode = win32_get_key_scancode,
+        .getScancodeName = win32_get_scancode_name,
+        .getClipboardString = win32_get_clipboard_string,
+        .setClipboardString = win32_set_clipboard_string,
+
+        .freeMonitor = win32_free_monitor,
+        .getMonitorPos = win32_get_monitor_pos,
+        .getMonitorWorkarea = win32_get_monitor_work_area,
+        .getMonitorContentScale = win32_get_monitor_content_scale,
+        .getVideoModes = win32_get_video_modes,
+        .getVideoMode = win32_get_video_mode,
+        .getGammaRamp = win32_get_gamma_ramp,
+        .setGammaRamp = win32_set_gamma_ramp,
+    };
+
+    *platform = win32;
+    return true;
+}
+
 #endif // WSI_WIN32
 

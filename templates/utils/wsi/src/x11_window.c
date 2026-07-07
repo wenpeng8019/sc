@@ -3090,5 +3090,148 @@ WSI_API const char* wsi_get_x11_selection_string(void)
     return getSelectionString(g_wsi.x11.PRIMARY);
 }
 
+bool x11_connect(int platformID, platform_st* platform)
+{
+    const platform_st x11 =
+    {
+        .platformID = SC_PLATFORM_X11,
+        .init = x11_init,
+        .terminate = x11_terminate,
+
+        .pollEvents = x11_poll_events,
+        .waitEvents = x11_wait_events,
+        .waitEventsTimeout = _glfwWaitEventsTimeoutX11,
+        .postEmptyEvent = _glfwPostEmptyEventX11,
+
+        .createWindow = x11_create_window,
+        .destroyWindow = x11_destroy_window,
+        .setWindowTitle = x11_set_window_title,
+        .setWindowIcon = x11_set_window_icon,
+        .setWindowMonitor = x11_set_window_monitor,
+        .setWindowMousePassthrough = x11_set_window_mouse_passthrough,
+
+        .setWindowDecorated = x11_set_window_decorated,
+        .setWindowResizable = x11_set_window_resizable,
+        .setWindowFloating = x11_set_window_floating,
+        .setWindowOpacity = x11_set_window_opacity,
+        .getWindowOpacity = x11_get_window_opacity,
+
+        .getWindowPos = x11_get_window_pos,
+        .setWindowPos = x11_set_window_pos,
+        .getWindowSize = x11_get_window_size,
+        .setWindowSize = x11_set_window_size,
+        .getWindowFrameSize = x11_get_window_frame_size,
+        .setWindowSizeLimits = x11_set_window_size_limits,
+        .getWindowContentScale = x11_get_window_content_scale,
+        .setWindowAspectRatio = x11_set_window_aspect_ratio,
+
+        .showWindow = x11_show_window,
+        .hideWindow = x11_hide_window,
+        .maximizeWindow = x11_maximize_window,
+        .restoreWindow = x11_restore_window,
+        .focusWindow = x11_focus_window,
+        .iconifyWindow = x11_iconify_window,
+        .requestWindowAttention = x11_request_window_attention,
+
+        .windowVisible = x11_window_visible,
+        .windowMaximized = x11_window_maximized,
+        .windowFocused = x11_window_focused,
+        .windowHovered = x11_window_hovered,
+        .windowIconified = x11_window_iconified,
+
+        .setCursor = x11_set_cursor,
+        .createStandardCursor = x11_create_standard_cursor,
+        .createCursor = x11_create_cursor,
+        .destroyCursor = x11_destroy_cursor,
+        .setCursorMode = x11_set_cursorMode,
+        .setCursorPos = x11_set_cursor_pos,
+        .getCursorPos = x11_get_cursor_pos,
+        .setRawMouseMotion = x11_set_mouse_raw_motion,
+        .rawMouseMotionSupported = x11_mouse_raw_motion_supported,
+
+        .getKeyScancode = x11_get_key_scancode,
+        .getScancodeName = x11_get_scancode_name,
+        .getClipboardString = x11_get_clipboard_string,
+        .setClipboardString = x11_set_clipboard_string,
+
+        .freeMonitor = wsi_free_monitorX11,
+        .getMonitorPos = x11_get_monitor_pos,
+        .getMonitorWorkarea = x11_get_monitor_work_area,
+        .getMonitorContentScale = x11_get_monitor_content_scale,
+        .getVideoModes = x11_get_video_modes,
+        .getVideoMode = x11_get_video_mode,
+        .getGammaRamp = x11_get_gamma_ramp,
+        .setGammaRamp = x11_set_gamma_ramp,
+    };
+
+    // HACK: If the application has left the locale as "C" then both wide
+    //       character text input and explicit UTF-8 input via XIM will break
+    //       This sets the CTYPE part of the current locale from the environment
+    //       in the hope that it is set to something more sane than "C"
+    if (strcmp(setlocale(LC_CTYPE, NULL), "C") == 0)
+        setlocale(LC_CTYPE, "");
+
+#if defined(__CYGWIN__)
+    void* module = impl_platform_load_module("libX11-6.so");
+#elif defined(__OpenBSD__) || defined(__NetBSD__)
+    void* module = impl_platform_load_module("libX11.so");
+#else
+    void* module = impl_platform_load_module("libX11.so.6");
+#endif
+    if (!module)
+    {
+        if (platformID == SC_PLATFORM_X11)
+            impl_on_error(SC_WSI_ERR_PLATFORM_ERROR, "X11: Failed to load Xlib");
+
+        return false;
+    }
+
+    PFN_XInitThreads XInitThreads = (PFN_XInitThreads)
+        impl_platform_get_module_symbol(module, "XInitThreads");
+    PFN_XrmInitialize XrmInitialize = (PFN_XrmInitialize)
+        impl_platform_get_module_symbol(module, "XrmInitialize");
+    PFN_XOpenDisplay XOpenDisplay = (PFN_XOpenDisplay)
+        impl_platform_get_module_symbol(module, "XOpenDisplay");
+    if (!XInitThreads || !XrmInitialize || !XOpenDisplay)
+    {
+        if (platformID == SC_PLATFORM_X11)
+            impl_on_error(SC_WSI_ERR_PLATFORM_ERROR, "X11: Failed to load Xlib entry point");
+
+        impl_platform_unload_module(module);
+        return false;
+    }
+
+    XInitThreads();
+    XrmInitialize();
+
+    Display* display = XOpenDisplay(NULL);
+    if (!display)
+    {
+        if (platformID == SC_PLATFORM_X11)
+        {
+            const char* name = getenv("DISPLAY");
+            if (name)
+            {
+                impl_on_error(SC_WSI_ERR_PLATFORM_UNAVAILABLE,
+                                "X11: Failed to open display %s", name);
+            }
+            else
+            {
+                impl_on_error(SC_WSI_ERR_PLATFORM_UNAVAILABLE,
+                                "X11: The DISPLAY environment variable is missing");
+            }
+        }
+
+        impl_platform_unload_module(module);
+        return false;
+    }
+
+    g_wsi.x11.display = display;
+    g_wsi.x11.xlib.handle = module;
+
+    *platform = x11;
+    return true;
+}
+
 #endif // WSI_X11
 

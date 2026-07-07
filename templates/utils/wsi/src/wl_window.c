@@ -3395,5 +3395,122 @@ WSI_API struct wl_surface* wsi_get_wayland_window(sc_window* handle)
     return window->wl.surface;
 }
 
+bool wayland_connect(int platformID, platform_st* platform)
+{
+    const platform_st wayland =
+    {
+        .platformID = SC_PLATFORM_WAYLAND,
+        .init = wayland_init,
+        .terminate = wayland_terminate,
+
+        .pollEvents = wayland_poll_events,
+        .waitEvents = wayland_wait_events,
+        .waitEventsTimeout = wayland_wait_eventsTimeout,
+        .postEmptyEvent = wayland_post_empty_event,
+
+        .createWindow = wayland_create_window,
+        .destroyWindow = wayland_destroy_window,
+        .setWindowTitle = wayland_set_window_title,
+        .setWindowIcon = wayland_set_window_icon,
+        .setWindowMonitor = wayland_set_window_monitor,
+        .setWindowMousePassthrough = wayland_set_window_mouse_passthrough,
+
+        .setWindowDecorated = wayland_set_window_decorated,
+        .setWindowResizable = wayland_set_window_resizable,
+        .setWindowFloating = wayland_set_window_floating,
+        .setWindowOpacity = wayland_set_window_opacity,
+        .getWindowOpacity = wayland_get_window_opacity,
+
+        .getWindowPos = wayland_get_window_pos,
+        .setWindowPos = wayland_set_window_pos,
+        .getWindowSize = wayland_get_window_size,
+        .setWindowSize = wayland_set_window_size,
+        .getWindowFrameSize = wayland_get_window_frame_size,
+        .setWindowSizeLimits = wayland_set_window_size_limits,
+        .getWindowContentScale = wayland_get_window_content_scale,
+        .setWindowAspectRatio = wayland_set_window_aspect_ratio,
+
+        .showWindow = wayland_show_window,
+        .hideWindow = wayland_hide_window,
+        .maximizeWindow = wayland_maximize_window,
+        .restoreWindow = wayland_restore_window,
+        .focusWindow = wayland_focus_window,
+        .iconifyWindow = wayland_iconify_window,
+        .requestWindowAttention = wayland_request_window_attention,
+
+        .windowVisible = wayland_window_visible,
+        .windowMaximized = wayland_window_maximized,
+        .windowFocused = wayland_window_focused,
+        .windowHovered = wayland_window_hovered,
+        .windowIconified = wayland_window_iconified,
+
+        .setCursor = wayland_set_cursor,
+        .createStandardCursor = wayland_create_standard_cursor,
+        .createCursor = wayland_create_cursor,
+        .destroyCursor = wayland_destroy_cursor,
+        .setCursorMode = wayland_set_cursorMode,
+        .setCursorPos = wayland_set_cursor_pos,
+        .getCursorPos = wayland_get_cursor_pos,
+        .setRawMouseMotion = wayland_set_mouse_raw_motion,
+        .rawMouseMotionSupported = wayland_mouse_raw_motion_supported,
+
+        .getKeyScancode = wayland_get_key_scancode,
+        .getScancodeName = wayland_get_scancode_name,
+        .getClipboardString = wayland_get_clipboard_string,
+        .setClipboardString = wayland_set_clipboard_string,
+
+        .freeMonitor = wsi_free_monitorWayland,
+        .getMonitorPos = wayland_get_monitor_pos,
+        .getMonitorWorkarea = wayland_get_monitor_work_area,
+        .getMonitorContentScale = wayland_get_monitor_content_scale,
+        .getVideoModes = wayland_get_video_modes,
+        .getVideoMode = wayland_get_video_mode,
+        .getGammaRamp = wayland_get_gamma_ramp,
+        .setGammaRamp = wayland_set_gamma_ramp,
+    };
+
+    void* module = impl_platform_load_module("libwayland-client.so.0");
+    if (!module)
+    {
+        if (platformID == SC_PLATFORM_WAYLAND)
+        {
+            impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
+                            "Wayland: Failed to load libwayland-client");
+        }
+
+        return false;
+    }
+
+    PFN_wl_display_connect wl_display_connect = (PFN_wl_display_connect)
+        impl_platform_get_module_symbol(module, "wl_display_connect");
+    if (!wl_display_connect)
+    {
+        if (platformID == SC_PLATFORM_WAYLAND)
+        {
+            impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
+                            "Wayland: Failed to load libwayland-client entry point");
+        }
+
+        impl_platform_unload_module(module);
+        return false;
+    }
+
+    struct wl_display* display = wl_display_connect(NULL);
+    if (!display)
+    {
+        if (platformID == SC_PLATFORM_WAYLAND)
+            impl_on_error(SC_WSI_ERR_PLATFORM_ERROR, "Wayland: Failed to connect to display");
+
+        impl_platform_unload_module(module);
+        return false;
+    }
+
+    g_wsi.wl.display = display;
+    g_wsi.wl.client.handle = module;
+
+    *platform = wayland;
+    return true;
+}
+
 #endif // WSI_WAYLAND
 

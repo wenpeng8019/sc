@@ -800,8 +800,8 @@ bool null_connect(int platformID, platform_st* platform)
         .requestWindowAttention     = null_request_window_attention,
 
         .windowVisible              = null_window_visible,
-        .windowFocused              = null_window_focused,
         .windowMaximized            = null_window_maximized,
+        .windowFocused              = null_window_focused,
         .windowHovered              = null_window_hovered,
         .windowIconified            = null_window_iconified,
 

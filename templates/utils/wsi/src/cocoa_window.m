@@ -1822,6 +1822,87 @@ const char* _glfwGetClipboardStringCocoa(void)
     } // autoreleasepool
 }
 
+//////////////////////////////////////////////////////////////////////////
+//////                       GLFW platform API                      //////
+//////////////////////////////////////////////////////////////////////////
+
+bool cocoa_connect(int platformID, platform_st* platform)
+{
+    const platform_st cocoa =
+    {
+        .platformID                 = SC_PLATFORM_COCOA,
+        .init                       = cocoa_init,
+        .terminate                  = cocoa_terminate,
+
+        .pollEvents                 = cocoa_poll_events,
+        .waitEvents                 = cocoa_wait_events,
+        .waitEventsTimeout          = cocoa_wait_eventsTimeout,
+        .postEmptyEvent             = cocoa_post_empty_event
+
+        .createWindow               = cocoa_create_window,
+        .destroyWindow              = cocoa_destroy_window,
+        .setWindowTitle             = cocoa_set_window_title,
+        .setWindowIcon              = cocoa_set_window_icon,
+        .setWindowMonitor           = cocoa_set_window_monitor,
+        .setWindowMousePassthrough  = cocoa_set_window_mouse_passthrough,
+
+        .setWindowDecorated         = cocoa_set_window_decorated,
+        .setWindowResizable         = cocoa_set_window_resizable,
+        .setWindowFloating          = cocoa_set_window_floating,
+        .setWindowOpacity           = cocoa_set_window_opacity,
+        .getWindowOpacity           = cocoa_get_window_opacity,
+
+        .getWindowPos               = cocoa_get_window_pos,
+        .setWindowPos               = cocoa_set_window_pos,
+        .getWindowSize              = cocoa_get_window_size,
+        .setWindowSize              = cocoa_set_window_size,
+        .getWindowFrameSize         = cocoa_get_window_frame_size,
+        .setWindowSizeLimits        = cocoa_set_window_size_limits,
+        .getWindowContentScale      = cocoa_get_window_content_scale,
+        .setWindowAspectRatio       = cocoa_set_window_aspect_ratio,
+
+        .showWindow                 = cocoa_show_window,
+        .hideWindow                 = cocoa_hide_window,
+        .maximizeWindow             = cocoa_maximize_window,
+        .restoreWindow              = cocoa_restore_window,
+        .focusWindow                = cocoa_focus_window,
+        .iconifyWindow              = cocoa_iconify_window,
+        .requestWindowAttention     = cocoa_request_window_attention,
+
+        .windowVisible              = cocoa_window_visible,
+        .windowMaximized            = cocoa_window_maximized,
+        .windowFocused              = cocoa_window_focused,
+        .windowHovered              = cocoa_window_hovered,
+        .windowIconified            = cocoa_window_iconified,
+
+        .setCursor                  = cocoa_set_cursor,
+        .createStandardCursor       = cocoa_create_standard_cursor,
+        .createCursor               = cocoa_create_cursor,
+        .destroyCursor              = cocoa_destroy_cursor,
+        .setCursorMode              = cocoa_set_cursorMode,
+        .setCursorPos               = cocoa_set_cursor_pos,
+        .getCursorPos               = cocoa_get_cursor_pos,
+        .setRawMouseMotion          = cocoa_set_mouse_raw_motion,
+        .rawMouseMotionSupported    = cocoa_mouse_raw_motion_supported,
+
+        .getKeyScancode             = cocoa_get_key_scancode,
+        .getScancodeName            = cocoa_get_scancode_name,
+        .getClipboardString         = cocoa_get_clipboard_string,
+        .setClipboardString         = cocoa_set_clipboard_string,
+
+        .freeMonitor                = cocoa_free_monitor,
+        .getMonitorPos              = cocoa_get_monitor_pos,
+        .getMonitorWorkarea         = cocoa_get_monitor_work_area,
+        .getMonitorContentScale     = cocoa_get_monitor_content_scale,
+        .getVideoModes              = cocoa_get_video_modes,
+        .getVideoMode               = cocoa_get_video_mode,
+        .getGammaRamp               = cocoa_get_gamma_ramp,
+        .setGammaRamp               = cocoa_set_gamma_ramp,
+    };
+
+    *platform = cocoa;
+    return true;
+}
 
 #endif // WSI_COCOA
 

@@ -151,7 +151,7 @@ esac
 
 # 共享源文件（所有平台）
 SHARED_SRCS="init.c input.c monitor.c window.c platform.c native.c"
-NULL_SRCS="null_init.c null_monitor.c null_window.c"
+NULL_SRCS="null_monitor.c null_window.c"
 
 # 平台后端宏（可多个，glfw 多后端）→ 展开为 -D 传给编译器
 DEFINE_FLAGS=""

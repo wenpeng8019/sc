@@ -43,10 +43,10 @@ typedef void* id;
  #define NSPasteboardTypeURL NSURLPboardType
 #endif
 
-#define GLFW_COCOA_WINDOW_STATE         _sc_windowNS  ns;
-#define GLFW_COCOA_LIBRARY_WINDOW_STATE _GLFWlibraryNS ns;
-#define GLFW_COCOA_MONITOR_STATE        _sc_monitorNS ns;
-#define GLFW_COCOA_CURSOR_STATE         _sc_cursorNS  ns;
+#define GLFW_COCOA_WINDOW_STATE         ns_window_t  ns;
+#define GLFW_COCOA_LIBRARY_WINDOW_STATE ns_library_t ns;
+#define GLFW_COCOA_MONITOR_STATE        ns_monitor_t ns;
+#define GLFW_COCOA_CURSOR_STATE         ns_cursor_t  ns;
 
 // HIToolbox.framework pointer typedefs
 #define kTISPropertyUnicodeKeyLayoutData g_wsi.ns.tis.kPropertyUnicodeKeyLayoutData
@@ -58,37 +58,11 @@ typedef UInt8 (*PFN_LMGetKbdType)(void);
 #define LMGetKbdType g_wsi.ns.tis.GetKbdType
 
 
-// Cocoa-specific per-window data
-//
-typedef struct _sc_windowNS
-{
-    id              object;
-    id              delegate;
-    id              view;
-    id              layer;
-
-    bool        maximized;
-    bool        occluded;
-    bool        scaleFramebuffer;
-
-    // Cached window properties to filter out duplicate events
-    int             width, height;
-    int             fbWidth, fbHeight;
-    float           xscale, yscale;
-
-    // The total sum of the distances the cursor has been warped
-    // since the last cursor motion event was processed
-    // This is kept to counteract Cocoa doing the same internally
-    double          cursorWarpDeltaX, cursorWarpDeltaY;
-} _sc_windowNS;
-
-// Cocoa-specific global data
-//
-typedef struct _GLFWlibraryNS
+typedef struct ns_library_t
 {
     CGEventSourceRef    eventSource;
     id                  delegate;
-    bool            cursorHidden;
+    bool                cursorHidden;
     TISInputSourceRef   inputSource;
     IOHIDManagerRef     hidManager;
     id                  unicodeData;
@@ -104,7 +78,7 @@ typedef struct _GLFWlibraryNS
     // Where to place the cursor when re-enabled
     double              restoreCursorPosX, restoreCursorPosY;
     // The window whose disabled cursor mode is active
-    window_st*        disabledCursorWindow;
+    window_st*          disabledCursorWindow;
 
     struct {
         CFBundleRef     bundle;
@@ -113,96 +87,119 @@ typedef struct _GLFWlibraryNS
         PFN_LMGetKbdType GetKbdType;
         CFStringRef     kPropertyUnicodeKeyLayoutData;
     } tis;
-} _GLFWlibraryNS;
+} ns_library_t;
 
-// Cocoa-specific per-monitor data
-//
-typedef struct _sc_monitorNS
+
+typedef struct ns_window_t
+{
+    id                  object;
+    id                  delegate;
+    id                  view;
+    id                  layer;
+
+    bool                maximized;
+    bool                occluded;
+    bool                scaleFramebuffer;
+
+    // Cached window properties to filter out duplicate events
+    int                 width, height;
+    int                 fbWidth, fbHeight;
+    float               xscale, yscale;
+
+    // The total sum of the distances the cursor has been warped
+    // since the last cursor motion event was processed
+    // This is kept to counteract Cocoa doing the same internally
+    double              cursorWarpDeltaX, cursorWarpDeltaY;
+} ns_window_t;
+
+typedef struct ns_monitor_t
 {
     CGDirectDisplayID   displayID;
     CGDisplayModeRef    previousMode;
     uint32_t            unitNumber;
     id                  screen;
     double              fallbackRefreshRate;
-} _sc_monitorNS;
+} ns_monitor_t;
 
-// Cocoa-specific per-cursor data
-//
-typedef struct _sc_cursorNS
+typedef struct ns_cursor_t
 {
     id              object;
-} _sc_cursorNS;
-
-
-bool cocoa_connect(int platformID, platform_st* platform);
-int cocoa_init(void);
-void cocoa_terminate(void);
-
-bool cocoa_create_window(window_st* window, const wnd_config_st* wndconfig);
-void cocoa_destroy_window(window_st* window);
-void cocoa_set_window_title(window_st* window, const char* title);
-void cocoa_set_window_icon(window_st* window, int count, const GLFWimage* images);
-void cocoa_get_window_pos(window_st* window, int* xpos, int* ypos);
-void cocoa_set_window_pos(window_st* window, int xpos, int ypos);
-void cocoa_get_window_size(window_st* window, int* width, int* height);
-void cocoa_set_window_size(window_st* window, int width, int height);
-void cocoa_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void cocoa_set_window_aspect_ratio(window_st* window, int numer, int denom);
-void cocoa_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
-void cocoa_get_window_content_scale(window_st* window, float* xscale, float* yscale);
-void cocoa_iconify_window(window_st* window);
-void cocoa_restore_window(window_st* window);
-void cocoa_maximize_window(window_st* window);
-void cocoa_show_window(window_st* window);
-void cocoa_hide_window(window_st* window);
-void cocoa_request_window_attention(window_st* window);
-void cocoa_focus_window(window_st* window);
-void cocoa_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool cocoa_window_focused(window_st* window);
-bool cocoa_window_iconified(window_st* window);
-bool cocoa_window_visible(window_st* window);
-bool cocoa_window_maximized(window_st* window);
-bool cocoa_window_hovered(window_st* window);
-void cocoa_set_window_resizable(window_st* window, bool enabled);
-void cocoa_set_window_decorated(window_st* window, bool enabled);
-void cocoa_set_window_floating(window_st* window, bool enabled);
-float cocoa_get_window_opacity(window_st* window);
-void cocoa_set_window_opacity(window_st* window, float opacity);
-void cocoa_set_window_mouse_passthrough(window_st* window, bool enabled);
-
-void cocoa_set_mouse_raw_motion(window_st *window, bool enabled);
-bool cocoa_mouse_raw_motion_supported(void);
-
-void cocoa_poll_events(void);
-void cocoa_wait_events(void);
-void cocoa_wait_eventsTimeout(double timeout);
-void cocoa_post_empty_event(void);
-
-void cocoa_get_cursor_pos(window_st* window, double* xpos, double* ypos);
-void cocoa_set_cursor_pos(window_st* window, double xpos, double ypos);
-void cocoa_set_cursorMode(window_st* window, int mode);
-const char* cocoa_get_scancode_name(int scancode);
-int cocoa_get_key_scancode(int key);
-bool cocoa_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool cocoa_create_standard_cursor(cursor_st* cursor, int shape);
-void cocoa_destroy_cursor(cursor_st* cursor);
-void cocoa_set_cursor(window_st* window, cursor_st* cursor);
-void cocoa_set_clipboard_string(const char* string);
-const char* cocoa_get_clipboard_string(void);
-
-
-void cocoa_free_monitor(monitor_st* monitor);
-void cocoa_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
-void cocoa_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
-void cocoa_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count);
-bool cocoa_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
-bool cocoa_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
-void cocoa_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
+} ns_cursor_t;
 
 void cocoa_poll_monitors(void);
 void cocoa_SetVideoMode(monitor_st* monitor, const GLFWvidmode* desired);
 void cocoa_RestoreVideoMode(monitor_st* monitor);
 
 float cocoa_TransformY(float y);
+
+bool cocoa_connect(int platformID, platform_st* platform);
+
+int cocoa_init(void);
+void cocoa_terminate(void);
+
+void cocoa_poll_events(void);
+void cocoa_wait_events(void);
+void cocoa_wait_eventsTimeout(double timeout);
+void cocoa_post_empty_event(void);
+
+bool cocoa_create_window(window_st* window, const wnd_config_st* wndconfig);
+void cocoa_destroy_window(window_st* window);
+void cocoa_set_window_title(window_st* window, const char* title);
+void cocoa_set_window_icon(window_st* window, int count, const GLFWimage* images);
+void cocoa_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
+void cocoa_set_window_mouse_passthrough(window_st* window, bool enabled);
+
+void cocoa_set_window_decorated(window_st* window, bool enabled);
+void cocoa_set_window_resizable(window_st* window, bool enabled);
+void cocoa_set_window_floating(window_st* window, bool enabled);
+void cocoa_set_window_opacity(window_st* window, float opacity);
+float cocoa_get_window_opacity(window_st* window);
+
+void cocoa_get_window_pos(window_st* window, int* xpos, int* ypos);
+void cocoa_set_window_pos(window_st* window, int xpos, int ypos);
+void cocoa_get_window_size(window_st* window, int* width, int* height);
+void cocoa_set_window_size(window_st* window, int width, int height);
+void cocoa_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
+void cocoa_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
+void cocoa_get_window_content_scale(window_st* window, float* xscale, float* yscale);
+void cocoa_set_window_aspect_ratio(window_st* window, int numer, int denom);
+
+void cocoa_show_window(window_st* window);
+void cocoa_hide_window(window_st* window);
+void cocoa_maximize_window(window_st* window);
+void cocoa_restore_window(window_st* window);
+void cocoa_focus_window(window_st* window);
+void cocoa_iconify_window(window_st* window);
+void cocoa_request_window_attention(window_st* window);
+
+bool cocoa_window_visible(window_st* window);
+bool cocoa_window_focused(window_st* window);
+bool cocoa_window_maximized(window_st* window);
+bool cocoa_window_hovered(window_st* window);
+bool cocoa_window_iconified(window_st* window);
+
+
+void cocoa_set_cursor(window_st* window, cursor_st* cursor);
+bool cocoa_create_standard_cursor(cursor_st* cursor, int shape);
+bool cocoa_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
+void cocoa_destroy_cursor(cursor_st* cursor);
+void cocoa_set_cursorMode(window_st* window, int mode);
+void cocoa_set_cursor_pos(window_st* window, double xpos, double ypos);
+void cocoa_get_cursor_pos(window_st* window, double* xpos, double* ypos);
+void cocoa_set_mouse_raw_motion(window_st *window, bool enabled);
+bool cocoa_mouse_raw_motion_supported(void);
+
+int cocoa_get_key_scancode(int key);
+const char* cocoa_get_scancode_name(int scancode);
+const char* cocoa_get_clipboard_string(void);
+void cocoa_set_clipboard_string(const char* string);
+
+void cocoa_free_monitor(monitor_st* monitor);
+void cocoa_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
+void cocoa_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
+void cocoa_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
+GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count);
+bool cocoa_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
+bool cocoa_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
+void cocoa_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
 
