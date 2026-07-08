@@ -2008,6 +2008,10 @@ struct Parser {
                 err("@ 后期望版本号（整数如 450 或小数如 2.0）");
             }
             t.version = normalizeShaderVersion(t.api, major, minor, hasDecimal);
+            std::string hint;
+            if (!validShaderVersion(t.api, t.version, hint))
+                err("无效目标版本 " + api + "@" + std::to_string(t.version) +
+                    "（" + hint + "）");
             prog.shaderTargets.push_back(t);
         } while (accept(Tok::Comma));
         expect(Tok::Newline, "换行");

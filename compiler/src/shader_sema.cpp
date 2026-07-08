@@ -56,6 +56,7 @@ bool illegalSwizzle(const std::string& m) {
 
 struct Checker {
     int f8Line = 0;   // 首次出现 f8(double) 类型的行号（0 = 未用）；供能力门控查表。
+    int uintLine = 0; // 首次出现 u*/uvec* 无符号类型的行号（GLSL ES 100 无 uint）。
 
     void expr(const Expr* e) {
         if (!e) return;
@@ -91,6 +92,10 @@ struct Checker {
         if (t.autoFree)  bad(line, "单例指针 T@1");
         if (t.fnKind != TypeRef::FncKind::None) bad(line, "函数指针字段");
         if (t.name == "f8" && !f8Line) f8Line = line;   // f8 双精度：能力门控用（见 shaderSemaCheck）
+        if (!uintLine &&
+            (t.name == "u1" || t.name == "u2" || t.name == "u4" ||
+             t.name == "uvec2" || t.name == "uvec3" || t.name == "uvec4"))
+            uintLine = line;                            // uint 族：同上
     }
 
     void stmt(const Stmt* s) {
@@ -171,10 +176,19 @@ void shaderSemaCheck(Program& prog) {
     for (const auto& d : prog.decls) {
         if (!d) continue;
 
-        // 结构体字段（含 I/O 与资源块）的类型子集检查
+        // 结构体字段（含 I/O 与资源块）的类型子集检查 + 内建语义能力采集
         if (d->kind == Decl::StructD || d->kind == Decl::UnionD) {
-            for (const auto& f : d->structCommon.fields)
-                c.checkType(f.type, f.line ? f.line : d->line);
+            for (const auto& f : d->structCommon.fields) {
+                int fl = f.line ? f.line : d->line;
+                c.checkType(f.type, fl);
+                if (f.shaderAttr && !f.shaderAttr->builtin.empty()) {
+                    const std::string& b = f.shaderAttr->builtin;
+                    if (b == "vertex_id" || b == "instance_id")
+                        useCap(Cap::VertexIdBuiltin, fl);
+                    else if (b == "frag_depth")
+                        useCap(Cap::FragDepthBuiltin, fl);
+                }
+            }
         }
 
         // 资源块 / 全局资源（结构体或 var）的绑定冲突 + 能力采集
@@ -200,10 +214,23 @@ void shaderSemaCheck(Program& prog) {
         if (d->kind == Decl::FuncD) {
             c.func(*d);
             if (d->shaderStage == ShaderStage::Comp) useCap(Cap::ComputeStage, d->line);
+            // frag 多输出（返回结构体含 ≥2 个非 builtin 字段）→ MRT 能力
+            if (d->shaderStage == ShaderStage::Frag && d->structCommon.type) {
+                for (const auto& rd : prog.decls) {
+                    if (!rd || rd->kind != Decl::StructD ||
+                        rd->name != d->structCommon.type->name) continue;
+                    int outs = 0;
+                    for (const auto& f : rd->structCommon.fields)
+                        if (!f.shaderAttr || f.shaderAttr->builtin.empty()) outs++;
+                    if (outs >= 2) useCap(Cap::MultiRenderTarget, d->line);
+                    break;
+                }
+            }
         }
     }
 
-    if (c.f8Line) useCap(Cap::DoubleType, c.f8Line);   // f8 双精度（由 checkType 捕获）
+    if (c.f8Line)   useCap(Cap::DoubleType, c.f8Line);   // f8 双精度（由 checkType 捕获）
+    if (c.uintLine) useCap(Cap::UintType, c.uintLine);   // uint 族（同上）
 
     // 已用能力集存入 prog：codegen_glsl 据此对经扩展满足的能力发射 #extension。
     prog.shaderUsedCaps.clear();

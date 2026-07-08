@@ -48,12 +48,18 @@ std::string mapType(const std::string& n) {
     return n;   // vec2/3/4、ivec*、mat*、sampler2D 及自定义类型原样保留
 }
 
+// 遗留 ES（GLSL ES 100 = OpenGL ES 2.0）：发射形态整体切换——
+// attribute/varying、gl_FragColor/gl_FragData、无 layout 限定、无 uniform 块
+//（平铺为普通 uniform）、无数组构造器（降级逐元素赋值）、texture2D()。
+bool legacyES(const GlslTarget& t) { return t.isES() && t.version < 300; }
+
 // 内建语义名（sc 标注）→ GLSL 内建变量。区分输入侧 / 输出侧、以及目标 API：
 // Vulkan 用 gl_VertexIndex/gl_InstanceIndex；GL/ES 用 gl_VertexID/gl_InstanceID。
 std::string builtinGlsl(const std::string& sem, bool asOutput, const GlslTarget& t) {
     if (sem == "position")    return asOutput ? "gl_Position" : "gl_FragCoord";
     if (sem == "frag_coord")  return "gl_FragCoord";
-    if (sem == "frag_depth")  return "gl_FragDepth";
+    if (sem == "frag_depth")  return legacyES(t) ? "gl_FragDepthEXT"   // GL_EXT_frag_depth
+                                                 : "gl_FragDepth";
     if (sem == "vertex_id")   return t.isVulkan() ? "gl_VertexIndex"   : "gl_VertexID";
     if (sem == "instance_id") return t.isVulkan() ? "gl_InstanceIndex" : "gl_InstanceID";
     /* 计算阶段（comp）内建 */
@@ -122,6 +128,7 @@ struct Emitter {
     const std::unordered_map<std::string, std::string>* memberMap = nullptr;  // "base.field" → 替换名
     const std::unordered_set<std::string>* outAggVars = nullptr;              // 输出聚合局部变量名
     std::string scalarOut;   // 片元标量返回的目标输出名（空 = 非标量返回）
+    bool legacy = false;     // GLSL ES 100 遗留模式（无数组构造器、texture2D）
 
     void pad() { for (int i = 0; i < indent; i++) os << "    "; }
 
@@ -178,7 +185,9 @@ struct Emitter {
                 return expr(e->a.get()) + "." + e->text;
             }
             case Expr::Call: {
-                std::string s = expr(e->a.get()) + "(";
+                std::string callee = expr(e->a.get());
+                if (legacy && callee == "texture") callee = "texture2D";   // ES 100 无重载 texture()
+                std::string s = callee + "(";
                 for (size_t i = 0; i < e->args.size(); i++) {
                     if (i) s += ", ";
                     s += expr(e->args[i].get());
@@ -226,6 +235,20 @@ struct Emitter {
             case Stmt::VarS:
             case Stmt::LetS:
                 for (const auto& f : s->decls) {
+                    // ES 100 无数组构造器：声明后逐元素赋值（const 随之丢弃）
+                    if (legacy && f.init && f.init->kind == Expr::InitList &&
+                        !f.type.arrayDims.empty()) {
+                        pad();
+                        os << mapType(f.type.name) << " " << f.name;
+                        for (const auto& d : f.type.arrayDims) os << "[" << d << "]";
+                        os << ";\n";
+                        for (size_t i = 0; i < f.init->args.size(); i++) {
+                            pad();
+                            os << f.name << "[" << i << "] = "
+                               << expr(f.init->args[i].get()) << ";\n";
+                        }
+                        continue;
+                    }
                     pad();
                     if (s->kind == Stmt::LetS) os << "const ";
                     os << mapType(f.type.name) << " " << f.name;
@@ -284,16 +307,19 @@ Model buildModel(const Program& prog) {
 }
 
 // 资源块 GLSL（对所有阶段一致发射；未用者对编译无害）。
+// legacy ES（GLSL ES 100）无 uniform 块：平铺为普通 uniform（名 = 块_字段，
+// 运行时按名 glUniform 上传；块成员访问由 emitStage 的 memberMap 改写）。
 std::string emitResources(const Model& m, const GlslTarget& t) {
     const bool useSet  = t.useSetQualifier();                 // 仅 Vulkan 有 set= 限定
     const bool explicitBind = capSupported(Cap::ExplicitBinding, t);
+    const bool legacy = legacyES(t);
     std::string out;
     for (const Decl* r : m.resources) {
         auto* a = r->shaderAttr.get();
         std::string bind;
         auto add = [&](const std::string& s) { bind += (bind.empty() ? "" : ", ") + s; };
         if (a->res == ShaderDeclAttr::Push) bind = "push_constant";   // 仅 Vulkan 抵达（已语义门控）
-        else {
+        else if (!legacy) {
             if (useSet && a->set >= 0)          add("set=" + std::to_string(a->set));
             if (explicitBind && a->binding >= 0) add("binding=" + std::to_string(a->binding));
         }
@@ -301,6 +327,14 @@ std::string emitResources(const Model& m, const GlslTarget& t) {
             const Field& f = r->structCommon.fields.front();
             std::string pfx = bind.empty() ? "" : ("layout(" + bind + ") ");
             out += pfx + "uniform " + mapType(f.type.name) + " " + f.name + ";\n";
+            continue;
+        }
+        if (legacy) {                                      // 块平铺（仅 uniform 可抵达）
+            for (const auto& f : r->structCommon.fields) {
+                out += "uniform " + mapType(f.type.name) + " " + r->name + "_" + f.name;
+                for (const auto& d : f.type.arrayDims) out += "[" + d + "]";
+                out += ";\n";
+            }
             continue;
         }
         bool std430 = a->res == ShaderDeclAttr::Storage;   // uniform / storage / push 块
@@ -342,10 +376,29 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
                       const GlslTarget& t, const std::vector<Cap>& usedCaps) {
     const bool isVert = stage.shaderStage == ShaderStage::Vert;
     const bool isComp = stage.shaderStage == ShaderStage::Comp;
+    const bool legacy = legacyES(t);
     std::unordered_map<std::string, std::string> memberMap;
     std::unordered_set<std::string> outAggVars;
     std::string ioDecls;
     std::string scalarOut;
+
+    // legacy：uniform 块平铺后的成员访问改写（Params.a → Params_a）
+    if (legacy)
+        for (const Decl* r : m.resources)
+            if (r->kind != Decl::VarD)
+                for (const auto& f : r->structCommon.fields)
+                    memberMap[r->name + "." + f.name] = r->name + "_" + f.name;
+
+    // 输入/输出限定词：现代 GLSL 用 layout(location=N) in/out；
+    // legacy ES 用 attribute（vert 入）/ varying（vert 出 + frag 入）。
+    auto inQual = [&](int loc) {
+        if (legacy) return std::string(isVert ? "attribute " : "varying ");
+        return "layout(location=" + std::to_string(loc) + ") in ";
+    };
+    auto outQual = [&](int loc) {
+        if (legacy) return std::string("varying ");
+        return "layout(location=" + std::to_string(loc) + ") out ";
+    };
 
     // comp：工作组尺寸（暂无 .ss 语法，固定 64×1×1；反射清单同步携带，
     // 运行时据此设 threads_per_group）
@@ -357,8 +410,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     for (const auto& p : stage.structCommon.fields) {
         auto it = m.structs.find(p.type.name);
         if (it == m.structs.end()) {   // 标量/向量入参：单个顶点属性
-            ioDecls += "layout(location=" + std::to_string(autoInLoc++) + ") in " +
-                       mapType(p.type.name) + " " + p.name + ";\n";
+            ioDecls += inQual(autoInLoc++) + mapType(p.type.name) + " " + p.name + ";\n";
             continue;
         }
         for (const auto& f : it->second->structCommon.fields) {
@@ -375,12 +427,13 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
             int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoInLoc++;
             std::string g = isVert ? f.name : ("v_" + f.name);
             memberMap[p.name + "." + f.name] = g;
-            ioDecls += "layout(location=" + std::to_string(loc) + ") in " +
-                       mapType(f.type.name) + " " + g + ";\n";
+            ioDecls += inQual(loc) + mapType(f.type.name) + " " + g + ";\n";
         }
     }
 
     // —— 输出接口（返回类型）——
+    // legacy frag：无自定义 out——单输出写 gl_FragColor，多输出（MRT，已能力
+    // 门控 GL_EXT_draw_buffers）全部写 gl_FragData[loc]（两者不可混用）。
     std::string retType = stage.structCommon.type ? stage.structCommon.type->name : "void";
     auto rit = m.structs.find(retType);
     if (retType != "void" && !retType.empty() && rit != m.structs.end()) {
@@ -388,6 +441,11 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
             if (s->kind == Stmt::VarS)
                 for (const auto& f : s->decls)
                     if (f.type.name == retType) outAggVars.insert(f.name);
+
+        int fragOuts = 0;   // 非 builtin 输出数（legacy frag 选 gl_FragColor/gl_FragData）
+        if (legacy && !isVert)
+            for (const auto& f : rit->second->structCommon.fields)
+                if (!f.shaderAttr || f.shaderAttr->builtin.empty()) fragOuts++;
 
         int autoOutLoc = 0;
         for (const auto& f : rit->second->structCommon.fields) {
@@ -397,16 +455,24 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
                 target = builtinGlsl(sem, /*out*/true, t);   // gl_Position / gl_FragDepth
             } else {
                 int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoOutLoc++;
-                std::string g = isVert ? ("v_" + f.name) : ("f_" + f.name);
-                ioDecls += "layout(location=" + std::to_string(loc) + ") out " +
-                           mapType(f.type.name) + " " + g + ";\n";
-                target = g;
+                if (legacy && !isVert) {
+                    target = fragOuts >= 2 ? ("gl_FragData[" + std::to_string(loc) + "]")
+                                           : "gl_FragColor";
+                } else {
+                    std::string g = isVert ? ("v_" + f.name) : ("f_" + f.name);
+                    ioDecls += outQual(loc) + mapType(f.type.name) + " " + g + ";\n";
+                    target = g;
+                }
             }
             for (const auto& v : outAggVars) memberMap[v + "." + f.name] = target;
         }
     } else if (retType != "void" && !retType.empty()) {
-        scalarOut = "f_color";   // 标量/向量返回（典型 frag vec4）
-        ioDecls += "layout(location=0) out " + mapType(retType) + " f_color;\n";
+        if (legacy) {
+            scalarOut = "gl_FragColor";   // legacy：直写内建，无声明
+        } else {
+            scalarOut = "f_color";   // 标量/向量返回（典型 frag vec4）
+            ioDecls += outQual(0) + mapType(retType) + " f_color;\n";
+        }
     }
 
     // —— 装配 ——
@@ -414,10 +480,20 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     out << "#version " << t.version;
     if (const char* prof = t.profileWord(); prof && *prof) out << " " << prof;
     out << "\n";
-    // 经替代扩展满足的能力 → #extension 指令（去重：多能力可共用同一扩展）
+    // 经替代扩展满足的能力 → #extension 指令（去重：多能力可共用同一扩展；
+    // 阶段过滤：frag/comp 专属能力的扩展不进其他阶段）
     {
+        auto capInStage = [&](Cap c) {
+            switch (c) {
+                case Cap::FragDepthBuiltin:
+                case Cap::MultiRenderTarget: return stage.shaderStage == ShaderStage::Frag;
+                case Cap::ComputeStage:      return isComp;
+                default: return true;
+            }
+        };
         std::vector<const char*> emitted;
         for (Cap c : usedCaps) {
+            if (!capInStage(c)) continue;
             const char* ext = nullptr;
             if (capResolve(c, t, &ext) == CapVia::Ext && ext) {
                 bool dup = false;
@@ -431,7 +507,11 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     }
     out << "// generated from " << stage.name << " (" << stageExt(stage.shaderStage)
         << ") target " << glTargetTag(t) << "\n\n";
-    if (t.isES()) out << "precision highp float;\nprecision highp int;\n\n";
+    if (t.isES()) {
+        // legacy frag：ES2 硬件不保证片元 highp，mediump 是安全缺省
+        const char* prec = (legacy && !isVert) ? "mediump" : "highp";
+        out << "precision " << prec << " float;\nprecision " << prec << " int;\n\n";
+    }
     out << prelude;
     if (!ioDecls.empty()) out << ioDecls << "\n";
 
@@ -439,6 +519,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     em.memberMap = &memberMap;
     em.outAggVars = outAggVars.empty() ? nullptr : &outAggVars;
     em.scalarOut = scalarOut;
+    em.legacy = legacy;
     for (const auto& s : stage.body) em.stmt(s.get());
 
     out << "void main() {\n" << em.os.str() << "}\n";
@@ -471,7 +552,8 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
     j << "{\n";
     j << "  \"target\": {\"api\": " << jstr(glApiName(target.api))
       << ", \"version\": " << target.version
-      << ", \"explicitBinding\": " << (explicitBind ? "true" : "false") << "},\n";
+      << ", \"explicitBinding\": " << (explicitBind ? "true" : "false")
+      << ", \"flattenUniforms\": " << (legacyES(target) ? "true" : "false") << "},\n";
     j << "  \"stages\": [\n";
 
     bool firstStage = true;

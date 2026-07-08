@@ -76,6 +76,44 @@ inline int normalizeShaderVersion(GlApi api, int major, int minor, bool hasDecim
     return major;
 }
 
+// 版本白名单：GLSL 版本号不是连续数，写错（如 gles@200）应当场拒绝并提示。
+//   典型误区：ES2.0 的着色语言是 GLSL ES 100（非 200），ES3.0 才是 300。
+//   Metal 为打包整数，只验范围（MSL 1.0–4.x）。
+// 合法返回 true；非法返回 false 并置 hint（可直接拼进报错）。
+inline bool validShaderVersion(GlApi api, int v, std::string& hint) {
+    auto in = [&](std::initializer_list<int> list) {
+        for (int x : list) if (x == v) return true;
+        return false;
+    };
+    switch (api) {
+        case GlApi::Vulkan:
+            if (in({450, 460})) return true;
+            hint = "vulkan 有效版本：450/460";
+            return false;
+        case GlApi::GLCore:
+            if (in({110, 120, 130, 140, 150, 330, 400, 410, 420, 430, 440, 450, 460}))
+                return true;
+            hint = "glcore 有效版本：110–150/330/400–460";
+            return false;
+        case GlApi::GLES:
+            if (in({100, 300, 310, 320})) return true;
+            hint = v == 200
+                ? "gles 无 GLSL 版本 200：ES2.0 的着色语言是 gles@100，ES3.0 才是 gles@300"
+                : "gles 有效版本：100(ES2.0)/300(ES3.0)/310(ES3.1)/320(ES3.2)";
+            return false;
+        case GlApi::WebGL:
+            if (in({100, 300})) return true;
+            hint = "webgl 有效版本：100(WebGL1)/300(WebGL2)";
+            return false;
+        case GlApi::Metal:
+            if (v >= 10000 && v < 50000) return true;
+            hint = "metal 版本如 2.0（MSL 1.0–4.x）";
+            return false;
+    }
+    hint = "未知 API";
+    return false;
+}
+
 // API 族名（诊断 / 反射清单 / 产物 tag）。
 inline const char* glApiName(GlApi a) {
     switch (a) {
@@ -170,6 +208,14 @@ inline bool parseCapsProfile(const std::string& text, GlslTarget& out, std::stri
                 return false;
             }
             out.version = normalizeShaderVersion(out.api, major, minor, hasDecimal);
+            {
+                std::string hint;
+                if (!validShaderVersion(out.api, out.version, hint)) {
+                    err = "第 " + std::to_string(lineNo) + " 行：无效版本 " +
+                          std::to_string(out.version) + "（" + hint + "）";
+                    return false;
+                }
+            }
             hasVersion = true;
         } else if (key == "ext") {
             out.extensions.push_back(val);
@@ -196,6 +242,10 @@ enum class Cap {
     DoubleType,       // f8 双精度
     DescriptorSet,    // 多描述符集（set >= 1）
     ExplicitBinding,  // layout(binding=) 显式绑定（codegen 策略：不支持则退化按名绑定）
+    UintType,         // u1/u2/u4 无符号整型（GLSL ES 100 / 早期桌面 GL 无 uint）
+    VertexIdBuiltin,  // builtin vertex_id / instance_id（ES 100 无 gl_VertexID）
+    FragDepthBuiltin, // builtin frag_depth（ES 100 经 GL_EXT_frag_depth → gl_FragDepthEXT）
+    MultiRenderTarget,// frag 多输出（ES 100 经 GL_EXT_draw_buffers → gl_FragData[i]）
     CapCount
 };
 
@@ -253,6 +303,30 @@ inline const CapRow& capRow(Cap c) {
             {310, nullptr, 0},
             { -1, nullptr, 0},
             {20000, nullptr, 0}},
+        /*UintType       */ {"u* 无符号整型",
+            {450, nullptr, 0},
+            {130, nullptr, 0},
+            {300, nullptr, 0},
+            {300, nullptr, 0},
+            {10000, nullptr, 0}},
+        /*VertexIdBuiltin*/ {"vertex_id/instance_id 内建",
+            {450, nullptr, 0},
+            {130, nullptr, 0},
+            {300, nullptr, 0},   // ES 100 无 gl_VertexID（也无标准扩展）
+            {300, nullptr, 0},
+            {10000, nullptr, 0}},
+        /*FragDepthBuiltin*/ {"frag_depth 内建",
+            {450, nullptr, 0},
+            {110, nullptr, 0},
+            {300, "GL_EXT_frag_depth", 100},   // ES 100 经扩展 → gl_FragDepthEXT
+            {300, "GL_EXT_frag_depth", 100},
+            {10000, nullptr, 0}},
+        /*MultiRenderTarget*/ {"frag 多输出(MRT)",
+            {450, nullptr, 0},
+            {110, nullptr, 0},
+            {300, "GL_EXT_draw_buffers", 100}, // ES 100 经扩展 → gl_FragData[i]
+            {300, nullptr, 0},
+            {10000, nullptr, 0}},
     };
     return TABLE[(int)c];
 }

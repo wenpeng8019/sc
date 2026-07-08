@@ -401,24 +401,34 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
   | `gles` | `#version 300 es` / `310 es` | 移动端 / 嵌入式 |
   | `webgl` | `#version 300 es`（WebGL2）/ `100`（WebGL1） | 浏览器 |
 
-- **codegen 按 target 分叉的差异点**（需在 `codegen_glsl` 里参数化，而非硬编码）：
-  - **版本头 + profile**：`#version N [core|es]`。
-  - **精度限定符**：ES/WebGL 片元着色器须 `precision highp float;`（及 int/sampler 精度）。
+- **codegen 按 target 分叉的差异点**（已在 `codegen_glsl` 参数化；legacy ES = gles@100/
+  webgl@100 整体切换发射形态）：
+  - **版本头 + profile**：`#version N [core|es]`（ES 100 / GL<150 无 profile 词）。
+  - **精度限定符**：ES 发 `precision`；legacy frag 用 `mediump`（ES2 硬件不保证片元
+    highp），其余 `highp`。
   - **绑定语法**：Vulkan 用 `layout(set=,binding=)`；桌面 GL 无 `set`、`binding` 需 GL≥4.2；
     ES3.1 才有显式 binding；更低版本退化为运行时按名字 `glGetUniformLocation` → 反射清单需带名字。
-  - **内建变量名**：`gl_VertexIndex`↔`gl_VertexID`、`gl_InstanceIndex`↔`gl_InstanceID`
-    （Vulkan vs GL/ES 命名不同，`builtinGlsl` 需按 target 映射）。
-  - **I/O 关键字**：现代用 `in`/`out`；GLSL ES 100 / GL 120 用 `attribute`/`varying`。
-  - **采样**：`texture()`（现代）vs `texture2D()`（ES2/GL<3.3）；组合 sampler 的可用性。
-  - **数组构造器、位运算、`double`(f8)** 等在低版本不可用（见下）。
+  - **uniform 块平铺（legacy，已实现）**：ES 100 无 uniform 块——块字段平铺为普通
+    uniform（名 = `块_字段`，如 `Params_tint`），块成员访问自动改写；反射清单 target 增
+    `"flattenUniforms": true`，运行时按名逐字段 `glUniform*` 上传。
+  - **内建变量名**：`gl_VertexIndex`↔`gl_VertexID`（Vulkan vs GL/ES）；legacy frag_depth →
+    `gl_FragDepthEXT`（GL_EXT_frag_depth）。
+  - **I/O 关键字（legacy，已实现）**：现代用 `in`/`out` + `layout(location=)`；
+    legacy 用 `attribute`（vert 入）/`varying`（vert 出 + frag 入）无 layout；
+    frag 输出写 `gl_FragColor`（单）/`gl_FragData[i]`（MRT，需 GL_EXT_draw_buffers）。
+  - **采样（legacy，已实现）**：`texture()` → `texture2D()`。
+  - **数组构造器（legacy，已实现）**：ES 100 无 `vec2[3](...)` —— 初始化列表降级为
+    声明 + 逐元素赋值（`const` 随之丢弃）。
 
-- **shader_sema 按 target 收窄能力**（这是「语义分析也要根据输出版本进行功能限制」）：
-  - `storage`/SSBO → 需 GL≥4.3 / ES≥3.1，否则报错。
-  - `comp` 计算着色器 → 需 GL≥4.3 / ES≥3.1。
-  - `f8`（double）→ 仅桌面 GL≥4.0；ES/WebGL 无。
-  - 数组字面量构造器、整数位运算、无符号整型 → ES2/GL<3.3 不可用。
-  - 各版本内建函数集差异（如 `textureLod` 在 ES2 顶点阶段的限制）。
-  - 校验应产出**明确的版本相关报错**：「target `gles300` 不支持 storage buffer（需 ES≥3.1）」。
+- **shader_sema 按 target 收窄能力**（已实现，能力行见 `shader_caps.h`）：
+  - `storage`/SSBO、`comp` → 需 GL≥4.3 / ES≥3.1（或 ARB 后向移植扩展）。
+  - `f8`（double）→ 仅桌面 GL≥4.0（或 GL_ARB_gpu_shader_fp64）；ES/WebGL/Metal 无。
+  - `u*`/`uvec*` 无符号整型 → 需 GL≥1.30 / ES≥3.0（ES 100 无 uint）。
+  - `builtin vertex_id/instance_id` → 需 ES≥3.0（ES 100 无 gl_VertexID，无标准扩展）。
+  - `builtin frag_depth` → ES 100 经 GL_EXT_frag_depth（发射名改 gl_FragDepthEXT）。
+  - frag 多输出（MRT）→ ES 100 经 GL_EXT_draw_buffers（gl_FragData[i]）。
+  - 校验产出**明确的版本相关报错**：「目标 `gles100` 不支持 vertex_id/instance_id 内建
+    （需 gles≥300）」；有替代扩展途径时报错文案告知两条补救方式。
 
 - **目标声明（已定稿）——源码内 `tar` 指令，不走 CLI**：
 
@@ -438,6 +448,10 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
   - `<api>@<version>`：**版本必须显式指定，无默认**；`@N` 为**精确锚定**，codegen 直接发
     `#version N`，能力判定按「该 api 起始支持版本 ≤ N」。
   - api 取值：`vulkan` / `glcore` / `gles` / `webgl`。
+  - **版本白名单（已实现）**：GLSL 版本号非连续数，写错当场拒绝并提示。
+    gles 只有 `100(ES2.0)/300(ES3.0)/310(ES3.1)/320(ES3.2)`——典型误区
+    `gles@200` 会报「ES2.0 的着色语言是 gles@100」；glcore 限
+    `110–150/330/400–460`；webgl 限 `100/300`；vulkan 限 `450/460`。
   - **多目标 = 兼容性契约**：声明的每个目标都必须支持所用能力，任一不满足即**硬报错**
     （不降级、不静默跳过）；codegen 逐目标各出一份产物。
   - 共享：一期只支持**每文件声明**（将来再加 inc 共享 / 项目级默认，见 §15）。
