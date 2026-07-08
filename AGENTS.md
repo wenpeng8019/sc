@@ -48,8 +48,8 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 | 组件 | macOS | Linux | Windows |
 |------|-------|-------|---------|
 | wsi | ✅ cocoa 实测 | x11/wayland 已写未实测 | win32 已写未实测 |
-| gpu env | ✅ Metal(metal_env.m)+ GL(NSGL) | GLX(gl_ctx.c)+ EGL headless/memimg(gl_egl.c,**盲写待板验**) | WGL 已写未实测;**无 D3D** |
-| gfx | ✅ Metal + GL4.1 双后端三角形实测 | gl_gfx.c 应可用(未实测);**无 Vulkan** | **缺 GL 加载器**(gl_gfx.c #error);**无 D3D** |
+| gpu env | ✅ Metal(metal_env.m)+ GL(NSGL 含无屏) | GLX(gl_ctx.c)+ EGL headless/memimg(gl_egl.c)+ EGL window(**盲写，GLES 形态交叉编译验证**) | WGL 已写未实测；**无 D3D** |
+| gfx | ✅ Metal + GL4.1 双后端三角形实测 | gl_gfx.c 双形态：桌面 GL / **GLES3.0+(SC_GPU_GLES，交叉编译验证)**；**无 Vulkan** | **缺 GL 加载器**(gl_gfx.c #error)；**无 D3D** |
 | spc | ✅ Metal kernel + MPSGraph + CoreML/ANE(86% 实测) | 待补(Vulkan/GLES31 kernel、RKNN model) | 待补 |
 | 无表面渲染 | ✅ IOSurface 双后端双模验证（Metal + NSGL 无屏） | dma-buf 路径盲写 | 无 |
 
@@ -139,11 +139,14 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 
 ## 9. 优先待办(Windows/Linux 方向)
 
-1. **GLES 化（前置依赖，比想象中紧迫）**：嵌入式板子多为 GLES 非桌面 GL
-   （invo 板即 GLES2/3）——“Linux 板验证”实际前置 ES 支持：
-   gl_gfx.c 加 ES 模式（大部分 API ES3.0 兼容，差 CLAMP_TO_BORDER/ES3.2、
-   MSAA 纹理/ES3.1 等少量分支）；gl_egl.c 补 EGL window surface 路径；
-   scc 验证 `tar gles@310`（compute 需 ES3.1）。
+1. **GLES 化（已基本完成，待板验）**：编译器侧 — 版本白名单（gles 仅
+   100/300/310/320）、GLSL ES 100 发射模式（attribute/varying、gl_FragColor、
+   uniform 块平铺+反射 flattenUniforms、数组降级、texture2D）、新能力行
+   （UintType/VertexIdBuiltin/FragDepthBuiltin/MRT）；运行时侧 — SC_GPU_GLES
+   编译形态（build.sh --gles，入库 Khronos 头 gpu/khr/，交叉编译验证通过）：
+   gl_gfx.c ES3.0/3.1 分支、gl_egl.c EGL window surface、gl_env.c 窗口路径切
+   EGL。**剩余**：ES2 运行时路径（flattenUniforms 按名 glUniform 上传、
+   glBindAttribLocation、无 VAO/UBO/sampler 对象退化）、实板验证。
 2. Linux 实板验证：gl_egl.c（EGL headless/GBM/dma-heap/fence）+ gl_gfx/gl_env、
    wsi x11/wayland。
 3. **Vulkan 后端**（gpu env + gfx）：SPIR-V 直消费，反射即 set/binding，

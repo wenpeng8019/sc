@@ -27,7 +27,11 @@
 #include <gbm.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GL/gl.h>
+#if defined(SC_GPU_GLES)
+  #include <GLES3/gl31.h>   /* 入库 Khronos 头（khr/），交叉编译免 sysroot */
+#else
+  #include <GL/gl.h>
+#endif
 
 /* eglext.h 老版本可能缺的常量兜底 */
 #ifndef EGL_PLATFORM_GBM_KHR
@@ -375,6 +379,154 @@ int gl_egl_fence_fd(void) {
     int fd = egl.pDupFenceFd(egl.dpy, sync);
     egl.pDestroySync(egl.dpy, sync);
     return fd;   /* -1 = 失败 */
+}
+
+/* ============================================================
+ * window surface —— EGL 窗口路径（Wayland/X11/嵌入式）
+ * ============================================================
+ * 与 headless（GBM 平台 display）分属不同 EGLDisplay：窗口路径用
+ * native_display（wl_display* / X11 Display*）。同进程多窗口共享
+ * display（引用计数）；上下文暂不共享对象（同 gl_ctx TODO）。
+ * SC_GPU_GLES 建 ES3（回落 ES2）；否则桌面 GL 4.1→3.3 core。
+ * ============================================================ */
+
+struct gl_egl_win {
+    EGLDisplay dpy;
+    EGLContext ctx;
+    EGLSurface surf;
+};
+
+static struct {
+    EGLDisplay dpy;
+    void*      native;
+    int        refs;
+} eglwin;
+
+gl_egl_win* gl_egl_win_create(void* native_display, void* native_window,
+                              int swap_interval) {
+    if (!native_window) return NULL;
+    if (eglwin.refs > 0 && eglwin.native != native_display) {
+        gpu_log("egl: 多 native display 暂不支持");
+        return NULL;
+    }
+
+    if (eglwin.refs == 0) {
+        eglwin.dpy = eglGetDisplay((EGLNativeDisplayType)native_display);
+        if (eglwin.dpy == EGL_NO_DISPLAY ||
+            !eglInitialize(eglwin.dpy, NULL, NULL)) {
+            gpu_log("egl: 窗口 display 初始化失败(%d)", eglGetError());
+            return NULL;
+        }
+        eglwin.native = native_display;
+    }
+
+    EGLint cfg_attribs[] = {
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+#if defined(SC_GPU_GLES)
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+#else
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
+#endif
+        EGL_NONE
+    };
+    EGLConfig cfg; EGLint ncfg = 0;
+#if defined(SC_GPU_GLES)
+    eglBindAPI(EGL_OPENGL_ES_API);
+    if (!eglChooseConfig(eglwin.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
+        cfg_attribs[15] = EGL_OPENGL_ES2_BIT;   /* ES3 config 无 → ES2 */
+        if (!eglChooseConfig(eglwin.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
+            gpu_log("egl: 无可用窗口 config");
+            goto fail_dpy;
+        }
+    }
+#else
+    eglBindAPI(EGL_OPENGL_API);
+    if (!eglChooseConfig(eglwin.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
+        gpu_log("egl: 无可用窗口 config");
+        goto fail_dpy;
+    }
+#endif
+
+    gl_egl_win* w = (gl_egl_win*)calloc(1, sizeof(gl_egl_win));
+    if (!w) goto fail_dpy;
+    w->dpy = eglwin.dpy;
+
+#if defined(SC_GPU_GLES)
+    EGLint ctx3[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+    EGLint ctx2[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+    w->ctx = eglCreateContext(w->dpy, cfg, EGL_NO_CONTEXT, ctx3);
+    if (w->ctx == EGL_NO_CONTEXT)
+        w->ctx = eglCreateContext(w->dpy, cfg, EGL_NO_CONTEXT, ctx2);
+#else
+    EGLint ctxgl[] = {
+        EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 1,
+        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        EGL_NONE
+    };
+    w->ctx = eglCreateContext(w->dpy, cfg, EGL_NO_CONTEXT, ctxgl);
+    if (w->ctx == EGL_NO_CONTEXT) {
+        ctxgl[1] = 3; ctxgl[3] = 3;   /* 4.1 不可用 → 3.3 core */
+        w->ctx = eglCreateContext(w->dpy, cfg, EGL_NO_CONTEXT, ctxgl);
+    }
+#endif
+    if (w->ctx == EGL_NO_CONTEXT) {
+        gpu_log("egl: 窗口上下文创建失败(%d)", eglGetError());
+        goto fail_w;
+    }
+
+    w->surf = eglCreateWindowSurface(w->dpy, cfg,
+                                     (EGLNativeWindowType)native_window, NULL);
+    if (w->surf == EGL_NO_SURFACE) {
+        gpu_log("egl: 窗口 surface 创建失败(%d)", eglGetError());
+        eglDestroyContext(w->dpy, w->ctx);
+        goto fail_w;
+    }
+
+    if (!eglMakeCurrent(w->dpy, w->surf, w->surf, w->ctx)) {
+        gpu_log("egl: 窗口 make current 失败(%d)", eglGetError());
+        eglDestroySurface(w->dpy, w->surf);
+        eglDestroyContext(w->dpy, w->ctx);
+        goto fail_w;
+    }
+    eglSwapInterval(w->dpy, swap_interval);
+    eglwin.refs++;
+    return w;
+
+fail_w:
+    free(w);
+fail_dpy:
+    if (eglwin.refs == 0) {
+        eglTerminate(eglwin.dpy);
+        eglwin.dpy = EGL_NO_DISPLAY;
+        eglwin.native = NULL;
+    }
+    return NULL;
+}
+
+void gl_egl_win_destroy(gl_egl_win* w) {
+    if (!w) return;
+    if (eglGetCurrentContext() == w->ctx)
+        eglMakeCurrent(w->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    eglDestroySurface(w->dpy, w->surf);
+    eglDestroyContext(w->dpy, w->ctx);
+    free(w);
+    if (--eglwin.refs == 0) {
+        eglTerminate(eglwin.dpy);
+        eglwin.dpy = EGL_NO_DISPLAY;
+        eglwin.native = NULL;
+    }
+}
+
+void gl_egl_win_make_current(gl_egl_win* w) {
+    if (w) eglMakeCurrent(w->dpy, w->surf, w->surf, w->ctx);
+    else if (eglwin.dpy != EGL_NO_DISPLAY)
+        eglMakeCurrent(eglwin.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+}
+
+void gl_egl_win_swap(gl_egl_win* w) {
+    if (w) eglSwapBuffers(w->dpy, w->surf);
 }
 
 #endif /* SC_GPU_GL && __linux__ */

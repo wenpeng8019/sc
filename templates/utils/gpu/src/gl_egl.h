@@ -35,4 +35,14 @@ void  gl_memimg_free(gl_memimg* m);
  * 需先 glFlush；扩展不可用返回 -1。 */
 int gl_egl_fence_fd(void);
 
+/* ---- window surface（EGL 窗口路径：Wayland/X11/嵌入式） ----
+ * 与 headless 分属不同 EGLDisplay；SC_GPU_GLES 建 ES3（回落 ES2），
+ * 否则桌面 GL 4.1→3.3 core。创建后即为当前上下文。 */
+typedef struct gl_egl_win gl_egl_win;
+gl_egl_win* gl_egl_win_create(void* native_display, void* native_window,
+                              int swap_interval);
+void gl_egl_win_destroy(gl_egl_win* w);
+void gl_egl_win_make_current(gl_egl_win* w);   /* NULL = 清当前 */
+void gl_egl_win_swap(gl_egl_win* w);
+
 #endif /* SC_GPU_GL_EGL_H */

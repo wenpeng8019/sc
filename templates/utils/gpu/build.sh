@@ -13,7 +13,12 @@
 #   linux   → GL (SC_GPU_GL) + null（Vulkan 后端待补）
 #   windows → null（GL 需加载器、D3D 后端待补）
 #
-# 注：渲染层在 utils/gfx（libgfx.a），后端宏两库同套。
+# GLES 形态（--gles，仅 linux/嵌入式）：GL 后端按 OpenGL ES 3.0/3.1 编译
+#   （-DSC_GPU_GLES + 入库 Khronos 头 khr/）：窗口 = EGL window surface，
+#   无屏 = GBM surfaceless；链 libGLESv2+libEGL（非 libGL/GLX）。
+#   嵌入式板卡（如 invo GLES2/3）交叉：./build.sh --target aarch64-linux-gnu --gles
+#
+# 注：渲染层在 utils/gfx（libgfx.a），后端宏两库同套（--gles 亦须同步）。
 # ============================================================
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,14 +29,16 @@ TARGET=""
 TARGET_EXPLICIT=""
 CC=""
 AR=""
+GLES=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --target|-t) TARGET="$2"; TARGET_EXPLICIT=1; shift 2 ;;
         --cc)        CC="$2";     shift 2 ;;
         --ar)        AR="$2";     shift 2 ;;
+        --gles)      GLES=1;      shift ;;
         -h|--help)
-            echo "用法: $0 [--target <triple>] [--cc <compiler>] [--ar <archiver>]"
+            echo "用法: $0 [--target <triple>] [--cc <compiler>] [--ar <archiver>] [--gles]"
             exit 0 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
@@ -77,6 +84,13 @@ case "$PLAT" in
     linux)   BACKEND_DEFS="-DSC_GPU_GL" ;;
     windows) BACKEND_DEFS="" ;;                 # GL 需加载器、D3D 后端待补
 esac
+if [[ "$GLES" == 1 ]]; then
+    if [[ "$PLAT" != linux ]]; then echo "--gles 仅支持 linux 平台"; exit 1; fi
+    BACKEND_DEFS="$BACKEND_DEFS -DSC_GPU_GLES -Ikhr"
+    LIB_SUFFIX=".gles"
+else
+    LIB_SUFFIX=""
+fi
 
 # 公共层 + null 后端（所有平台）
 compile_c "$SRC_DIR/gpu.c" "$BACKEND_DEFS"
@@ -91,13 +105,19 @@ case "$PLAT" in
         compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
         ;;
     linux)
-        compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS"
-        compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
-        compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
+        if [[ "$GLES" == 1 ]]; then
+            # GLES：窗口走 EGL window surface（gl_egl.c），不编 gl_ctx.c（GLX）
+            compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
+            compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
+        else
+            compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS"
+            compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
+            compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
+        fi
         ;;
 esac
 
-LIB="libgpu.$TARGET.a"
+LIB="libgpu.$TARGET$LIB_SUFFIX.a"
 rm -f "$LIB"
 # 过滤空元素
 REAL_OBJS=()

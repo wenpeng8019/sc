@@ -1,11 +1,19 @@
 /* ============================================================
- * gl_gfx.c —— OpenGL 渲染后端（GL 4.1 core：macOS 上限）
+ * gl_gfx.c —— OpenGL 渲染后端（GL 4.1 core / GLES 3.0+）
  * ============================================================
  * 与 Metal 渲染后端同构的 vtable 实现；上下文/交换链在 gpu 模块
- * （env 层：gl_env.c + gl_ctx.c），本文件假定上下文已 current。
+ * （env 层：gl_env.c + gl_ctx.c / gl_egl.c），本文件假定上下文已 current。
  *
- * 版本约束（macOS 上限 GL 4.1 core，对应 scc tar glcore@410）：
- *   · 无 compute / SSBO（dispatch、storage 绑定报不支持）
+ * 两套编译形态（build.sh 注入）：
+ *   默认        桌面 GL 4.1 core（macOS 上限，对应 scc tar glcore@410）
+ *   SC_GPU_GLES OpenGL ES 3.0/3.1（嵌入式/移动，对应 tar gles@300/310）：
+ *     · 头文件 = 入库 Khronos 官方头（gpu/khr/），链 libGLESv2
+ *     · CLAMP_TO_BORDER 退化 CLAMP_TO_EDGE（ES3.2/EXT 才有 border）
+ *     · MSAA 纹理需 ES3.1 glTexStorage2DMultisample（ES3.0 报不支持）
+ *     · 其余（VAO/UBO/sampler 对象/instancing/blit/MapBufferRange）ES3.0 同名同义
+ *
+ * 版本约束（桌面 4.1 与 ES3.0 共性）：
+ *   · 无 compute / SSBO（dispatch、storage 绑定报不支持；ES3.1 待二期）
  *   · 无 shader 内 explicit binding → 链接后按反射清单的名字
  *     解析 uniform 块索引 / sampler location，手动指派绑定点
  *
@@ -27,7 +35,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__APPLE__)
+#if defined(SC_GPU_GLES)
+  /* GLES 3.0/3.1：Khronos 官方头（入库 gpu/khr/，免依赖交叉 sysroot） */
+  #include <GLES3/gl31.h>
+  #include <GLES2/gl2ext.h>
+  #include <EGL/egl.h>
+  typedef void (*PFN_scEGLImageTargetTexture2DOES)(GLenum target, void* image);
+  /* ES 无 border wrap（ES3.2/EXT）：编译常量兼容，运行退化 CLAMP_TO_EDGE */
+  #ifndef GL_CLAMP_TO_BORDER
+    #define GL_CLAMP_TO_BORDER GL_CLAMP_TO_EDGE
+  #endif
+#elif defined(__APPLE__)
   #define GL_SILENCE_DEPRECATION
   #include <OpenGL/gl3.h>
   #include <OpenGL/OpenGL.h>          /* CGL：当前上下文 */
@@ -429,8 +447,14 @@ static bool glImageCreate(gfx_image_t* img) {
     glGenTextures(1, &m->tex);
     glBindTexture(m->target, m->tex);
     if (m->target == GL_TEXTURE_2D_MULTISAMPLE) {
+#if defined(SC_GPU_GLES)
+        /* ES3.1 只有 immutable 形式（ES3.0 无 MSAA 纹理，运行时报 GL 错误） */
+        glTexStorage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, d->sample_count,
+                                  fi.internal, d->width, d->height, GL_TRUE);
+#else
         glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, d->sample_count,
                                 fi.internal, d->width, d->height, GL_TRUE);
+#endif
     } else {
         glTexParameteri(m->target, GL_TEXTURE_MAX_LEVEL, d->mip_count - 1);
         imageUploadData(img, m, &d->data);
@@ -484,12 +508,18 @@ static bool glSamplerCreate(gfx_sampler_t* smp) {
     }
     if (d->wrap_u == SC_GFX_WRAP_BORDER || d->wrap_v == SC_GFX_WRAP_BORDER ||
         d->wrap_w == SC_GFX_WRAP_BORDER) {
+#if defined(SC_GPU_GLES)
+        /* ES 无 border color（ES3.2/GL_EXT_texture_border_clamp 才有）：
+         * wrap 已退化 CLAMP_TO_EDGE（见头部 define），border 色忽略 */
+        gfx_log("gl(es): border wrap 退化为 CLAMP_TO_EDGE");
+#else
         float bc[4] = { 0, 0, 0, 0 };
         if (d->border_color == SC_GFX_BORDERCOLOR_OPAQUE_BLACK) bc[3] = 1.0f;
         else if (d->border_color == SC_GFX_BORDERCOLOR_OPAQUE_WHITE) {
             bc[0] = bc[1] = bc[2] = bc[3] = 1.0f;
         }
         glSamplerParameterfv(m->smp, GL_TEXTURE_BORDER_COLOR, bc);
+#endif
     }
     if (d->compare != SC_GFX_COMPARE_ALWAYS) {
         glSamplerParameteri(m->smp, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);

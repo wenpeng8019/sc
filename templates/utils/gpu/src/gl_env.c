@@ -34,9 +34,14 @@
   #include <CoreFoundation/CoreFoundation.h>
   /* mac 无 EGL 原生 fence：dequeue 前 frame_end 已 glFinish，sync_fd 恒 -1 */
 #elif defined(__linux__)
-  #define GL_GLEXT_PROTOTYPES
-  #include <GL/gl.h>
-  #include <GL/glext.h>
+  #if defined(SC_GPU_GLES)
+    #include <GLES3/gl31.h>           /* 入库 Khronos 头（khr/） */
+    #include <GLES2/gl2ext.h>
+  #else
+    #define GL_GLEXT_PROTOTYPES
+    #include <GL/gl.h>
+    #include <GL/glext.h>
+  #endif
   #include "gl_egl.h"
   #include <unistd.h>
   /* GL_OES_EGL_image（Mesa 桌面 GL 亦暴露） */
@@ -46,9 +51,13 @@
 #define GL_MAX_ACQUIRED 16
 
 typedef struct GlSurface {
-    /* WINDOW */
+    /* WINDOW：桌面 = gl_ctx（NSGL/WGL/GLX）；SC_GPU_GLES = EGL 窗口 */
+#if defined(SC_GPU_GLES)
+    gl_egl_win* eglWin;
+#else
     gl_ctx* ctx;
-    GLuint      vao;      /* core profile 必需的全局 VAO */
+#endif
+    GLuint      vao;      /* core profile / ES3 惯用的全局 VAO */
     /* MEMORY：环槽 memimg 包装纹理 + FBO；共享深度 rbo
      * linux = EGLImage→GL_TEXTURE_2D；mac = IOSurface→GL_TEXTURE_RECTANGLE */
 #if defined(__linux__) || defined(__APPLE__)
@@ -272,10 +281,18 @@ static bool glSurfaceCreate(gpu_surface_t* surf) {
 
     if (surf->desc.sample_count > 1)
         gpu_log("gl: 交换链 MSAA 暂不支持（忽略 sample_count）");
-    /* macOS 上限 4.1 core（scc tar glcore@410 对应） */
+#if defined(SC_GPU_GLES)
+    /* GLES：EGL 窗口 surface（ES3 优先，回落 ES2） */
+    s->eglWin = gl_egl_win_create(surf->desc.native_display,
+                                  surf->desc.native_window,
+                                  surf->desc.swap_interval);
+    if (!s->eglWin) { free(s); return false; }
+#else
+    /* 桌面：macOS 上限 4.1 core（scc tar glcore@410 对应） */
     s->ctx = gl_ctx_create(surf->desc.native_window, surf->desc.native_display,
                                4, 1, surf->desc.swap_interval);
     if (!s->ctx) { free(s); return false; }
+#endif
     /* 创建后即为当前上下文 */
     glGenVertexArrays(1, &s->vao);
     glBindVertexArray(s->vao);
@@ -312,11 +329,19 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
         return;
     }
 #endif
+#if defined(SC_GPU_GLES)
+    if (s->eglWin) {
+        gl_egl_win_make_current(s->eglWin);
+        if (s->vao) glDeleteVertexArrays(1, &s->vao);
+        gl_egl_win_destroy(s->eglWin);
+    }
+#else
     if (s->ctx) {
         gl_ctx_make_current(s->ctx);
         if (s->vao) glDeleteVertexArrays(1, &s->vao);
         gl_ctx_destroy(s->ctx);
     }
+#endif
     free(s);
     surf->backend = NULL;
 }
@@ -333,17 +358,29 @@ static void glSurfaceActivate(gpu_surface_t* surf) {
 #endif
             return;
         }
+#if defined(SC_GPU_GLES)
+        gl_egl_win_make_current(s->eglWin);
+#else
         gl_ctx_make_current(s->ctx);
+#endif
         glBindVertexArray(s->vao);
     } else {
+#if defined(SC_GPU_GLES)
+        gl_egl_win_make_current(NULL);
+#else
         gl_ctx_make_current(NULL);
+#endif
     }
 }
 
 static void glSurfaceResize(gpu_surface_t* surf, int w, int h) {
     (void)w; (void)h;
+#if defined(SC_GPU_GLES)
+    (void)surf;   /* EGL 窗口 surface 尺寸随 native window，无需显式 update */
+#else
     GlSurface* s = (GlSurface*)surf->backend;
     if (s) gl_ctx_resize(s->ctx);
+#endif
 }
 
 /* ---- 帧交付 ------------------------------------------------ */
@@ -401,7 +438,11 @@ static void glFrameEnd(void) {
             glFinish();   /* NSGL 无导出 fence：CPU 同步，dequeue 即可消费 */
 #endif
         } else {
+#if defined(SC_GPU_GLES)
+            gl_egl_win_swap(s->eglWin);
+#else
             gl_ctx_swap(s->ctx);   /* swap 不改变 current */
+#endif
         }
     }
     env.acquiredCount = 0;
