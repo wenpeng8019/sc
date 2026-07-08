@@ -155,7 +155,7 @@ struct Checker {
 
 } // namespace
 
-void shaderSemaCheck(const Program& prog) {
+void shaderSemaCheck(Program& prog) {
     Checker c;
 
     // 资源绑定冲突检测：同一 (set,binding) 不可重复占用。
@@ -205,18 +205,34 @@ void shaderSemaCheck(const Program& prog) {
 
     if (c.f8Line) useCap(Cap::DoubleType, c.f8Line);   // f8 双精度（由 checkType 捕获）
 
+    // 已用能力集存入 prog：codegen_glsl 据此对经扩展满足的能力发射 #extension。
+    prog.shaderUsedCaps.clear();
+    for (const auto& u : usedCaps) prog.shaderUsedCaps.push_back(u.first);
+
     // ---- 能力门控（syntax-s §13.1）----
-    // 契约制：声明的每个目标都必须支持所用能力，任一不满足即硬报错。
+    // 契约制：声明的每个目标都必须支持所用能力（核心版本或声明的替代扩展
+    // 任一途径），任一不满足即硬报错；报错文案告知两条途径的补救方式。
     for (const auto& t : prog.shaderTargets) {
+        if (t.version == 0 && !t.profile.empty())
+            continue;   // profile 待加载（codegen_glsl 加载后会重跑门控）
         for (const auto& u : usedCaps) {
             if (capSupported(u.first, t)) continue;
-            int mn = capMinVersion(u.first, t.api);
-            std::string need = mn < 0
-                ? std::string(glApiName(t.api)) + " 永不支持"
-                : std::string(glApiName(t.api)) + "≥" + std::to_string(mn);
-            throw CompileError{"目标 " + std::string(glApiName(t.api)) + "@" +
-                std::to_string(t.version) + " 不支持 " + capRow(u.first).name +
-                "（需 " + need + "）", u.second};
+            const CapReq& q = capReq(u.first, t.api);
+            std::string need;
+            if (q.core < 0 && !q.ext)
+                need = std::string(glApiName(t.api)) + " 永不支持";
+            else {
+                if (q.core >= 0)
+                    need = std::string(glApiName(t.api)) + "≥" + std::to_string(q.core);
+                if (q.ext) {
+                    if (!need.empty()) need += " 或 ";
+                    need += std::string("扩展 ") + q.ext +
+                            "（caps profile 声明，需版本≥" +
+                            std::to_string(q.extFrom) + "）";
+                }
+            }
+            throw CompileError{"目标 " + glTargetTag(t) +
+                " 不支持 " + capRow(u.first).name + "（需 " + need + "）", u.second};
         }
     }
 }

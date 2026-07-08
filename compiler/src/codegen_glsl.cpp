@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -335,8 +336,10 @@ std::string emitHelper(const Decl& d) {
 }
 
 // 发射单个阶段：装配 in/out 接口 + main() 体（含 I/O 改写）。
+// usedCaps = shaderSemaCheck 采集的已用能力：经替代扩展满足的能力在
+// #version 后发射 `#extension <名> : require`（能力矩阵 capResolve）。
 std::string emitStage(const Decl& stage, const Model& m, const std::string& prelude,
-                      const GlslTarget& t) {
+                      const GlslTarget& t, const std::vector<Cap>& usedCaps) {
     const bool isVert = stage.shaderStage == ShaderStage::Vert;
     const bool isComp = stage.shaderStage == ShaderStage::Comp;
     std::unordered_map<std::string, std::string> memberMap;
@@ -411,6 +414,21 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     out << "#version " << t.version;
     if (const char* prof = t.profileWord(); prof && *prof) out << " " << prof;
     out << "\n";
+    // 经替代扩展满足的能力 → #extension 指令（去重：多能力可共用同一扩展）
+    {
+        std::vector<const char*> emitted;
+        for (Cap c : usedCaps) {
+            const char* ext = nullptr;
+            if (capResolve(c, t, &ext) == CapVia::Ext && ext) {
+                bool dup = false;
+                for (const char* e : emitted) if (std::string(e) == ext) { dup = true; break; }
+                if (!dup) {
+                    out << "#extension " << ext << " : require\n";
+                    emitted.push_back(ext);
+                }
+            }
+        }
+    }
     out << "// generated from " << stage.name << " (" << stageExt(stage.shaderStage)
         << ") target " << glTargetTag(t) << "\n\n";
     if (t.isES()) out << "precision highp float;\nprecision highp int;\n\n";
@@ -439,7 +457,7 @@ std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target) {
     std::vector<GlslUnit> units;
     for (const auto& d : prog.decls) {
         if (!d || d->kind != Decl::FuncD || d->shaderStage == ShaderStage::None) continue;
-        std::string text = emitStage(*d, m, prelude, target);
+        std::string text = emitStage(*d, m, prelude, target, prog.shaderUsedCaps);
         units.push_back(GlslUnit{d->shaderStage, d->name, stageExt(d->shaderStage), text});
     }
     return units;
@@ -564,6 +582,28 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
+
+        // 外部设备能力档案（tar "file.caps"）：按源文件相对路径加载解析，
+        // 在能力门控前完成 —— 使门控与发射都看到完整的 api/版本/扩展集。
+        for (auto& t : prog.shaderTargets) {
+            if (t.profile.empty()) continue;
+            std::filesystem::path pp(t.profile);
+            if (pp.is_relative())
+                pp = std::filesystem::path(srcPath).parent_path() / pp;
+            std::ifstream pf(pp);
+            if (!pf) {
+                std::fprintf(stderr, "ss: 无法打开能力档案 %s\n", pp.string().c_str());
+                return 1;
+            }
+            std::stringstream pss; pss << pf.rdbuf();
+            std::string perr;
+            if (!parseCapsProfile(pss.str(), t, perr)) {
+                std::fprintf(stderr, "ss: 能力档案 %s 解析失败：%s\n",
+                             pp.string().c_str(), perr.c_str());
+                return 1;
+            }
+        }
+
         shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查 + 能力门控（syntax-s §9/§13.1）
 
         if (prog.shaderTargets.empty()) {       // GLSL 生成必须声明目标（无 CLI 默认）

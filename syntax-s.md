@@ -432,6 +432,7 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
   ```
   tar vulkan@450                 # 单目标
   tar gles@100, gles@300         # 多目标（逗号分隔，可同 api 多版本）
+  tar "boards/rk3588.caps"       # 外部设备能力档案（见下），可与内联目标混用
   ```
 
   - `<api>@<version>`：**版本必须显式指定，无默认**；`@N` 为**精确锚定**，codegen 直接发
@@ -443,34 +444,54 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
   - 反射清单 JSON 增 `"target": {"api","version"}`；无显式 binding 的低版本目标，resources
     项保留 `"name"` 供运行时按名绑定。
 
+- **设备能力档案（caps profile，已实现）——外部文件配置目标 + 扩展**：
+
+  「API@版本」网格点不足以描述真实设备：嵌入式板卡常见「基线版本低但带关键扩展」
+  （如 GLES2 + `GL_OES_standard_derivatives`，GL3.3 + ARB 后向移植扩展）。
+  `tar "file.caps"` 把一个目标锚定到具体设备的能力档案（行式通用协议）：
+
+  ```
+  # rk3588.caps —— 设备能力档案（# 行注释）
+  api gles
+  version 3.1            # 或 310；同 tar 版本规则归一化
+  ext GL_EXT_texture_border_clamp
+  ext GL_OES_sample_variables
+  ```
+
+  - 路径相对 `.ss` 源文件解析；产物/反射 tag 用文件 stem（如 `cs_main.rk3588.comp`），
+    不同板卡档案互不覆盖。
+  - **扩展参与能力判定**：能力矩阵每格除核心起始版本外可挂**替代扩展**（含扩展版本
+    下限）；版本不够但档案声明了该扩展 → 能力成立，codegen 在 `#version` 后自动发射
+    `#extension <名> : require`。报错文案告知两条途径：
+    「目标 rk3588 不支持 storage 缓冲（需 glcore≥430 或 扩展 GL_ARB_...（caps profile 声明，需版本≥400））」。
+  - 解析器（`parseCapsProfile`）住 `shader_caps.h`，纯文本无 I/O；文件加载在
+    `compileShaderSource` 里、能力门控前完成。
+
 - **能力表架构（单一事实源，sema 与 codegen 共用）**：
 
   用一张二维表取代散落各处的版本 `if` 判断——**行 = sg 能力全集（含方言构造）**，
-  **列 = API 族**，格值 = 该能力在该 api 的**起始支持版本**（`-1` = 永不支持）。
+  **列 = API 族**，格值 = `{ 核心起始版本, 替代扩展, 扩展版本下限 }`。
   新增能力加一行、新增目标加一列，天然不易漏、易扩展。
 
   ```cpp
-  // shader_caps.h（新，独立头）—— sg 能力 × 目标 的版本矩阵
+  // shader_caps.h —— sg 能力 × 目标 的需求矩阵（核心版本 或 替代扩展）
   enum class Cap { StorageBuffer, ComputeStage, PushConstant, DoubleType,
                    DescriptorSet, ExplicitBinding, /* … */ CapCount };
-  struct CapRow { const char* name; int vulkan, glcore, gles, webgl; };  // 起始版本；-1=不支持
-  static const CapRow CAP_TABLE[(int)Cap::CapCount] = {
-      /*StorageBuffer*/ {"storage 缓冲",  450, 430, 310, -1},
-      /*ComputeStage */ {"comp 计算着色", 450, 430, 310, -1},
-      /*PushConstant */ {"push 常量",     450,  -1,  -1, -1},   // 仅 Vulkan
-      /*DoubleType   */ {"f8 双精度",     450, 400,  -1, -1},
-      /*DescriptorSet*/ {"set 描述符集",  450,  -1,  -1, -1},   // 仅 Vulkan
-      /*ExplicitBind */ {"binding 限定",  450, 420, 310, -1},
-      /* … 随实现补全 */
-  };
-  bool capSupported(Cap c, GlslTarget t);   // t.api 对应列 != -1 且 <= t.version
+  struct CapReq { int core; const char* ext; int extFrom; };  // -1/NULL = 无该途径
+  struct CapRow { const char* name; CapReq vulkan, glcore, gles, webgl, metal; };
+  // 例：StorageBuffer.glcore = {430, "GL_ARB_shader_storage_buffer_object", 400}
+  //   → 核心 430 直接支持；400–429 若档案声明该扩展亦成立（发 #extension）
+  enum class CapVia { No, Core, Ext };
+  CapVia capResolve(Cap c, const GlslTarget& t, const char** outExt);
+  bool   capSupported(Cap c, const GlslTarget& t);   // 任一途径成立
   ```
 
   - **sema 用法**：遍历 AST 收集「已用能力集」（`storage` 属性→StorageBuffer、出现 `comp`
-    →ComputeStage、用到 `f8`→DoubleType…），对**每个声明目标**查表，不满足即报错并点名
-    「能力 × 目标 × 需要版本」，如「target `gles@300` 不支持 storage 缓冲（需 ES≥310）」。
+    →ComputeStage、用到 `f8`→DoubleType…）并存入 `prog.shaderUsedCaps`；对**每个声明目标**
+    查表，不满足即报错并点名「能力 × 目标 × 两条补救途径」。
   - **codegen 用法**：查「策略类能力」（DescriptorSet/ExplicitBinding/精度/内建名）决定**怎么发**
-    ——同一份 AST，vulkan 发 `set=/binding=`、glcore@410 省 `set` 只留名字绑定等。
+    ——同一份 AST，vulkan 发 `set=/binding=`、glcore@410 省 `set` 只留名字绑定等；
+    对 `capResolve == Ext` 的已用能力在 `#version` 后发 `#extension : require`。
 
 - **落点**：新增独立 `shader_caps.*`（能力表）；`codegen_glsl` 引入
   `struct GlslTarget { enum class Api{Vulkan,GLCore,GLES,WebGL}; Api api; int version; }`，

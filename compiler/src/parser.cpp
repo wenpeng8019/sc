@@ -1967,14 +1967,23 @@ struct Parser {
     }
 
     // GPU/着色器扩展（syntax-s §13.1）：顶层 `tar` 指令 —— 声明转义目标与版本。
-    // 版本必须显式指定（无默认），一行可逗号分隔多个目标：
+    // 版本必须显式指定（无默认），一行可逗号分隔多个目标；
+    // 字符串 = 外部设备能力档案（caps profile，api/version/ext 行式协议，
+    // 由 codegen_glsl 按源文件相对路径加载）：
     //   tar vulkan@450
     //   tar gles@100, gles@300
+    //   tar "boards/rk3588.caps"
     void parseShaderTargets(Program& prog) {
         advance();                                  // 跳过 tar
         do {
+            if (at(Tok::Str)) {                     // 外部能力档案目标
+                GlslTarget t;
+                t.profile = unquoteStr(advance().text);   // 路径先存，加载延后
+                prog.shaderTargets.push_back(t);
+                continue;
+            }
             if (!at(Tok::Ident))
-                err("tar 后期望目标 API 名（vulkan/glcore/gles/webgl/metal）");
+                err("tar 后期望目标 API 名（vulkan/glcore/gles/webgl/metal）或能力档案路径字符串");
             std::string api = advance().text;
             GlslTarget t;
             if (!parseGlApi(api, t.api))

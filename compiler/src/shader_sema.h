@@ -12,6 +12,7 @@
 // 独立于核心 semantic.cpp（见 syntax-s §12）。
 // ============================================================
 
-// 对已按 shaderMode 解析的 Program 做 shader 子集语义检查。
+// 对已按 shaderMode 解析的 Program 做 shader 子集语义检查，并把采集到的
+// 已用能力集写入 prog.shaderUsedCaps（供 codegen 发射 #extension）。
 // 违反即 throw CompileError（带行号）。
-void shaderSemaCheck(const Program& prog);
+void shaderSemaCheck(Program& prog);

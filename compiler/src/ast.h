@@ -618,8 +618,12 @@ struct Program {
                                             // 其 @导出 默认注入到所有依赖单元，供编译期对接语法插件静态发现。
 
     // GPU/着色器扩展（syntax-s §13.1）：.ss 顶层 tar 指令声明的转义目标列表
-    // （每目标 API+版本）。空 = 未声明（仅 --ast/--emit-sc 允许；GLSL 代码生成必须声明）。
+    // （每目标 API+版本；tar "file.caps" 目标先存 profile 路径，由 codegen_glsl
+    // 按源文件相对路径加载解析）。空 = 未声明（仅 --ast/--emit-sc 允许）。
     std::vector<GlslTarget> shaderTargets;
+    // shaderSemaCheck 采集的已用能力集（去重）：codegen_glsl 据此对经扩展
+    // 满足的能力发射 #extension 指令。
+    std::vector<Cap> shaderUsedCaps;
 };
 
 // ---------- 诊断信息 ----------
