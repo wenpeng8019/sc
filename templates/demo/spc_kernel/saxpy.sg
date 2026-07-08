@@ -1,0 +1,30 @@
+# saxpy —— spc kernel 面验证:y[i] = a * x[i] + y[i]
+#
+# 编译(产出 cs_saxpy.metal + saxpy.reflect.json):
+#   ./compiler/build/scc templates/demo/spc_kernel/saxpy.sg -o templates/demo/spc_kernel/out/saxpy
+#
+# 说明:dispatch 用精确全局线程数(Metal non-uniform threadgroups),
+# n 越界守卫仍保留(通用做法,兼容需要对齐线程组的后端)。
+
+tar metal@2.0
+
+@def Params: {
+    a: f4
+    n: u4
+} uniform set 0 binding 0
+
+@def XBuf: {
+    x[]: f4
+} storage set 0 binding 1
+
+@def YBuf: {
+    y[]: f4
+} storage set 0 binding 2
+
+@def CompIn: {
+    gid: u4 builtin global_invocation_id
+}
+
+comp cs_saxpy: void, in: CompIn
+    if in.gid < Params.n
+        YBuf.y[in.gid] = Params.a * XBuf.x[in.gid] + YBuf.y[in.gid]

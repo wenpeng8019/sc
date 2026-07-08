@@ -55,7 +55,19 @@ std::string builtinGlsl(const std::string& sem, bool asOutput, const GlslTarget&
     if (sem == "frag_depth")  return "gl_FragDepth";
     if (sem == "vertex_id")   return t.isVulkan() ? "gl_VertexIndex"   : "gl_VertexID";
     if (sem == "instance_id") return t.isVulkan() ? "gl_InstanceIndex" : "gl_InstanceID";
-    return "gl_" + sem;       // 兜底：原样加前缀（未知语义）
+    /* 计算阶段（comp）内建 */
+    if (sem == "global_invocation_id")    return "gl_GlobalInvocationID";   /* uvec3 */
+    if (sem == "local_invocation_id")     return "gl_LocalInvocationID";    /* uvec3 */
+    if (sem == "workgroup_id")            return "gl_WorkGroupID";          /* uvec3 */
+    if (sem == "num_workgroups")          return "gl_NumWorkGroups";        /* uvec3 */
+    if (sem == "local_invocation_index")  return "gl_LocalInvocationIndex"; /* uint */
+    return "gl_" + sem;       // 兔底：原样加前缀（未知语义）
+}
+
+// comp 阶段的 uvec3 内建：字段声明为标量（u4/i4）时自动取 .x（1D 调度惯用）。
+bool builtinIsUvec3(const std::string& sem) {
+    return sem == "global_invocation_id" || sem == "local_invocation_id" ||
+           sem == "workgroup_id" || sem == "num_workgroups";
 }
 
 // std140 / std430 布局的对齐与大小（字节），支持标量 / 向量 / 方阵 / 数组。
@@ -326,10 +338,16 @@ std::string emitHelper(const Decl& d) {
 std::string emitStage(const Decl& stage, const Model& m, const std::string& prelude,
                       const GlslTarget& t) {
     const bool isVert = stage.shaderStage == ShaderStage::Vert;
+    const bool isComp = stage.shaderStage == ShaderStage::Comp;
     std::unordered_map<std::string, std::string> memberMap;
     std::unordered_set<std::string> outAggVars;
     std::string ioDecls;
     std::string scalarOut;
+
+    // comp：工作组尺寸（暂无 .sg 语法，固定 64×1×1；反射清单同步携带，
+    // 运行时据此设 threads_per_group）
+    if (isComp)
+        ioDecls += "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n";
 
     // —— 输入接口（入参结构体）——
     int autoInLoc = 0;
@@ -343,7 +361,12 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
         for (const auto& f : it->second->structCommon.fields) {
             std::string sem = f.shaderAttr ? f.shaderAttr->builtin : "";
             if (!sem.empty()) {
-                memberMap[p.name + "." + f.name] = builtinGlsl(sem, /*out*/false, t);
+                std::string g = builtinGlsl(sem, /*out*/false, t);
+                // comp 的 uvec3 内建 + 标量字段声明 → 自动取 .x（1D 调度惯用）
+                std::string mt = mapType(f.type.name);
+                if (isComp && builtinIsUvec3(sem) && (mt == "uint" || mt == "int"))
+                    g += ".x";
+                memberMap[p.name + "." + f.name] = g;
                 continue;
             }
             int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoInLoc++;
@@ -443,6 +466,8 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
         j << "      \"stage\": " << jstr(stageExt(d->shaderStage)) << ",\n";
         j << "      \"entry\": \"main\",\n";
         j << "      \"file\": " << jstr(d->name + "." + stageExt(d->shaderStage)) << ",\n";
+        if (d->shaderStage == ShaderStage::Comp)
+            j << "      \"local_size\": [64, 1, 1],\n";   /* 与 emitStage 固定值同步 */
 
         j << "      \"inputs\": [";
         bool firstIn = true; int autoLoc = 0;

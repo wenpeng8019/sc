@@ -3139,7 +3139,7 @@ static double rng_normal_std(void) {   /* Box-Muller，标准正态 */
     return sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);
 }
 
-void rand_seed(int64_t seed) {
+void sc_rand_seed(int64_t seed) {
     rng_s0 = (uint64_t)seed ^ 0x9E3779B97F4A7C15ULL;
     rng_s1 = ((uint64_t)seed << 1) ^ 0xBF58476D1CE4E5B9ULL;
     if (rng_s0 == 0 && rng_s1 == 0) rng_s1 = 1;

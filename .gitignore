@@ -8,6 +8,7 @@ compiler/build-linux/
 templates/utils/wsi/build/
 templates/utils/gpu/build/
 templates/utils/gfx/build/
+templates/utils/spc/build/
 *.o
 *.out
 *.exe
@@ -33,6 +34,10 @@ examples/*.c
 examples/*.h
 examples/*.dSYM/
 templates/demo/gpu_shader/out/
+templates/demo/spc_kernel/out/
+templates/demo/spc_model/tiny.mlmodelc/
+templates/demo/spc_model/tiny.mlpackage/
+templates/demo/spc_model/tiny_ref.npy
 
 # 第三方依赖构建产物（vendor 源码保留，仅忽略编译输出）
 vendor/libuv/build/
