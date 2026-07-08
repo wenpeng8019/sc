@@ -135,12 +135,28 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 
 ## 9. 优先待办(Windows/Linux 方向)
 
-1. Linux 实板验证:gl_egl.c(EGL headless/GBM/dma-heap/fence)+ gl_gfx/gl_env、
+1. **GLES 化（前置依赖，比想象中紧迫）**：嵌入式板子多为 GLES 非桌面 GL
+   （invo 板即 GLES2/3）——“Linux 板验证”实际前置 ES 支持：
+   gl_gfx.c 加 ES 模式（大部分 API ES3.0 兼容，差 CLAMP_TO_BORDER/ES3.2、
+   MSAA 纹理/ES3.1 等少量分支）；gl_egl.c 补 EGL window surface 路径；
+   scc 验证 `tar gles@310`（compute 需 ES3.1）。
+2. Linux 实板验证：gl_egl.c（EGL headless/GBM/dma-heap/fence）+ gl_gfx/gl_env、
    wsi x11/wayland。
-2. **Vulkan 后端**(gpu env + gfx):SPIR-V 直消费,反射即 set/binding,
-   frame 契约可能需扩(image view/semaphore 字段)。
-3. **Windows**:wsi win32 验证;GL 加载器(gl_gfx.c 现 #error)或直接跳 D3D11;
-   D3D 后端 + scc 的 HLSL tar 目标(SPIRV-Cross)。
-4. spc 二期:Vulkan compute kernel、RKNN model 后端、nn 热点算子接 graph 面、
-   local_size 的 .ss 语法。
-5. ts/nn 保持 CPU 纯数值不动(spc 只读 sc_tensor 字段,要求 C-连续,零链接依赖)。
+3. **Vulkan 后端**（gpu env + gfx）：SPIR-V 直消费，反射即 set/binding，
+   frame 契约可能需扩（image view/semaphore 字段）；建议先无屏后窗口（§4.1）。
+4. **Windows**：wsi win32 验证；GL 加载器（gl_gfx.c 现 #error）或直接跳 D3D11；
+   D3D 后端 + scc 的 HLSL tar 目标（SPIRV-Cross）。
+5. spc 二期：Vulkan/GLES31 compute kernel、RKNN model 后端、nn 热点算子接
+   graph 面、local_size 的 .ss 语法。
+6. ts/nn 保持 CPU 纯数值不动（spc 只读 sc_tensor 字段，要求 C-连续，零链接依赖）。
+
+## 10. 移动端路线（规划，wsi 将加移动后端）
+
+- **iOS（离现有代码最近）**：GLES 在 iOS 已弃用，直接 Metal——metal_env/
+  metal_gfx（CAMetalLayer/IOSurface 同款）与 spc 的 CoreML/ANE 几乎原样复用；
+  只差 wsi 的 uikit 后端（UIWindow/触控事件）。
+- **Android**：wsi 加 android 后端（ANativeWindow/ALooper）；gpu env 复用
+  EGL（gl_egl 的 window 路径）或 Vulkan；**memimg = AHardwareBuffer**
+  （与 dma-buf/IOSurface 完美对偶，可导 EGLImage/Vulkan external memory，
+  直送 MediaCodec 编码）；spc model = NNAPI/厂商栈。
+- memimg 三元组对偶：dma-buf(linux) / IOSurface(apple) / AHardwareBuffer(android)。
