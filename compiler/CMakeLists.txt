@@ -201,11 +201,10 @@ option(SCC_EMBED_BUILTINS "内嵌 builtins 资源（单二进制发行）" OFF)
 option(SCC_EMBED_PREBUILT "额外内嵌 host 平台预编译子项目静态库" OFF)
 if(SCC_EMBED_BUILTINS)
     get_filename_component(BUILTINS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../builtins ABSOLUTE)
-    # 资源清单：源码全集 .sc/.h/.c/.caps + 模块预编译库 lib*.a（gpu/gfx/spc 形态）
-    # （configure 时收集，builtins 增删文件后需重新 cmake）
+    # 资源清单：源码全集 .sc/.h/.c/.m/.caps（configure 时收集，增删文件后需重新 cmake）
     file(GLOB_RECURSE BUILTIN_RES RELATIVE ${BUILTINS_DIR}
          ${BUILTINS_DIR}/*.sc ${BUILTINS_DIR}/*.h ${BUILTINS_DIR}/*.c
-         ${BUILTINS_DIR}/*.caps ${BUILTINS_DIR}/lib*.a)
+         ${BUILTINS_DIR}/*.m ${BUILTINS_DIR}/*.caps ${BUILTINS_DIR}/lib*.a)
 
     # 可选：预编译各子项目默认实现 builtins/x/x_impl.c → x.a（host 平台）
     set(EMBED_LIBS "")
