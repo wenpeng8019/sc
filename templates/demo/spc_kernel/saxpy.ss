@@ -1,7 +1,7 @@
 # saxpy —— spc kernel 面验证:y[i] = a * x[i] + y[i]
 #
 # 编译(产出 cs_saxpy.metal + saxpy.reflect.json):
-#   ./compiler/build/scc templates/demo/spc_kernel/saxpy.sg -o templates/demo/spc_kernel/out/saxpy
+#   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #
 # 说明:dispatch 用精确全局线程数(Metal non-uniform threadgroups),
 # n 越界守卫仍保留(通用做法,兼容需要对齐线程组的后端)。

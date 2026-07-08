@@ -17,11 +17,11 @@
 #include <vector>
 
 // ============================================================
-// codegen_glsl 实现（syntax-g 一期）
+// codegen_glsl 实现（syntax-s 一期）
 // ============================================================
-// 把 .sg 里的着色阶段（vert/frag/comp）+ I/O 结构体 + 资源块 + 辅助函数
+// 把 .ss 里的着色阶段（vert/frag/comp）+ I/O 结构体 + 资源块 + 辅助函数
 // 翻译为 Vulkan-GLSL 文本，并产出反射清单 JSON。GLSL→SPIR-V→各后端交给
-// 运行时的 glslang/SPIRV-Cross/MoltenVK（见 syntax-g §10）。
+// 运行时的 glslang/SPIRV-Cross/MoltenVK（见 syntax-s §10）。
 //
 // 阶段 I/O 采用「成员改写」模型（无需在 GLSL 里重建结构体）：
 //   · 顶点属性：vert 入参结构体的 loc 字段 → layout(location=N) in <t> <field>;
@@ -317,7 +317,7 @@ std::string emitResources(const Model& m, const GlslTarget& t) {
     return out;
 }
 
-// 辅助函数（.sg 里的普通 fnc）GLSL。
+// 辅助函数（.ss 里的普通 fnc）GLSL。
 std::string emitHelper(const Decl& d) {
     std::string ret = d.structCommon.type ? mapType(d.structCommon.type->name) : "void";
     std::string out = ret + " " + d.name + "(";
@@ -344,7 +344,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
     std::string ioDecls;
     std::string scalarOut;
 
-    // comp：工作组尺寸（暂无 .sg 语法，固定 64×1×1；反射清单同步携带，
+    // comp：工作组尺寸（暂无 .ss 语法，固定 64×1×1；反射清单同步携带，
     // 运行时据此设 threads_per_group）
     if (isComp)
         ioDecls += "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n";
@@ -564,10 +564,10 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
-        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查 + 能力门控（syntax-g §9/§13.1）
+        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查 + 能力门控（syntax-s §9/§13.1）
 
         if (prog.shaderTargets.empty()) {       // GLSL 生成必须声明目标（无 CLI 默认）
-            std::fprintf(stderr, "sg: %s 未声明转义目标（需顶部 `tar`，如 `tar vulkan@450`）\n",
+            std::fprintf(stderr, "ss: %s 未声明转义目标（需顶部 `tar`，如 `tar vulkan@450`）\n",
                          srcPath.c_str());
             return 1;
         }
@@ -579,10 +579,10 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         if (!outDir.empty()) std::filesystem::create_directories(outDir, ec);
         auto write = [&](const std::string& path, const std::string& data) -> bool {
             FILE* f = std::fopen(path.c_str(), "wb");
-            if (!f) { std::fprintf(stderr, "sg: 无法写入 %s\n", path.c_str()); return false; }
+            if (!f) { std::fprintf(stderr, "ss: 无法写入 %s\n", path.c_str()); return false; }
             std::fwrite(data.data(), 1, data.size(), f);
             std::fclose(f);
-            std::fprintf(stderr, "sg: 生成 %s\n", path.c_str());
+            std::fprintf(stderr, "ss: 生成 %s\n", path.c_str());
             return true;
         };
 
@@ -597,7 +597,7 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                 GlslTarget vk; vk.api = GlApi::Vulkan; vk.version = 450;
                 auto units = emitGlsl(prog, vk);
                 if (units.empty()) {
-                    std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                    std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                     return 1;
                 }
                 std::string reflect = emitReflectionJson(prog, target);
@@ -623,7 +623,7 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
             std::string reflect = emitReflectionJson(prog, target);
 
             if (units.empty()) {
-                std::fprintf(stderr, "sg: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                 return 1;
             }
 

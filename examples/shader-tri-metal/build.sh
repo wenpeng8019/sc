@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # ============================================================
-# syntax-g 发行路径 demo：.sg → GLSL → SPIR-V → MSL → .metallib
+# syntax-s 发行路径 demo：.ss → GLSL → SPIR-V → MSL → .metallib
 # ------------------------------------------------------------
 # 与 ../shader-tri（MoltenVK 运行时翻译 Vulkan→Metal）并列，这里走「离线转译」
 # 发行链，直接产出原生 Metal 着色库：
-#   scc tri.sg  → *.vert/*.frag        (Vulkan-GLSL)
+#   scc tri.ss  → *.vert/*.frag        (Vulkan-GLSL)
 #     → glslangValidator → *.spv       (SPIR-V，中枢 IR)
 #     → spirv-cross --msl → *.metal    (Metal Shading Language)
 #     → xcrun metal -c    → *.air      (Apple IR)
 #     → xcrun metallib    → tri.metallib
 #
 # 本 demo（里程碑 A）只验证「发行侧着色器编译链」打通并产出可加载的 .metallib；
-# 原生 Metal 渲染 host 为下一里程碑。着色器共用 ../shader-tri/tri.sg（单一真源）。
+# 原生 Metal 渲染 host 为下一里程碑。着色器共用 ../shader-tri/tri.ss（单一真源）。
 #
 # 依赖：brew install glslang spirv-cross + Xcode/CLT 的 metal 工具链（xcrun metal）。
 # ============================================================
@@ -19,14 +19,14 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 SCC=${SCC:-../../compiler/build/scc}
-SRC=${SRC:-../shader-tri/tri.sg}     # 与 MoltenVK 版共用同一 .sg
+SRC=${SRC:-../shader-tri/tri.ss}     # 与 MoltenVK 版共用同一 .ss
 MSL_VERSION=${MSL_VERSION:-20000}    # Metal 2.0（macOS 10.13+）
 OUT=build
 mkdir -p "$OUT"
 
 # 阶段表（并行数组）：entry 同时用作 spirv-cross 的入口重命名目标（main→entry），
 # 保证多阶段链接进同一 metallib 时函数名唯一，也方便 host 按名查函数。
-STAGE_ENTRIES=(vs_main fs_main)   # scc 产出的入口名（= .sg 里的 stage 名）
+STAGE_ENTRIES=(vs_main fs_main)   # scc 产出的入口名（= .ss 里的 stage 名）
 STAGE_EXTS=(vert frag)            # scc 产出的 GLSL 扩展名
 STAGE_KINDS=(vert frag)           # spirv-cross / metal 阶段种类
 

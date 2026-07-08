@@ -66,8 +66,8 @@ std::string nodeExt(const std::string& k, const std::string& n, const std::strin
 std::string declNode(const Decl& d);
 std::string declNodeCore(const Decl& d);
 
-// ---- 着色器（syntax-g）属性 → 可读 detail 附加文本 ----
-// AST 视图对 .sg 显示 stage 类型（vert/frag/comp）与资源/位置绑定。
+// ---- 着色器（syntax-s）属性 → 可读 detail 附加文本 ----
+// AST 视图对 .ss 显示 stage 类型（vert/frag/comp）与资源/位置绑定。
 const char* shaderStageWord(ShaderStage s) {
     switch (s) {
         case ShaderStage::Vert: return "vert";
@@ -318,7 +318,7 @@ std::string declNodeCore(const Decl& d) {
                 std::string ret = typeToStr(d.structCommon.type);
                 if (!ret.empty()) detail = ": " + ret;
             }
-            // 着色阶段入口：detail 前缀标出 vert/frag/comp（供 .sg 的 AST 视图辨识）
+            // 着色阶段入口：detail 前缀标出 vert/frag/comp（供 .ss 的 AST 视图辨识）
             const std::string stagePfx =
                 d.shaderStage != ShaderStage::None
                     ? std::string(shaderStageWord(d.shaderStage)) + " " : "";

@@ -165,7 +165,7 @@ do_install() {
     else
         echo "    跳过：未找到 code CLI，请在 VSCode 中手动安装 'Markdown Preview Enhanced'"
     fi
-    echo "==> 安装完成（重启 VSCode 后 .sc/.sg 文件生效高亮与 AST 视图）"
+    echo "==> 安装完成（重启 VSCode 后 .sc/.ss 文件生效高亮与 AST 视图）"
 }
 
 do_uninstall() {

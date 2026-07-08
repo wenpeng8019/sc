@@ -2,7 +2,7 @@
 #
 # 命名旨趣：cpu = 串行·逻辑·时间；gpu/spc = 并行·变换·空间。
 # spc 是 gpu（运行环境）之下与 gfx（渲染）平级的"计算路"，三个入口：
-#   kernel 面：执行 scc 编译 .sg comp 的产物（自定义并行算法，Metal）
+#   kernel 面：执行 scc 编译 .ss comp 的产物（自定义并行算法，Metal）
 #   graph 面 ：高性能张量算子（mac = MPSGraph；nn GPU 加速的着力点）
 #   model 面 ：整图推理（mac = CoreML，可调度 ANE 推理芯片）
 #

@@ -1,8 +1,8 @@
 # gfx —— 渲染层（执行 scc 编译转义后的 GPU 代码）
 
 在 [utils/gpu](../gpu/)（GPU 运行环境）之上的**薄硬件访问层**，
-对应 sokol_gfx 的渲染部分：驱动 GPU 硬件、执行 scc 编译 `.sg`
-（syntax-g 方言）的产物。不做场景图/材质/渲染图等上层概念。
+对应 sokol_gfx 的渲染部分：驱动 GPU 硬件、执行 scc 编译 `.ss`
+（syntax-s 方言）的产物。不做场景图/材质/渲染图等上层概念。
 
 ## 1. 与 gpu（env 层）的边界
 
@@ -17,7 +17,7 @@
 - 像素格式沿用 `sc_gpu_pixel_format`（两层共同词汇）。
 
 ```
- .sg ──scc──▶ vs.metal / vs.vert + reflect.json
+ .ss ──scc──▶ vs.metal / vs.vert + reflect.json
                      │
  gpu_init（env）─▶ gfx_init ─▶ make_shader（直接吃产物）─▶ pipeline ─▶ 帧循环
 ```
@@ -45,7 +45,7 @@
 ```c
 sc_gfx_shader_desc sd = {0};
 sd.vs.code  = (sc_gfx_range){ msl_text, msl_len };
-sd.vs.entry = "vs_main";          /* Metal 产物入口 = .sg 阶段函数名；GL 恒 main */
+sd.vs.entry = "vs_main";          /* Metal 产物入口 = .ss 阶段函数名；GL 恒 main */
 sd.fs.code  = ...;
 sd.reflect_json = reflect_text;   /* <stem>.reflect.json 内容 */
 ```
@@ -94,7 +94,7 @@ macOS 链接框架见 [.sc](.sc)。
 ./templates/utils/wsi/build.sh
 ./templates/utils/gpu/build.sh
 ./templates/utils/gfx/build.sh
-./compiler/build/scc templates/demo/gpu_shader/gpu_tri.sg -o templates/demo/gpu_shader/out/gpu_tri
+./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
 SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
              -framework Metal -framework QuartzCore -framework OpenGL" \
     ./compiler/build/scc templates/demo/gpu_demo.sc     # Metal 三角形

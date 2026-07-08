@@ -20,7 +20,7 @@
 
 void _sc_gfx_log(const char* fmt, ...);
 
-/* ---- 反射清单（scc .sg 产物）解析结果 --------------------- */
+/* ---- 反射清单（scc .ss 产物）解析结果 --------------------- */
 
 typedef struct _sc_gfx_reflect_block {
     int    stage;                 /* sc_gfx_shader_stage；-1=全阶段 */

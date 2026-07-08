@@ -4,13 +4,13 @@
 #include "ast.h"
 
 // ============================================================
-// codegen_glsl —— GPU/着色器扩展（syntax-g）一期后端
+// codegen_glsl —— GPU/着色器扩展（syntax-s）一期后端
 // ============================================================
-// 把 .sg 源里的着色阶段（vert/frag/comp）翻译为 Vulkan-GLSL 文本。
-// 与核心 sc→C 管线（codegen_c）完全独立（见 syntax-g.md §12），
+// 把 .ss 源里的着色阶段（vert/frag/comp）翻译为 Vulkan-GLSL 文本。
+// 与核心 sc→C 管线（codegen_c）完全独立（见 syntax-s.md §12），
 // 后续 GLSL→SPIR-V→各平台后端交由运行时（shaderc/SPIRV-Cross/MoltenVK）。
 //
-// 本文件当前为「walking skeleton」：验证 .sg 路由 → 解析阶段 → 发射合法 GLSL
+// 本文件当前为「walking skeleton」：验证 .ss 路由 → 解析阶段 → 发射合法 GLSL
 // 的端到端链路。类型系统（vec/mat/swizzle）、语义子集强制、阶段 I/O 与绑定、
 // 反射清单等在后续迭代补齐。
 // ============================================================
@@ -18,7 +18,7 @@
 // 一个着色阶段的 GLSL 产物。
 struct GlslUnit {
     ShaderStage stage;      // 着色阶段
-    std::string entry;      // 入口名（来自 .sg 源）
+    std::string entry;      // 入口名（来自 .ss 源）
     std::string ext;        // 建议文件扩展名（vert/frag/comp）
     std::string text;       // 生成的 GLSL 源文本
 };
@@ -26,12 +26,12 @@ struct GlslUnit {
 // 将已按 shaderMode 解析的 Program 中所有阶段入口发射为 GLSL 文本（按目标 target）。
 std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target);
 
-// 生成反射清单 JSON（syntax-g §10）：目标（api/version）、阶段、入口、顶点属性
+// 生成反射清单 JSON（syntax-s §10）：目标（api/version）、阶段、入口、顶点属性
 // location、varying 配对、uniform/storage/sampler 的 set/binding 与 std140/std430
 // 字段偏移。低版本目标（无显式 binding）resources 项保留 name 供运行时按名绑定。
 std::string emitReflectionJson(const Program& prog, const GlslTarget& target);
 
-// .sg 源到 GLSL 的端到端驱动：lex → parse(shaderMode=true) → shader_sema → emitGlsl。
+// .ss 源到 GLSL 的端到端驱动：lex → parse(shaderMode=true) → shader_sema → emitGlsl。
 // outDir 为空 → 打印到 stdout（各阶段带分隔头 + 反射清单）；否则写入
 // outDir/<entry>.<ext> 与 outDir/<stem>.reflect.json。返回进程退出码（0 成功）。
 int compileShaderSource(const std::string& src, const std::string& srcPath,

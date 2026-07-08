@@ -9,7 +9,7 @@
 
 | 入口 | 定位 | mac 引擎(一期) | 板子(二期) |
 |------|------|----------------|------------|
-| **kernel**(可编程) | 执行 scc 编译 `.sg comp` 的产物;自定义并行算法/图像处理主场 | Metal compute | Vulkan / GLES3.1 |
+| **kernel**(可编程) | 执行 scc 编译 `.ss comp` 的产物;自定义并行算法/图像处理主场 | Metal compute | Vulkan / GLES3.1 |
 | **graph**(算子) | 高性能张量算子,nn GPU 加速的着力点 | MPSGraph | — |
 | **model**(整图推理) | 加载编译好的模型执行 | CoreML(**可调度 ANE 推理芯片**) | RKNN 等厂商栈 |
 
@@ -32,7 +32,7 @@ CPU——这是正确行为,不是集成失败。
 
 ## 3. kernel 面机制
 
-- 内核 = scc `.sg comp` 产物(MSL 文本)+ 反射清单。
+- 内核 = scc `.ss comp` 产物(MSL 文本)+ 反射清单。
 - **槽位对位**:spirv-cross 会重排 MSL `[[buffer(N)]]`,与清单
   binding 不一致——运行时经 Metal 管线反射按**块实例名**对位。
 - 绑定模型:`sc_spc_bindings.buffers[binding]`(storage 块)+
@@ -44,7 +44,7 @@ CPU——这是正确行为,不是集成失败。
 
 ```sh
 ./templates/utils/gpu/build.sh && ./templates/utils/spc/build.sh
-./compiler/build/scc templates/demo/spc_kernel/saxpy.sg -o templates/demo/spc_kernel/out/saxpy
+./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 python3 templates/demo/spc_model/gen.py     # 需 pip install coremltools
 SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
   -framework IOSurface -framework OpenGL -framework MetalPerformanceShaders \
@@ -74,4 +74,4 @@ src/coreml_spc.m      model 面:CoreML 加载/推理/MLComputePlan 查证
 - nn 热点算子(matmul/conv2d/sdpa)经 graph 面 GPU 加速(tape 不动)
 - Linux:Vulkan/GLES3.1 compute kernel、RKNN model 后端(经 memimg
   与相机/编码器零拷贝衔接)
-- .sg comp 的 local_size 语法(现编译器固定 64×1×1)
+- .ss comp 的 local_size 语法(现编译器固定 64×1×1)

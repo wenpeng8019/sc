@@ -1,12 +1,12 @@
 # spc_demo —— 多维空间并行计算演示:kernel / graph / model 三入口验证
 #
-#   kernel 面:scc .sg comp(saxpy)→ Metal compute,GPU 结果 vs ts CPU
+#   kernel 面:scc .ss comp(saxpy)→ Metal compute,GPU 结果 vs ts CPU
 #   graph 面 :MPSGraph matmul,GPU 结果 vs ts CPU matmul
 #   model 面 :CoreML tiny 模型推理(倾向 ANE),MLComputePlan 查证调度
 #
 # 前置(从仓库根目录运行):
 #   ./templates/utils/gpu/build.sh && ./templates/utils/spc/build.sh
-#   ./compiler/build/scc templates/demo/spc_kernel/saxpy.sg -o templates/demo/spc_kernel/out/saxpy
+#   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #   python3 templates/demo/spc_model/gen.py        # 生成 tiny.mlmodelc(需 coremltools)
 #   SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
 #     -framework IOSurface -framework MetalPerformanceShaders \
@@ -60,7 +60,7 @@ fnc main: i4
     var msl: char& = (load_file("templates/demo/spc_kernel/out/cs_saxpy.metal", &msln): char&)
     var rj: char& = (load_file("templates/demo/spc_kernel/out/saxpy.reflect.json", &rjn): char&)
     if msl == nil || rj == nil
-        print "内核产物缺失:先 scc 编译 spc_kernel/saxpy.sg\n"
+        print "内核产物缺失:先 scc 编译 spc_kernel/saxpy.ss\n"
         return 1
 
     var x: tensor& = arange(0.0, 1024.0, 1.0, DT_F4)
@@ -79,7 +79,7 @@ fnc main: i4
         print "make_kernel 失败\n"
         return 1
 
-    # uniform 块 {a: f4, n: u4}(与 .sg 的 Params 布局一致)
+    # uniform 块 {a: f4, n: u4}(与 .ss 的 Params 布局一致)
     var pb: & = ::malloc(8)
     var pf: f4& = (pb: f4&)
     pf[0] = 2.0

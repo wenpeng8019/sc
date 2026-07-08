@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# syntax-g demo 构建脚本：.sg → GLSL → SPIR-V → 本机可执行三角形
+# syntax-s demo 构建脚本：.ss → GLSL → SPIR-V → 本机可执行三角形
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -10,8 +10,8 @@ BREW_PREFIX=$(brew --prefix 2>/dev/null || echo /opt/homebrew)
 OUT=build
 mkdir -p "$OUT"
 
-echo "==> [1/3] scc: tri.sg → Vulkan-GLSL"
-"$SCC" tri.sg -o "$OUT/x"      # 生成 vs_main.vert / fs_main.frag / tri.reflect.json
+echo "==> [1/3] scc: tri.ss → Vulkan-GLSL"
+"$SCC" tri.ss -o "$OUT/x"      # 生成 vs_main.vert / fs_main.frag / tri.reflect.json
 
 echo "==> [2/3] glslangValidator: GLSL → SPIR-V"
 glslangValidator -V "$OUT/vs_main.vert" -o "$OUT/vs_main.spv"

@@ -100,7 +100,7 @@ fnc main: i4
     var fs: char& = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
     var rj: char& = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
     if vs == nil || fs == nil || rj == nil
-        print "着色器产物缺失：先 scc 编译 gpu_shader/gpu_tri.sg\n"
+        print "着色器产物缺失：先 scc 编译 gpu_shader/gpu_tri.ss\n"
         return 1
     var sd: ::sc_gfx_shader_desc
     ::memset(&sd, 0, sizeof(::sc_gfx_shader_desc))

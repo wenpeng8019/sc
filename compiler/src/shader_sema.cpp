@@ -6,7 +6,7 @@
 #include <vector>
 
 // ============================================================
-// shader_sema 实现（syntax-g 一期）
+// shader_sema 实现（syntax-s 一期）
 // ============================================================
 // 两类检查：
 //   1) 子集强制：递归遍历阶段 / 辅助函数体，遇禁用构造即报错。
@@ -205,7 +205,7 @@ void shaderSemaCheck(const Program& prog) {
 
     if (c.f8Line) useCap(Cap::DoubleType, c.f8Line);   // f8 双精度（由 checkType 捕获）
 
-    // ---- 能力门控（syntax-g §13.1）----
+    // ---- 能力门控（syntax-s §13.1）----
     // 契约制：声明的每个目标都必须支持所用能力，任一不满足即硬报错。
     for (const auto& t : prog.shaderTargets) {
         for (const auto& u : usedCaps) {

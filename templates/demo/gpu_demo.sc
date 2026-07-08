@@ -2,7 +2,7 @@
 # GPU 代码（Metal / GL 三角形）
 #
 # 链路（本 demo 的意义即验证此闭环）：
-#   gpu_shader/gpu_tri.sg ──scc──▶ vs_main.metal20000.metal / vs_main.glcore410.vert
+#   gpu_shader/gpu_tri.ss ──scc──▶ vs_main.metal20000.metal / vs_main.glcore410.vert
 #                                  + gpu_tri.<tar>.reflect.json
 #                                        │
 #   wsi 窗口 ─▶ gpu_init（环境：device + surface 交换链）
@@ -13,7 +13,7 @@
 #   ./templates/utils/wsi/build.sh                 # 先编出 libwsi.a
 #   ./templates/utils/gpu/build.sh                 # 环境层 libgpu.a
 #   ./templates/utils/gfx/build.sh                 # 渲染层 libgfx.a
-#   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.sg -o templates/demo/gpu_shader/out/gpu_tri
+#   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
 #   SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
 #                -framework Metal -framework QuartzCore -framework OpenGL" \
 #       ./compiler/build/scc templates/demo/gpu_demo.sc
@@ -94,7 +94,7 @@ fnc main: i4
         wsi_terminate()
         return 1
 
-    # ---- 着色器：直接消费 scc 编译 .sg 的产物（按后端选目标产物） ----
+    # ---- 着色器：直接消费 scc 编译 .ss 的产物（按后端选目标产物） ----
     var vsn: u8 = 0
     var fsn: u8 = 0
     var rjn: u8 = 0
@@ -110,7 +110,7 @@ fnc main: i4
         fs = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
         rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
     if vs == nil || fs == nil || rj == nil
-        print "着色器产物缺失：先运行 scc 编译 gpu_shader/gpu_tri.sg（见文件头用法）\n"
+        print "着色器产物缺失：先运行 scc 编译 gpu_shader/gpu_tri.ss（见文件头用法）\n"
         gfx_shutdown()
         gpu_shutdown()
         wsi_terminate()
@@ -120,7 +120,7 @@ fnc main: i4
     ::memset(&sd, 0, sizeof(::sc_gfx_shader_desc))
     sd.vs.code.ptr  = (vs: &)
     sd.vs.code.size = vsn
-    sd.vs.entry     = "vs_main"      # Metal 产物入口 = .sg 阶段函数名；GL 恒为 main（后端忽略）
+    sd.vs.entry     = "vs_main"      # Metal 产物入口 = .ss 阶段函数名；GL 恒为 main（后端忽略）
     sd.fs.code.ptr  = (fs: &)
     sd.fs.code.size = fsn
     sd.fs.entry     = "fs_main"

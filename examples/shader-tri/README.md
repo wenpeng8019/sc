@@ -1,11 +1,11 @@
-# syntax-g demo：GLSL → SPIR-V → MoltenVK 三角形
+# syntax-s demo：GLSL → SPIR-V → MoltenVK 三角形
 
-用 sc 的 GPU 方言（`.sg`，见 [`syntax-g.md`](../../syntax-g.md)）写一个三角形着色器，
+用 sc 的 GPU 方言（`.ss`，见 [`syntax-s.md`](../../syntax-s.md)）写一个三角形着色器，
 经 `scc` 生成 Vulkan-GLSL，再由 `glslangValidator` 编译成 SPIR-V，最后用一个
 极简的 Vulkan host（经 MoltenVK 跑在 Metal 上）绘制出来。
 
 ```
-tri.sg ──scc──▶ vs_main.vert / fs_main.frag ──glslangValidator──▶ *.spv ──▶ main.c(Vulkan/MoltenVK)
+tri.ss ──scc──▶ vs_main.vert / fs_main.frag ──glslangValidator──▶ *.spv ──▶ main.c(Vulkan/MoltenVK)
                 (+ tri.reflect.json 反射清单)
 ```
 
@@ -36,7 +36,7 @@ brew install glslang glfw molten-vk vulkan-headers vulkan-loader
 
 | 文件 | 说明 |
 | --- | --- |
-| `tri.sg` | 着色器源（sc GPU 方言） |
+| `tri.ss` | 着色器源（sc GPU 方言） |
 | `main.c` | 极简 Vulkan/MoltenVK host（实例→设备→交换链→管线→渲染循环） |
 | `build.sh` | 三步构建管线 |
 | `run.sh` | 选定 MoltenVK 驱动并运行 |
@@ -44,7 +44,7 @@ brew install glslang glfw molten-vk vulkan-headers vulkan-loader
 
 ## 说明
 
-- 这是 syntax-g 一期的运行时验证：证明 `scc` 产出的 GLSL 能一路走到 GPU。
+- 这是 syntax-s 一期的运行时验证：证明 `scc` 产出的 GLSL 能一路走到 GPU。
   一期本身零着色器库依赖，SPIR-V 之后的环节（glslang / MoltenVK）全部是开源现成件。
 - `tri.reflect.json` 是配套的反射清单（阶段 I/O、location、资源绑定与 std140 偏移），
   供运行时构建管线布局/描述符使用；本 demo 无资源，故未用到。

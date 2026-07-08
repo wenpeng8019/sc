@@ -1,8 +1,13 @@
-# 三角形 demo 着色器（syntax-g）。
+# gpu_demo 三角形着色器（syntax-s）——gpu 模块 Metal 后端首光 demo。
 # 无顶点缓冲、无 uniform：三个顶点的位置与颜色写在常量数组里，
 # 由内建 vertex_id 索引。运行时 host 只需空 draw(3)。
+#
+# 编译（多目标产物带目标标签：vs_main.metal20.metal / vs_main.glcore410.vert
+#       / gpu_tri.metal20.reflect.json / gpu_tri.glcore410.reflect.json）：
+#   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out
 
-tar vulkan@450
+tar metal@2.0
+tar glcore@410
 
 @def VsIn: {
     vid: i4 builtin vertex_id

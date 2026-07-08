@@ -1,7 +1,7 @@
 {
     "name": "sg-lang",
     "displayName": "sc Shader (sg)",
-    "description": "sc 图形着色方言（.sg）语法高亮、补全与编译诊断",
+    "description": "sc 图形着色方言（.ss）语法高亮、补全与编译诊断",
     "version": "0.1.0",
     "publisher": "sc-lang",
     "engines": { "vscode": "^1.75.0" },
@@ -13,7 +13,7 @@
             {
                 "id": "sg",
                 "aliases": ["sg", "sc-shader"],
-                "extensions": [".sg"],
+                "extensions": [".ss"],
                 "configuration": "./language-configuration.json",
                 "icon": {
                     "light": "./icons/sg-icon-dark.svg",
@@ -24,7 +24,7 @@
         "grammars": [
             {
                 "language": "sg",
-                "scopeName": "source.sg",
+                "scopeName": "source.ss",
                 "path": "./syntaxes/sg.tmLanguage.json"
             }
         ],
@@ -39,7 +39,7 @@
                 "sg.diagnostics": {
                     "type": "boolean",
                     "default": true,
-                    "description": "编辑/保存时调用 scc 编译 .sg 并把错误显示为诊断。"
+                    "description": "编辑/保存时调用 scc 编译 .ss 并把错误显示为诊断。"
                 }
             }
         }

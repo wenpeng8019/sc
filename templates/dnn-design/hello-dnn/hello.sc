@@ -150,8 +150,8 @@ fnc forward: f4, x0: f4, x1: f4
 # 优化器一步：对各神经元调 neuron 的 sgd 方法（传入超参）。
 fnc sgd_step:
     for k in 4
-        HID[k].sgd(LR, MOMENTUM)
-    OUT[0].sgd(LR, MOMENTUM)
+        HID[k].ssd(LR, MOMENTUM)
+    OUT[0].ssd(LR, MOMENTUM)
     return
 
 # 训练 EPOCHS 轮（逐样本 SGD：清梯度 → 前向 → back 反传 → 更新）。

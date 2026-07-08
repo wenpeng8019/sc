@@ -3,7 +3,7 @@
  * ============================================================
  * 定位（对应 sokol_gfx 的渲染部分）：
  *   在 gpu 模块（utils/gpu，GPU 运行环境）之上做**驱动 GPU 硬件、
- *   执行 scc 编译转义后的 GPU 代码（.sg → MSL/GLSL/SPIR-V + 反射
+ *   执行 scc 编译转义后的 GPU 代码（.ss → MSL/GLSL/SPIR-V + 反射
  *   清单）**的薄硬件访问层。不做场景图/材质/渲染图等上层概念。
  *
  * 与 gpu（env 层）的边界（软边界：本库编译期单向依赖 libgpu.a）：
@@ -13,7 +13,7 @@
  *   · 像素格式沿用 sc_gpu_pixel_format（两层共同词汇）
  *
  * 与 scc 的整合（核心）：
- *   sc_gfx_shader_desc 直接消费 scc 编译 .sg 的产物：
+ *   sc_gfx_shader_desc 直接消费 scc 编译 .ss 的产物：
  *     · 各阶段目标代码 blob（Metal 吃 MSL，GL 吃 GLSL）
  *     · 反射清单 JSON——运行时据此自动建立管线绑定。
  *
@@ -299,7 +299,7 @@ typedef struct sc_gfx_sampler_desc {
     const char*    label;
 } sc_gfx_sampler_desc;
 
-/* 着色器：核心整合点 —— 直接消费 scc 编译 .sg 的产物。
+/* 着色器：核心整合点 —— 直接消费 scc 编译 .ss 的产物。
  *   code   ：当前后端的目标代码。Metal=MSL 文本、GL=GLSL 文本。
  *            文本无须 NUL 结尾（按 size 取）。
  *   entry  ：入口函数名。scc 产物 MSL 为重命名后的入口（如 vs_main）；

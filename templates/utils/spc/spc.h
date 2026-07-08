@@ -6,7 +6,7 @@
  * gpu（env 层）之下与 gfx（渲染）平级的"计算路"。
  *
  * 三个入口（一个模块，按工作负载选引擎）：
- *   kernel 面（可编程）：执行 scc 编译 .sg comp 的产物（MSL 计算内核）
+ *   kernel 面（可编程）：执行 scc 编译 .ss comp 的产物（MSL 计算内核）
  *       —— 自定义并行算法 / 图像处理 / 传感器数据的主场（Metal，一期）
  *   graph 面（算子）  ：高性能张量算子，走平台算子图引擎
  *       —— mac = MPSGraph（一期 matmul）；为 nn 的 GPU 加速铺路
@@ -87,7 +87,7 @@ void sc_spc_destroy_buffer(sc_spc_buffer buf);
 
 /* ---- kernel 面：内核与调度 --------------------------------- */
 
-/* code = scc .sg comp 产物（mac 为 MSL 文本）；entry = comp 阶段函数名；
+/* code = scc .ss comp 产物（mac 为 MSL 文本）；entry = comp 阶段函数名；
  * reflect_json = 同批 .reflect.json 内容——运行时据此建立
  * binding 槽 → MSL 参数位 的名字对位（spirv-cross 会重排 MSL 槽），
  * 并取 local_size 作为线程组尺寸。 */

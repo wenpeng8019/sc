@@ -1,7 +1,7 @@
 # gfx —— 渲染层（执行 scc 编译转义后的 GPU 代码）
 #
 # 定位（对应 sokol_gfx 的渲染部分）：在 gpu 模块（GPU 运行环境）之上
-#   做**驱动 GPU 硬件、执行 scc 编译 .sg 产物（MSL/GLSL + 反射清单）**
+#   做**驱动 GPU 硬件、执行 scc 编译 .ss 产物（MSL/GLSL + 反射清单）**
 #   的薄硬件访问层。资源模型：buffer/image/sampler/shader/pipeline
 #   五类句柄 + desc 一次性描述。
 #

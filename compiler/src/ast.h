@@ -180,7 +180,7 @@ struct Field {
                                         // + 认领一个 C 侧已定义的全局符号，转 C 生成 extern T name;
                                         //   不分配存储、无初值；仅把名字与类型登记进 sc 符号表。
 
-    // GPU/着色器扩展（syntax-g）：字段级绑定属性（loc N / builtin X），仅 .sg 解析。
+    // GPU/着色器扩展（syntax-s）：字段级绑定属性（loc N / builtin X），仅 .ss 解析。
     // 用 shared_ptr 保持 Field 可默认拷贝，非 shader 场景为空指针零开销。
     std::shared_ptr<ShaderFieldAttr> shaderAttr;
 
@@ -591,12 +591,12 @@ struct Decl {
                                     // 去重），使模块导出签名引用实例类型时可见。普通声明为 false。
     std::string genericKey;         // 所属泛型实例键（如 "Vec<i4,int>"），跨单元去重用。
 
-    // GPU/着色器扩展（syntax-g）：FuncD 的着色阶段标记。仅在 .sg 源（shader 模式）
+    // GPU/着色器扩展（syntax-s）：FuncD 的着色阶段标记。仅在 .ss 源（shader 模式）
     // 解析时由 parser 置位；None 即普通 sc 函数。shader 专属语义/代码生成在
     // shader_sema.* / codegen_glsl.*。
     ShaderStage shaderStage = ShaderStage::None;
 
-    // GPU/着色器扩展（syntax-g）：结构体级资源绑定属性（uniform/storage/push），仅 .sg。
+    // GPU/着色器扩展（syntax-s）：结构体级资源绑定属性（uniform/storage/push），仅 .ss。
     std::shared_ptr<ShaderDeclAttr> shaderAttr;
 
     //---------
@@ -617,7 +617,7 @@ struct Program {
     bool isRoot = false;                    // 头部含 @@ 标记：本单元为显式根模块（全局前奏提供者），
                                             // 其 @导出 默认注入到所有依赖单元，供编译期对接语法插件静态发现。
 
-    // GPU/着色器扩展（syntax-g §13.1）：.sg 顶层 tar 指令声明的转义目标列表
+    // GPU/着色器扩展（syntax-s §13.1）：.ss 顶层 tar 指令声明的转义目标列表
     // （每目标 API+版本）。空 = 未声明（仅 --ast/--emit-sc 允许；GLSL 代码生成必须声明）。
     std::vector<GlslTarget> shaderTargets;
 };

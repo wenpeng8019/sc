@@ -95,7 +95,7 @@ struct Parser {
     // future<ID>() 构造点收集的 ID（去重、首见序）：parseProgram 末尾合成 future_id 枚举
     std::vector<std::string> futureIds;
 
-    // shader 模式（GPU/着色器扩展 syntax-g）：仅 .sg 源为 true。为真时顶层
+    // shader 模式（GPU/着色器扩展 syntax-s）：仅 .ss 源为 true。为真时顶层
     // vert/frag/comp 标识符被识别为着色阶段入口。默认 false（.sc 完全不受影响）。
     bool shaderMode = false;
 
@@ -1900,7 +1900,7 @@ struct Parser {
         accept(Tok::Dedent);
     }
 
-    // GPU/着色器扩展（syntax-g）：解析一个着色阶段入口声明（仅 shaderMode 下调用）。
+    // GPU/着色器扩展（syntax-s）：解析一个着色阶段入口声明（仅 shaderMode 下调用）。
     // 骨架形态：vert|frag|comp NAME \n <缩进体>。复用核心 FuncD 表示，附 shaderStage 标记；
     // 阶段体本身即 sc 语句，交由既有 parseStmts 解析，后由 codegen_glsl 翻译为 GLSL。
     DeclPtr parseShaderStage(ShaderStage stage) {
@@ -1924,7 +1924,7 @@ struct Parser {
         return d;
     }
 
-    // GPU/着色器扩展（syntax-g §5）：字段级后缀属性（仅 shader 模式，且属性词出现时才消费）。
+    // GPU/着色器扩展（syntax-s §5）：字段级后缀属性（仅 shader 模式，且属性词出现时才消费）。
     //   loc N        → 顶点属性 / varying 位置
     //   builtin X    → 内建变量语义（position/frag_coord/...）
     void parseShaderFieldAttrs(Field& f) {
@@ -1941,7 +1941,7 @@ struct Parser {
         }
     }
 
-    // GPU/着色器扩展（syntax-g §6）：结构体级资源绑定后缀属性（仅 shader 模式）。
+    // GPU/着色器扩展（syntax-s §6）：结构体级资源绑定后缀属性（仅 shader 模式）。
     //   uniform|storage set S binding B   |   push
     void parseShaderDeclAttrs(Decl& d) {
         if (!(at(Tok::Ident) &&
@@ -1966,7 +1966,7 @@ struct Parser {
         }
     }
 
-    // GPU/着色器扩展（syntax-g §13.1）：顶层 `tar` 指令 —— 声明转义目标与版本。
+    // GPU/着色器扩展（syntax-s §13.1）：顶层 `tar` 指令 —— 声明转义目标与版本。
     // 版本必须显式指定（无默认），一行可逗号分隔多个目标：
     //   tar vulkan@450
     //   tar gles@100, gles@300
@@ -2778,7 +2778,7 @@ struct Parser {
                             : cur().kind == Tok::KwLet ? Decl::LetD : Decl::TlsD;
                     d->exported = exported;
                     advance();
-                    // GPU/着色器扩展：.sg 顶层 var 作为全局着色资源（sampler/image 等）：
+                    // GPU/着色器扩展：.ss 顶层 var 作为全局着色资源（sampler/image 等）：
                     //   var albedo: sampler2D set 0 binding 1 —— 单项 + 可选 set/binding。
                     if (shaderMode && d->kind == Decl::VarD) {
                         d->structCommon.fields.push_back(parseVarItem());
@@ -2810,11 +2810,11 @@ struct Parser {
                 }
 
                 default:
-                    // GPU/着色器扩展（syntax-g）：.sg 源顶层的 vert/frag/comp 阶段入口。
+                    // GPU/着色器扩展（syntax-s）：.ss 源顶层的 vert/frag/comp 阶段入口。
                     // vert/frag/comp 仍作为普通标识符词法化（保护 .sc 方言与全部回归），
                     // 仅在 shader 模式下、位于顶层时才升格为阶段声明。
                     if (shaderMode && at(Tok::Ident)) {
-                        // tar：顶层转义目标声明（syntax-g §13.1）。
+                        // tar：顶层转义目标声明（syntax-s §13.1）。
                         if (cur().text == "tar") {
                             if (exported) err("tar 不支持 @ 导出");
                             parseShaderTargets(prog);
