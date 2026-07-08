@@ -1893,6 +1893,49 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             }
 #endif
         }
+        // gpu / gfx / spc（builtins GPU 模块体系）+ wsi（窗口库）——平台链接注入：
+        //   模块以 add lib<mod>.a 预编译库交付（build.sh 产多 triple 变体），
+        //   其平台框架/系统库依赖由此处按目标平台族自动注入，用户零 SCC_LDFLAGS。
+        //   darwin 框架集为实测；linux 桌面组（GL/EGL/gbm）为板验前的合理缺省，
+        //   GLES 形态（lib<mod>.<triple>.gles.a）的 -lGLESv2 选择待板验接入。
+        if (scStem == "gpu" || scStem == "gfx" || scStem == "spc" || scStem == "wsi") {
+            const std::string fam =
+                platformFamily(tc.triple.empty() ? hostTriple() : tc.triple);
+            auto addLd = [&](const char* flag) {
+                if (extraLd && extraLd->find(flag) == std::string::npos)
+                    *extraLd += std::string(" ") + flag;
+            };
+            if (fam == "darwin") {
+                if (scStem == "wsi") {
+                    addLd("-framework Cocoa");
+                    addLd("-framework IOKit");
+                    addLd("-framework CoreFoundation");
+                    addLd("-framework QuartzCore");
+                } else {
+                    /* gpu/gfx/spc 共用基础集（查重防重复注入） */
+                    addLd("-framework Cocoa");
+                    addLd("-framework Metal");
+                    addLd("-framework QuartzCore");
+                    addLd("-framework OpenGL");
+                    addLd("-framework IOSurface");
+                    addLd("-framework CoreFoundation");
+                    if (scStem == "spc") {
+                        addLd("-framework MetalPerformanceShaders");
+                        addLd("-framework MetalPerformanceShadersGraph");
+                        addLd("-framework CoreML");
+                        addLd("-framework Foundation");
+                    }
+                }
+            } else if (fam == "linux") {
+                if (scStem == "gpu" || scStem == "gfx") {
+                    /* 桌面组；GLES 形态板验时按库变体切 -lGLESv2 */
+                    addLd("-lGL");
+                    addLd("-lEGL");
+                    addLd("-lgbm");
+                }
+                /* wsi linux（X11/Wayland 后端选择）待板验注入 */
+            }
+        }
         // op —— 默认导入的语言运行时（chain/异步内核）。异步内核基于 pthread，故需链接
         //   线程库（Linux=-lpthread；macOS/Windows/裸机=空）。编译器以 -DSCC_WITH_UV
         //   构建时改用 libuv 后端：op_impl.c 需 -DSCC_WITH_UV + libuv 头，链接 libuv.a

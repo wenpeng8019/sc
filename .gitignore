@@ -6,9 +6,9 @@ compiler/build-dist/
 compiler/build-ssl/
 compiler/build-linux/
 templates/utils/wsi/build/
-templates/utils/gpu/build/
-templates/utils/gfx/build/
-templates/utils/spc/build/
+builtins/gpu/build/
+builtins/gfx/build/
+builtins/spc/build/
 *.o
 *.out
 *.exe

@@ -9,7 +9,8 @@
 #   按平台默认或 sc_gpu_desc.backend 显式选择：
 #     macOS → Metal（默认）/ GL     linux/win → GL（默认）
 #
-# 依赖：wsi（native_window / native_display 来自 sc_wsi_win_get_native_*）。
+# 无窗口库依赖：native_window/native_display 是平台原生句柄（标准定义
+#   在 gpu.h 文件头），窗口库（如 utils/wsi）适配本标准交付句柄。
 #
 # 句柄：C 侧为纯 u4 typedef（低 16 位池索引 + 高 16 位代数），绑定声明
 #   为 u4；0 = 无效句柄。desc 结构体经指针传递（&）。

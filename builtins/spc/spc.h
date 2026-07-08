@@ -34,7 +34,7 @@
 #define SC_SPC_H
 
 #include <stdint.h>
-#include "../../../builtins/ts/ts.h"   /* sc_tensor（编译期结构定义，无链接依赖） */
+#include "../ts/ts.h"   /* sc_tensor（编译期结构定义，无链接依赖） */
 
 #ifdef __cplusplus
 extern "C" {

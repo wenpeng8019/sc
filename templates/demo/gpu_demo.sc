@@ -9,21 +9,19 @@
 #              └▶ gfx_init（渲染）─▶ gfx_make_shader(直接吃 scc 产物)
 #                          └▶ gfx_make_pipeline ─▶ 帧循环 gfx_draw(3)
 #
-# 用法（macOS，从仓库根目录运行）：
+# 用法（macOS，从仓库根目录运行；平台框架链接由编译器自动注入，零 SCC_LDFLAGS）：
 #   ./templates/utils/wsi/build.sh                 # 先编出 libwsi.a
-#   ./templates/utils/gpu/build.sh                 # 环境层 libgpu.a
-#   ./templates/utils/gfx/build.sh                 # 渲染层 libgfx.a
+#   ./builtins/gpu/build.sh                 # 环境层 libgpu.a
+#   ./builtins/gfx/build.sh                 # 渲染层 libgfx.a
 #   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
-#   SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
-#                -framework Metal -framework QuartzCore -framework OpenGL" \
-#       ./compiler/build/scc templates/demo/gpu_demo.sc
+#   ./compiler/build/scc templates/demo/gpu_demo.sc
 #   ./templates/demo/gpu_demo                      # 需从仓库根运行（着色器按相对路径加载）
 #   GPU_BACKEND=gl ./templates/demo/gpu_demo       # 切 OpenGL 后端
 
 inc io.sc
 inc ../utils/wsi/wsi.sc
-inc ../utils/gpu/gpu.sc
-inc ../utils/gfx/gfx.sc
+inc gpu.sc
+inc gfx.sc
 
 # 整文件读入 malloc 缓冲（尾部补 NUL，文本产物可当 C 串用）。失败返回 nil。
 @fnc load_file: &, path: const char&, out_size: u8&

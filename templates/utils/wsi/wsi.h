@@ -2774,6 +2774,9 @@ WSI_API void sc_wsi_win_set_user_data(sc_window* window, void* pointer);
  *  例如 X11 的 `Display*`、Wayland 的 `wl_display*`。在不需要 display
  *  句柄的平台返回 `NULL`。
  *
+ *  交付含义适配 builtins/gpu 的「平台原生句柄标准」（gpu.h 文件头）：
+ *  返回值可直接填入 sc_gpu_surface_desc.native_display。
+ *
  *  @param[in] window 要查询的窗口。
  *  @return 原生 display 句柄，若无或失败返回 `NULL`。
  *
@@ -2788,6 +2791,9 @@ WSI_API void* sc_wsi_win_get_native_display(sc_window* window);
  *
  *  例如 Win32 的 `HWND`、Cocoa 的 `NSView*`、X11 的 `Window`（经 `uintptr_t`
  *  转换为指针值）、Wayland 的 `wl_surface*`。
+ *
+ *  交付含义适配 builtins/gpu 的「平台原生句柄标准」（gpu.h 文件头）：
+ *  返回值可直接填入 sc_gpu_surface_desc.native_window。
  *
  *  @param[in] window 要查询的窗口。
  *  @return 原生 window/surface 句柄，失败返回 `NULL`。

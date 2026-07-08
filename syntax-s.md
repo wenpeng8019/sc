@@ -11,8 +11,8 @@ GPU **空间计算**（渲染着色 + 并行计算）开发扩展。定位与主
 > 现代 GPU 已超越图像渲染（graphics），扩展到空间计算/AI 并行计算；本方言同时
 > 承载 `vert`/`frag`（渲染）与 `comp`（计算），故从“g”改名“s”。源文件扩展名同步
 > 由 `.sg` 改为 **`.ss`**（space source）。运行时消费侧对应三个模块：
-> [utils/gfx](templates/utils/gfx/)（渲染）、[utils/spc](templates/utils/spc/)（计算），
-> 共同架在 [utils/gpu](templates/utils/gpu/)（运行环境）之上。
+> [builtins/gfx](builtins/gfx/)（渲染）、[builtins/spc](builtins/spc/)（计算），
+> 共同架在 [builtins/gpu](builtins/gpu/)（运行环境）之上。
 
 > **当前状态（重要）**
 >
@@ -22,9 +22,9 @@ GPU **空间计算**（渲染着色 + 并行计算）开发扩展。定位与主
 > 成员改写、std140/std430 布局偏移均已实现并回归通过。
 >
 > **原 §13 的 P0–P2 已全部落地成模块体系**：GL 版本适配（`tar` 多目标，§13.1）、
-> 运行环境与渲染（utils/gpu + utils/gfx，Metal/GL 双后端三角形实机验证）、
+> 运行环境与渲染（builtins/gpu + builtins/gfx，Metal/GL 双后端三角形实机验证）、
 > 窗口层（utils/wsi）。`comp` 计算链路亦已打通（计算内建映射、local_size、
-> 反射携带），由 utils/spc 消费（Metal compute 实机验证）。文中未落地部分仍为
+> 反射携带），由 builtins/spc 消费（Metal compute 实机验证）。文中未落地部分仍为
 > **提案**，标注「（待定）」处实现前可调整。
 
 > **两条硬约束（贯穿全文）**
@@ -301,7 +301,7 @@ shader 内置函数映射到各后端的原生内置（由 codegen 转名，SPIR
   属性标注，见 §5）：`global_invocation_id` / `local_invocation_id` / `workgroup_id` /
   `num_workgroups`（uvec3；字段声明为标量 u4/i4 时自动取 `.x`，1D 调度惯用）、
   `local_invocation_index`（uint）。工作组尺寸暂无 `.ss` 语法，编译器固定发射
-  `local_size = 64×1×1` 并在反射清单 stages[] 携带，运行时（utils/spc）据此设
+  `local_size = 64×1×1` 并在反射清单 stages[] 携带，运行时（builtins/spc）据此设
   线程组；自定义 local_size 语法属二期。
 
 考虑作为 shader 专属 builtins 模块（如 `builtins/shader/` 或 `templates/shader/`）暴露给
@@ -374,9 +374,9 @@ lexer/parser 基础设施但各自的语义/代码生成完全独立。CMakeList
 
 ## 13. 待做能力（近期优先）——**已全部落地**（保留作设计依据）
 
-> 本节三项能力已实现并模块化：P0 = `tar` 多目标（§13.1）；P1 = utils/gpu +
-> utils/gfx（运行环境/渲染，Metal+GL 双后端）；P2 = utils/wsi（自研窗口层）。
-> 计算路另落地为 utils/spc（kernel/graph/model 三入口，含 ANE 推理）。
+> 本节三项能力已实现并模块化：P0 = `tar` 多目标（§13.1）；P1 = builtins/gpu +
+> builtins/gfx（运行环境/渲染，Metal+GL 双后端）；P2 = utils/wsi（自研窗口层）。
+> 计算路另落地为 builtins/spc（kernel/graph/model 三入口，含 ANE 推理）。
 > 下文保留当时的设计取舍作历史依据，细节以各模块 README 为准。
 
 一期已把「`.ss` → Vulkan-GLSL 450 → SPIR-V → MoltenVK 三角形」的**最小闭环**跑通，但要达到
@@ -574,14 +574,14 @@ flowchart LR
 ### 14.2 紧接一期（原近期优先，§13）——**已全部落地**
 - ✅ **P0**：GL 版本/profile 适配（`tar metal@2.0` / `glcore@410` / `gles@300` 多目标，
   多目标产物带标签名）+ 按版本的 sema 能力裁剪。
-- ✅ **P1**：GPU 运行环境与渲染模块：[utils/gpu](templates/utils/gpu/)（device/surface/
-  memimg，含无表面渲染）+ [utils/gfx](templates/utils/gfx/)（读反射清单自动装配管线，
+- ✅ **P1**：GPU 运行环境与渲染模块：[builtins/gpu](builtins/gpu/)（device/surface/
+  memimg，含无表面渲染）+ [builtins/gfx](builtins/gfx/)（读反射清单自动装配管线，
   Metal/GL 双后端）。
 - ✅ **P2**：跨平台窗口/输入模块 [utils/wsi](templates/utils/wsi/)（自研，glfw 同构）。
 
 ### 14.3 二期（部分已提前落地）
 - ✅ `comp` 计算链路：计算内建映射 + `local_size` 发射/反射携带 + storage/SSBO；
-  消费侧 [utils/spc](templates/utils/spc/)（多维空间并行计算：kernel=Metal compute、
+  消费侧 [builtins/spc](builtins/spc/)（多维空间并行计算：kernel=Metal compute、
   graph=MPSGraph、model=CoreML/ANE）实机验证。待深化：`local_size` 语法、
   barrier/共享内存语法。
 - `@def` 共享布局（CPU↔GPU uniform 一致性校验，见 §7）。
@@ -599,11 +599,11 @@ flowchart LR
 
 - ~~GL 版本适配的接口形态~~：已定——`.ss` 内 `tar` 顶层指令（可多目标）；多目标
   产物带标签名（如 `vs_main.glcore410.vert`）。
-- ~~上下文/窗口模块的边界与命名~~：已定——utils/wsi（窗口）、utils/gpu（运行环境）、
-  utils/gfx（渲染）、utils/spc（计算），均自研。
+- ~~上下文/窗口模块的边界与命名~~：已定——utils/wsi（窗口）、builtins/gpu（运行环境）、
+  builtins/gfx（渲染）、builtins/spc（计算），均自研。
 - 向量/矩阵类型是内置关键字还是 shader builtins 模块提供（见 §4、§8）。
 - `local_size` 的 `.ss` 语法形态（现为编译器固定 64×1×1）。
-- 计算着色器与 sc `tok`/dnn 体系的结合边界（远期研究；utils/spc 的 graph/model
+- 计算着色器与 sc `tok`/dnn 体系的结合边界（远期研究；builtins/spc 的 graph/model
   面已提供运行时路径）。
 - **已定**（一期落地时确定，此处存档）：属性附着语法（`loc N` / `builtin X` 跟在字段后；
   `uniform|storage|push [set S binding B]` 跟在 `@def` 结构后）；反射清单 JSON schema

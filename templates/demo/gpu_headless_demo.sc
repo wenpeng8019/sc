@@ -9,15 +9,14 @@
 # 验证方式：渲染三角形 → map 映射 CPU → 写 PPM 文件肉眼校验。
 #   真实链路中 map 换成把 frame.fd / frame.native 交给 v4l2 / VideoToolbox。
 #
-# 用法（macOS，从仓库根目录运行；默认 Metal，GPU_BACKEND=gl 切 NSGL 无屏）：
-#   SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
-#                -framework OpenGL -framework IOSurface" \
-#       ./compiler/build/scc templates/demo/gpu_headless_demo.sc
+# 用法（macOS，从仓库根目录运行；默认 Metal，GPU_BACKEND=gl 切 NSGL 无屏；
+#      平台框架链接由编译器自动注入，零 SCC_LDFLAGS）：
+#   ./compiler/build/scc templates/demo/gpu_headless_demo.sc
 #   产出 /tmp/sc_headless_a.ppm（Mode A，深蓝底）/ sc_headless_b.ppm（Mode B，深绿底）
 
 inc io.sc
-inc ../utils/gpu/gpu.sc
-inc ../utils/gfx/gfx.sc
+inc gpu.sc
+inc gfx.sc
 
 # 整文件读入 malloc 缓冲（尾部补 NUL）。失败返回 nil。
 @fnc load_file: &, path: const char&, out_size: u8&

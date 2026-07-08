@@ -1,10 +1,14 @@
 # GPU 模块体系核心机制/原理
 
-> 本文是 templates/utils 四模块（wsi/gpu/gfx/spc）的**统一规格文档**，与根目录
-> [AGENTS.md](../../AGENTS.md)（开发上下文/平台矩阵）互补：AGENTS.md 管「现状与待办」，
+> 本文是 GPU 模块体系（builtins 内的 gpu/gfx/spc + 外部适配层 wsi）的**统一规格文档**，
+> 与根目录 [AGENTS.md](../../AGENTS.md)（开发上下文/平台矩阵）互补：AGENTS.md 管「现状与待办」，
 > 本文管「**怎么做、怎么实现、背后的技术和流程是什么**」——各 GPU 设备技术的原理、
 > 以及本项目对它们的适配机制，均从实际源码推导总结。风格对齐
-> [builtins/MECHANISM.md](../../builtins/MECHANISM.md)。
+> [builtins/MECHANISM.md](../MECHANISM.md)。
+>
+> 模块归属：gpu/gfx/spc 是语言内置模块（builtins，`inc gpu.sc` 即用，平台
+> 框架链接由编译器自动注入）；wsi（窗口库）留在 templates/utils，按 gpu.h
+> 定义的「平台原生句柄标准」适配——gpu 不依赖任何窗口库。
 
 ---
 

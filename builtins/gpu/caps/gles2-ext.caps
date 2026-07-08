@@ -1,0 +1,13 @@
+# gles2-ext.caps —— GLES2 嵌入式基线 + 常见扩展（示例档案）
+#
+# builtins/gpu/caps/ = 标准设备能力档案库：.ss 里 `tar "gles2-ext.caps"`
+# 按名解析（搜索顺序：相对 .ss 源文件 → builtins/gpu/caps/）。
+# 板卡专属档案建议放项目里（tar "boards/xxx.caps" 相对路径）。
+#
+# 本档案描述典型 GLES2 板卡：GLSL ES 100 基线 + 三个最常见扩展。
+
+api gles
+version 100
+ext GL_EXT_frag_depth              # gl_FragDepthEXT（frag_depth 内建）
+ext GL_EXT_draw_buffers            # gl_FragData[i]（frag 多输出/MRT）
+ext GL_OES_standard_derivatives    # dFdx/dFdy/fwidth

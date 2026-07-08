@@ -4,19 +4,16 @@
 #   graph 面 :MPSGraph matmul,GPU 结果 vs ts CPU matmul
 #   model 面 :CoreML tiny 模型推理(倾向 ANE),MLComputePlan 查证调度
 #
-# 前置(从仓库根目录运行):
-#   ./templates/utils/gpu/build.sh && ./templates/utils/spc/build.sh
+# 前置(从仓库根目录运行；平台框架链接由编译器自动注入，零 SCC_LDFLAGS):
+#   ./builtins/gpu/build.sh && ./builtins/spc/build.sh
 #   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #   python3 templates/demo/spc_model/gen.py        # 生成 tiny.mlmodelc(需 coremltools)
-#   SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
-#     -framework OpenGL -framework IOSurface -framework MetalPerformanceShaders \
-#     -framework MetalPerformanceShadersGraph -framework CoreML -framework Foundation" \
-#     ./compiler/build/scc templates/demo/spc_demo.sc
+#   ./compiler/build/scc templates/demo/spc_demo.sc
 
 inc io.sc
 inc ts.sc
-inc ../utils/gpu/gpu.sc
-inc ../utils/spc/spc.sc
+inc gpu.sc
+inc spc.sc
 
 # 整文件读入 malloc 缓冲(尾部补 NUL)。失败返回 nil。
 @fnc load_file: &, path: const char&, out_size: u8&

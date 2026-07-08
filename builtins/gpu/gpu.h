@@ -23,7 +23,20 @@
  *     Linux   → GL（默认）   / Vulkan（远期）
  *     Windows → GL（远期，需加载器） / D3D（远期）
  *
- * 依赖：wsi（native_window / native_display）。
+ * 平台原生句柄标准（本头即标准定义，窗口库适配本标准）：
+ *   gpu 不依赖任何窗口库——native_window/native_display 是平台原生
+ *   句柄（void*），含义由下表定义。任何窗口库（如 templates/utils/wsi）
+ *   按此标准交付句柄即可对接；无窗口场景（MEMORY surface）两者均 NULL。
+ *
+ *   | 平台        | native_window     | native_display |
+ *   |-------------|-------------------|----------------|
+ *   | macOS       | NSView*           | NULL           |
+ *   | Windows     | HWND              | NULL           |
+ *   | X11         | Window(XID)       | Display*       |
+ *   | Wayland     | wl_surface*       | wl_display*    |
+ *   | Android(规划)| ANativeWindow*    | NULL           |
+ *   | 嵌入式 EGL   | EGLNativeWindowType | EGLNativeDisplayType |
+ *
  * 函数名带 sc_ 前缀以匹配 sc 侧 @fnc name:: 约定（gpu.sc 里去前缀）。
  * ============================================================ */
 
@@ -99,8 +112,8 @@ enum { SC_GPU_MAX_MEMORY_IMAGES = 8 };   /* MEMORY surface 环深度上限 */
 
 typedef struct sc_gpu_surface_desc {
     sc_gpu_surface_kind kind;
-    void* native_window;   /* WINDOW：wsi: sc_wsi_win_get_native_window()
-                              mac=NSView* / win=HWND / x11=Window / wl=wl_surface* */
+    void* native_window;   /* WINDOW：平台原生窗口句柄（标准见文件头表）；
+                              窗口库适配本标准，如 wsi: sc_wsi_win_get_native_window() */
     void* native_display;  /* x11=Display* / wl=wl_display*；mac/win 传 NULL */
     int   width;           /* 帧缓冲像素尺寸 */
     int   height;

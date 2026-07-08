@@ -665,13 +665,36 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
 
-        // 外部设备能力档案（tar "file.caps"）：按源文件相对路径加载解析，
-        // 在能力门控前完成 —— 使门控与发射都看到完整的 api/版本/扩展集。
+        // 外部设备能力档案（tar "file.caps"）加载，在能力门控前完成 ——
+        // 使门控与发射都看到完整的 api/版本/扩展集。搜索顺序：
+        //   绝对路径 → 相对 .ss 源文件目录 → builtins/gpu/caps/（标准档案库，
+        //   随 --builtins 目标适配目录整体替换）
         for (auto& t : prog.shaderTargets) {
             if (t.profile.empty()) continue;
             std::filesystem::path pp(t.profile);
-            if (pp.is_relative())
-                pp = std::filesystem::path(srcPath).parent_path() / pp;
+            if (pp.is_relative()) {
+                std::filesystem::path rel =
+                    std::filesystem::path(srcPath).parent_path() / pp;
+                if (std::filesystem::exists(rel)) {
+                    pp = rel;
+                } else {
+                    // builtins/gpu/caps/：从源文件目录与 cwd 逐级向上找 builtins
+                    auto findCaps = [&](std::filesystem::path base)
+                        -> std::filesystem::path {
+                        for (; !base.empty(); base = base.parent_path()) {
+                            std::filesystem::path c =
+                                base / "builtins" / "gpu" / "caps" / t.profile;
+                            if (std::filesystem::exists(c)) return c;
+                            if (base == base.parent_path()) break;
+                        }
+                        return {};
+                    };
+                    std::filesystem::path hit = findCaps(
+                        std::filesystem::absolute(srcPath).parent_path());
+                    if (hit.empty()) hit = findCaps(std::filesystem::current_path());
+                    pp = hit.empty() ? rel : hit;   // 都没有 → 保留相对路径报错
+                }
+            }
             std::ifstream pf(pp);
             if (!pf) {
                 std::fprintf(stderr, "ss: 无法打开能力档案 %s\n", pp.string().c_str());

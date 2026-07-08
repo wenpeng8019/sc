@@ -12,17 +12,27 @@
 - **syntax-s**(`.ss` 文件,手册 [syntax-s.md](syntax-s.md)):GPU 空间计算方言
   (vert/frag/comp),sc 的严格子集。命名旨趣:**cpu = 串行·逻辑·时间,
   gpu = 并行·变换·空间**。旧名 syntax-g/.sg 已全量更名,无兼容。
-- 构建配置:模块目录下 `.sc` 文件带 ldflags;临时链接标志用环境变量 `SCC_LDFLAGS`。
+- 构建配置：gpu/gfx/spc/wsi 的平台框架链接由编译器自动注入（main.cpp 按
+  scStem 特判，零 SCC_LDFLAGS）；临时链接标志仍可用环境变量 `SCC_LDFLAGS`。
 
-## 2. GPU 模块体系(四模块,templates/utils/)
+## 2. GPU 模块体系(builtins 内置：gpu/gfx/spc；外部适配：wsi)
 
 ```
-wsi(窗口/输入,glfw 同构自研)
-  │ native_window/native_display
-gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·memimg·帧交付
-  ├── gfx(渲染,≈sokol_gfx)──资源/管线/pass/draw,执行 scc 产物
-  └── spc(多维空间并行计算)──kernel(.ss comp)/graph(算子)/model(整图推理)
+wsi(窗口/输入,templates/utils/,glfw 同构自研)──按 gpu.h 句柄标准适配
+  │ native_window/native_display（平台原生句柄，标准定义在 gpu.h 文件头）
+gpu(builtins/gpu,≈sokol_app 去窗口)── device·surface交换链·memimg·帧交付
+  ├── gfx(builtins/gfx,≈sokol_gfx)──资源/管线/pass/draw,执行 scc 产物
+  └── spc(builtins/spc)──kernel(.ss comp)/graph(算子)/model(整图推理)
 ```
+
+- **依赖方向（2026-07-08 反转）**：gpu 不依赖任何窗口库——gpu.h 文件头定义
+  「平台原生句柄标准」（mac=NSView*/win=HWND/x11=Window/wl=wl_surface* 等），
+  wsi 等窗口库是适配者；无窗口场景（MEMORY surface）两句柄均 NULL。
+- **builtins 集成**：`inc gpu.sc` 裸名即用（子项目形态搜索 builtins/<名>/<名>.sc）；
+  `add lib<mod>.a` 按 <名>.<triple>.a 变体匹配交叉目标；apple 的 ObjC 构建与
+  C 工具链同源（xcode clang 同时发行两者），故 .m 后端可作为 builtins 默认集成。
+- **能力档案库**：builtins/gpu/caps/ = 标准设备能力档案（.ss 里 `tar "名.caps"`
+  搜索顺序：相对源文件 → builtins/gpu/caps/）；随 `--builtins` 目录整体替换。
 
 - **边界契约**(参考 sokol 的 environment/swapchain):gpu 一次性交付
   `sc_gpu_device()`(Metal=MTLDevice;GL=NULL);每帧 `sc_gpu_frame_acquire()`
@@ -95,12 +105,12 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 ## 6. 构建与验证工作流
 
 ```sh
-./templates/utils/wsi/build.sh && ./templates/utils/gpu/build.sh \
-  && ./templates/utils/gfx/build.sh && ./templates/utils/spc/build.sh
+./templates/utils/wsi/build.sh && ./builtins/gpu/build.sh \
+  && ./builtins/gfx/build.sh && ./builtins/spc/build.sh
 # 交叉:./build.sh --target aarch64-linux-gnu(产 lib<mod>.<triple>.a)
 # 编译器:cd compiler/build && make scc
 
-# 三个 demo(从仓库根跑;SCC_LDFLAGS 见各 demo 文件头):
+# 三个 demo(从仓库根跑;平台框架链接由编译器自动注入,零 SCC_LDFLAGS):
 #  gpu_demo.sc         窗口三角形(GPU_BACKEND=gl 前缀切 GL 后端——环境变量要
 #                      加在 scc 命令前,因为程序在 /tmp 运行)
 #  gpu_headless_demo.sc 无表面双模(MEMORY surface + memimg 绑定)→ 写 PPM 校验
