@@ -1,20 +1,21 @@
 /* ============================================================
- * metal_dev.m —— Metal 后端（macOS）
+ * metal_gfx.m —— Metal 渲染后端（macOS）
  * ============================================================
  * 参照 sokol_gfx 的 _sg_mtl_* 实现对齐其已解决的问题：
  *   · 双帧并行（in-flight=2）+ 信号量节流
  *   · 延迟释放队列：资源销毁时入队，等 GPU 用完该帧再真正释放
  *   · DYNAMIC/STREAM 缓冲双副本轮转（每帧首次更新时切换）
  *   · 每帧独立 uniform 环缓冲（256 对齐追加）
- *   · MSAA：交换链 MSAA 纹理 + resolve 到 drawable；
- *     离屏 pass 支持 resolve 附件（STOREACTION_RESOLVE）
- *   · resize 竞态：begin_pass 时校验深度纹理与 drawable 尺寸
+ *   · MSAA：离屏 pass 支持 resolve 附件（STOREACTION_RESOLVE）；
+ *     交换链 MSAA 由 gpu env 提供 msaa 纹理，此处 resolve 到 drawable
  *   · viewport/scissor 钳制到当前 pass 边界（Metal 校验层要求）
  *
- * surface（gpu 子概念）：
- *   每个 surface = 一个 CAMetalLayer 交换链（挂在 NSView 上），
- *   含自己的深度纹理 / MSAA 纹理。make_current 切换当前呈现目标；
- *   交换链 pass 渲染到当前 surface，commit 统一 present。
+ * 与 gpu（env 层）的衔接：
+ *   · init：设备经 sc_gpu_device() 取（env 已创建）
+ *   · 交换链 pass：sc_gpu_frame_acquire() 取本帧渲染目标（含
+ *     resize 竞态校验后的真实尺寸）
+ *   · commit：presentDrawable 挂命令缓冲（最佳呈现节拍）→ 提交
+ *     → sc_gpu_frame_end() 收尾
  *
  * 绑定约定（与 scc 反射清单对应）：
  *   uniform 块  → [[buffer(binding)]]（vs/fs/cs 各自槽位空间）
@@ -32,21 +33,13 @@
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
-#import <Cocoa/Cocoa.h>
 
-#define MTL_MAX_INFLIGHT   SC_GPU_MAX_INFLIGHT_FRAMES   /* 2 */
+#define MTL_MAX_INFLIGHT   SC_GFX_MAX_INFLIGHT_FRAMES   /* 2 */
 #define MTL_UB_RING_SIZE   (4 * 1024 * 1024)
 #define MTL_VBUF_BASE      8       /* 顶点缓冲起始槽（0..7 留给 uniform） */
-#define MTL_MAX_PRESENT    16      /* 单帧最多呈现的 surface 数 */
+#define MTL_MAX_PRESENT    16      /* 单帧最多呈现的 drawable 数 */
 
 /* ---- 后端私有体 -------------------------------------------- */
-
-typedef struct MtlSurface {
-    CAMetalLayer*       layer;
-    id<CAMetalDrawable> drawable;   /* 本帧已取的 drawable（commit 后清） */
-    id<MTLTexture>      depthTex;
-    id<MTLTexture>      msaaTex;    /* sample_count>1 时的 MSAA 颜色目标 */
-} MtlSurface;
 
 typedef struct MtlBuffer {
     id<MTLBuffer> buf[MTL_MAX_INFLIGHT];
@@ -88,7 +81,7 @@ typedef struct MtlPipeline {
 /* ---- 全局状态 ---------------------------------------------- */
 
 static struct {
-    id<MTLDevice>       device;
+    id<MTLDevice>       device;   /* 借自 gpu env（sc_gpu_device） */
     id<MTLCommandQueue> queue;
     dispatch_semaphore_t sem;
 
@@ -102,9 +95,8 @@ static struct {
     int             ubPos;
     uint32_t        frameIndex;
 
-    _sc_gpu_surface_t* curSurf;                 /* make_current 目标 */
-    _sc_gpu_surface_t* present[MTL_MAX_PRESENT]; /* 本帧待呈现 */
-    int                presentCount;
+    id<CAMetalDrawable> present[MTL_MAX_PRESENT];   /* 本帧待呈现 */
+    int                 presentCount;
 
     id<MTLBuffer> curIndexBuf;
     int           curIndexOffset;
@@ -162,214 +154,119 @@ static int formatByteSize(sc_gpu_pixel_format f) {
     }
 }
 
-static MTLVertexFormat toMtlVertexFormat(sc_gpu_vertex_format f) {
+static MTLVertexFormat toMtlVertexFormat(sc_gfx_vertex_format f) {
     switch (f) {
-        case SC_GPU_VERTEXFORMAT_FLOAT:    return MTLVertexFormatFloat;
-        case SC_GPU_VERTEXFORMAT_FLOAT2:   return MTLVertexFormatFloat2;
-        case SC_GPU_VERTEXFORMAT_FLOAT3:   return MTLVertexFormatFloat3;
-        case SC_GPU_VERTEXFORMAT_FLOAT4:   return MTLVertexFormatFloat4;
-        case SC_GPU_VERTEXFORMAT_BYTE4:    return MTLVertexFormatChar4;
-        case SC_GPU_VERTEXFORMAT_BYTE4N:   return MTLVertexFormatChar4Normalized;
-        case SC_GPU_VERTEXFORMAT_UBYTE4:   return MTLVertexFormatUChar4;
-        case SC_GPU_VERTEXFORMAT_UBYTE4N:  return MTLVertexFormatUChar4Normalized;
-        case SC_GPU_VERTEXFORMAT_SHORT2:   return MTLVertexFormatShort2;
-        case SC_GPU_VERTEXFORMAT_SHORT2N:  return MTLVertexFormatShort2Normalized;
-        case SC_GPU_VERTEXFORMAT_SHORT4:   return MTLVertexFormatShort4;
-        case SC_GPU_VERTEXFORMAT_SHORT4N:  return MTLVertexFormatShort4Normalized;
-        case SC_GPU_VERTEXFORMAT_USHORT2:  return MTLVertexFormatUShort2;
-        case SC_GPU_VERTEXFORMAT_USHORT2N: return MTLVertexFormatUShort2Normalized;
-        case SC_GPU_VERTEXFORMAT_USHORT4:  return MTLVertexFormatUShort4;
-        case SC_GPU_VERTEXFORMAT_USHORT4N: return MTLVertexFormatUShort4Normalized;
-        case SC_GPU_VERTEXFORMAT_HALF2:    return MTLVertexFormatHalf2;
-        case SC_GPU_VERTEXFORMAT_HALF4:    return MTLVertexFormatHalf4;
-        case SC_GPU_VERTEXFORMAT_UINT10N2: return MTLVertexFormatUInt1010102Normalized;
-        case SC_GPU_VERTEXFORMAT_UINT:     return MTLVertexFormatUInt;
+        case SC_GFX_VERTEXFORMAT_FLOAT:    return MTLVertexFormatFloat;
+        case SC_GFX_VERTEXFORMAT_FLOAT2:   return MTLVertexFormatFloat2;
+        case SC_GFX_VERTEXFORMAT_FLOAT3:   return MTLVertexFormatFloat3;
+        case SC_GFX_VERTEXFORMAT_FLOAT4:   return MTLVertexFormatFloat4;
+        case SC_GFX_VERTEXFORMAT_BYTE4:    return MTLVertexFormatChar4;
+        case SC_GFX_VERTEXFORMAT_BYTE4N:   return MTLVertexFormatChar4Normalized;
+        case SC_GFX_VERTEXFORMAT_UBYTE4:   return MTLVertexFormatUChar4;
+        case SC_GFX_VERTEXFORMAT_UBYTE4N:  return MTLVertexFormatUChar4Normalized;
+        case SC_GFX_VERTEXFORMAT_SHORT2:   return MTLVertexFormatShort2;
+        case SC_GFX_VERTEXFORMAT_SHORT2N:  return MTLVertexFormatShort2Normalized;
+        case SC_GFX_VERTEXFORMAT_SHORT4:   return MTLVertexFormatShort4;
+        case SC_GFX_VERTEXFORMAT_SHORT4N:  return MTLVertexFormatShort4Normalized;
+        case SC_GFX_VERTEXFORMAT_USHORT2:  return MTLVertexFormatUShort2;
+        case SC_GFX_VERTEXFORMAT_USHORT2N: return MTLVertexFormatUShort2Normalized;
+        case SC_GFX_VERTEXFORMAT_USHORT4:  return MTLVertexFormatUShort4;
+        case SC_GFX_VERTEXFORMAT_USHORT4N: return MTLVertexFormatUShort4Normalized;
+        case SC_GFX_VERTEXFORMAT_HALF2:    return MTLVertexFormatHalf2;
+        case SC_GFX_VERTEXFORMAT_HALF4:    return MTLVertexFormatHalf4;
+        case SC_GFX_VERTEXFORMAT_UINT10N2: return MTLVertexFormatUInt1010102Normalized;
+        case SC_GFX_VERTEXFORMAT_UINT:     return MTLVertexFormatUInt;
         default:                           return MTLVertexFormatInvalid;
     }
 }
 
-static MTLCompareFunction toMtlCompare(sc_gpu_compare c) {
+static MTLCompareFunction toMtlCompare(sc_gfx_compare c) {
     switch (c) {
-        case SC_GPU_COMPARE_NEVER:         return MTLCompareFunctionNever;
-        case SC_GPU_COMPARE_LESS:          return MTLCompareFunctionLess;
-        case SC_GPU_COMPARE_EQUAL:         return MTLCompareFunctionEqual;
-        case SC_GPU_COMPARE_LESS_EQUAL:    return MTLCompareFunctionLessEqual;
-        case SC_GPU_COMPARE_GREATER:       return MTLCompareFunctionGreater;
-        case SC_GPU_COMPARE_NOT_EQUAL:     return MTLCompareFunctionNotEqual;
-        case SC_GPU_COMPARE_GREATER_EQUAL: return MTLCompareFunctionGreaterEqual;
+        case SC_GFX_COMPARE_NEVER:         return MTLCompareFunctionNever;
+        case SC_GFX_COMPARE_LESS:          return MTLCompareFunctionLess;
+        case SC_GFX_COMPARE_EQUAL:         return MTLCompareFunctionEqual;
+        case SC_GFX_COMPARE_LESS_EQUAL:    return MTLCompareFunctionLessEqual;
+        case SC_GFX_COMPARE_GREATER:       return MTLCompareFunctionGreater;
+        case SC_GFX_COMPARE_NOT_EQUAL:     return MTLCompareFunctionNotEqual;
+        case SC_GFX_COMPARE_GREATER_EQUAL: return MTLCompareFunctionGreaterEqual;
         default:                           return MTLCompareFunctionAlways;
     }
 }
 
-static MTLStencilOperation toMtlStencilOp(sc_gpu_stencil_op op) {
+static MTLStencilOperation toMtlStencilOp(sc_gfx_stencil_op op) {
     switch (op) {
-        case SC_GPU_STENCILOP_ZERO:       return MTLStencilOperationZero;
-        case SC_GPU_STENCILOP_REPLACE:    return MTLStencilOperationReplace;
-        case SC_GPU_STENCILOP_INCR_CLAMP: return MTLStencilOperationIncrementClamp;
-        case SC_GPU_STENCILOP_DECR_CLAMP: return MTLStencilOperationDecrementClamp;
-        case SC_GPU_STENCILOP_INVERT:     return MTLStencilOperationInvert;
-        case SC_GPU_STENCILOP_INCR_WRAP:  return MTLStencilOperationIncrementWrap;
-        case SC_GPU_STENCILOP_DECR_WRAP:  return MTLStencilOperationDecrementWrap;
+        case SC_GFX_STENCILOP_ZERO:       return MTLStencilOperationZero;
+        case SC_GFX_STENCILOP_REPLACE:    return MTLStencilOperationReplace;
+        case SC_GFX_STENCILOP_INCR_CLAMP: return MTLStencilOperationIncrementClamp;
+        case SC_GFX_STENCILOP_DECR_CLAMP: return MTLStencilOperationDecrementClamp;
+        case SC_GFX_STENCILOP_INVERT:     return MTLStencilOperationInvert;
+        case SC_GFX_STENCILOP_INCR_WRAP:  return MTLStencilOperationIncrementWrap;
+        case SC_GFX_STENCILOP_DECR_WRAP:  return MTLStencilOperationDecrementWrap;
         default:                          return MTLStencilOperationKeep;
     }
 }
 
-static MTLBlendFactor toMtlBlendFactor(sc_gpu_blend_factor f) {
+static MTLBlendFactor toMtlBlendFactor(sc_gfx_blend_factor f) {
     switch (f) {
-        case SC_GPU_BLEND_ZERO:                  return MTLBlendFactorZero;
-        case SC_GPU_BLEND_SRC_COLOR:             return MTLBlendFactorSourceColor;
-        case SC_GPU_BLEND_ONE_MINUS_SRC_COLOR:   return MTLBlendFactorOneMinusSourceColor;
-        case SC_GPU_BLEND_SRC_ALPHA:             return MTLBlendFactorSourceAlpha;
-        case SC_GPU_BLEND_ONE_MINUS_SRC_ALPHA:   return MTLBlendFactorOneMinusSourceAlpha;
-        case SC_GPU_BLEND_DST_COLOR:             return MTLBlendFactorDestinationColor;
-        case SC_GPU_BLEND_ONE_MINUS_DST_COLOR:   return MTLBlendFactorOneMinusDestinationColor;
-        case SC_GPU_BLEND_DST_ALPHA:             return MTLBlendFactorDestinationAlpha;
-        case SC_GPU_BLEND_ONE_MINUS_DST_ALPHA:   return MTLBlendFactorOneMinusDestinationAlpha;
-        case SC_GPU_BLEND_SRC_ALPHA_SATURATED:   return MTLBlendFactorSourceAlphaSaturated;
-        case SC_GPU_BLEND_BLEND_COLOR:           return MTLBlendFactorBlendColor;
-        case SC_GPU_BLEND_ONE_MINUS_BLEND_COLOR: return MTLBlendFactorOneMinusBlendColor;
+        case SC_GFX_BLEND_ZERO:                  return MTLBlendFactorZero;
+        case SC_GFX_BLEND_SRC_COLOR:             return MTLBlendFactorSourceColor;
+        case SC_GFX_BLEND_ONE_MINUS_SRC_COLOR:   return MTLBlendFactorOneMinusSourceColor;
+        case SC_GFX_BLEND_SRC_ALPHA:             return MTLBlendFactorSourceAlpha;
+        case SC_GFX_BLEND_ONE_MINUS_SRC_ALPHA:   return MTLBlendFactorOneMinusSourceAlpha;
+        case SC_GFX_BLEND_DST_COLOR:             return MTLBlendFactorDestinationColor;
+        case SC_GFX_BLEND_ONE_MINUS_DST_COLOR:   return MTLBlendFactorOneMinusDestinationColor;
+        case SC_GFX_BLEND_DST_ALPHA:             return MTLBlendFactorDestinationAlpha;
+        case SC_GFX_BLEND_ONE_MINUS_DST_ALPHA:   return MTLBlendFactorOneMinusDestinationAlpha;
+        case SC_GFX_BLEND_SRC_ALPHA_SATURATED:   return MTLBlendFactorSourceAlphaSaturated;
+        case SC_GFX_BLEND_BLEND_COLOR:           return MTLBlendFactorBlendColor;
+        case SC_GFX_BLEND_ONE_MINUS_BLEND_COLOR: return MTLBlendFactorOneMinusBlendColor;
         default:                                 return MTLBlendFactorOne;
     }
 }
 
-static MTLBlendOperation toMtlBlendOp(sc_gpu_blend_op op) {
+static MTLBlendOperation toMtlBlendOp(sc_gfx_blend_op op) {
     switch (op) {
-        case SC_GPU_BLENDOP_SUBTRACT:         return MTLBlendOperationSubtract;
-        case SC_GPU_BLENDOP_REVERSE_SUBTRACT: return MTLBlendOperationReverseSubtract;
-        case SC_GPU_BLENDOP_MIN:              return MTLBlendOperationMin;
-        case SC_GPU_BLENDOP_MAX:              return MTLBlendOperationMax;
+        case SC_GFX_BLENDOP_SUBTRACT:         return MTLBlendOperationSubtract;
+        case SC_GFX_BLENDOP_REVERSE_SUBTRACT: return MTLBlendOperationReverseSubtract;
+        case SC_GFX_BLENDOP_MIN:              return MTLBlendOperationMin;
+        case SC_GFX_BLENDOP_MAX:              return MTLBlendOperationMax;
         default:                              return MTLBlendOperationAdd;
     }
 }
 
-static MTLLoadAction toMtlLoad(sc_gpu_load_action a) {
+static MTLLoadAction toMtlLoad(sc_gfx_load_action a) {
     switch (a) {
-        case SC_GPU_LOADACTION_LOAD:     return MTLLoadActionLoad;
-        case SC_GPU_LOADACTION_DONTCARE: return MTLLoadActionDontCare;
+        case SC_GFX_LOADACTION_LOAD:     return MTLLoadActionLoad;
+        case SC_GFX_LOADACTION_DONTCARE: return MTLLoadActionDontCare;
         default:                         return MTLLoadActionClear;
     }
 }
 
-static MTLStoreAction toMtlStore(sc_gpu_store_action a) {
+static MTLStoreAction toMtlStore(sc_gfx_store_action a) {
     switch (a) {
-        case SC_GPU_STOREACTION_DONTCARE:      return MTLStoreActionDontCare;
-        case SC_GPU_STOREACTION_RESOLVE:       return MTLStoreActionMultisampleResolve;
-        case SC_GPU_STOREACTION_STORE_RESOLVE: return MTLStoreActionStoreAndMultisampleResolve;
+        case SC_GFX_STOREACTION_DONTCARE:      return MTLStoreActionDontCare;
+        case SC_GFX_STOREACTION_RESOLVE:       return MTLStoreActionMultisampleResolve;
+        case SC_GFX_STOREACTION_STORE_RESOLVE: return MTLStoreActionStoreAndMultisampleResolve;
         default:                               return MTLStoreActionStore;
     }
 }
 
-static MTLSamplerAddressMode toMtlWrap(sc_gpu_wrap w) {
+static MTLSamplerAddressMode toMtlWrap(sc_gfx_wrap w) {
     switch (w) {
-        case SC_GPU_WRAP_CLAMP:  return MTLSamplerAddressModeClampToEdge;
-        case SC_GPU_WRAP_MIRROR: return MTLSamplerAddressModeMirrorRepeat;
-        case SC_GPU_WRAP_BORDER: return MTLSamplerAddressModeClampToBorderColor;
+        case SC_GFX_WRAP_CLAMP:  return MTLSamplerAddressModeClampToEdge;
+        case SC_GFX_WRAP_MIRROR: return MTLSamplerAddressModeMirrorRepeat;
+        case SC_GFX_WRAP_BORDER: return MTLSamplerAddressModeClampToBorderColor;
         default:                 return MTLSamplerAddressModeRepeat;
     }
 }
 
-/* ---- surface ----------------------------------------------- */
-
-/* 交换链附属纹理（深度 / MSAA），随 resize 重建 */
-static void surfaceCreateTargets(MtlSurface* s, const sc_gpu_surface_desc* d) {
-    if (d->depth_format != SC_GPU_PIXELFORMAT_NONE) {
-        MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
-        td.textureType = d->sample_count > 1 ? MTLTextureType2DMultisample
-                                             : MTLTextureType2D;
-        td.pixelFormat = toMtlFormat(d->depth_format);
-        td.width  = (NSUInteger)d->width;
-        td.height = (NSUInteger)d->height;
-        td.sampleCount  = (NSUInteger)(d->sample_count > 1 ? d->sample_count : 1);
-        td.usage        = MTLTextureUsageRenderTarget;
-        td.storageMode  = MTLStorageModePrivate;
-        mtlDeferRelease(s->depthTex);
-        s->depthTex = [mtl.device newTextureWithDescriptor:td];
-    } else {
-        mtlDeferRelease(s->depthTex);
-        s->depthTex = nil;
-    }
-    if (d->sample_count > 1) {
-        MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
-        td.textureType = MTLTextureType2DMultisample;
-        td.pixelFormat = toMtlFormat(d->color_format);
-        td.width  = (NSUInteger)d->width;
-        td.height = (NSUInteger)d->height;
-        td.sampleCount  = (NSUInteger)d->sample_count;
-        td.usage        = MTLTextureUsageRenderTarget;
-        td.storageMode  = MTLStorageModePrivate;
-        mtlDeferRelease(s->msaaTex);
-        s->msaaTex = [mtl.device newTextureWithDescriptor:td];
-    } else {
-        mtlDeferRelease(s->msaaTex);
-        s->msaaTex = nil;
-    }
-}
-
-static bool mtlSurfaceCreate(_sc_gpu_surface_t* surf) {
-    MtlSurface* s = (MtlSurface*)calloc(1, sizeof(MtlSurface));
-    if (!s) return false;
-
-    CAMetalLayer* layer = [CAMetalLayer layer];
-    layer.device = mtl.device;
-    layer.pixelFormat = toMtlFormat(surf->desc.color_format);
-    layer.framebufferOnly = YES;
-    layer.drawableSize = CGSizeMake(surf->desc.width, surf->desc.height);
-    if (@available(macOS 10.13, *))
-        layer.displaySyncEnabled = surf->desc.swap_interval != 0;
-    s->layer = layer;
-
-    NSView* view = (__bridge NSView*)surf->desc.native_window;
-    void (^attach)(void) = ^{
-        view.wantsLayer = YES;
-        view.layer = layer;
-    };
-    if ([NSThread isMainThread]) attach();
-    else dispatch_sync(dispatch_get_main_queue(), attach);
-
-    surfaceCreateTargets(s, &surf->desc);
-    surf->backend = s;
-    return true;
-}
-
-static void mtlSurfaceDestroy(_sc_gpu_surface_t* surf) {
-    MtlSurface* s = (MtlSurface*)surf->backend;
-    if (!s) return;
-    /* 从本帧呈现列表移除（防悬垂） */
-    for (int i = 0; i < mtl.presentCount; i++) {
-        if (mtl.present[i] == surf) {
-            mtl.present[i] = mtl.present[--mtl.presentCount];
-            break;
-        }
-    }
-    mtlDeferRelease(s->layer);
-    mtlDeferRelease(s->drawable);
-    mtlDeferRelease(s->depthTex);
-    mtlDeferRelease(s->msaaTex);
-    s->layer = nil; s->drawable = nil; s->depthTex = nil; s->msaaTex = nil;
-    free(s);
-    surf->backend = NULL;
-}
-
-static void mtlSurfaceActivate(_sc_gpu_surface_t* surf) {
-    mtl.curSurf = surf;   /* NULL = 无当前 surface */
-}
-
-static void mtlSurfaceResize(_sc_gpu_surface_t* surf, int w, int h) {
-    MtlSurface* s = (MtlSurface*)surf->backend;
-    if (!s) return;
-    /* surf->desc.width/height 已由公共层更新 */
-    (void)w; (void)h;
-    s->layer.drawableSize = CGSizeMake(surf->desc.width, surf->desc.height);
-    surfaceCreateTargets(s, &surf->desc);
-}
-
 /* ---- init/shutdown ----------------------------------------- */
 
-static bool mtlInit(const sc_gpu_desc* desc) {
+static bool mtlInit(const sc_gfx_desc* desc) {
     (void)desc;
     memset((void*)&mtl, 0, sizeof(mtl));
-    mtl.device = MTLCreateSystemDefaultDevice();
-    if (!mtl.device) { _sc_gpu_log("metal: 无可用设备"); return false; }
+    mtl.device = (__bridge id<MTLDevice>)sc_gpu_device();
+    if (!mtl.device) { _sc_gfx_log("metal: gpu env 未交付设备"); return false; }
     mtl.queue = [mtl.device newCommandQueue];
     mtl.sem = dispatch_semaphore_create(MTL_MAX_INFLIGHT);
     for (int i = 0; i < MTL_MAX_INFLIGHT; i++) {
@@ -391,6 +288,7 @@ static void mtlShutdown(void) {
         mtl.releaseQueue[i] = nil;
         mtl.ubRing[i] = nil;
     }
+    for (int i = 0; i < MTL_MAX_PRESENT; i++) mtl.present[i] = nil;
     mtl.renc = nil; mtl.cenc = nil; mtl.cmd = nil;
     mtl.curIndexBuf = nil;
     mtl.queue = nil; mtl.device = nil; mtl.sem = nil;
@@ -399,10 +297,10 @@ static void mtlShutdown(void) {
 
 /* ---- buffer ------------------------------------------------ */
 
-static bool mtlBufferCreate(_sc_gpu_buffer_t* buf) {
+static bool mtlBufferCreate(_sc_gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)calloc(1, sizeof(MtlBuffer));
     if (!b) return false;
-    b->numSlots = (buf->desc.usage == SC_GPU_USAGE_IMMUTABLE) ? 1 : MTL_MAX_INFLIGHT;
+    b->numSlots = (buf->desc.usage == SC_GFX_USAGE_IMMUTABLE) ? 1 : MTL_MAX_INFLIGHT;
     for (int i = 0; i < b->numSlots; i++) {
         if (i == 0 && buf->desc.data.ptr) {
             b->buf[i] = [mtl.device newBufferWithBytes:buf->desc.data.ptr
@@ -418,7 +316,7 @@ static bool mtlBufferCreate(_sc_gpu_buffer_t* buf) {
     return true;
 }
 
-static void mtlBufferDestroy(_sc_gpu_buffer_t* buf) {
+static void mtlBufferDestroy(_sc_gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     if (!b) return;
     for (int i = 0; i < b->numSlots; i++) {
@@ -430,7 +328,7 @@ static void mtlBufferDestroy(_sc_gpu_buffer_t* buf) {
 }
 
 /* 每帧首次更新时轮转副本（sokol 语义：同帧多次 append 写同一副本） */
-static void mtlBufferUpdate(_sc_gpu_buffer_t* buf, const sc_gpu_range* data, int offset) {
+static void mtlBufferUpdate(_sc_gfx_buffer_t* buf, const sc_gfx_range* data, int offset) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     if (!b) return;
     if (b->numSlots > 1 && b->updFrame != mtl.frameIndex) {
@@ -440,7 +338,7 @@ static void mtlBufferUpdate(_sc_gpu_buffer_t* buf, const sc_gpu_range* data, int
     memcpy((uint8_t*)b->buf[b->active].contents + offset, data->ptr, data->size);
 }
 
-static id<MTLBuffer> mtlActiveBuf(_sc_gpu_buffer_t* buf) {
+static id<MTLBuffer> mtlActiveBuf(_sc_gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     return b ? b->buf[b->active] : nil;
 }
@@ -448,23 +346,23 @@ static id<MTLBuffer> mtlActiveBuf(_sc_gpu_buffer_t* buf) {
 /* ---- image ------------------------------------------------- */
 
 /* 子图像上传（cube 面 / 数组层 / 3D 深度 / mip 链） */
-static void imageUploadData(_sc_gpu_image_t* img, id<MTLTexture> tex,
-                            const sc_gpu_image_data* data) {
-    const sc_gpu_image_desc* d = &img->desc;
+static void imageUploadData(_sc_gfx_image_t* img, id<MTLTexture> tex,
+                            const sc_gfx_image_data* data) {
+    const sc_gfx_image_desc* d = &img->desc;
     int bpp = formatByteSize(d->format);
-    int faces = (d->kind == SC_GPU_IMAGEKIND_CUBE) ? 6 : 1;
-    int slices = (d->kind == SC_GPU_IMAGEKIND_ARRAY) ? d->slices : 1;
+    int faces = (d->kind == SC_GFX_IMAGEKIND_CUBE) ? 6 : 1;
+    int slices = (d->kind == SC_GFX_IMAGEKIND_ARRAY) ? d->slices : 1;
 
     for (int f = 0; f < faces; f++) {
         for (int mip = 0; mip < d->mip_count; mip++) {
-            const sc_gpu_range* r = &data->subimage[f][mip];
+            const sc_gfx_range* r = &data->subimage[f][mip];
             if (!r->ptr) continue;
             int mw = d->width  >> mip; if (mw < 1) mw = 1;
             int mh = d->height >> mip; if (mh < 1) mh = 1;
             NSUInteger rowBytes = (NSUInteger)(mw * bpp);
             NSUInteger imgBytes = rowBytes * (NSUInteger)mh;
 
-            if (d->kind == SC_GPU_IMAGEKIND_3D) {
+            if (d->kind == SC_GFX_IMAGEKIND_3D) {
                 int md = d->slices >> mip; if (md < 1) md = 1;
                 [tex replaceRegion:MTLRegionMake3D(0, 0, 0, (NSUInteger)mw,
                                                    (NSUInteger)mh, (NSUInteger)md)
@@ -473,7 +371,7 @@ static void imageUploadData(_sc_gpu_image_t* img, id<MTLTexture> tex,
                          withBytes:r->ptr
                        bytesPerRow:rowBytes
                      bytesPerImage:imgBytes];
-            } else if (d->kind == SC_GPU_IMAGEKIND_ARRAY) {
+            } else if (d->kind == SC_GFX_IMAGEKIND_ARRAY) {
                 /* 数组：subimage[0][mip] 为整段连续数据，按层切开 */
                 const uint8_t* p = (const uint8_t*)r->ptr;
                 for (int s = 0; s < slices; s++) {
@@ -496,16 +394,16 @@ static void imageUploadData(_sc_gpu_image_t* img, id<MTLTexture> tex,
     }
 }
 
-static bool mtlImageCreate(_sc_gpu_image_t* img) {
+static bool mtlImageCreate(_sc_gfx_image_t* img) {
     MtlImage* m = (MtlImage*)calloc(1, sizeof(MtlImage));
     if (!m) return false;
-    const sc_gpu_image_desc* d = &img->desc;
+    const sc_gfx_image_desc* d = &img->desc;
 
     MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
     switch (d->kind) {
-        case SC_GPU_IMAGEKIND_CUBE:  td.textureType = MTLTextureTypeCube; break;
-        case SC_GPU_IMAGEKIND_3D:    td.textureType = MTLTextureType3D; break;
-        case SC_GPU_IMAGEKIND_ARRAY: td.textureType = MTLTextureType2DArray; break;
+        case SC_GFX_IMAGEKIND_CUBE:  td.textureType = MTLTextureTypeCube; break;
+        case SC_GFX_IMAGEKIND_3D:    td.textureType = MTLTextureType3D; break;
+        case SC_GFX_IMAGEKIND_ARRAY: td.textureType = MTLTextureType2DArray; break;
         default:
             td.textureType = d->sample_count > 1 ? MTLTextureType2DMultisample
                                                  : MTLTextureType2D;
@@ -515,8 +413,8 @@ static bool mtlImageCreate(_sc_gpu_image_t* img) {
     if (td.pixelFormat == MTLPixelFormatInvalid) { free(m); return false; }
     td.width  = (NSUInteger)d->width;
     td.height = (NSUInteger)d->height;
-    if (d->kind == SC_GPU_IMAGEKIND_3D) td.depth = (NSUInteger)d->slices;
-    else if (d->kind == SC_GPU_IMAGEKIND_ARRAY) td.arrayLength = (NSUInteger)d->slices;
+    if (d->kind == SC_GFX_IMAGEKIND_3D) td.depth = (NSUInteger)d->slices;
+    else if (d->kind == SC_GFX_IMAGEKIND_ARRAY) td.arrayLength = (NSUInteger)d->slices;
     td.mipmapLevelCount = (NSUInteger)d->mip_count;
     td.sampleCount = (NSUInteger)(d->sample_count > 1 ? d->sample_count : 1);
     if (d->render_target) {
@@ -535,7 +433,7 @@ static bool mtlImageCreate(_sc_gpu_image_t* img) {
     return true;
 }
 
-static void mtlImageDestroy(_sc_gpu_image_t* img) {
+static void mtlImageDestroy(_sc_gfx_image_t* img) {
     MtlImage* m = (MtlImage*)img->backend;
     if (!m) return;
     mtlDeferRelease(m->tex);
@@ -544,7 +442,7 @@ static void mtlImageDestroy(_sc_gpu_image_t* img) {
     img->backend = NULL;
 }
 
-static void mtlImageUpdate(_sc_gpu_image_t* img, const sc_gpu_image_data* data) {
+static void mtlImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* data) {
     MtlImage* m = (MtlImage*)img->backend;
     if (!m || img->desc.render_target) return;
     imageUploadData(img, m->tex, data);
@@ -552,17 +450,17 @@ static void mtlImageUpdate(_sc_gpu_image_t* img, const sc_gpu_image_data* data) 
 
 /* ---- sampler ----------------------------------------------- */
 
-static bool mtlSamplerCreate(_sc_gpu_sampler_t* smp) {
+static bool mtlSamplerCreate(_sc_gfx_sampler_t* smp) {
     MtlSampler* m = (MtlSampler*)calloc(1, sizeof(MtlSampler));
     if (!m) return false;
-    const sc_gpu_sampler_desc* d = &smp->desc;
+    const sc_gfx_sampler_desc* d = &smp->desc;
 
     MTLSamplerDescriptor* sd = [[MTLSamplerDescriptor alloc] init];
-    sd.minFilter = d->min_filter == SC_GPU_FILTER_LINEAR ? MTLSamplerMinMagFilterLinear
+    sd.minFilter = d->min_filter == SC_GFX_FILTER_LINEAR ? MTLSamplerMinMagFilterLinear
                                                          : MTLSamplerMinMagFilterNearest;
-    sd.magFilter = d->mag_filter == SC_GPU_FILTER_LINEAR ? MTLSamplerMinMagFilterLinear
+    sd.magFilter = d->mag_filter == SC_GFX_FILTER_LINEAR ? MTLSamplerMinMagFilterLinear
                                                          : MTLSamplerMinMagFilterNearest;
-    sd.mipFilter = d->mipmap_filter == SC_GPU_FILTER_LINEAR ? MTLSamplerMipFilterLinear
+    sd.mipFilter = d->mipmap_filter == SC_GFX_FILTER_LINEAR ? MTLSamplerMipFilterLinear
                                                             : MTLSamplerMipFilterNearest;
     sd.sAddressMode = toMtlWrap(d->wrap_u);
     sd.tAddressMode = toMtlWrap(d->wrap_v);
@@ -571,14 +469,14 @@ static bool mtlSamplerCreate(_sc_gpu_sampler_t* smp) {
     sd.lodMaxClamp = d->max_lod > 0.0f ? d->max_lod : FLT_MAX;
     sd.maxAnisotropy = (NSUInteger)(d->max_anisotropy > 1 ? d->max_anisotropy : 1);
     switch (d->border_color) {
-        case SC_GPU_BORDERCOLOR_OPAQUE_BLACK:
+        case SC_GFX_BORDERCOLOR_OPAQUE_BLACK:
             sd.borderColor = MTLSamplerBorderColorOpaqueBlack; break;
-        case SC_GPU_BORDERCOLOR_OPAQUE_WHITE:
+        case SC_GFX_BORDERCOLOR_OPAQUE_WHITE:
             sd.borderColor = MTLSamplerBorderColorOpaqueWhite; break;
         default:
             sd.borderColor = MTLSamplerBorderColorTransparentBlack; break;
     }
-    if (d->compare != SC_GPU_COMPARE_ALWAYS)
+    if (d->compare != SC_GFX_COMPARE_ALWAYS)
         sd.compareFunction = toMtlCompare(d->compare);
     m->smp = [mtl.device newSamplerStateWithDescriptor:sd];
     if (!m->smp) { free(m); return false; }
@@ -586,7 +484,7 @@ static bool mtlSamplerCreate(_sc_gpu_sampler_t* smp) {
     return true;
 }
 
-static void mtlSamplerDestroy(_sc_gpu_sampler_t* smp) {
+static void mtlSamplerDestroy(_sc_gfx_sampler_t* smp) {
     MtlSampler* m = (MtlSampler*)smp->backend;
     if (!m) return;
     mtlDeferRelease(m->smp);
@@ -597,26 +495,26 @@ static void mtlSamplerDestroy(_sc_gpu_sampler_t* smp) {
 
 /* ---- shader ------------------------------------------------ */
 
-static bool compileStage(const sc_gpu_shader_stage_desc* sd,
+static bool compileStage(const sc_gfx_shader_stage_desc* sd,
                          id<MTLLibrary> __strong* outLib,
                          id<MTLFunction> __strong* outFn) {
     if (!sd->code.ptr) return true;   /* 阶段缺省 = 不用 */
     NSString* src = [[NSString alloc] initWithBytes:sd->code.ptr
                                              length:sd->code.size
                                            encoding:NSUTF8StringEncoding];
-    if (!src) { _sc_gpu_log("metal: 着色器源码非 UTF-8"); return false; }
+    if (!src) { _sc_gfx_log("metal: 着色器源码非 UTF-8"); return false; }
     NSError* err = nil;
     MTLCompileOptions* opt = [[MTLCompileOptions alloc] init];
     id<MTLLibrary> lib = [mtl.device newLibraryWithSource:src options:opt error:&err];
     if (!lib) {
-        _sc_gpu_log("metal: MSL 编译失败: %s",
+        _sc_gfx_log("metal: MSL 编译失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         return false;
     }
     NSString* entry = sd->entry ? [NSString stringWithUTF8String:sd->entry] : @"main0";
     id<MTLFunction> fn = [lib newFunctionWithName:entry];
     if (!fn) {
-        _sc_gpu_log("metal: 入口 %s 不存在", entry.UTF8String);
+        _sc_gfx_log("metal: 入口 %s 不存在", entry.UTF8String);
         return false;
     }
     *outLib = lib;
@@ -624,7 +522,7 @@ static bool compileStage(const sc_gpu_shader_stage_desc* sd,
     return true;
 }
 
-static bool mtlShaderCreate(_sc_gpu_shader_t* shd, const sc_gpu_shader_desc* desc) {
+static bool mtlShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc) {
     MtlShader* m = (MtlShader*)calloc(1, sizeof(MtlShader));
     if (!m) return false;
     bool ok = compileStage(&desc->vs, &m->vsLib, &m->vsFn)
@@ -640,7 +538,7 @@ static bool mtlShaderCreate(_sc_gpu_shader_t* shd, const sc_gpu_shader_desc* des
     return true;
 }
 
-static void mtlShaderDestroy(_sc_gpu_shader_t* shd) {
+static void mtlShaderDestroy(_sc_gfx_shader_t* shd) {
     MtlShader* m = (MtlShader*)shd->backend;
     if (!m) return;
     mtlDeferRelease(m->vsLib); mtlDeferRelease(m->fsLib); mtlDeferRelease(m->csLib);
@@ -653,19 +551,19 @@ static void mtlShaderDestroy(_sc_gpu_shader_t* shd) {
 
 /* ---- pipeline ---------------------------------------------- */
 
-static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
+static bool mtlPipelineCreate(_sc_gfx_pipeline_t* pip) {
     MtlShader* shd = (MtlShader*)pip->shader->backend;
     if (!shd) return false;
     MtlPipeline* m = (MtlPipeline*)calloc(1, sizeof(MtlPipeline));
     if (!m) return false;
-    const sc_gpu_pipeline_desc* d = &pip->desc;
+    const sc_gfx_pipeline_desc* d = &pip->desc;
 
     if (d->compute) {
         if (!shd->csFn) { free(m); return false; }
         NSError* err = nil;
         m->cps = [mtl.device newComputePipelineStateWithFunction:shd->csFn error:&err];
         if (!m->cps) {
-            _sc_gpu_log("metal: 计算管线创建失败: %s",
+            _sc_gfx_log("metal: 计算管线创建失败: %s",
                         err ? err.localizedDescription.UTF8String : "?");
             free(m);
             return false;
@@ -685,17 +583,17 @@ static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
 
     /* 顶点布局：属性 location i；缓冲槽 MTL_VBUF_BASE + buffer_index */
     MTLVertexDescriptor* vd = [MTLVertexDescriptor vertexDescriptor];
-    bool bufUsed[SC_GPU_MAX_VERTEX_BUFFERS] = {0};
-    for (int i = 0; i < SC_GPU_MAX_VERTEX_ATTRS; i++) {
-        const sc_gpu_vertex_attr* a = &d->attrs[i];
-        if (a->format == SC_GPU_VERTEXFORMAT_INVALID) continue;
+    bool bufUsed[SC_GFX_MAX_VERTEX_BUFFERS] = {0};
+    for (int i = 0; i < SC_GFX_MAX_VERTEX_ATTRS; i++) {
+        const sc_gfx_vertex_attr* a = &d->attrs[i];
+        if (a->format == SC_GFX_VERTEXFORMAT_INVALID) continue;
         vd.attributes[i].format = toMtlVertexFormat(a->format);
         vd.attributes[i].offset = (NSUInteger)a->offset;
         vd.attributes[i].bufferIndex = (NSUInteger)(MTL_VBUF_BASE + a->buffer_index);
         bufUsed[a->buffer_index] = true;
     }
     bool hasAttrs = false;
-    for (int i = 0; i < SC_GPU_MAX_VERTEX_BUFFERS; i++) {
+    for (int i = 0; i < SC_GFX_MAX_VERTEX_BUFFERS; i++) {
         if (!bufUsed[i]) continue;
         hasAttrs = true;
         NSUInteger li = (NSUInteger)(MTL_VBUF_BASE + i);
@@ -707,7 +605,7 @@ static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
     if (hasAttrs) rp.vertexDescriptor = vd;
 
     for (int i = 0; i < d->color_count; i++) {
-        const sc_gpu_color_target_state* c = &d->colors[i];
+        const sc_gfx_color_target_state* c = &d->colors[i];
         rp.colorAttachments[i].pixelFormat = toMtlFormat(c->format);
         if (c->write_mask)
             rp.colorAttachments[i].writeMask = (MTLColorWriteMask)c->write_mask;
@@ -734,7 +632,7 @@ static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
     NSError* err = nil;
     m->rps = [mtl.device newRenderPipelineStateWithDescriptor:rp error:&err];
     if (!m->rps) {
-        _sc_gpu_log("metal: 渲染管线创建失败: %s",
+        _sc_gfx_log("metal: 渲染管线创建失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         free(m);
         return false;
@@ -769,20 +667,20 @@ static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
     }
 
     switch (d->primitive) {
-        case SC_GPU_PRIMITIVE_POINTS:         m->primitive = MTLPrimitiveTypePoint; break;
-        case SC_GPU_PRIMITIVE_LINES:          m->primitive = MTLPrimitiveTypeLine; break;
-        case SC_GPU_PRIMITIVE_LINE_STRIP:     m->primitive = MTLPrimitiveTypeLineStrip; break;
-        case SC_GPU_PRIMITIVE_TRIANGLE_STRIP: m->primitive = MTLPrimitiveTypeTriangleStrip; break;
+        case SC_GFX_PRIMITIVE_POINTS:         m->primitive = MTLPrimitiveTypePoint; break;
+        case SC_GFX_PRIMITIVE_LINES:          m->primitive = MTLPrimitiveTypeLine; break;
+        case SC_GFX_PRIMITIVE_LINE_STRIP:     m->primitive = MTLPrimitiveTypeLineStrip; break;
+        case SC_GFX_PRIMITIVE_TRIANGLE_STRIP: m->primitive = MTLPrimitiveTypeTriangleStrip; break;
         default:                              m->primitive = MTLPrimitiveTypeTriangle; break;
     }
     switch (d->cull) {
-        case SC_GPU_CULL_FRONT: m->cull = MTLCullModeFront; break;
-        case SC_GPU_CULL_BACK:  m->cull = MTLCullModeBack; break;
+        case SC_GFX_CULL_FRONT: m->cull = MTLCullModeFront; break;
+        case SC_GFX_CULL_BACK:  m->cull = MTLCullModeBack; break;
         default:                m->cull = MTLCullModeNone; break;
     }
-    m->winding = d->winding == SC_GPU_WINDING_CW ? MTLWindingClockwise
+    m->winding = d->winding == SC_GFX_WINDING_CW ? MTLWindingClockwise
                                                  : MTLWindingCounterClockwise;
-    if (d->index_type == SC_GPU_INDEXTYPE_UINT32) {
+    if (d->index_type == SC_GFX_INDEXTYPE_UINT32) {
         m->indexType = MTLIndexTypeUInt32; m->indexSize = 4;
     } else {
         m->indexType = MTLIndexTypeUInt16; m->indexSize = 2;
@@ -796,7 +694,7 @@ static bool mtlPipelineCreate(_sc_gpu_pipeline_t* pip) {
     return true;
 }
 
-static void mtlPipelineDestroy(_sc_gpu_pipeline_t* pip) {
+static void mtlPipelineDestroy(_sc_gfx_pipeline_t* pip) {
     MtlPipeline* m = (MtlPipeline*)pip->backend;
     if (!m) return;
     mtlDeferRelease(m->rps); mtlDeferRelease(m->cps); mtlDeferRelease(m->dss);
@@ -818,9 +716,9 @@ static void ensureCmd(void) {
     mtl.presentCount = 0;
 }
 
-static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
-                         int color_count, _sc_gpu_image_t* resolves[],
-                         _sc_gpu_image_t* depth) {
+static void mtlBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
+                         int color_count, _sc_gfx_image_t* resolves[],
+                         _sc_gfx_image_t* depth) {
     ensureCmd();
 
     if (pass->compute) {
@@ -831,32 +729,21 @@ static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
 
     if (color_count == 0) {
-        /* 交换链 pass：目标 = 当前 surface */
-        _sc_gpu_surface_t* surf = mtl.curSurf;
-        MtlSurface* s = surf ? (MtlSurface*)surf->backend : NULL;
-        if (!s) { _sc_gpu_log("metal: begin_pass 无当前 surface"); return; }
-
-        if (!s->drawable) s->drawable = [s->layer nextDrawable];
-        if (!s->drawable) { _sc_gpu_log("metal: nextDrawable 失败"); return; }
-
-        id<MTLTexture> target = s->drawable.texture;
-        mtl.curPassWidth = (int)target.width;
-        mtl.curPassHeight = (int)target.height;
-
-        /* resize 竞态：附属纹理与 drawable 尺寸不一致 → 立刻重建 */
-        if ((s->depthTex && ((int)s->depthTex.width != mtl.curPassWidth ||
-                             (int)s->depthTex.height != mtl.curPassHeight)) ||
-            (s->msaaTex && ((int)s->msaaTex.width != mtl.curPassWidth ||
-                            (int)s->msaaTex.height != mtl.curPassHeight))) {
-            sc_gpu_surface_desc d = surf->desc;
-            d.width = mtl.curPassWidth;
-            d.height = mtl.curPassHeight;
-            surfaceCreateTargets(s, &d);
+        /* 交换链 pass：渲染目标经 gpu env 交付（含 resize 竞态校验） */
+        sc_gpu_frame f;
+        if (!sc_gpu_frame_acquire(&f)) {
+            _sc_gfx_log("metal: frame_acquire 失败");
+            return;
         }
+        id<MTLTexture> target = (__bridge id<MTLTexture>)f.color;
+        id<MTLTexture> msaa = (__bridge id<MTLTexture>)f.msaa_color;
+        id<MTLTexture> depthTex = (__bridge id<MTLTexture>)f.depth;
+        mtl.curPassWidth = f.width;
+        mtl.curPassHeight = f.height;
 
-        const sc_gpu_color_attachment_action* ca = &pass->action.colors[0];
-        if (s->msaaTex) {
-            rpd.colorAttachments[0].texture = s->msaaTex;
+        const sc_gfx_color_attachment_action* ca = &pass->action.colors[0];
+        if (msaa) {
+            rpd.colorAttachments[0].texture = msaa;
             rpd.colorAttachments[0].resolveTexture = target;
             rpd.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
         } else {
@@ -867,14 +754,14 @@ static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
         rpd.colorAttachments[0].clearColor = MTLClearColorMake(
             ca->clear[0], ca->clear[1], ca->clear[2], ca->clear[3]);
 
-        if (s->depthTex) {
-            const sc_gpu_depth_attachment_action* da = &pass->action.depth;
-            rpd.depthAttachment.texture = s->depthTex;
+        if (depthTex) {
+            const sc_gfx_depth_attachment_action* da = &pass->action.depth;
+            rpd.depthAttachment.texture = depthTex;
             rpd.depthAttachment.loadAction = toMtlLoad(da->load);
             rpd.depthAttachment.storeAction = toMtlStore(da->store);
             rpd.depthAttachment.clearDepth = da->clear_depth;
-            if (surf->desc.depth_format == SC_GPU_PIXELFORMAT_DEPTH_STENCIL) {
-                rpd.stencilAttachment.texture = s->depthTex;
+            if (f.depth_format == SC_GPU_PIXELFORMAT_DEPTH_STENCIL) {
+                rpd.stencilAttachment.texture = depthTex;
                 rpd.stencilAttachment.loadAction = toMtlLoad(da->load);
                 rpd.stencilAttachment.storeAction = toMtlStore(da->store);
                 rpd.stencilAttachment.clearStencil = da->clear_stencil;
@@ -882,11 +769,12 @@ static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
         }
 
         /* 记入本帧呈现列表（去重） */
+        id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)f.drawable;
         bool listed = false;
         for (int i = 0; i < mtl.presentCount; i++)
-            if (mtl.present[i] == surf) { listed = true; break; }
+            if (mtl.present[i] == drawable) { listed = true; break; }
         if (!listed && mtl.presentCount < MTL_MAX_PRESENT)
-            mtl.present[mtl.presentCount++] = surf;
+            mtl.present[mtl.presentCount++] = drawable;
     } else {
         /* 离屏 pass */
         mtl.curPassWidth = colors[0]->desc.width >> pass->colors[0].mip;
@@ -896,7 +784,7 @@ static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
 
         for (int i = 0; i < color_count; i++) {
             MtlImage* img = (MtlImage*)colors[i]->backend;
-            const sc_gpu_color_attachment_action* ca = &pass->action.colors[i];
+            const sc_gfx_color_attachment_action* ca = &pass->action.colors[i];
             rpd.colorAttachments[i].texture = img->tex;
             rpd.colorAttachments[i].level = (NSUInteger)pass->colors[i].mip;
             rpd.colorAttachments[i].slice = (NSUInteger)pass->colors[i].slice;
@@ -913,7 +801,7 @@ static void mtlBeginPass(const sc_gpu_pass* pass, _sc_gpu_image_t* colors[],
         }
         if (depth) {
             MtlImage* img = (MtlImage*)depth->backend;
-            const sc_gpu_depth_attachment_action* da = &pass->action.depth;
+            const sc_gfx_depth_attachment_action* da = &pass->action.depth;
             rpd.depthAttachment.texture = img->tex;
             rpd.depthAttachment.loadAction = toMtlLoad(da->load);
             rpd.depthAttachment.storeAction = toMtlStore(da->store);
@@ -955,7 +843,7 @@ static void mtlApplyScissor(int x, int y, int w, int h, bool topLeft) {
                                                (NSUInteger)w, (NSUInteger)h }];
 }
 
-static void mtlApplyPipeline(_sc_gpu_pipeline_t* pip) {
+static void mtlApplyPipeline(_sc_gfx_pipeline_t* pip) {
     MtlPipeline* m = (MtlPipeline*)pip->backend;
     if (!m) return;
     mtl.curPip = m;
@@ -978,24 +866,24 @@ static void mtlApplyPipeline(_sc_gpu_pipeline_t* pip) {
                           blue:m->blendColor[2] alpha:m->blendColor[3]];
 }
 
-static void mtlApplyBindings(_sc_gpu_pipeline_t* pip, const sc_gpu_bindings* bnd,
-                             _sc_gpu_buffer_t* vbufs[], _sc_gpu_buffer_t* ibuf,
-                             _sc_gpu_image_t* imgs[][SC_GPU_MAX_IMAGES],
-                             _sc_gpu_sampler_t* smps[][SC_GPU_MAX_SAMPLERS],
-                             _sc_gpu_buffer_t* sbufs[][SC_GPU_MAX_STORAGE_BUFFERS]) {
+static void mtlApplyBindings(_sc_gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
+                             _sc_gfx_buffer_t* vbufs[], _sc_gfx_buffer_t* ibuf,
+                             _sc_gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
+                             _sc_gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
+                             _sc_gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
     (void)pip;
 
     /* 计算 pass */
     if (mtl.cenc) {
-        for (int i = 0; i < SC_GPU_MAX_IMAGES; i++)
+        for (int i = 0; i < SC_GFX_MAX_IMAGES; i++)
             if (imgs[2][i])
                 [mtl.cenc setTexture:((MtlImage*)imgs[2][i]->backend)->tex
                              atIndex:(NSUInteger)i];
-        for (int i = 0; i < SC_GPU_MAX_SAMPLERS; i++)
+        for (int i = 0; i < SC_GFX_MAX_SAMPLERS; i++)
             if (smps[2][i])
                 [mtl.cenc setSamplerState:((MtlSampler*)smps[2][i]->backend)->smp
                                   atIndex:(NSUInteger)i];
-        for (int i = 0; i < SC_GPU_MAX_STORAGE_BUFFERS; i++)
+        for (int i = 0; i < SC_GFX_MAX_STORAGE_BUFFERS; i++)
             if (sbufs[2][i])
                 [mtl.cenc setBuffer:mtlActiveBuf(sbufs[2][i])
                              offset:0 atIndex:(NSUInteger)i];
@@ -1004,7 +892,7 @@ static void mtlApplyBindings(_sc_gpu_pipeline_t* pip, const sc_gpu_bindings* bnd
     if (!mtl.renc) return;
 
     /* 顶点缓冲（活动副本） */
-    for (int i = 0; i < SC_GPU_MAX_VERTEX_BUFFERS; i++) {
+    for (int i = 0; i < SC_GFX_MAX_VERTEX_BUFFERS; i++) {
         if (!vbufs[i]) continue;
         [mtl.renc setVertexBuffer:mtlActiveBuf(vbufs[i])
                            offset:(NSUInteger)bnd->vertex_buffer_offsets[i]
@@ -1019,7 +907,7 @@ static void mtlApplyBindings(_sc_gpu_pipeline_t* pip, const sc_gpu_bindings* bnd
         mtl.curIndexOffset = 0;
     }
     /* vs/fs 纹理、采样器、storage */
-    for (int i = 0; i < SC_GPU_MAX_IMAGES; i++) {
+    for (int i = 0; i < SC_GFX_MAX_IMAGES; i++) {
         if (imgs[0][i])
             [mtl.renc setVertexTexture:((MtlImage*)imgs[0][i]->backend)->tex
                                atIndex:(NSUInteger)i];
@@ -1027,7 +915,7 @@ static void mtlApplyBindings(_sc_gpu_pipeline_t* pip, const sc_gpu_bindings* bnd
             [mtl.renc setFragmentTexture:((MtlImage*)imgs[1][i]->backend)->tex
                                  atIndex:(NSUInteger)i];
     }
-    for (int i = 0; i < SC_GPU_MAX_SAMPLERS; i++) {
+    for (int i = 0; i < SC_GFX_MAX_SAMPLERS; i++) {
         if (smps[0][i])
             [mtl.renc setVertexSamplerState:((MtlSampler*)smps[0][i]->backend)->smp
                                     atIndex:(NSUInteger)i];
@@ -1035,7 +923,7 @@ static void mtlApplyBindings(_sc_gpu_pipeline_t* pip, const sc_gpu_bindings* bnd
             [mtl.renc setFragmentSamplerState:((MtlSampler*)smps[1][i]->backend)->smp
                                       atIndex:(NSUInteger)i];
     }
-    for (int i = 0; i < SC_GPU_MAX_STORAGE_BUFFERS; i++) {
+    for (int i = 0; i < SC_GFX_MAX_STORAGE_BUFFERS; i++) {
         if (sbufs[0][i])
             [mtl.renc setVertexBuffer:mtlActiveBuf(sbufs[0][i])
                                offset:0 atIndex:(NSUInteger)i];
@@ -1050,19 +938,19 @@ static void mtlApplyUniforms(int stage, int slot, const void* data, size_t size)
     id<MTLBuffer> ring = mtl.ubRing[mtlFrameSlot()];
     int pos = (mtl.ubPos + 255) & ~255;
     if ((size_t)pos + size > MTL_UB_RING_SIZE) {
-        _sc_gpu_log("metal: uniform 环缓冲溢出");
+        _sc_gfx_log("metal: uniform 环缓冲溢出");
         return;
     }
     memcpy((uint8_t*)ring.contents + pos, data, size);
     mtl.ubPos = pos + (int)size;
 
-    if (stage == SC_GPU_STAGE_COMPUTE) {
+    if (stage == SC_GFX_STAGE_COMPUTE) {
         if (mtl.cenc)
             [mtl.cenc setBuffer:ring offset:(NSUInteger)pos atIndex:(NSUInteger)slot];
         return;
     }
     if (!mtl.renc) return;
-    if (stage == SC_GPU_STAGE_VERTEX)
+    if (stage == SC_GFX_STAGE_VERTEX)
         [mtl.renc setVertexBuffer:ring offset:(NSUInteger)pos atIndex:(NSUInteger)slot];
     else
         [mtl.renc setFragmentBuffer:ring offset:(NSUInteger)pos atIndex:(NSUInteger)slot];
@@ -1101,14 +989,14 @@ static void mtlEndPass(void) {
 }
 
 static void mtlCommit(void) {
-    if (!mtl.cmd) return;
-    /* 呈现本帧触达的所有 surface */
+    if (!mtl.cmd) {
+        sc_gpu_frame_end();
+        return;
+    }
+    /* 呈现本帧触达的所有 drawable（挂命令缓冲 = 最佳呈现节拍） */
     for (int i = 0; i < mtl.presentCount; i++) {
-        MtlSurface* s = (MtlSurface*)mtl.present[i]->backend;
-        if (s && s->drawable) {
-            [mtl.cmd presentDrawable:s->drawable];
-            s->drawable = nil;
-        }
+        [mtl.cmd presentDrawable:mtl.present[i]];
+        mtl.present[i] = nil;
     }
     mtl.presentCount = 0;
 
@@ -1120,11 +1008,13 @@ static void mtlCommit(void) {
     [mtl.cmd commit];
     mtl.cmd = nil;
     mtl.frameIndex++;
+
+    sc_gpu_frame_end();   /* env 释放 drawable 引用（命令缓冲仍持有） */
 }
 
 /* ---- 能力查询 ----------------------------------------------- */
 
-static void mtlQueryPixelformat(sc_gpu_pixel_format fmt, sc_gpu_pixelformat_info* out) {
+static void mtlQueryPixelformat(sc_gpu_pixel_format fmt, sc_gfx_pixelformat_info* out) {
     switch (fmt) {
         case SC_GPU_PIXELFORMAT_DEPTH:
         case SC_GPU_PIXELFORMAT_DEPTH_STENCIL:
@@ -1142,15 +1032,10 @@ static void mtlQueryPixelformat(sc_gpu_pixel_format fmt, sc_gpu_pixelformat_info
 
 /* ---- vtable ------------------------------------------------ */
 
-static const _sc_gpu_backend_api mtlApi = {
+static const _sc_gfx_backend_api mtlApi = {
     .name = "metal",
-    .kind = SC_GPU_BACKEND_METAL,
     .init = mtlInit,
     .shutdown = mtlShutdown,
-    .surface_create = mtlSurfaceCreate,
-    .surface_destroy = mtlSurfaceDestroy,
-    .surface_activate = mtlSurfaceActivate,
-    .surface_resize = mtlSurfaceResize,
     .buffer_create = mtlBufferCreate,
     .buffer_destroy = mtlBufferDestroy,
     .buffer_update = mtlBufferUpdate,
@@ -1176,6 +1061,6 @@ static const _sc_gpu_backend_api mtlApi = {
     .query_pixelformat = mtlQueryPixelformat,
 };
 
-const _sc_gpu_backend_api* _sc_gpu_backend_metal(void) { return &mtlApi; }
+const _sc_gfx_backend_api* _sc_gfx_backend_metal(void) { return &mtlApi; }
 
 #endif /* SC_GPU_METAL */

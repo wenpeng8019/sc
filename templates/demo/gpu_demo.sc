@@ -1,15 +1,18 @@
-# gpu_demo —— gpu 模块演示：执行 scc 编译转义后的 GPU 代码（Metal / GL 三角形）
+# gpu_demo —— gpu(运行环境) + gfx(渲染) 两层演示：执行 scc 编译转义后的
+# GPU 代码（Metal / GL 三角形）
 #
 # 链路（本 demo 的意义即验证此闭环）：
 #   gpu_shader/gpu_tri.sg ──scc──▶ vs_main.metal20000.metal / vs_main.glcore410.vert
 #                                  + gpu_tri.<tar>.reflect.json
 #                                        │
-#   wsi 窗口（native_window）──▶ gpu_init ─▶ make_shader(直接吃 scc 产物)
-#                                        └▶ make_pipeline ─▶ 帧循环 draw(3)
+#   wsi 窗口 ─▶ gpu_init（环境：device + surface 交换链）
+#              └▶ gfx_init（渲染）─▶ gfx_make_shader(直接吃 scc 产物)
+#                          └▶ gfx_make_pipeline ─▶ 帧循环 gfx_draw(3)
 #
 # 用法（macOS，从仓库根目录运行）：
 #   ./templates/utils/wsi/build.sh                 # 先编出 libwsi.a
-#   ./templates/utils/gpu/build.sh                 # 再编出 libgpu.a（Metal + GL 后端）
+#   ./templates/utils/gpu/build.sh                 # 环境层 libgpu.a
+#   ./templates/utils/gfx/build.sh                 # 渲染层 libgfx.a
 #   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.sg -o templates/demo/gpu_shader/out/gpu_tri
 #   SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
 #                -framework Metal -framework QuartzCore -framework OpenGL" \
@@ -20,6 +23,7 @@
 inc io.sc
 inc ../utils/wsi/wsi.sc
 inc ../utils/gpu/gpu.sc
+inc ../utils/gfx/gfx.sc
 
 # 整文件读入 malloc 缓冲（尾部补 NUL，文本产物可当 C 串用）。失败返回 nil。
 @fnc load_file: &, path: const char&, out_size: u8&
@@ -81,6 +85,15 @@ fnc main: i4
     var bk: i4 = gpu_query_backend()
     print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Null)\n"
 
+    # ---- gfx 渲染层（后端种类跟随 gpu） ----
+    var fd: ::sc_gfx_desc
+    ::memset(&fd, 0, sizeof(::sc_gfx_desc))
+    if gfx_init(&fd) == 0
+        print "gfx_init 失败\n"
+        gpu_shutdown()
+        wsi_terminate()
+        return 1
+
     # ---- 着色器：直接消费 scc 编译 .sg 的产物（按后端选目标产物） ----
     var vsn: u8 = 0
     var fsn: u8 = 0
@@ -98,12 +111,13 @@ fnc main: i4
         rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
     if vs == nil || fs == nil || rj == nil
         print "着色器产物缺失：先运行 scc 编译 gpu_shader/gpu_tri.sg（见文件头用法）\n"
+        gfx_shutdown()
         gpu_shutdown()
         wsi_terminate()
         return 1
 
-    var sd: ::sc_gpu_shader_desc
-    ::memset(&sd, 0, sizeof(::sc_gpu_shader_desc))
+    var sd: ::sc_gfx_shader_desc
+    ::memset(&sd, 0, sizeof(::sc_gfx_shader_desc))
     sd.vs.code.ptr  = (vs: &)
     sd.vs.code.size = vsn
     sd.vs.entry     = "vs_main"      # Metal 产物入口 = .sg 阶段函数名；GL 恒为 main（后端忽略）
@@ -112,24 +126,24 @@ fnc main: i4
     sd.fs.entry     = "fs_main"
     sd.reflect_json = rj             # 反射清单：绑定信息自动解析
     sd.label        = "tri"
-    var shd: u4 = gpu_make_shader(&sd)
+    var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
         print "make_shader 失败\n"
         return 1
 
     # ---- 管线（无顶点缓冲；格式/深度默认对齐交换链） ----
-    var pd: ::sc_gpu_pipeline_desc
-    ::memset(&pd, 0, sizeof(::sc_gpu_pipeline_desc))
+    var pd: ::sc_gfx_pipeline_desc
+    ::memset(&pd, 0, sizeof(::sc_gfx_pipeline_desc))
     pd.shader = shd
     pd.label  = "tri"
-    var pip: u4 = gpu_make_pipeline(&pd)
+    var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
         print "make_pipeline 失败\n"
         return 1
 
     # ---- 帧循环 ----
-    var bnd: ::sc_gpu_bindings
-    ::memset(&bnd, 0, sizeof(::sc_gpu_bindings))
+    var bnd: ::sc_gfx_bindings
+    ::memset(&bnd, 0, sizeof(::sc_gfx_bindings))
     print "三角形已上屏，关闭窗口以退出...\n"
     while wsi_win_get_should_close(win) == 0
         wsi_poll_events()
@@ -141,22 +155,23 @@ fnc main: i4
             h = nh
             gpu_resize((((w: f4) * sx): i4), (((h: f4) * sy): i4))
 
-        var pass: ::sc_gpu_pass           # 全零 = 交换链 pass，默认 clear
-        ::memset(&pass, 0, sizeof(::sc_gpu_pass))
+        var pass: ::sc_gfx_pass           # 全零 = 交换链 pass，默认 clear
+        ::memset(&pass, 0, sizeof(::sc_gfx_pass))
         pass.action.colors[0].clear[0] = 0.10
         pass.action.colors[0].clear[1] = 0.10
         pass.action.colors[0].clear[2] = 0.12
         pass.action.colors[0].clear[3] = 1.0
-        gpu_begin_pass(&pass)
-        gpu_apply_pipeline(pip)
-        gpu_apply_bindings(&bnd)
-        gpu_draw(0, 3, 1)
-        gpu_end_pass()
-        gpu_commit()
+        gfx_begin_pass(&pass)
+        gfx_apply_pipeline(pip)
+        gfx_apply_bindings(&bnd)
+        gfx_draw(0, 3, 1)
+        gfx_end_pass()
+        gfx_commit()
 
-    # ---- 清理 ----
-    gpu_destroy_pipeline(pip)
-    gpu_destroy_shader(shd)
+    # ---- 清理（先 gfx 后 gpu） ----
+    gfx_destroy_pipeline(pip)
+    gfx_destroy_shader(shd)
+    gfx_shutdown()
     gpu_shutdown()
     ::free(vs)
     ::free(fs)

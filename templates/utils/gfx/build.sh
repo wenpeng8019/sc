@@ -1,19 +1,17 @@
 #!/bin/bash
 # ============================================================
-# build.sh —— sc gpu（GPU 运行环境 env 层）构建脚本
+# build.sh —— sc gfx（渲染层）构建脚本
 #
 # 用法：
 #   ./build.sh                       # 宿主构建，自动检测平台和工具链
 #   ./build.sh --target aarch64-linux-gnu  # 交叉编译
 #
-# 产出：libgpu.<triple>.a（宿主构建另生成 libgpu.a）
+# 产出：libgfx.<triple>.a（宿主构建另生成 libgfx.a）
 #
-# 多后端（同 wsi/glfw：一库可含多后端，运行时选择）：
+# 依赖：utils/gpu（env 层，libgpu.a）——后端宏两库同套：
 #   darwin  → Metal (SC_GPU_METAL) + GL (SC_GPU_GL) + null
-#   linux   → GL (SC_GPU_GL) + null（Vulkan 后端待补）
+#   linux   → GL (SC_GPU_GL) + null
 #   windows → null（GL 需加载器、D3D 后端待补）
-#
-# 注：渲染层在 utils/gfx（libgfx.a），后端宏两库同套。
 # ============================================================
 set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -67,37 +65,34 @@ compile_c() {  # $1=src $2=extra flags
     OBJS+=("$obj")
 }
 
-echo "=== 构建 libgpu ($TARGET) ==="
+echo "=== 构建 libgfx ($TARGET) ==="
 
-# ---- 平台后端选择（宏需同时作用于公共层 gpu.c 的后端分派） ----
+# ---- 平台后端选择（与 utils/gpu 的 build.sh 同套宏） ----
 BACKEND_DEFS=""
 case "$PLAT" in
     darwin)  BACKEND_DEFS="-DSC_GPU_METAL -DSC_GPU_GL" ;;
     linux)   BACKEND_DEFS="-DSC_GPU_GL" ;;
-    windows) BACKEND_DEFS="" ;;                 # GL 需加载器、D3D 后端待补
+    windows) BACKEND_DEFS="" ;;
 esac
 
 # 公共层 + null 后端（所有平台）
-compile_c "$SRC_DIR/gpu.c" "$BACKEND_DEFS"
-compile_c "$SRC_DIR/null_env.c" "$BACKEND_DEFS"
+compile_c "$SRC_DIR/gfx.c" "$BACKEND_DEFS"
+compile_c "$SRC_DIR/gfx_reflect.c" "$BACKEND_DEFS"
+compile_c "$SRC_DIR/null_gfx.c" "$BACKEND_DEFS"
 
 case "$PLAT" in
     darwin)
-        # Metal env（ARC：后端私有体含 ObjC 强引用成员）
-        compile_c "$SRC_DIR/metal_env.m" "$BACKEND_DEFS -fobjc-arc -x objective-c"
-        # GL env（gl_ctx.c 用 NSOpenGL/ObjC，须按 objective-c 编译；gl_env.c 纯 C）
-        compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS -fobjc-arc -x objective-c"
-        compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
+        # Metal 渲染后端（ARC：后端私有体含 ObjC 强引用成员）
+        compile_c "$SRC_DIR/metal_gfx.m" "$BACKEND_DEFS -fobjc-arc -x objective-c"
+        compile_c "$SRC_DIR/gl_gfx.c" "$BACKEND_DEFS"
         ;;
     linux)
-        compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS"
-        compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
+        compile_c "$SRC_DIR/gl_gfx.c" "$BACKEND_DEFS"
         ;;
 esac
 
-LIB="libgpu.$TARGET.a"
+LIB="libgfx.$TARGET.a"
 rm -f "$LIB"
-# 过滤空元素
 REAL_OBJS=()
 for o in "${OBJS[@]}"; do [[ -n "$o" ]] && REAL_OBJS+=("$o"); done
 $AR rcs "$LIB" "${REAL_OBJS[@]}"
@@ -105,7 +100,7 @@ echo "  -> $LIB"
 
 # 宿主构建生成无后缀软链
 if [[ -z "${TARGET_EXPLICIT:-}" ]]; then
-    ln -sf "$LIB" libgpu.a
-    echo "  -> libgpu.a -> $LIB"
+    ln -sf "$LIB" libgfx.a
+    echo "  -> libgfx.a -> $LIB"
 fi
 echo "=== done ==="

@@ -7,6 +7,7 @@ compiler/build-ssl/
 compiler/build-linux/
 templates/utils/wsi/build/
 templates/utils/gpu/build/
+templates/utils/gfx/build/
 *.o
 *.out
 *.exe
