@@ -186,7 +186,7 @@ case "$TARGET" in
             WAYLAND=0
         else
             PLAT_DEFINES="WSI_X11 WSI_WAYLAND"
-            PLAT_SRCS="x11_platform.c xkb_unicode.c wl_init.c wl_monitor.c wl_window.c"
+            PLAT_SRCS="x11_platform.c xkb_unicode.c wl_platform.c"
             WAYLAND=1
         fi
         POLL_SRCS="posix_poll.c" ;;
