@@ -15,8 +15,20 @@
 #include "../gfx.h"
 #include <stdbool.h>
 
-/* ---- 编译期后端开关（与 gpu 的 build.sh 同套宏） ----------- */
-/* SC_GPU_METAL / SC_GPU_GL */
+/* ---- 编译期后端开关：按目标平台自推导（与 gpu/src/internal.h 同源逻辑）----
+ * darwin → Metal + GL；linux → GL；SC_GPU_GLES 由目标档 cflags 显式给出。 */
+#if defined(__APPLE__)
+  #ifndef SC_GPU_METAL
+  #define SC_GPU_METAL 1
+  #endif
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
+  #endif
+#elif defined(__linux__)
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
+  #endif
+#endif
 
 void gfx_log(const char* fmt, ...);
 

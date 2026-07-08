@@ -18,9 +18,9 @@
  * gfx 资源须在使用它的 surface 上下文中创建。
  * ============================================================ */
 
+#include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #ifdef SC_GPU_GL
 
-#include "internal.h"
 #include "gl_ctx.h"
 #include <stdlib.h>
 #include <string.h>

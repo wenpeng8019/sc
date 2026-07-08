@@ -10,9 +10,11 @@
  * 由 gl_dev.c 按上下文各自持有。
  * ============================================================ */
 
-#ifdef SC_GPU_GL
+#include "gl_ctx.h"   /* 先引入：后端宏按目标平台自推导（见 gl_ctx.h） */
+/* GLES 形态整体空化：窗口走 EGL window surface（gl_egl.c），
+ * GLX/NSGL/WGL 是桌面 GL 的装载协议，GLES 世界只有 EGL */
+#if defined(SC_GPU_GL) && !defined(SC_GPU_GLES)
 
-#include "gl_ctx.h"
 #include <stdlib.h>
 #include <string.h>
 

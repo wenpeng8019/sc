@@ -7,6 +7,11 @@
 #ifndef SC_GPU_GL_CTX_H
 #define SC_GPU_GL_CTX_H
 
+/* 后端宏自推导（与 internal.h 同源逻辑；gl_ctx.m 独立于 internal.h） */
+#if !defined(SC_GPU_GL) && (defined(__APPLE__) || defined(__linux__))
+#define SC_GPU_GL 1
+#endif
+
 typedef struct gl_ctx gl_ctx;
 
 /* 在 native_window 上创建 GL 上下文（core profile major.minor），

@@ -13,7 +13,13 @@
 
 inc ts.sc
 inc spc.h
-add libspc.a
+
+# 实现：源码动态编译（同 gpu.sc：平台自守卫 + .m 自动 ObjC；
+# 一期 darwin 专属，非 darwin 目标全部空化为空 .o）
+add src/spc.c
+add src/metal_spc.m
+add src/mpsg_spc.m
+add src/coreml_spc.m
 
 # === 生命周期 ===
 @fnc spc_init:: i4, desc: const ::sc_spc_desc&

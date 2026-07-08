@@ -2,6 +2,10 @@
 # ============================================================
 # build.sh —— sc gpu（GPU 运行环境 env 层）构建脚本
 #
+# 【已降级为可选开发工具】模块实现现由 scc 动态编译（<模块>.sc 逐文件
+# add src 源码，平台自守卫 + .m 自动 ObjC）——本脚本不再参与构建链，
+# 仅保留用于独立开发调试（快速语法检查、产 .a 供外部 C 项目用）。
+#
 # 用法：
 #   ./build.sh                       # 宿主构建，自动检测平台和工具链
 #   ./build.sh --target aarch64-linux-gnu  # 交叉编译
@@ -100,17 +104,17 @@ case "$PLAT" in
     darwin)
         # Metal env（ARC：后端私有体含 ObjC 强引用成员）
         compile_c "$SRC_DIR/metal_env.m" "$BACKEND_DEFS -fobjc-arc -x objective-c"
-        # GL env（gl_ctx.c 用 NSOpenGL/ObjC，须按 objective-c 编译；gl_env.c 纯 C）
-        compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS -fobjc-arc -x objective-c"
+        # GL env（gl_ctx.m 用 NSOpenGL/ObjC，须按 objective-c 编译；gl_env.c 纯 C）
+        compile_c "$SRC_DIR/gl_ctx.m" "$BACKEND_DEFS -fobjc-arc -x objective-c"
         compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
         ;;
     linux)
         if [[ "$GLES" == 1 ]]; then
-            # GLES：窗口走 EGL window surface（gl_egl.c），不编 gl_ctx.c（GLX）
+            # GLES：窗口走 EGL window surface（gl_egl.c），不编 gl_ctx.m（GLX）
             compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
             compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
         else
-            compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS"
+            compile_c "$SRC_DIR/gl_ctx.m" "$BACKEND_DEFS"
             compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
             compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
         fi

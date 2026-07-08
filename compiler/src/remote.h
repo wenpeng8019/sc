@@ -70,7 +70,15 @@ std::unique_ptr<RemoteBuilder> makeRemoteBuilder(const RemoteTarget& t, std::str
 struct RemoteJob {
     RemoteTarget target;
     std::string csrc;                   // 本机生成的 C 翻译单元
-    std::string builtinsDir;            // 本机 builtins 目录（空=无；非空则整目录推送）
+    std::string builtinsDir;            // 本机 builtins 目录（空=无）
+    // builtins 远端缓存（POSIX 远端；Windows 保持整目录入包的旧路径）：
+    //   builtinsHash 非空 = 启用——builtins 不再随 bundle 上传，而是缓存在远端
+    //   ~/.sc/cache/builtins-<hash>/（.ok 标记幂等）；未命中时才上传一次：
+    //   builtinsTgz 非空（发行版：内嵌预压 tgz 落盘路径）直接推送；
+    //   为空（开发版）则现场从 builtinsDir 打包。命中则零上传零打包。
+    std::string builtinsHash;           // builtins 内容哈希（缓存键；空=旧路径）
+    std::string builtinsTgz;            // 预压 tgz 本地路径（空=现场打包）
+    bool targetDarwin = false;          // 目标平台族为 darwin（.m 源 ObjC 模式）
     std::string remoteCC;               // 远端编译器名（空=cc；MSVC 风味默认 cl）
     std::string ccStyle;                // "msvc"=cl.exe 风格（/I /c /Fo…）| 空=gcc 风格
     std::string vcvars;                 // MSVC vcvars64.bat 路径（cl 前 call，置 INCLUDE/LIB）

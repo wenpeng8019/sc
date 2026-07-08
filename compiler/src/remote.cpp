@@ -478,12 +478,15 @@ static bool makeBundle(const RemoteJob& job, const fs::path& tgz,
         std::ofstream out(stage / "main.c", std::ios::binary);
         out.write(job.csrc.data(), (std::streamsize)job.csrc.size());
     }
-    if (!job.builtinsDir.empty()) {
+    if (!job.builtinsDir.empty() &&
+        (job.target.windows || job.builtinsHash.empty())) {
+        // 旧路径（Windows 远端 / 无哈希）：builtins 整目录入包
         fs::copy(job.builtinsDir, stage / "builtins",
                  fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
         if (ec) { err = "复制 builtins 失败: " + ec.message();
                   fs::remove_all(stage, ec); return false; }
     }
+    // POSIX + builtinsHash：builtins 不入 bundle，走远端 ~/.sc/cache 缓存（见 runRemoteJob）
 
     // 用户模块手写头（项目根相对路径入包）：令生成 C 的相对根 #include 与头内
     //   "../../../builtins/…" 相对包含在远端（/I . + builtins/）一并解析。
@@ -566,6 +569,46 @@ int runRemoteJob(const RemoteJob& job) {
 
     if (!rb->push({{tgz.string(), "bundle.tgz"}}, err)) {
         std::fprintf(stderr, "错误: %s\n", err.c_str()); return cleanup(1);
+    }
+
+    // ---- builtins 远端缓存（POSIX）----
+    // builtins 不随 bundle 上传，而是缓存在远端 ~/.sc/cache/builtins-<内容哈希>/：
+    //   命中（.ok 标记）→ 零上传；未命中 → 上传一次 tgz（发行版直接用内嵌预压
+    //   包，开发版现场打包）解压入缓存。会话目录内建软链 builtins → 缓存，
+    //   使 bundle 内既有的 -I builtins 与头内相对包含全部照旧工作。
+    if (!job.target.windows && !job.builtinsHash.empty() && !job.builtinsDir.empty()) {
+        const std::string cdir = "$HOME/.sc/cache/builtins-" + job.builtinsHash;
+        std::string e2;
+        if (rb->exec("test -f " + cdir + "/.ok", e2) != 0) {
+            fs::path btgz;
+            bool tmpTgz = false;
+            if (!job.builtinsTgz.empty()) {
+                btgz = job.builtinsTgz;          // 发行版：内嵌预压包，零现场打包
+            } else {
+                btgz = fs::temp_directory_path() /
+                       ("scc_builtins_" + std::to_string(getpid()) + ".tgz");
+                const std::string cmd = "tar czf " + shq(btgz.string()) +
+                                        " -C " + shq(job.builtinsDir) + " .";
+                if (std::system(cmd.c_str()) != 0) {
+                    std::fprintf(stderr, "错误: builtins 打包失败\n");
+                    return cleanup(1);
+                }
+                tmpTgz = true;
+            }
+            bool ok = rb->push({{btgz.string(), "builtins.tgz"}}, err);
+            if (tmpTgz) fs::remove(btgz, ec);
+            if (!ok) { std::fprintf(stderr, "错误: %s\n", err.c_str()); return cleanup(1); }
+            if (rb->exec("mkdir -p " + cdir + "/builtins && tar xzf builtins.tgz -C " +
+                         cdir + "/builtins && rm -f builtins.tgz && touch " + cdir + "/.ok",
+                         err) != 0) {
+                std::fprintf(stderr, "错误: 远端 builtins 缓存展开失败\n");
+                return cleanup(1);
+            }
+        }
+        if (rb->exec("ln -sfn " + cdir + "/builtins builtins", err) != 0) {
+            std::fprintf(stderr, "错误: 远端 builtins 软链失败\n");
+            return cleanup(1);
+        }
     }
 
     std::string libs;
@@ -675,7 +718,11 @@ int runRemoteJob(const RemoteJob& job) {
         int oi = 0;
         for (auto& s : plan.sources) {
             std::string obj = "dep" + std::to_string(oi++) + ".o";
-            cmds.push_back(cc + " -O2 -g -I builtins -I . -I " + shq(s.second) +
+            // .m（ObjC）：darwin 远端 ObjC 模式；其余平台按 C 编（源文件平台守卫空化）
+            std::string lang;
+            if (s.first.size() > 2 && s.first.rfind(".m") == s.first.size() - 2)
+                lang = job.targetDarwin ? " -fobjc-arc -x objective-c" : " -x c";
+            cmds.push_back(cc + " -O2 -g" + lang + " -I builtins -I . -I " + shq(s.second) +
                            " -c " + shq(s.first) + " -o " + obj);
             objs += " " + obj;
         }

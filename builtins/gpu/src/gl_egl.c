@@ -10,10 +10,10 @@
  * 注意：仅 Linux 编译；本文件在 mac 开发机为盲写，板上验证。
  * ============================================================ */
 
+#include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #if defined(SC_GPU_GL) && defined(__linux__)
 
 #include "gl_egl.h"
-#include "internal.h"
 
 #include <fcntl.h>
 #include <unistd.h>

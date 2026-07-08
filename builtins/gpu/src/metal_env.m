@@ -11,9 +11,9 @@
  *     挂到命令缓冲——命令缓冲默认持有引用，此处释放安全）
  * ============================================================ */
 
+#include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #ifdef SC_GPU_METAL
 
-#include "internal.h"
 #include <string.h>
 
 #import <Metal/Metal.h>

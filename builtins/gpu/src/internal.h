@@ -11,9 +11,25 @@
 #include "../gpu.h"
 #include <stdbool.h>
 
-/* ---- 编译期后端开关（build.sh 按平台注入） ---------------- */
-/* SC_GPU_METAL —— Metal（macOS）
- * SC_GPU_GL    —— OpenGL（macOS NSGL / Linux GLX；Win WGL 待加载器） */
+/* ---- 编译期后端开关：按目标平台自推导（无需构建系统注入） ----
+ * 源文件由 scc 动态编译（模块 .sc 逐文件 add src 源码）：平台即配置——
+ *   darwin → Metal + GL；linux → GL；windows → 仅 null（GL 需加载器待补）。
+ * 预定义宏绑定「编译器的目标」非宿主：交叉工具链（如 aarch64-linux-gnu-gcc）
+ * 定义 __linux__，交叉编译天然正确。
+ * SC_GPU_GLES（GLES 形态）是构建选择非平台事实，由目标档 cflags 显式给出
+ *（-DSC_GPU_GLES -I builtins/gpu/khr）。显式 -D 优先（#ifndef 保护）。 */
+#if defined(__APPLE__)
+  #ifndef SC_GPU_METAL
+  #define SC_GPU_METAL 1
+  #endif
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
+  #endif
+#elif defined(__linux__)
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
+  #endif
+#endif
 
 void gpu_log(const char* fmt, ...);
 

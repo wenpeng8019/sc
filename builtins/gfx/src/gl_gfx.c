@@ -29,9 +29,9 @@
  *   · commit：sc_gpu_frame_end()（env 对触达的 surface swapBuffers）
  * ============================================================ */
 
+#include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #ifdef SC_GPU_GL
 
-#include "internal.h"
 #include <stdlib.h>
 #include <string.h>
 

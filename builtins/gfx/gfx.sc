@@ -13,7 +13,13 @@
 # 说明：各接口的功能、参数与默认值注释见 gfx.h。
 
 inc gfx.h
-add libgfx.a
+
+# 实现：源码动态编译（同 gpu.sc：平台自守卫 + .m 自动 ObjC）
+add src/gfx.c
+add src/gfx_reflect.c
+add src/null_gfx.c
+add src/gl_gfx.c
+add src/metal_gfx.m
 
 # === 生命周期 ===
 @fnc gfx_init:: i4, desc: const ::sc_gfx_desc&

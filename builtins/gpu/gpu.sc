@@ -20,7 +20,17 @@
 #   消费的内部契约，一般不需要在 sc 侧直接调用，故不做绑定。
 
 inc gpu.h
-add libgpu.a
+
+# 实现：源码动态编译（与 .sc 转义同一条工具链，交叉/远程天然正确）。
+# 平台选择全在源文件内：后端宏按平台自推导（src/internal.h），非本平台
+# 文件 #ifdef 自守卫空化；.m（ObjC）在 darwin 目标自动 ObjC 模式。
+# GLES 形态：目标档 cflags 加 -DSC_GPU_GLES -I builtins/gpu/khr。
+add src/gpu.c
+add src/null_env.c
+add src/gl_env.c
+add src/gl_egl.c
+add src/gl_ctx.m
+add src/metal_env.m
 
 # === 生命周期 ===
 @fnc gpu_init:: i4, desc: const ::sc_gpu_desc&

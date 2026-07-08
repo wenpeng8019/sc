@@ -25,9 +25,9 @@
  *   入口名默认 "main0"（scc MSL 产物为改名后的 .sg 阶段函数名）。
  * ============================================================ */
 
+#include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #ifdef SC_GPU_METAL
 
-#include "internal.h"
 #include <float.h>
 #include <string.h>
 

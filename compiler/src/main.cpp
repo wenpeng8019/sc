@@ -488,6 +488,45 @@ static std::filesystem::path resolveAddArtifact(const std::filesystem::path& p,
 // （unitsDir/units/ldLibs）。失败置 err 返回 false。定义见 buildProject 之后。
 static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
                                const ToolConfig& tc, RemoteJob& job, std::string& err);
+// builtins 目录内容哈希（FNV-1a：排序后的相对路径 + 文件内容）。
+// 作远端缓存键（~/.sc/cache/builtins-<hash>）：跨机稳定、内容变化即换键。
+// 覆盖 .sc/.h/.caps/.a（预编译库参与——gpu 等模块以 .a 交付实现）。
+static std::string builtinsContentHash(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::vector<fs::path> files;
+    for (auto it = fs::recursive_directory_iterator(dir, ec);
+         it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec || !it->is_regular_file(ec)) continue;
+        const std::string ext = it->path().extension().string();
+        if (ext == ".sc" || ext == ".h" || ext == ".caps" || ext == ".a")
+            files.push_back(it->path());
+    }
+    std::sort(files.begin(), files.end());
+    uint64_t h = 1469598103934665603ull;               // FNV-1a 64
+    auto mix = [&](const char* p, size_t n) {
+        for (size_t i = 0; i < n; i++) { h ^= (unsigned char)p[i]; h *= 1099511628211ull; }
+    };
+    for (auto& f : files) {
+        const std::string rel = fs::relative(f, dir, ec).generic_string();
+        mix(rel.data(), rel.size());
+        std::ifstream in(f, std::ios::binary);
+        char buf[65536];
+        while (in.read(buf, sizeof buf) || in.gcount() > 0)
+            mix(buf, (size_t)in.gcount());
+    }
+    char out[17];
+    std::snprintf(out, sizeof out, "%016llx", (unsigned long long)h);
+    return out;
+}
+
+#ifdef SCC_EMBED_BUILTINS
+// 前置声明（定义见下方内嵌 builtins 段；remoteDispatch 先于其定义使用）
+extern const char* const g_embeddedBuiltinsHash;
+std::filesystem::path embeddedBuiltinsTgzPath();
+static std::filesystem::path embeddedBuiltinsDir();
+#endif
+
 static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
                           const std::string& output,
                           const std::vector<std::string>& progArgs,
@@ -505,6 +544,22 @@ static int remoteDispatch(const std::string& csrc, const ToolConfig& tc,
                          (platformFamily(tc.triple) == "windows");
     job.csrc        = csrc;
     job.builtinsDir = tc.builtinsDir;
+    job.targetDarwin =
+        platformFamily(tc.triple.empty() ? hostTriple() : tc.triple) == "darwin";
+    // builtins 远端缓存键与预压包（POSIX 远端零重复上传；见 remote.h/remote.cpp）：
+    //   发行版 = 内嵌哈希 + 内嵌预压 tgz 落盘路径；开发版 = 目录内容哈希（现场打包）。
+    if (!tc.builtinsDir.empty()) {
+#ifdef SCC_EMBED_BUILTINS
+        if (std::filesystem::weakly_canonical(std::filesystem::path(tc.builtinsDir))
+            == std::filesystem::weakly_canonical(embeddedBuiltinsDir())) {
+            job.builtinsHash = g_embeddedBuiltinsHash;
+            job.builtinsTgz  = embeddedBuiltinsTgzPath().string();
+        } else
+#endif
+        {
+            job.builtinsHash = builtinsContentHash(tc.builtinsDir);
+        }
+    }
     job.remoteCC    = tc.remoteCC;
     // 编译器风味：显式 cc_style 优先，否则 windows 或 remote_cc=cl 默认 msvc
     job.ccStyle     = !tc.ccStyle.empty() ? tc.ccStyle
@@ -559,14 +614,35 @@ static bool gatherAddDeps(const std::filesystem::path& rootPath,
 
 #ifdef SCC_EMBED_BUILTINS
 // ---------------- 内嵌 builtins（发行版变体）----------------
-// CMake -DSCC_EMBED_BUILTINS=ON 时，builtins 的 .sc/.h 与预编译 adt.a
-// 经 cmake/embed_builtins.cmake 生成的表内嵌进二进制；首次使用释放到
-// ~/.cache/scc/builtins-<内容哈希>（已存在且大小一致则复用，内容变化
-// 自动换目录），使 scc 单二进制发行无需携带 builtins 目录。
-struct EmbeddedFile { const char* path; const unsigned char* data; size_t size; };
-extern const EmbeddedFile g_embeddedBuiltins[];
-extern const size_t g_embeddedBuiltinsCount;
+// CMake -DSCC_EMBED_BUILTINS=ON 时，builtins 的 .sc/.h/.caps 与预编译子项目 .a
+// 经 cmake/embed_builtins.cmake 预压缩为单一 builtins.tgz blob 内嵌进二进制
+//（文本资源高压缩率，比逐文件十六进制表更小）；首次使用解压到
+// ~/.cache/scc/builtins-<内容哈希>（.ok 标记幂等，内容变化自动换目录），
+// 使 scc 单二进制发行无需携带 builtins 目录。远程构建直接把 blob 当
+// bundle 组件上传（零现场打包，见 remote.cpp 的 builtins 缓存）。
+extern const unsigned char* const g_embeddedBuiltinsTgz;
+extern const size_t g_embeddedBuiltinsTgzSize;
 extern const char* const g_embeddedBuiltinsHash;
+
+// 把内嵌 tgz 写到磁盘（返回路径；已存在且大小一致则复用）。远程构建上传用。
+std::filesystem::path embeddedBuiltinsTgzPath() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path base;
+    if (const char* home = std::getenv("HOME"))
+        base = fs::path(home) / ".cache" / "scc";
+    else
+        base = fs::temp_directory_path(ec) / "scc-cache";
+    const fs::path tgz = base / ("builtins-" + std::string(g_embeddedBuiltinsHash) + ".tgz");
+    if (fs::is_regular_file(tgz, ec) && fs::file_size(tgz, ec) == g_embeddedBuiltinsTgzSize)
+        return tgz;
+    fs::create_directories(base, ec);
+    std::ofstream out(tgz, std::ios::binary);
+    if (!out.write(reinterpret_cast<const char*>(g_embeddedBuiltinsTgz),
+                   static_cast<std::streamsize>(g_embeddedBuiltinsTgzSize)))
+        return {};
+    return tgz;
+}
 
 static std::filesystem::path embeddedBuiltinsDir() {
     static const std::filesystem::path cached = [] {
@@ -578,16 +654,14 @@ static std::filesystem::path embeddedBuiltinsDir() {
         else
             base = fs::temp_directory_path(ec) / "scc-cache";
         const fs::path dir = base / ("builtins-" + std::string(g_embeddedBuiltinsHash));
-        for (size_t i = 0; i < g_embeddedBuiltinsCount; i++) {
-            const auto& f = g_embeddedBuiltins[i];
-            const fs::path p = dir / f.path;
-            if (fs::is_regular_file(p, ec) && fs::file_size(p, ec) == f.size) continue;
-            fs::create_directories(p.parent_path(), ec);
-            std::ofstream out(p, std::ios::binary);
-            if (!out.write(reinterpret_cast<const char*>(f.data),
-                           static_cast<std::streamsize>(f.size)))
-                return fs::path{};  // 释放失败：禁用内嵌目录（不影响其余搜索路径）
-        }
+        const fs::path ok = dir / ".ok";
+        if (fs::is_regular_file(ok, ec)) return dir;   // 已释放（幂等）
+        const fs::path tgz = embeddedBuiltinsTgzPath();
+        if (tgz.empty()) return fs::path{};
+        fs::create_directories(dir, ec);
+        const std::string cmd = "tar xzf '" + tgz.string() + "' -C '" + dir.string() + "'";
+        if (std::system(cmd.c_str()) != 0) return fs::path{};   // 解压失败：禁用内嵌目录
+        std::ofstream(ok.string()) << g_embeddedBuiltinsHash;   // 完整性标记
         return dir;
     }();
     return cached;
@@ -1894,10 +1968,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
 #endif
         }
         // gpu / gfx / spc（builtins GPU 模块体系）+ wsi（窗口库）——平台链接注入：
-        //   模块以 add lib<mod>.a 预编译库交付（build.sh 产多 triple 变体），
+        //   模块实现为源码动态编译（模块 .sc 逐文件 add src 源码，.m 自动 ObjC），
         //   其平台框架/系统库依赖由此处按目标平台族自动注入，用户零 SCC_LDFLAGS。
-        //   darwin 框架集为实测；linux 桌面组（GL/EGL/gbm）为板验前的合理缺省，
-        //   GLES 形态（lib<mod>.<triple>.gles.a）的 -lGLESv2 选择待板验接入。
+        //   darwin 框架集为实测；linux 按形态分组（GLES 形态 = cflags 含
+        //   -DSC_GPU_GLES → GLESv2；否则桌面 GL），板验前为合理缺省。
         if (scStem == "gpu" || scStem == "gfx" || scStem == "spc" || scStem == "wsi") {
             const std::string fam =
                 platformFamily(tc.triple.empty() ? hostTriple() : tc.triple);
@@ -1928,8 +2002,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                 }
             } else if (fam == "linux") {
                 if (scStem == "gpu" || scStem == "gfx") {
-                    /* 桌面组；GLES 形态板验时按库变体切 -lGLESv2 */
-                    addLd("-lGL");
+                    const bool gles =
+                        tc.cflags.find("-DSC_GPU_GLES") != std::string::npos;
+                    if (gles) addLd("-lGLESv2");
+                    else      addLd("-lGL");
                     addLd("-lEGL");
                     addLd("-lgbm");
                 }
@@ -2049,12 +2125,17 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
     }
 
     // 第四阶段：模块内 add 指令声明的实现/库文件参与编译与链接
-    //   add impl.c/.cpp/.cc/.cxx → 现场编译为 .o 并链接（解决「由 C 实现的接口」
+    //   add impl.c/.cpp/.cc/.cxx/.m → 现场编译为 .o 并链接（解决「由 C 实现的接口」
     //     无机制并入工程的问题：声明 :: 接口的模块自带 add 即可拉入实现）。
+    //     .m（ObjC）：darwin 目标自动 -fobjc-arc -x objective-c（apple 的 C 工具链
+    //     同源发行 ObjC，零额外依赖）；非 darwin 目标按 -x c 编译（源文件平台
+    //     自守卫，空翻译单元）——使平台后端源码可无条件 add，免构建脚本选文件。
     //   add libfoo.a/.so/.dylib/.o → 直接参与链接（替代构建脚本里手写 -l/路径，
     //     主要面向自定义库；跨平台系统库仍走编译选项机制）。
     //   路径相对该模块 .sc 所在目录解析；按规范化路径去重（被多模块/多次 add 安全）。
     {
+        const bool targetDarwin =
+            platformFamily(tc.triple.empty() ? hostTriple() : tc.triple) == "darwin";
         std::unordered_set<std::string> seenAdd;  // 已处理的源/库规范化路径
         int addSeq = 0;
         for (auto& kv : units) {
@@ -2086,13 +2167,18 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                 if (!seenAdd.insert(resolved.string()).second) continue;  // 去重
 
                 const std::string ext = resolved.extension().string();
-                if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx") {
+                if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx"
+                    || ext == ".m") {
                     // 现场编译为 .o（序号避免不同目录同名文件冲突）
                     const std::filesystem::path obj =
                         tmpDir / ("add_" + std::to_string(addSeq++) + "_"
                                   + resolved.stem().string() + ".o");
+                    std::string langFlags;
+                    if (ext == ".m")
+                        langFlags = targetDarwin ? " -fobjc-arc -x objective-c"
+                                                 : " -x c";   // 平台守卫空化
                     std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
-                        + extraCFlags
+                        + extraCFlags + langFlags
                         + " -I " + srcDir.string()
                         + " -I " + tmpDir.string()
                         + " -c " + resolved.string() + " -o " + obj.string();
@@ -2106,7 +2192,7 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     objects.push_back(resolved);  // 库/对象文件直接链接
                 } else {
                     std::cerr << "错误: add 不支持的文件类型: " << d->name
-                              << "（仅 .c/.cpp/.cc/.cxx/.o/.a/.so/.dylib）\n";
+                              << "（仅 .c/.cpp/.cc/.cxx/.m/.o/.a/.so/.dylib）\n";
                     return 1;
                 }
             }
@@ -2144,7 +2230,8 @@ static bool gatherAddDeps(const std::filesystem::path& rootPath,
             if (!std::filesystem::exists(resolved)) continue;
             if (!seen.insert(resolved.string()).second) continue;
             const std::string ext = resolved.extension().string();
-            const bool isSrc = (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx");
+            const bool isSrc = (ext == ".c" || ext == ".cpp" || ext == ".cc"
+                                || ext == ".cxx" || ext == ".m");
             const bool isLib = (ext == ".o" || ext == ".a" || ext == ".so" || ext == ".dylib");
             if (!isSrc && !isLib) continue;
             out.push_back({resolved.string(), srcDir.string(), isSrc});

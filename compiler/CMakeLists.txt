@@ -186,37 +186,48 @@ endif()
 
 # ------------------------------------------------------------
 # 发行版变体：-DSCC_EMBED_BUILTINS=ON
-#   builtins 的 .sc/.h 资源 + 各子项目预编译 .a 内嵌进 scc 二进制，
-#   运行时释放到 ~/.cache/scc/builtins-<内容哈希>（见 main.cpp），
-#   单二进制发行无需携带 builtins 目录
+#   builtins 全部源码资源（.sc/.h/.c/.caps + 预编译 .a 交付的模块库）预压缩为
+#   单一 builtins.tgz 内嵌进 scc 二进制（文本高压缩率，比逐文件十六进制表更小），
+#   运行时首次使用解压到 ~/.cache/scc/builtins-<内容哈希>（见 main.cpp）。
+#   · 含 _impl.c 源码 → host 构建走拼接机制（与开发版行为全同）、
+#     远程/交叉构建远端有源可编——单二进制发行完整自持。
+#   · 远程构建直接把内嵌 tgz 当上传件（零现场打包）+ 远端 ~/.sc/cache 缓存。
+#
+# SCC_EMBED_PREBUILT=ON（可选，默认 OFF）：
+#   额外把各子项目 _impl.c 预编为 host 平台 x.a 一并内嵌——host 构建跳过
+#   _impl.c 现场编译直接链接（快，但仅 host 平台受益；交叉/远程仍走源码）。
 # ------------------------------------------------------------
-option(SCC_EMBED_BUILTINS "内嵌 builtins 资源与预编译子项目静态库（单二进制发行）" OFF)
+option(SCC_EMBED_BUILTINS "内嵌 builtins 资源（单二进制发行）" OFF)
+option(SCC_EMBED_PREBUILT "额外内嵌 host 平台预编译子项目静态库" OFF)
 if(SCC_EMBED_BUILTINS)
     get_filename_component(BUILTINS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../builtins ABSOLUTE)
-    # 资源清单：所有 .sc/.h（configure 时收集，builtins 增删文件后需重新 cmake）
+    # 资源清单：源码全集 .sc/.h/.c/.caps + 模块预编译库 lib*.a（gpu/gfx/spc 形态）
+    # （configure 时收集，builtins 增删文件后需重新 cmake）
     file(GLOB_RECURSE BUILTIN_RES RELATIVE ${BUILTINS_DIR}
-         ${BUILTINS_DIR}/*.sc ${BUILTINS_DIR}/*.h)
+         ${BUILTINS_DIR}/*.sc ${BUILTINS_DIR}/*.h ${BUILTINS_DIR}/*.c
+         ${BUILTINS_DIR}/*.caps ${BUILTINS_DIR}/lib*.a)
 
-    # 预编译各子项目默认实现 builtins/x/x_impl.c → x.a
-    # （内嵌为 x/x.a，运行时释放后直接参与链接，不再现场编译）
+    # 可选：预编译各子项目默认实现 builtins/x/x_impl.c → x.a（host 平台）
     set(EMBED_LIBS "")
     set(EMBED_LIB_NAMES "")
-    file(GLOB BUILTIN_SUBS RELATIVE ${BUILTINS_DIR} ${BUILTINS_DIR}/*)
-    foreach(sub ${BUILTIN_SUBS})
-        set(IMPL_C ${BUILTINS_DIR}/${sub}/${sub}_impl.c)
-        if(EXISTS ${IMPL_C})
-            set(SUB_A ${CMAKE_CURRENT_BINARY_DIR}/${sub}.a)
-            add_custom_command(OUTPUT ${SUB_A}
-                COMMAND cc -O2 -I ${BUILTINS_DIR}/${sub} -I ${BUILTINS_DIR}
-                        -c ${IMPL_C} -o ${CMAKE_CURRENT_BINARY_DIR}/${sub}_impl.o
-                COMMAND ar rcs ${SUB_A} ${CMAKE_CURRENT_BINARY_DIR}/${sub}_impl.o
-                DEPENDS ${IMPL_C} ${BUILTINS_DIR}/${sub}/${sub}.h
-                        ${BUILTINS_DIR}/platform.h
-                COMMENT "预编译 builtins/${sub}/${sub}_impl.c → ${sub}.a")
-            list(APPEND EMBED_LIBS ${SUB_A})
-            list(APPEND EMBED_LIB_NAMES ${sub}/${sub}.a)
-        endif()
-    endforeach()
+    if(SCC_EMBED_PREBUILT)
+        file(GLOB BUILTIN_SUBS RELATIVE ${BUILTINS_DIR} ${BUILTINS_DIR}/*)
+        foreach(sub ${BUILTIN_SUBS})
+            set(IMPL_C ${BUILTINS_DIR}/${sub}/${sub}_impl.c)
+            if(EXISTS ${IMPL_C})
+                set(SUB_A ${CMAKE_CURRENT_BINARY_DIR}/${sub}.a)
+                add_custom_command(OUTPUT ${SUB_A}
+                    COMMAND cc -O2 -I ${BUILTINS_DIR}/${sub} -I ${BUILTINS_DIR}
+                            -c ${IMPL_C} -o ${CMAKE_CURRENT_BINARY_DIR}/${sub}_impl.o
+                    COMMAND ar rcs ${SUB_A} ${CMAKE_CURRENT_BINARY_DIR}/${sub}_impl.o
+                    DEPENDS ${IMPL_C} ${BUILTINS_DIR}/${sub}/${sub}.h
+                            ${BUILTINS_DIR}/platform.h
+                    COMMENT "预编译 builtins/${sub}/${sub}_impl.c → ${sub}.a")
+                list(APPEND EMBED_LIBS ${SUB_A})
+                list(APPEND EMBED_LIB_NAMES ${sub}/${sub}.a)
+            endif()
+        endforeach()
+    endif()
 
     # 生成内嵌资源表（路径列表以 ':' 连接传递，避免 cmake 列表分号转义问题）
     set(EMBED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_builtins.cpp)
