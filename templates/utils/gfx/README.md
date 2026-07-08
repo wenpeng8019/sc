@@ -32,6 +32,11 @@
   `draw` / `dispatch` → `end_pass` → `commit`。
 - 计算：`sc_gfx_pass.compute = 1` 开计算 pass。Metal 已支持；
   GL 4.1 无 compute（macOS 上限）。
+- 外部内存绑定：`image_desc.memimg` 非 0 时，纹理存储来自 gpu 的
+  memimg（dma-buf/IOSurface）——既可作离屏渲染目标（按需绘制导出），
+  也可作导入采样纹理（相机零拷贝）。限 2D 单 mip。
+- `sc_gfx_finish()`：等 GPU 全部完成（glFinish 语义）——无表面导出帧
+  的 `sync_fd` 为 -1 时，消费前调此同步。
 
 ## 3. 与 scc 的整合（核心）
 
@@ -80,8 +85,10 @@ macOS 链接框架见 [.sc](.sc)。
 
 ## 5. sc 侧用法
 
-[gfx.sc](gfx.sc) 为 FFI 描述（句柄即 `u4`）。完整示例见
-[templates/demo/gpu_demo.sc](../../demo/gpu_demo.sc)：
+[gfx.sc](gfx.sc) 为 FFI 描述（句柄即 `u4`）。完整示例：
+窗口渲染见 [templates/demo/gpu_demo.sc](../../demo/gpu_demo.sc)；
+无表面渲染（MEMORY surface / memimg 绑定双模）见
+[templates/demo/gpu_headless_demo.sc](../../demo/gpu_headless_demo.sc)。
 
 ```sh
 ./templates/utils/wsi/build.sh

@@ -276,6 +276,11 @@ typedef struct sc_gfx_image_desc {
     int                 render_target; /* 可作 pass 附件 */
     int                 sample_count;  /* MSAA；默认 1 */
     sc_gfx_image_data   data;
+    /* 绑定 gpu 内存图像（sc_gpu_memimg 句柄）：非 0 时纹理存储来自
+     * memimg（dma-buf / IOSurface）而非新建——按需离屏渲染目标
+     *（Mode B，render_target=1）或导入采样纹理（相机零拷贝）。
+     * 限 2D；width/height/format 须与 memimg 一致；data 忽略。 */
+    uint32_t            memimg;
     const char*         label;
 } sc_gfx_image_desc;
 
@@ -477,6 +482,9 @@ typedef struct sc_gfx_desc {
 int  sc_gfx_init(const sc_gfx_desc* desc);       /* 1 成功 / 0 失败；须先 sc_gpu_init */
 void sc_gfx_shutdown(void);
 int  sc_gfx_isvalid(void);
+/* 等待 GPU 完成全部已提交工作（同 glFinish）。无表面导出场景中，
+ * 当帧的 sync_fd 为 -1（平台无 fence 扩展）时，消费前调此同步。 */
+void sc_gfx_finish(void);
 
 /* ---- API：能力查询 ----------------------------------------- */
 

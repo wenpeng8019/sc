@@ -29,8 +29,21 @@ add libgpu.a
 @fnc gpu_resize:: width: i4, height: i4
 
 # === surface（呈现目标；多窗口用 make_current 切换） ===
+# kind=MEMORY 时为无表面内存交换链（图像环），渲染后 dequeue 送编码器
 @fnc gpu_make_surface:: u4, desc: const ::sc_gpu_surface_desc&
 @fnc gpu_destroy_surface:: surf: u4
 @fnc gpu_make_current:: surf: u4
 @fnc gpu_query_current_surface:: u4
 @fnc gpu_surface_resize:: surf: u4, width: i4, height: i4
+
+# === memimg（可导出/可导入内存图像：dma-buf / IOSurface） ===
+@fnc gpu_memimg_alloc:: u4, desc: const ::sc_gpu_memimg_desc&
+@fnc gpu_memimg_import:: u4, src: const ::sc_gpu_memory_frame&
+@fnc gpu_memimg_export:: i4, img: u4, out: ::sc_gpu_memory_frame&, with_fence: i4
+@fnc gpu_memimg_map:: &, img: u4, plane: i4, out_stride: u4&
+@fnc gpu_memimg_unmap:: img: u4, plane: i4
+@fnc gpu_memimg_free:: img: u4
+
+# === MEMORY surface 消费端（编码器侧，可在另一线程） ===
+@fnc gpu_memory_dequeue:: i4, surf: u4, out: ::sc_gpu_memory_frame&
+@fnc gpu_memory_enqueue:: surf: u4, slot: u4

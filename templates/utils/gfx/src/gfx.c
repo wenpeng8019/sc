@@ -288,6 +288,10 @@ void sc_gfx_shutdown(void) {
 
 int sc_gfx_isvalid(void) { return _sc_gfx.valid ? 1 : 0; }
 
+void sc_gfx_finish(void) {
+    if (_sc_gfx.valid && _sc_gfx.api->finish) _sc_gfx.api->finish();
+}
+
 /* ---- 能力查询 ----------------------------------------------- */
 
 sc_gfx_pixelformat_info sc_gfx_query_pixelformat(sc_gpu_pixel_format fmt) {
@@ -321,6 +325,10 @@ sc_gfx_buffer sc_gfx_make_buffer(const sc_gfx_buffer_desc* desc) {
 
 sc_gfx_image sc_gfx_make_image(const sc_gfx_image_desc* desc) {
     if (!_sc_gfx.valid || !desc) return 0;
+    if (desc->memimg && (desc->kind > SC_GFX_IMAGEKIND_2D || desc->mip_count > 1)) {
+        _sc_gfx_log("make_image: memimg 绑定限 2D 单 mip");
+        return 0;
+    }
     uint32_t id = _sc_gfx_pool_alloc(&_sc_gfx.image_pool);
     if (!id) { _sc_gfx_log("make_image: 池满"); return 0; }
     _sc_gfx_image_t* img = &_sc_gfx.images[_sc_gfx_slot_index(id)];

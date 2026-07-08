@@ -34,6 +34,9 @@
   #define GL_GLEXT_PROTOTYPES
   #include <GL/gl.h>
   #include <GL/glext.h>
+  #include <EGL/egl.h>
+  /* GL_OES_EGL_image（memimg 绑定：EGLImage → 纹理） */
+  typedef void (*PFN_scEGLImageTargetTexture2DOES)(GLenum target, void* image);
 #else
   #error "gl_gfx.c: Windows 需 GL 加载器（待补）"
 #endif
@@ -242,6 +245,10 @@ static void glGfxShutdown(void) {
     memset(&gl, 0, sizeof(gl));
 }
 
+static void glGfxFinish(void) {
+    glFinish();
+}
+
 /* ---- buffer ------------------------------------------------ */
 
 static GLenum glBufUsage(sc_gfx_usage u) {
@@ -346,6 +353,39 @@ static bool glImageCreate(_sc_gfx_image_t* img) {
     GlImage* m = (GlImage*)calloc(1, sizeof(GlImage));
     if (!m) return false;
     const sc_gfx_image_desc* d = &img->desc;
+
+    /* memimg 绑定：纹理存储来自 gpu env 的 EGLImage（linux） */
+    if (d->memimg) {
+#if defined(__linux__)
+        static PFN_scEGLImageTargetTexture2DOES pImageTarget;
+        if (!pImageTarget) {
+            pImageTarget = (PFN_scEGLImageTargetTexture2DOES)
+                eglGetProcAddress("glEGLImageTargetTexture2DOES");
+            if (!pImageTarget) {
+                _sc_gfx_log("gl: 无 GL_OES_EGL_image 扩展");
+                free(m);
+                return false;
+            }
+        }
+        void* eglimg = sc_gpu_memimg_native(d->memimg);
+        if (!eglimg) {
+            _sc_gfx_log("gl: memimg %u 无效", d->memimg);
+            free(m);
+            return false;
+        }
+        m->target = GL_TEXTURE_2D;
+        glGenTextures(1, &m->tex);
+        glBindTexture(GL_TEXTURE_2D, m->tex);
+        pImageTarget(GL_TEXTURE_2D, eglimg);
+        img->backend = m;
+        return true;
+#else
+        _sc_gfx_log("gl: mac 上 memimg 绑定请用 Metal 后端");
+        free(m);
+        return false;
+#endif
+    }
+
     GlFormatInfo fi = toGlFormat(d->format);
     if (!fi.internal) { free(m); return false; }
 
@@ -891,6 +931,7 @@ static const _sc_gfx_backend_api glApi = {
     .name = "gl",
     .init = glGfxInit,
     .shutdown = glGfxShutdown,
+    .finish = glGfxFinish,
     .buffer_create = glBufferCreate,
     .buffer_destroy = glBufferDestroy,
     .buffer_update = glBufferUpdate,

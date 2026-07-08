@@ -9,6 +9,7 @@
 
 static bool nullInit(const sc_gfx_desc* desc) { (void)desc; return true; }
 static void nullShutdown(void) {}
+static void nullFinish(void) {}
 
 static bool nullBufferCreate(_sc_gfx_buffer_t* buf) { (void)buf; return true; }
 static void nullBufferDestroy(_sc_gfx_buffer_t* buf) { (void)buf; }
@@ -73,6 +74,7 @@ static const _sc_gfx_backend_api nullApi = {
     .name = "null",
     .init = nullInit,
     .shutdown = nullShutdown,
+    .finish = nullFinish,
     .buffer_create = nullBufferCreate,
     .buffer_destroy = nullBufferDestroy,
     .buffer_update = nullBufferUpdate,

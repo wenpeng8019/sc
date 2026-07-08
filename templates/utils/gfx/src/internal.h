@@ -122,6 +122,7 @@ typedef struct _sc_gfx_backend_api {
 
     bool (*init)(const sc_gfx_desc* desc);   /* device 经 sc_gpu_device() 自取 */
     void (*shutdown)(void);
+    void (*finish)(void);                    /* 等待 GPU 全部完成（glFinish 语义） */
 
     bool (*buffer_create)(_sc_gfx_buffer_t* buf);
     void (*buffer_destroy)(_sc_gfx_buffer_t* buf);

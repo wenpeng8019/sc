@@ -91,6 +91,7 @@ case "$PLAT" in
         ;;
     linux)
         compile_c "$SRC_DIR/gl_ctx.c" "$BACKEND_DEFS"
+        compile_c "$SRC_DIR/gl_egl.c" "$BACKEND_DEFS"
         compile_c "$SRC_DIR/gl_env.c" "$BACKEND_DEFS"
         ;;
 esac

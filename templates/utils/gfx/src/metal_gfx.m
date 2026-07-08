@@ -86,6 +86,7 @@ static struct {
     dispatch_semaphore_t sem;
 
     id<MTLCommandBuffer>        cmd;
+    id<MTLCommandBuffer>        lastCmd;   /* 最后提交的命令缓冲（finish 用） */
     id<MTLRenderCommandEncoder> renc;
     id<MTLComputeCommandEncoder> cenc;
 
@@ -279,10 +280,14 @@ static bool mtlInit(const sc_gfx_desc* desc) {
 
 static void mtlShutdown(void) {
     if (mtl.cmd) { [mtl.cmd commit]; [mtl.cmd waitUntilCompleted]; }
-    /* 排空在飞帧 */
-    if (mtl.sem)
+    if (mtl.lastCmd) { [mtl.lastCmd waitUntilCompleted]; mtl.lastCmd = nil; }
+    /* 排空在飞帧后回填初值——dispatch 信号量释放时值低于初值会故意 crash */
+    if (mtl.sem) {
         for (int i = 0; i < MTL_MAX_INFLIGHT; i++)
             dispatch_semaphore_wait(mtl.sem, DISPATCH_TIME_FOREVER);
+        for (int i = 0; i < MTL_MAX_INFLIGHT; i++)
+            dispatch_semaphore_signal(mtl.sem);
+    }
     for (int i = 0; i < MTL_MAX_INFLIGHT; i++) {
         [mtl.releaseQueue[i] removeAllObjects];
         mtl.releaseQueue[i] = nil;
@@ -293,6 +298,13 @@ static void mtlShutdown(void) {
     mtl.curIndexBuf = nil;
     mtl.queue = nil; mtl.device = nil; mtl.sem = nil;
     memset((void*)&mtl, 0, sizeof(mtl));
+}
+
+static void mtlGfxFinish(void) {
+    if (mtl.lastCmd) {
+        [mtl.lastCmd waitUntilCompleted];
+        mtl.lastCmd = nil;
+    }
 }
 
 /* ---- buffer ------------------------------------------------ */
@@ -398,6 +410,24 @@ static bool mtlImageCreate(_sc_gfx_image_t* img) {
     MtlImage* m = (MtlImage*)calloc(1, sizeof(MtlImage));
     if (!m) return false;
     const sc_gfx_image_desc* d = &img->desc;
+
+    /* memimg 绑定：纹理来自 gpu env（IOSurface-backed MTLTexture） */
+    if (d->memimg) {
+        id<MTLTexture> tex = (__bridge id<MTLTexture>)sc_gpu_memimg_native(d->memimg);
+        if (!tex) {
+            _sc_gfx_log("metal: memimg %u 无效", d->memimg);
+            free(m);
+            return false;
+        }
+        if ((int)tex.width != d->width || (int)tex.height != d->height) {
+            _sc_gfx_log("metal: memimg 尺寸与 desc 不一致");
+            free(m);
+            return false;
+        }
+        m->tex = tex;
+        img->backend = m;
+        return true;
+    }
 
     MTLTextureDescriptor* td = [[MTLTextureDescriptor alloc] init];
     switch (d->kind) {
@@ -768,13 +798,15 @@ static void mtlBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
             }
         }
 
-        /* 记入本帧呈现列表（去重） */
+        /* 记入本帧呈现列表（去重；MEMORY surface 无 drawable） */
         id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)f.drawable;
-        bool listed = false;
-        for (int i = 0; i < mtl.presentCount; i++)
-            if (mtl.present[i] == drawable) { listed = true; break; }
-        if (!listed && mtl.presentCount < MTL_MAX_PRESENT)
-            mtl.present[mtl.presentCount++] = drawable;
+        if (drawable) {
+            bool listed = false;
+            for (int i = 0; i < mtl.presentCount; i++)
+                if (mtl.present[i] == drawable) { listed = true; break; }
+            if (!listed && mtl.presentCount < MTL_MAX_PRESENT)
+                mtl.present[mtl.presentCount++] = drawable;
+        }
     } else {
         /* 离屏 pass */
         mtl.curPassWidth = colors[0]->desc.width >> pass->colors[0].mip;
@@ -1006,6 +1038,7 @@ static void mtlCommit(void) {
         dispatch_semaphore_signal(sem);
     }];
     [mtl.cmd commit];
+    mtl.lastCmd = mtl.cmd;
     mtl.cmd = nil;
     mtl.frameIndex++;
 
@@ -1036,6 +1069,7 @@ static const _sc_gfx_backend_api mtlApi = {
     .name = "metal",
     .init = mtlInit,
     .shutdown = mtlShutdown,
+    .finish = mtlGfxFinish,
     .buffer_create = mtlBufferCreate,
     .buffer_destroy = mtlBufferDestroy,
     .buffer_update = mtlBufferUpdate,

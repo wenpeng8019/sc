@@ -41,6 +41,7 @@ extern "C" {
  * 纯 u32 typedef：与 sc 侧 FFI 的 u4 直接对应。 */
 
 typedef uint32_t sc_gpu_surface;   /* 呈现目标（交换链）；make_current 切换 */
+typedef uint32_t sc_gpu_memimg;    /* 可导出/可导入内存图像（dma-buf / IOSurface） */
 
 /* ---- 枚举 ------------------------------------------------ */
 
@@ -74,12 +75,31 @@ typedef enum sc_gpu_pixel_format {
 } sc_gpu_pixel_format;
 
 /* ---- surface（呈现目标） ---------------------------------- */
-/* surface = 一块可呈现的原生窗口面（交换链）。gpu 内部持有当前
- * surface；多窗口时用 make_current 切换。sc_gpu_init 若提供
- * native_window，自动创建默认 surface 并置为当前。 */
+/* surface = 一块可呈现的目标面（交换链），两种形态：
+ *   WINDOW：原生窗口面（CAMetalLayer / GL 上下文）
+ *   MEMORY：无表面——N 张可导出内存图像（memimg）的环，渲染后
+ *           dequeue 取帧送编码器，enqueue 归还（视频流/无屏场景）
+ * gpu 内部持有当前 surface；多目标时用 make_current 切换。
+ * sc_gpu_init 若提供 native_window，自动创建默认 WINDOW surface。 */
+
+typedef enum sc_gpu_surface_kind {
+    SC_GPU_SURFACE_WINDOW = 0,
+    SC_GPU_SURFACE_MEMORY,
+} sc_gpu_surface_kind;
+
+/* 内存图像的底层分配方式 */
+typedef enum sc_gpu_memory_kind {
+    SC_GPU_MEMORY_DEFAULT = 0,   /* 平台最优：linux=GBM BO，mac=IOSurface */
+    SC_GPU_MEMORY_GBM,           /* linux GBM BO（设备最优布局） */
+    SC_GPU_MEMORY_DMA_HEAP,      /* linux CMA dma-heap（物理连续，编码器要求时） */
+    SC_GPU_MEMORY_IOSURFACE,     /* macOS IOSurface（可送 VideoToolbox） */
+} sc_gpu_memory_kind;
+
+enum { SC_GPU_MAX_MEMORY_IMAGES = 8 };   /* MEMORY surface 环深度上限 */
 
 typedef struct sc_gpu_surface_desc {
-    void* native_window;   /* wsi: sc_wsi_win_get_native_window()
+    sc_gpu_surface_kind kind;
+    void* native_window;   /* WINDOW：wsi: sc_wsi_win_get_native_window()
                               mac=NSView* / win=HWND / x11=Window / wl=wl_surface* */
     void* native_display;  /* x11=Display* / wl=wl_display*；mac/win 传 NULL */
     int   width;           /* 帧缓冲像素尺寸 */
@@ -87,7 +107,9 @@ typedef struct sc_gpu_surface_desc {
     sc_gpu_pixel_format color_format;  /* 默认 BGRA8 */
     sc_gpu_pixel_format depth_format;  /* 默认 DEPTH_STENCIL，NONE=无 */
     int   sample_count;    /* 交换链 MSAA；默认 1（GL 后端暂只支持 1） */
-    int   swap_interval;   /* 垂直同步；默认 1 */
+    int   swap_interval;   /* 垂直同步；默认 1（MEMORY 忽略） */
+    int   image_count;     /* MEMORY：环深度，默认 3 */
+    sc_gpu_memory_kind memory;   /* MEMORY：底层分配方式 */
     const char* label;
 } sc_gpu_surface_desc;
 
@@ -97,6 +119,7 @@ typedef struct sc_gpu_desc {
     sc_gpu_backend backend;         /* DEFAULT = 平台默认 */
     sc_gpu_surface_desc surface;    /* 默认 surface；native_window 为 NULL 则不建 */
     int            surface_pool_size;   /* 默认 8 */
+    int            memimg_pool_size;    /* 默认 64 */
 } sc_gpu_desc;
 
 /* ---- API：生命周期 ---------------------------------------- */
@@ -116,6 +139,60 @@ sc_gpu_surface sc_gpu_query_current_surface(void);
 void sc_gpu_surface_resize(sc_gpu_surface surf, int width, int height);
 /* 查 surface 的已解析 desc（surf=0 取当前）。1 成功 / 0 无效 */
 int  sc_gpu_query_surface_info(sc_gpu_surface surf, sc_gpu_surface_desc* out);
+
+/* ---- memimg（可导出/可导入内存图像，平台原语） ------------ */
+/* 双向复用的边界原语：
+ *   输出：MEMORY surface 环成员（Mode A，gpu 驱动）；或绑定到
+ *         gfx image 作离屏渲染目标（Mode B，按需绘制，应用自管环）
+ *   输入：导入外部 dma-buf（如 v4l2 相机）绑定到 gfx image 作
+ *         采样纹理（零拷贝）
+ * 底层：linux = GBM BO / dma-heap → EGLImage；mac = IOSurface。 */
+
+typedef struct sc_gpu_memimg_desc {
+    int width, height;
+    sc_gpu_pixel_format format;   /* RGB 系格式；默认 BGRA8 */
+    uint32_t fourcc;              /* 非 0 时覆盖 format（DRM fourcc，YUV 等） */
+    sc_gpu_memory_kind memory;
+    int render_target;            /* 需作渲染目标（默认是；导入纹理可 0） */
+    uint64_t modifier;            /* DRM modifier 意向；0 = LINEAR（预留） */
+    const char* label;
+} sc_gpu_memimg_desc;
+
+#define SC_GPU_FOURCC(a, b, c, d) \
+    ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+
+/* 导出帧描述（送编码器 / 外部导入来源）。
+ * 生命周期：fd/native 为借用——dequeue→enqueue 或 export→memimg_free
+ * 期间有效，调用方不关闭（需更长持有自行 dup）。sync_fd 归调用方
+ * 关闭（-1 = 无栅栏，消费前应 sc_gfx_finish() 或依赖平台隐式同步）。 */
+typedef struct sc_gpu_memory_frame {
+    int      planes;
+    int      fd[4];         /* linux: dma-buf fd（每平面）；mac 无效(-1) */
+    uint32_t stride[4];
+    uint32_t offset[4];
+    uint32_t fourcc;        /* DRM fourcc */
+    int      width, height;
+    int      sync_fd;       /* 显式同步栅栏；-1 = 无 */
+    void*    native;        /* mac: IOSurfaceRef（可直送 VideoToolbox） */
+    sc_gpu_memimg img;      /* 对应的 memimg 句柄（map 用） */
+    uint32_t slot;          /* MEMORY surface 归还凭据 */
+} sc_gpu_memory_frame;
+
+sc_gpu_memimg sc_gpu_memimg_alloc(const sc_gpu_memimg_desc* desc);
+sc_gpu_memimg sc_gpu_memimg_import(const sc_gpu_memory_frame* src);  /* 相机零拷贝 */
+int   sc_gpu_memimg_export(sc_gpu_memimg img, sc_gpu_memory_frame* out, int with_fence);
+void* sc_gpu_memimg_native(sc_gpu_memimg img);   /* EGLImage / MTLTexture（gfx 后端消费） */
+void* sc_gpu_memimg_map(sc_gpu_memimg img, int plane, uint32_t* out_stride); /* CPU 映射 */
+void  sc_gpu_memimg_unmap(sc_gpu_memimg img, int plane);
+void  sc_gpu_memimg_free(sc_gpu_memimg img);
+
+/* ---- API：MEMORY surface 消费端（编码器侧） ----------------- */
+/* 渲染端循环与窗口场景完全同构（make_current → gfx pass → commit）；
+ * 消费端（可在另一线程）：dequeue 取渲染完的帧 → 编码 → enqueue 归还。
+ * 单生产者 + 单消费者语义。 */
+
+int  sc_gpu_memory_dequeue(sc_gpu_surface surf, sc_gpu_memory_frame* out); /* 1 成功/0 无帧 */
+void sc_gpu_memory_enqueue(sc_gpu_surface surf, uint32_t slot);
 
 /* ---- API：帧交付（gfx 消费） ------------------------------- */
 

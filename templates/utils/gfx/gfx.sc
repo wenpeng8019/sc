@@ -19,6 +19,7 @@ add libgfx.a
 @fnc gfx_init:: i4, desc: const ::sc_gfx_desc&
 @fnc gfx_shutdown::
 @fnc gfx_isvalid:: i4
+@fnc gfx_finish::
 
 # === 资源创建 / 销毁（句柄 = u4，0 无效） ===
 @fnc gfx_make_buffer:: u4, desc: const ::sc_gfx_buffer_desc&
