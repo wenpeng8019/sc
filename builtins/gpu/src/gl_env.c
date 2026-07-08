@@ -42,6 +42,7 @@
     #include <GL/gl.h>
     #include <GL/glext.h>
   #endif
+  #include <EGL/egl.h>                /* eglGetProcAddress（headless 路径的标准加载器） */
   #include "gl_egl.h"
   #include <unistd.h>
   /* GL_OES_EGL_image（Mesa 桌面 GL 亦暴露） */
@@ -118,8 +119,10 @@ static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
     if (!env.headlessVao) glGenVertexArrays(1, &env.headlessVao);
     glBindVertexArray(env.headlessVao);
     if (!env.pImageTarget) {
+        /* EGL headless 路径的标准加载器：eglGetProcAddress（GLES 形态下
+         * gl_ctx 整体空化，gl_get_proc 不存在；桌面 Mesa 亦支持） */
         env.pImageTarget = (PFN_scEGLImageTargetTexture2DOES)
-            gl_get_proc("glEGLImageTargetTexture2DOES");
+            eglGetProcAddress("glEGLImageTargetTexture2DOES");
         if (!env.pImageTarget) {
             gpu_log("gl: 无 GL_OES_EGL_image 扩展");
             return false;
