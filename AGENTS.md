@@ -167,3 +167,19 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
   （与 dma-buf/IOSurface 完美对偶，可导 EGLImage/Vulkan external memory，
   直送 MediaCodec 编码）；spc model = NNAPI/厂商栈。
 - memimg 三元组对偶：dma-buf(linux) / IOSurface(apple) / AHardwareBuffer(android)。
+
+## 11. Web 路线评估（结论，2026-07-08）
+
+- **WebGL = GLES 的同类**（非独立后端）：浏览器 WebGL2 ≈ GLES3.0、WebGL1 ≈
+  GLES2；emscripten 把 GLES/EGL 调用直译到 WebGL——**SC_GPU_GLES 编译形态
+  就是 Web 路径的主体**（gl_egl window 路径换 emscripten 的 EGL 模拟，
+  wsi 换 emscripten HTML5 API）。scc 侧 webgl 目标已在能力表（webgl@100/300，
+  多数能力对齐 gles 列）；ES2 运行时路径（flattenUniforms 等）同时服务
+  WebGL1。**结论：不单做，随 GLES 板验后加 emscripten 构建形态验证**。
+- **WebGPU = Vulkan 一档的独立后端**（非 GLES 同类）：WGSL 着色语言 +
+  bind group 描述符模型 + 显式命令编码，抽象层级与 Vulkan/Metal 同代。
+  接入路径：scc 加 `tar wgsl` 目标（SPIRV-Cross/naga 转译 WGSL）+
+  gpu env/gfx 各一张 vtable（浏览器 JS 互操作或原生 Dawn/wgpu-native）。
+  反射清单的 set/binding 直映 bind group——与 Vulkan 后端高度同构。
+  **结论：排在 Vulkan 后端之后做，两者共享大部分设计决策**。
+- 优先级不变：GLES 板验 → Vulkan → （D3D | WebGPU/emscripten 按需）。
