@@ -312,15 +312,15 @@ typedef void (* PFN_XShapeCombineMask)(Display*,Window,int,int,int,Pixmap,int);
 #define XShapeCombineRegion g_wsi.x11.xshape.ShapeCombineRegion
 #define XShapeCombineMask g_wsi.x11.xshape.ShapeCombineMask
 
-#define GLFW_X11_WINDOW_STATE           _sc_windowX11 x11;
-#define GLFW_X11_LIBRARY_WINDOW_STATE   _sc_libraryX11 x11;
-#define GLFW_X11_MONITOR_STATE          _sc_monitorX11 x11;
-#define GLFW_X11_CURSOR_STATE           _sc_cursorX11 x11;
+#define GLFW_X11_WINDOW_STATE           x11_window_t x11;
+#define GLFW_X11_LIBRARY_WINDOW_STATE   x11_library_t x11;
+#define GLFW_X11_MONITOR_STATE          x11_monitor_t x11;
+#define GLFW_X11_CURSOR_STATE           x11_cursor_t x11;
 
 #define GLFW_INVALID_CODEPOINT 0xffffffffu
 
 // X11-specific per-window data
-typedef struct _sc_windowX11
+typedef struct x11_window_t
 {
     Colormap            colormap;
     Window              handle;
@@ -346,10 +346,10 @@ typedef struct _sc_windowX11
     // The time of the last KeyPress event per keycode, for discarding
     // duplicate key events generated for some keys by ibus
     Time                keyPressTimes[256];
-} _sc_windowX11;
+} x11_window_t;
 
 // X11-specific global data
-typedef struct _sc_libraryX11
+typedef struct x11_library_t
 {
     Display*            display;
     int                 screen;
@@ -668,10 +668,10 @@ typedef struct _sc_libraryX11
         PFN_XShapeQueryVersion QueryVersion;
         PFN_XShapeCombineMask ShapeCombineMask;
     } xshape;
-} _sc_libraryX11;
+} x11_library_t;
 
 // X11-specific per-monitor data
-typedef struct _sc_monitorX11
+typedef struct x11_monitor_t
 {
     RROutput        output;
     RRCrtc          crtc;
@@ -680,13 +680,13 @@ typedef struct _sc_monitorX11
     // Index of corresponding Xinerama screen,
     // for EWMH full screen window placement
     int             index;
-} _sc_monitorX11;
+} x11_monitor_t;
 
 // X11-specific per-cursor data
-typedef struct _sc_cursorX11
+typedef struct x11_cursor_t
 {
     Cursor handle;
-} _sc_cursorX11;
+} x11_cursor_t;
 
 uint32_t x11_KeySym2Unicode(unsigned int keysym);
 

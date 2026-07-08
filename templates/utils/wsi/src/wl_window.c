@@ -1239,7 +1239,7 @@ static bool createNativeSurface(window_st* window,
 }
 
 static void setCursorImage(window_st* window,
-                           _sc_cursorWayland* cursorWayland)
+                           wl_cursor_t* cursorWayland)
 {
     struct itimerspec timer = {0};
     struct wl_cursor* wlCursor = cursorWayland->cursor;
@@ -3213,7 +3213,7 @@ void wayland_set_cursor(window_st* window, cursor_st* cursor)
                     wl_cursor_theme_get_cursor(g_wsi.wl.cursorThemeHiDPI, "left_ptr");
             }
 
-            _sc_cursorWayland cursorWayland =
+            wl_cursor_t cursorWayland =
             {
                 defaultCursor,
                 defaultCursorHiDPI,

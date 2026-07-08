@@ -11,31 +11,31 @@ static bool nullInit(const sc_gfx_desc* desc) { (void)desc; return true; }
 static void nullShutdown(void) {}
 static void nullFinish(void) {}
 
-static bool nullBufferCreate(_sc_gfx_buffer_t* buf) { (void)buf; return true; }
-static void nullBufferDestroy(_sc_gfx_buffer_t* buf) { (void)buf; }
-static void nullBufferUpdate(_sc_gfx_buffer_t* buf, const sc_gfx_range* d, int off) {
+static bool nullBufferCreate(gfx_buffer_t* buf) { (void)buf; return true; }
+static void nullBufferDestroy(gfx_buffer_t* buf) { (void)buf; }
+static void nullBufferUpdate(gfx_buffer_t* buf, const sc_gfx_range* d, int off) {
     (void)buf; (void)d; (void)off;
 }
 
-static bool nullImageCreate(_sc_gfx_image_t* img) { (void)img; return true; }
-static void nullImageDestroy(_sc_gfx_image_t* img) { (void)img; }
-static void nullImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* d) {
+static bool nullImageCreate(gfx_image_t* img) { (void)img; return true; }
+static void nullImageDestroy(gfx_image_t* img) { (void)img; }
+static void nullImageUpdate(gfx_image_t* img, const sc_gfx_image_data* d) {
     (void)img; (void)d;
 }
 
-static bool nullSamplerCreate(_sc_gfx_sampler_t* smp) { (void)smp; return true; }
-static void nullSamplerDestroy(_sc_gfx_sampler_t* smp) { (void)smp; }
+static bool nullSamplerCreate(gfx_sampler_t* smp) { (void)smp; return true; }
+static void nullSamplerDestroy(gfx_sampler_t* smp) { (void)smp; }
 
-static bool nullShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* d) {
+static bool nullShaderCreate(gfx_shader_t* shd, const sc_gfx_shader_desc* d) {
     (void)shd; (void)d; return true;
 }
-static void nullShaderDestroy(_sc_gfx_shader_t* shd) { (void)shd; }
+static void nullShaderDestroy(gfx_shader_t* shd) { (void)shd; }
 
-static bool nullPipelineCreate(_sc_gfx_pipeline_t* pip) { (void)pip; return true; }
-static void nullPipelineDestroy(_sc_gfx_pipeline_t* pip) { (void)pip; }
+static bool nullPipelineCreate(gfx_pipeline_t* pip) { (void)pip; return true; }
+static void nullPipelineDestroy(gfx_pipeline_t* pip) { (void)pip; }
 
-static void nullBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
-                          int n, _sc_gfx_image_t* resolves[], _sc_gfx_image_t* depth) {
+static void nullBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[],
+                          int n, gfx_image_t* resolves[], gfx_image_t* depth) {
     (void)pass; (void)colors; (void)n; (void)resolves; (void)depth;
     if (n == 0 && !pass->compute) {
         sc_gpu_frame f;
@@ -48,12 +48,12 @@ static void nullApplyViewport(int x, int y, int w, int h, bool tl) {
 static void nullApplyScissor(int x, int y, int w, int h, bool tl) {
     (void)x; (void)y; (void)w; (void)h; (void)tl;
 }
-static void nullApplyPipeline(_sc_gfx_pipeline_t* pip) { (void)pip; }
-static void nullApplyBindings(_sc_gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
-                              _sc_gfx_buffer_t* vbufs[], _sc_gfx_buffer_t* ibuf,
-                              _sc_gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
-                              _sc_gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
-                              _sc_gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
+static void nullApplyPipeline(gfx_pipeline_t* pip) { (void)pip; }
+static void nullApplyBindings(gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
+                              gfx_buffer_t* vbufs[], gfx_buffer_t* ibuf,
+                              gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
+                              gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
+                              gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
     (void)pip; (void)bnd; (void)vbufs; (void)ibuf; (void)imgs; (void)smps; (void)sbufs;
 }
 static void nullApplyUniforms(int stage, int slot, const void* d, size_t sz) {
@@ -70,7 +70,7 @@ static void nullQueryPixelformat(sc_gpu_pixel_format fmt, sc_gfx_pixelformat_inf
     out->depth = (fmt == SC_GPU_PIXELFORMAT_DEPTH || fmt == SC_GPU_PIXELFORMAT_DEPTH_STENCIL);
 }
 
-static const _sc_gfx_backend_api nullApi = {
+static const gfx_backend_api nullApi = {
     .name = "null",
     .init = nullInit,
     .shutdown = nullShutdown,
@@ -100,4 +100,4 @@ static const _sc_gfx_backend_api nullApi = {
     .query_pixelformat = nullQueryPixelformat,
 };
 
-const _sc_gfx_backend_api* _sc_gfx_backend_null(void) { return &nullApi; }
+const gfx_backend_api* gfx_backend_null(void) { return &nullApi; }

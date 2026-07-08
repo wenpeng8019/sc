@@ -68,7 +68,7 @@ static bool readStr(const char* v, char* out, size_t cap) {
 
 static long readInt(const char* v) { return strtol(v, NULL, 10); }
 
-bool _sc_gfx_parse_reflect(const char* json, _sc_gfx_reflect* out) {
+bool gfx_parse_reflect(const char* json, gfx_reflect* out) {
     memset(out, 0, sizeof(*out));
     if (!json) return false;
 
@@ -94,14 +94,14 @@ bool _sc_gfx_parse_reflect(const char* json, _sc_gfx_reflect* out) {
 
             if (strcmp(kind, "sampler") == 0) {
                 if (out->sampler_count < SC_GFX_MAX_SAMPLERS) {
-                    _sc_gfx_reflect_sampler* s = &out->samplers[out->sampler_count++];
+                    gfx_reflect_sampler* s = &out->samplers[out->sampler_count++];
                     s->stage = -1;
                     s->slot = (int)(binding < 0 ? out->sampler_count - 1 : binding);
                     strncpy(s->name, name, sizeof(s->name) - 1);
                 }
             } else if (kind[0]) {   /* uniform / storage / push */
                 if (out->block_count < SC_GFX_MAX_UNIFORM_BLOCKS * 2) {
-                    _sc_gfx_reflect_block* b = &out->blocks[out->block_count++];
+                    gfx_reflect_block* b = &out->blocks[out->block_count++];
                     b->stage = -1;
                     b->slot = (int)(binding < 0 ? out->block_count - 1 : binding);
                     b->size = (size_t)size;
@@ -137,7 +137,7 @@ bool _sc_gfx_parse_reflect(const char* json, _sc_gfx_reflect* out) {
                         const char* aEnd = matchBrace(q, '{', '}');
                         if (!aEnd) break;
                         if (out->attr_count < SC_GFX_MAX_VERTEX_ATTRS) {
-                            _sc_gfx_reflect_attr* a = &out->attrs[out->attr_count++];
+                            gfx_reflect_attr* a = &out->attrs[out->attr_count++];
                             const char* w;
                             if ((w = findKey(q, aEnd, "name")))
                                 readStr(w, a->name, sizeof(a->name));

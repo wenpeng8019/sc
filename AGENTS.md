@@ -34,10 +34,14 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 - **memimg**(可导出/导入内存图像,双向原语):linux = GBM BO/dma-heap→EGLImage,
   mac = IOSurface。输出方向送编码器(fence:linux EGL native fence→sync_fd,退化
   glFinish);输入方向 v4l2 相机零拷贝导入。fd/native 借用语义(不 dup)。
-- **多后端机制**:每后端一张 vtable(`_sc_gpu_env_api` / `_sc_gfx_backend_api`),
+- **多后端机制**:每后端一张 vtable(`gpu_env_api` / `gfx_backend_api`),
   编译宏 `SC_GPU_METAL`/`SC_GPU_GL`(两库同套,build.sh 按平台注入),运行时按
   `desc.backend` 显式选或平台默认,不静默降级。spc 一期单实现未抽 vtable
   (`#ifdef __APPLE__` 直连),加 Vulkan/RKNN 时再抽。
+- **命名规约**:`sc_` 前缀 = sc 语言在 C 侧的域命名(仅公开 API,如
+  `sc_gpu_init`);模块内部私有符号直接用模块名前缀(`gpu_*`/`gfx_*`/
+  `spc_*`/`gl_*`),全局状态变量 `g_gpu`/`g_gfx`/`g_wsi`。**禁用 `_sc_` 前缀**
+  (glfw 遗留风格,已全量清除)。
 
 ## 3. 各平台现状矩阵(诚实标注)
 

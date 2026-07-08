@@ -17,7 +17,7 @@
 
 extern void* sc_gpu_device(void);
 
-int _sc_spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
+int spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
     id<MTLDevice> dev = (__bridge id<MTLDevice>)sc_gpu_device();
     if (!dev) return 0;
 
@@ -37,10 +37,10 @@ int _sc_spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
                                                       secondaryTensor:tb
                                                                  name:@"mm"];
 
-        NSData* da = [NSData dataWithBytesNoCopy:_sc_spc_tsdata(a)
+        NSData* da = [NSData dataWithBytesNoCopy:spc_tsdata(a)
                                           length:(NSUInteger)(a->numel * 4)
                                     freeWhenDone:NO];
-        NSData* db = [NSData dataWithBytesNoCopy:_sc_spc_tsdata(b)
+        NSData* db = [NSData dataWithBytesNoCopy:spc_tsdata(b)
                                           length:(NSUInteger)(b->numel * 4)
                                     freeWhenDone:NO];
         MPSGraphTensorData* xa = [[MPSGraphTensorData alloc] initWithDevice:gdev
@@ -56,8 +56,8 @@ int _sc_spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
                                   targetTensors:@[ tc ]
                                targetOperations:nil];
         MPSGraphTensorData* xc = results[tc];
-        if (!xc) { _sc_spc_log("mpsg: matmul 执行失败"); return 0; }
-        [[xc mpsndarray] readBytes:_sc_spc_tsdata(out) strideBytes:nil];
+        if (!xc) { spc_log("mpsg: matmul 执行失败"); return 0; }
+        [[xc mpsndarray] readBytes:spc_tsdata(out) strideBytes:nil];
     }
     return 1;
 }

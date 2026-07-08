@@ -78,14 +78,14 @@ static struct {
     bool    ubOrphaned;    /* 本帧是否已孤儿化 */
 
     /* 帧内状态 */
-    _sc_gfx_pipeline_t* curPip;
+    gfx_pipeline_t* curPip;
     int     curIndexOffset;
     GLuint  curFbo;        /* 离屏 pass 的临时 FBO（0 = 交换链） */
     GLuint  resolveFbo;    /* MSAA 解析用 */
     int     curPassWidth, curPassHeight;
     bool    inPass;
-    _sc_gfx_image_t* passResolveSrc[SC_GFX_MAX_COLOR_ATTACHMENTS];
-    _sc_gfx_image_t* passResolveDst[SC_GFX_MAX_COLOR_ATTACHMENTS];
+    gfx_image_t* passResolveSrc[SC_GFX_MAX_COLOR_ATTACHMENTS];
+    gfx_image_t* passResolveDst[SC_GFX_MAX_COLOR_ATTACHMENTS];
     sc_gfx_attachment passResolveAtt[SC_GFX_MAX_COLOR_ATTACHMENTS];
     int     passColorCount;
 } gl;
@@ -259,9 +259,9 @@ static GLenum glBufUsage(sc_gfx_usage u) {
     }
 }
 
-static bool glBufferCreate(_sc_gfx_buffer_t* buf) {
+static bool glBufferCreate(gfx_buffer_t* buf) {
     if (buf->desc.kind == SC_GFX_BUFFERKIND_STORAGE) {
-        _sc_gfx_log("gl: 4.1 无 SSBO（storage buffer 不支持）");
+        gfx_log("gl: 4.1 无 SSBO（storage buffer 不支持）");
         return false;
     }
     GlBuffer* b = (GlBuffer*)calloc(1, sizeof(GlBuffer));
@@ -276,7 +276,7 @@ static bool glBufferCreate(_sc_gfx_buffer_t* buf) {
     return true;
 }
 
-static void glBufferDestroy(_sc_gfx_buffer_t* buf) {
+static void glBufferDestroy(gfx_buffer_t* buf) {
     GlBuffer* b = (GlBuffer*)buf->backend;
     if (!b) return;
     glDeleteBuffers(1, &b->buf);
@@ -284,7 +284,7 @@ static void glBufferDestroy(_sc_gfx_buffer_t* buf) {
     buf->backend = NULL;
 }
 
-static void glBufferUpdate(_sc_gfx_buffer_t* buf, const sc_gfx_range* data, int offset) {
+static void glBufferUpdate(gfx_buffer_t* buf, const sc_gfx_range* data, int offset) {
     GlBuffer* b = (GlBuffer*)buf->backend;
     if (!b) return;
     glBindBuffer(b->target, b->buf);
@@ -309,7 +309,7 @@ static int glFormatByteSize(sc_gpu_pixel_format f) {
     }
 }
 
-static void imageUploadData(_sc_gfx_image_t* img, GlImage* m,
+static void imageUploadData(gfx_image_t* img, GlImage* m,
                             const sc_gfx_image_data* data) {
     const sc_gfx_image_desc* d = &img->desc;
     GlFormatInfo fi = toGlFormat(d->format);
@@ -349,7 +349,7 @@ static void imageUploadData(_sc_gfx_image_t* img, GlImage* m,
     }
 }
 
-static bool glImageCreate(_sc_gfx_image_t* img) {
+static bool glImageCreate(gfx_image_t* img) {
     GlImage* m = (GlImage*)calloc(1, sizeof(GlImage));
     if (!m) return false;
     const sc_gfx_image_desc* d = &img->desc;
@@ -362,14 +362,14 @@ static bool glImageCreate(_sc_gfx_image_t* img) {
             pImageTarget = (PFN_scEGLImageTargetTexture2DOES)
                 eglGetProcAddress("glEGLImageTargetTexture2DOES");
             if (!pImageTarget) {
-                _sc_gfx_log("gl: 无 GL_OES_EGL_image 扩展");
+                gfx_log("gl: 无 GL_OES_EGL_image 扩展");
                 free(m);
                 return false;
             }
         }
         void* eglimg = sc_gpu_memimg_native(d->memimg);
         if (!eglimg) {
-            _sc_gfx_log("gl: memimg %u 无效", d->memimg);
+            gfx_log("gl: memimg %u 无效", d->memimg);
             free(m);
             return false;
         }
@@ -380,7 +380,7 @@ static bool glImageCreate(_sc_gfx_image_t* img) {
         img->backend = m;
         return true;
 #else
-        _sc_gfx_log("gl: mac 上 memimg 绑定请用 Metal 后端");
+        gfx_log("gl: mac 上 memimg 绑定请用 Metal 后端");
         free(m);
         return false;
 #endif
@@ -410,7 +410,7 @@ static bool glImageCreate(_sc_gfx_image_t* img) {
     return true;
 }
 
-static void glImageDestroy(_sc_gfx_image_t* img) {
+static void glImageDestroy(gfx_image_t* img) {
     GlImage* m = (GlImage*)img->backend;
     if (!m) return;
     glDeleteTextures(1, &m->tex);
@@ -418,7 +418,7 @@ static void glImageDestroy(_sc_gfx_image_t* img) {
     img->backend = NULL;
 }
 
-static void glImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* data) {
+static void glImageUpdate(gfx_image_t* img, const sc_gfx_image_data* data) {
     GlImage* m = (GlImage*)img->backend;
     if (!m || img->desc.render_target) return;
     imageUploadData(img, m, data);
@@ -426,7 +426,7 @@ static void glImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* data) {
 
 /* ---- sampler ----------------------------------------------- */
 
-static bool glSamplerCreate(_sc_gfx_sampler_t* smp) {
+static bool glSamplerCreate(gfx_sampler_t* smp) {
     GlSampler* m = (GlSampler*)calloc(1, sizeof(GlSampler));
     if (!m) return false;
     const sc_gfx_sampler_desc* d = &smp->desc;
@@ -470,7 +470,7 @@ static bool glSamplerCreate(_sc_gfx_sampler_t* smp) {
     return true;
 }
 
-static void glSamplerDestroy(_sc_gfx_sampler_t* smp) {
+static void glSamplerDestroy(gfx_sampler_t* smp) {
     GlSampler* m = (GlSampler*)smp->backend;
     if (!m) return;
     glDeleteSamplers(1, &m->smp);
@@ -491,16 +491,16 @@ static GLuint compileGlStage(GLenum kind, const sc_gfx_range* code) {
     if (!ok) {
         char log[1024];
         glGetShaderInfoLog(sh, sizeof(log), NULL, log);
-        _sc_gfx_log("gl: 着色器编译失败: %s", log);
+        gfx_log("gl: 着色器编译失败: %s", log);
         glDeleteShader(sh);
         return 0;
     }
     return sh;
 }
 
-static bool glShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc) {
+static bool glShaderCreate(gfx_shader_t* shd, const sc_gfx_shader_desc* desc) {
     if (desc->cs.code.ptr) {
-        _sc_gfx_log("gl: 4.1 无 compute（计算着色器不支持）");
+        gfx_log("gl: 4.1 无 compute（计算着色器不支持）");
         return false;
     }
     GlShader* m = (GlShader*)calloc(1, sizeof(GlShader));
@@ -525,7 +525,7 @@ static bool glShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc
     if (!ok) {
         char log[1024];
         glGetProgramInfoLog(m->prog, sizeof(log), NULL, log);
-        _sc_gfx_log("gl: 程序链接失败: %s", log);
+        gfx_log("gl: 程序链接失败: %s", log);
         glDeleteProgram(m->prog);
         free(m);
         return false;
@@ -533,9 +533,9 @@ static bool glShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc
 
     /* 4.1 无 shader 内 explicit binding：按反射清单名字解析并指派 */
     glUseProgram(m->prog);
-    const _sc_gfx_reflect* r = &shd->reflect;
+    const gfx_reflect* r = &shd->reflect;
     for (int i = 0; i < r->block_count; i++) {
-        const _sc_gfx_reflect_block* b = &r->blocks[i];
+        const gfx_reflect_block* b = &r->blocks[i];
         GLuint idx = glGetUniformBlockIndex(m->prog, b->name);
         if (idx != GL_INVALID_INDEX) {
             int stage = b->stage < 0 ? 0 : b->stage;
@@ -544,7 +544,7 @@ static bool glShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc
         }
     }
     for (int i = 0; i < r->sampler_count; i++) {
-        const _sc_gfx_reflect_sampler* s = &r->samplers[i];
+        const gfx_reflect_sampler* s = &r->samplers[i];
         GLint loc = glGetUniformLocation(m->prog, s->name);
         if (loc >= 0) {
             int stage = s->stage < 0 ? 1 : s->stage;   /* 默认按 fs */
@@ -556,7 +556,7 @@ static bool glShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc
     return true;
 }
 
-static void glShaderDestroy(_sc_gfx_shader_t* shd) {
+static void glShaderDestroy(gfx_shader_t* shd) {
     GlShader* m = (GlShader*)shd->backend;
     if (!m) return;
     glDeleteProgram(m->prog);
@@ -566,9 +566,9 @@ static void glShaderDestroy(_sc_gfx_shader_t* shd) {
 
 /* ---- pipeline ---------------------------------------------- */
 
-static bool glPipelineCreate(_sc_gfx_pipeline_t* pip) {
+static bool glPipelineCreate(gfx_pipeline_t* pip) {
     if (pip->desc.compute) {
-        _sc_gfx_log("gl: 4.1 无 compute（计算管线不支持）");
+        gfx_log("gl: 4.1 无 compute（计算管线不支持）");
         return false;
     }
     GlPipeline* m = (GlPipeline*)calloc(1, sizeof(GlPipeline));
@@ -583,7 +583,7 @@ static bool glPipelineCreate(_sc_gfx_pipeline_t* pip) {
     return true;
 }
 
-static void glPipelineDestroy(_sc_gfx_pipeline_t* pip) {
+static void glPipelineDestroy(gfx_pipeline_t* pip) {
     GlPipeline* m = (GlPipeline*)pip->backend;
     if (!m) return;
     free(m);
@@ -592,7 +592,7 @@ static void glPipelineDestroy(_sc_gfx_pipeline_t* pip) {
 
 /* ---- 帧 ---------------------------------------------------- */
 
-static void glAttachTexture(GLenum attach, _sc_gfx_image_t* img, const sc_gfx_attachment* a) {
+static void glAttachTexture(GLenum attach, gfx_image_t* img, const sc_gfx_attachment* a) {
     GlImage* m = (GlImage*)img->backend;
     switch (img->desc.kind) {
         case SC_GFX_IMAGEKIND_CUBE:
@@ -610,11 +610,11 @@ static void glAttachTexture(GLenum attach, _sc_gfx_image_t* img, const sc_gfx_at
     }
 }
 
-static void glBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
-                        int color_count, _sc_gfx_image_t* resolves[],
-                        _sc_gfx_image_t* depth) {
+static void glBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[],
+                        int color_count, gfx_image_t* resolves[],
+                        gfx_image_t* depth) {
     if (pass->compute) {
-        _sc_gfx_log("gl: 4.1 无 compute pass");
+        gfx_log("gl: 4.1 无 compute pass");
         return;
     }
     gl.inPass = true;
@@ -635,7 +635,7 @@ static void glBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
         /* 交换链 pass：目标经 gpu env 交付 */
         sc_gpu_frame f;
         if (!sc_gpu_frame_acquire(&f)) {
-            _sc_gfx_log("gl: frame_acquire 失败");
+            gfx_log("gl: frame_acquire 失败");
             return;
         }
         glBindFramebuffer(GL_FRAMEBUFFER, f.gl_fbo);
@@ -668,7 +668,7 @@ static void glBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
             glAttachTexture(att, depth, &pass->depth_stencil);
         }
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            _sc_gfx_log("gl: FBO 不完整");
+            gfx_log("gl: FBO 不完整");
     }
 
     /* load action：清屏（关 scissor / 开写掩码后清） */
@@ -712,7 +712,7 @@ static void glApplyScissor(int x, int y, int w, int h, bool topLeft) {
     glScissor(x, y, w, h);
 }
 
-static void glApplyPipeline(_sc_gfx_pipeline_t* pip) {
+static void glApplyPipeline(gfx_pipeline_t* pip) {
     GlPipeline* m = (GlPipeline*)pip->backend;
     GlShader* shd = (GlShader*)pip->shader->backend;
     if (!m || !shd) return;
@@ -790,11 +790,11 @@ static void glApplyPipeline(_sc_gfx_pipeline_t* pip) {
     else glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
 }
 
-static void glApplyBindings(_sc_gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
-                            _sc_gfx_buffer_t* vbufs[], _sc_gfx_buffer_t* ibuf,
-                            _sc_gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
-                            _sc_gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
-                            _sc_gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
+static void glApplyBindings(gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
+                            gfx_buffer_t* vbufs[], gfx_buffer_t* ibuf,
+                            gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
+                            gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
+                            gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
     (void)sbufs;
     const sc_gfx_pipeline_desc* d = &pip->desc;
 
@@ -803,7 +803,7 @@ static void glApplyBindings(_sc_gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
     for (int i = 0; i < SC_GFX_MAX_VERTEX_ATTRS; i++) {
         const sc_gfx_vertex_attr* a = &d->attrs[i];
         if (a->format == SC_GFX_VERTEXFORMAT_INVALID) { glDisableVertexAttribArray((GLuint)i); continue; }
-        _sc_gfx_buffer_t* vb = vbufs[a->buffer_index];
+        gfx_buffer_t* vb = vbufs[a->buffer_index];
         if (!vb || !vb->backend) continue;
         GlBuffer* b = (GlBuffer*)vb->backend;
         if (b->buf != lastBuf) {
@@ -850,7 +850,7 @@ static void glApplyUniforms(int stage, int slot, const void* data, size_t size) 
     ensureUbRing();
     int pos = (gl.ubPos + gl.ubAlign - 1) & ~(gl.ubAlign - 1);
     if ((size_t)pos + size > GL_UB_RING_SIZE) {
-        _sc_gfx_log("gl: uniform 环缓冲溢出");
+        gfx_log("gl: uniform 环缓冲溢出");
         return;
     }
     glBindBuffer(GL_UNIFORM_BUFFER, gl.ubRing);
@@ -875,7 +875,7 @@ static void glDraw(int base, int count, int instances) {
 
 static void glDispatch(int gx, int gy, int gz) {
     (void)gx; (void)gy; (void)gz;
-    _sc_gfx_log("gl: 4.1 无 compute dispatch");
+    gfx_log("gl: 4.1 无 compute dispatch");
 }
 
 static void glEndPass(void) {
@@ -927,7 +927,7 @@ static void glQueryPixelformat(sc_gpu_pixel_format fmt, sc_gfx_pixelformat_info*
 
 /* ---- vtable ------------------------------------------------ */
 
-static const _sc_gfx_backend_api glApi = {
+static const gfx_backend_api glApi = {
     .name = "gl",
     .init = glGfxInit,
     .shutdown = glGfxShutdown,
@@ -957,6 +957,6 @@ static const _sc_gfx_backend_api glApi = {
     .query_pixelformat = glQueryPixelformat,
 };
 
-const _sc_gfx_backend_api* _sc_gfx_backend_gl(void) { return &glApi; }
+const gfx_backend_api* gfx_backend_gl(void) { return &glApi; }
 
 #endif /* SC_GPU_GL */

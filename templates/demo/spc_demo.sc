@@ -9,7 +9,7 @@
 #   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #   python3 templates/demo/spc_model/gen.py        # 生成 tiny.mlmodelc(需 coremltools)
 #   SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
-#     -framework IOSurface -framework MetalPerformanceShaders \
+#     -framework OpenGL -framework IOSurface -framework MetalPerformanceShaders \
 #     -framework MetalPerformanceShadersGraph -framework CoreML -framework Foundation" \
 #     ./compiler/build/scc templates/demo/spc_demo.sc
 

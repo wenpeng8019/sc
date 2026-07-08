@@ -30,16 +30,16 @@
  * 兼容路径，静默弃用告警 */
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-struct _sc_gl_ctx {
+struct gl_ctx {
     NSOpenGLContext*     ctx;
     NSOpenGLPixelFormat* pf;
     NSView*              view;
 };
 
-_sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
+gl_ctx* gl_ctx_create(void* native_window, void* native_display,
                               int major, int minor, int swap_interval) {
     (void)native_display;
-    _sc_gl_ctx* c = (_sc_gl_ctx*)calloc(1, sizeof(_sc_gl_ctx));
+    gl_ctx* c = (gl_ctx*)calloc(1, sizeof(gl_ctx));
     if (!c) return NULL;
     c->view = (__bridge NSView*)native_window;
     if (!c->view) { free(c); return NULL; }
@@ -80,7 +80,7 @@ _sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
     return c;
 }
 
-void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
+void gl_ctx_destroy(gl_ctx* c) {
     if (!c) return;
     if (c->ctx == [NSOpenGLContext currentContext])
         [NSOpenGLContext clearCurrentContext];
@@ -90,16 +90,16 @@ void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
     free(c);
 }
 
-void _sc_gl_ctx_make_current(_sc_gl_ctx* c) {
+void gl_ctx_make_current(gl_ctx* c) {
     if (c && c->ctx) [c->ctx makeCurrentContext];
     else [NSOpenGLContext clearCurrentContext];
 }
 
-void _sc_gl_ctx_swap(_sc_gl_ctx* c) {
+void gl_ctx_swap(gl_ctx* c) {
     if (c && c->ctx) [c->ctx flushBuffer];
 }
 
-void _sc_gl_ctx_resize(_sc_gl_ctx* c) {
+void gl_ctx_resize(gl_ctx* c) {
     if (!c || !c->ctx) return;
     NSOpenGLContext* ctx = c->ctx;
     void (^upd)(void) = ^{ [ctx update]; };
@@ -107,7 +107,7 @@ void _sc_gl_ctx_resize(_sc_gl_ctx* c) {
     else dispatch_sync(dispatch_get_main_queue(), upd);
 }
 
-void* _sc_gl_get_proc(const char* name) {
+void* gl_get_proc(const char* name) {
     static void* fw = NULL;
     if (!fw)
         fw = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY);
@@ -124,7 +124,7 @@ void* _sc_gl_get_proc(const char* name) {
 #endif
 #include <windows.h>
 
-struct _sc_gl_ctx {
+struct gl_ctx {
     HGLRC rc;
     HDC   dc;
     HWND  hwnd;
@@ -137,10 +137,10 @@ struct _sc_gl_ctx {
     BOOL (WINAPI* wsi_)(int);
 };
 
-_sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
+gl_ctx* gl_ctx_create(void* native_window, void* native_display,
                               int major, int minor, int swap_interval) {
     (void)native_display;
-    _sc_gl_ctx* c = (_sc_gl_ctx*)calloc(1, sizeof(_sc_gl_ctx));
+    gl_ctx* c = (gl_ctx*)calloc(1, sizeof(gl_ctx));
     if (!c) return NULL;
     c->hwnd = (HWND)native_window;
     if (!c->hwnd) { free(c); return NULL; }
@@ -181,7 +181,7 @@ _sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
     return c;
 }
 
-void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
+void gl_ctx_destroy(gl_ctx* c) {
     if (!c) return;
     if (c->rc) { c->wmc(NULL, NULL); c->wdc(c->rc); }
     if (c->dc) ReleaseDC(c->hwnd, c->dc);
@@ -189,15 +189,15 @@ void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
     free(c);
 }
 
-void _sc_gl_ctx_make_current(_sc_gl_ctx* c) {
+void gl_ctx_make_current(gl_ctx* c) {
     if (c && c->dc && c->rc) c->wmc(c->dc, c->rc);
     else if (c) c->wmc(NULL, NULL);
 }
 
-void _sc_gl_ctx_swap(_sc_gl_ctx* c) { if (c && c->dc) SwapBuffers(c->dc); }
-void _sc_gl_ctx_resize(_sc_gl_ctx* c) { (void)c; }
+void gl_ctx_swap(gl_ctx* c) { if (c && c->dc) SwapBuffers(c->dc); }
+void gl_ctx_resize(gl_ctx* c) { (void)c; }
 
-void* _sc_gl_get_proc(const char* name) {
+void* gl_get_proc(const char* name) {
     static HMODULE gl = NULL;
     if (!gl) gl = LoadLibraryA("opengl32.dll");
     if (!gl) return NULL;
@@ -220,7 +220,7 @@ void* _sc_gl_get_proc(const char* name) {
 #include <stdint.h>
 #include <dlfcn.h>
 
-struct _sc_gl_ctx {
+struct gl_ctx {
     Display*   dpy;
     int        own_dpy;
     GLXContext ctx;
@@ -228,9 +228,9 @@ struct _sc_gl_ctx {
     Window     xwin;
 };
 
-_sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
+gl_ctx* gl_ctx_create(void* native_window, void* native_display,
                               int major, int minor, int swap_interval) {
-    _sc_gl_ctx* c = (_sc_gl_ctx*)calloc(1, sizeof(_sc_gl_ctx));
+    gl_ctx* c = (gl_ctx*)calloc(1, sizeof(gl_ctx));
     if (!c) return NULL;
     c->xwin = (Window)(uintptr_t)native_window;
     if (!c->xwin) { free(c); return NULL; }
@@ -274,7 +274,7 @@ _sc_gl_ctx* _sc_gl_ctx_create(void* native_window, void* native_display,
     return c;
 }
 
-void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
+void gl_ctx_destroy(gl_ctx* c) {
     if (!c) return;
     if (c->ctx) {
         glXMakeCurrent(c->dpy, None, NULL);
@@ -284,17 +284,17 @@ void _sc_gl_ctx_destroy(_sc_gl_ctx* c) {
     free(c);
 }
 
-void _sc_gl_ctx_make_current(_sc_gl_ctx* c) {
+void gl_ctx_make_current(gl_ctx* c) {
     if (c && c->dpy) glXMakeCurrent(c->dpy, c->glxw, c->ctx);
 }
 
-void _sc_gl_ctx_swap(_sc_gl_ctx* c) {
+void gl_ctx_swap(gl_ctx* c) {
     if (c && c->dpy) glXSwapBuffers(c->dpy, c->glxw);
 }
 
-void _sc_gl_ctx_resize(_sc_gl_ctx* c) { (void)c; }
+void gl_ctx_resize(gl_ctx* c) { (void)c; }
 
-void* _sc_gl_get_proc(const char* name) {
+void* gl_get_proc(const char* name) {
     return (void*)glXGetProcAddress((const GLubyte*)name);
 }
 

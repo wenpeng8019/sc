@@ -36,18 +36,18 @@ static struct {
 
 /* ---- 生命周期 ---------------------------------------------- */
 
-bool _sc_spc_mtl_init(void) {
+bool spc_mtl_init(void) {
     memset((void*)&M, 0, sizeof(M));
     M.device = (__bridge id<MTLDevice>)sc_gpu_device();
     if (!M.device) {
-        _sc_spc_log("metal: gpu env 未交付设备（先 sc_gpu_init）");
+        spc_log("metal: gpu env 未交付设备（先 sc_gpu_init）");
         return false;
     }
     M.queue = [M.device newCommandQueue];
     return M.queue != nil;
 }
 
-void _sc_spc_mtl_shutdown(void) {
+void spc_mtl_shutdown(void) {
     if (M.lastCmd) [M.lastCmd waitUntilCompleted];
     M.lastCmd = nil;
     M.queue = nil;
@@ -55,7 +55,7 @@ void _sc_spc_mtl_shutdown(void) {
     memset((void*)&M, 0, sizeof(M));
 }
 
-void _sc_spc_mtl_finish(void) {
+void spc_mtl_finish(void) {
     if (M.lastCmd) {
         [M.lastCmd waitUntilCompleted];
         M.lastCmd = nil;
@@ -64,7 +64,7 @@ void _sc_spc_mtl_finish(void) {
 
 /* ---- buffer ------------------------------------------------ */
 
-bool _sc_spc_mtl_buffer_create(_sc_spc_buffer_t* b, const void* data, uint64_t size) {
+bool spc_mtl_buffer_create(spc_buffer_t* b, const void* data, uint64_t size) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)calloc(1, sizeof(MtlSpcBuffer));
     if (!m) return false;
     m->buf = data
@@ -75,7 +75,7 @@ bool _sc_spc_mtl_buffer_create(_sc_spc_buffer_t* b, const void* data, uint64_t s
     return true;
 }
 
-void _sc_spc_mtl_buffer_destroy(_sc_spc_buffer_t* b) {
+void spc_mtl_buffer_destroy(spc_buffer_t* b) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return;
     m->buf = nil;
@@ -83,15 +83,15 @@ void _sc_spc_mtl_buffer_destroy(_sc_spc_buffer_t* b) {
     b->backend = NULL;
 }
 
-bool _sc_spc_mtl_buffer_read(_sc_spc_buffer_t* b, void* dst, uint64_t size, uint64_t off) {
+bool spc_mtl_buffer_read(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return false;
-    _sc_spc_mtl_finish();   /* 读回前确保 GPU 写入完成 */
+    spc_mtl_finish();   /* 读回前确保 GPU 写入完成 */
     memcpy(dst, (const uint8_t*)m->buf.contents + off, size);
     return true;
 }
 
-bool _sc_spc_mtl_buffer_write(_sc_spc_buffer_t* b, const void* src, uint64_t size, uint64_t off) {
+bool spc_mtl_buffer_write(spc_buffer_t* b, const void* src, uint64_t size, uint64_t off) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return false;
     memcpy((uint8_t*)m->buf.contents + off, src, size);
@@ -100,7 +100,7 @@ bool _sc_spc_mtl_buffer_write(_sc_spc_buffer_t* b, const void* src, uint64_t siz
 
 /* ---- kernel ------------------------------------------------ */
 
-bool _sc_spc_mtl_kernel_create(_sc_spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
+bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
     MtlSpcKernel* m = (MtlSpcKernel*)calloc(1, sizeof(MtlSpcKernel));
     if (!m) return false;
     for (int i = 0; i < SC_SPC_MAX_BINDINGS; i++) m->mslIndex[i] = -1;
@@ -108,13 +108,13 @@ bool _sc_spc_mtl_kernel_create(_sc_spc_kernel_t* k, const sc_spc_kernel_desc* de
     NSString* src = [[NSString alloc] initWithBytes:desc->code.ptr
                                              length:desc->code.size
                                            encoding:NSUTF8StringEncoding];
-    if (!src) { _sc_spc_log("metal: 内核源码非 UTF-8"); free(m); return false; }
+    if (!src) { spc_log("metal: 内核源码非 UTF-8"); free(m); return false; }
     NSError* err = nil;
     id<MTLLibrary> lib = [M.device newLibraryWithSource:src
                                                 options:[[MTLCompileOptions alloc] init]
                                                   error:&err];
     if (!lib) {
-        _sc_spc_log("metal: MSL 编译失败: %s",
+        spc_log("metal: MSL 编译失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         free(m);
         return false;
@@ -122,7 +122,7 @@ bool _sc_spc_mtl_kernel_create(_sc_spc_kernel_t* k, const sc_spc_kernel_desc* de
     NSString* entry = desc->entry ? [NSString stringWithUTF8String:desc->entry] : @"main0";
     id<MTLFunction> fn = [lib newFunctionWithName:entry];
     if (!fn) {
-        _sc_spc_log("metal: 入口 %s 不存在", entry.UTF8String);
+        spc_log("metal: 入口 %s 不存在", entry.UTF8String);
         free(m);
         return false;
     }
@@ -136,7 +136,7 @@ bool _sc_spc_mtl_kernel_create(_sc_spc_kernel_t* k, const sc_spc_kernel_desc* de
                                                   reflection:&refl
                                                        error:&err];
     if (!m->pso) {
-        _sc_spc_log("metal: 计算管线创建失败: %s",
+        spc_log("metal: 计算管线创建失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         free(m);
         return false;
@@ -150,14 +150,14 @@ bool _sc_spc_mtl_kernel_create(_sc_spc_kernel_t* k, const sc_spc_kernel_desc* de
             }
         }
         if (m->mslIndex[i] < 0)
-            _sc_spc_log("metal: 内核参数 %s 未在管线反射中出现（可能被优化掉）",
+            spc_log("metal: 内核参数 %s 未在管线反射中出现（可能被优化掉）",
                         k->res[i].name);
     }
     k->backend = m;
     return true;
 }
 
-void _sc_spc_mtl_kernel_destroy(_sc_spc_kernel_t* k) {
+void spc_mtl_kernel_destroy(spc_kernel_t* k) {
     MtlSpcKernel* m = (MtlSpcKernel*)k->backend;
     if (!m) return;
     m->pso = nil;
@@ -165,9 +165,9 @@ void _sc_spc_mtl_kernel_destroy(_sc_spc_kernel_t* k) {
     k->backend = NULL;
 }
 
-bool _sc_spc_mtl_dispatch(_sc_spc_kernel_t* k, int gx, int gy, int gz,
+bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
                           const sc_spc_bindings* bnd,
-                          _sc_spc_buffer_t* bufs[SC_SPC_MAX_BINDINGS]) {
+                          spc_buffer_t* bufs[SC_SPC_MAX_BINDINGS]) {
     MtlSpcKernel* m = (MtlSpcKernel*)k->backend;
     if (!m) return false;
 
@@ -177,7 +177,7 @@ bool _sc_spc_mtl_dispatch(_sc_spc_kernel_t* k, int gx, int gy, int gz,
 
     for (int i = 0; i < k->res_count; i++) {
         if (m->mslIndex[i] < 0) continue;
-        const _sc_spc_kernel_res* r = &k->res[i];
+        const spc_kernel_res* r = &k->res[i];
         if (r->storage) {
             [enc setBuffer:((MtlSpcBuffer*)bufs[r->binding]->backend)->buf
                     offset:0

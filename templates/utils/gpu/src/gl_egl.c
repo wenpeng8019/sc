@@ -37,7 +37,7 @@
 #define EGL_NO_NATIVE_FENCE_FD_ANDROID -1
 #endif
 
-typedef struct _sc_gl_memimg {
+typedef struct gl_memimg {
     struct gbm_bo* bo;      /* GBM 模式 */
     int            dma_fd;  /* dma-heap 模式（bo 为 NULL 时有效） */
     EGLImageKHR    image;
@@ -48,7 +48,7 @@ typedef struct _sc_gl_memimg {
     uint32_t       stride[4], offset[4];
     size_t         size;    /* CPU 映射大小（plane0 起整段） */
     void*          map_ptr;
-} _sc_gl_memimg;
+} gl_memimg;
 
 static struct {
     bool               inited;
@@ -69,18 +69,18 @@ static struct {
 
 /* ---- 初始化 ------------------------------------------------ */
 
-bool _sc_gl_egl_init(void) {
+bool gl_egl_init(void) {
     if (egl.inited) return true;
 
     egl.drm_fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (egl.drm_fd < 0) egl.drm_fd = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
     if (egl.drm_fd < 0) {
-        _sc_gpu_log("egl: 打开 DRM 设备失败(%d)", errno);
+        gpu_log("egl: 打开 DRM 设备失败(%d)", errno);
         return false;
     }
     egl.gbm = gbm_create_device(egl.drm_fd);
     if (!egl.gbm) {
-        _sc_gpu_log("egl: 创建 GBM 设备失败(%d)", errno);
+        gpu_log("egl: 创建 GBM 设备失败(%d)", errno);
         close(egl.drm_fd); egl.drm_fd = -1;
         return false;
     }
@@ -94,13 +94,13 @@ bool _sc_gl_egl_init(void) {
     egl.pDupFenceFd   = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)
         eglGetProcAddress("eglDupNativeFenceFDANDROID");
     if (!egl.pGetPlatformDisplay || !egl.pCreateImage || !egl.pDestroyImage) {
-        _sc_gpu_log("egl: 缺少必需扩展入口");
+        gpu_log("egl: 缺少必需扩展入口");
         goto fail;
     }
 
     egl.dpy = egl.pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, egl.gbm, NULL);
     if (egl.dpy == EGL_NO_DISPLAY || !eglInitialize(egl.dpy, NULL, NULL)) {
-        _sc_gpu_log("egl: display 初始化失败(%d)", eglGetError());
+        gpu_log("egl: display 初始化失败(%d)", eglGetError());
         goto fail;
     }
 
@@ -109,7 +109,7 @@ bool _sc_gl_egl_init(void) {
     egl.has_fence = exts && strstr(exts, "EGL_ANDROID_native_fence_sync") &&
                     egl.pCreateSync && egl.pDupFenceFd;
     if (!surfaceless)
-        _sc_gpu_log("egl: 无 surfaceless_context 扩展（尝试继续）");
+        gpu_log("egl: 无 surfaceless_context 扩展（尝试继续）");
 
     /* 桌面 GL 优先（对应 scc glcore410），失败回落 GLES */
     EGLint cfg_attribs[] = {
@@ -123,7 +123,7 @@ bool _sc_gl_egl_init(void) {
         cfg_attribs[9] = EGL_OPENGL_ES2_BIT;
         api = EGL_OPENGL_ES_API;
         if (!eglChooseConfig(egl.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
-            _sc_gpu_log("egl: 无可用 config");
+            gpu_log("egl: 无可用 config");
             goto fail;
         }
     }
@@ -143,11 +143,11 @@ bool _sc_gl_egl_init(void) {
         egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT, ctx_attribs_gl);
     }
     if (egl.ctx == EGL_NO_CONTEXT) {
-        _sc_gpu_log("egl: 创建上下文失败(%d)", eglGetError());
+        gpu_log("egl: 创建上下文失败(%d)", eglGetError());
         goto fail;
     }
     if (!eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl.ctx)) {
-        _sc_gpu_log("egl: surfaceless make current 失败(%d)", eglGetError());
+        gpu_log("egl: surfaceless make current 失败(%d)", eglGetError());
         eglDestroyContext(egl.dpy, egl.ctx);
         goto fail;
     }
@@ -163,7 +163,7 @@ fail:
     return false;
 }
 
-void _sc_gl_egl_shutdown(void) {
+void gl_egl_shutdown(void) {
     if (!egl.inited) return;
     eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     if (egl.ctx != EGL_NO_CONTEXT) eglDestroyContext(egl.dpy, egl.ctx);
@@ -176,7 +176,7 @@ void _sc_gl_egl_shutdown(void) {
     egl.dpy = EGL_NO_DISPLAY;
 }
 
-void _sc_gl_egl_make_current(void) {
+void gl_egl_make_current(void) {
     if (egl.inited)
         eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl.ctx);
 }
@@ -216,15 +216,15 @@ static EGLImageKHR createDmaBufImage(int w, int h, uint32_t fourcc, int planes,
                             NULL, attribs);
 }
 
-_sc_gl_memimg* _sc_gl_memimg_alloc(int w, int h, uint32_t fourcc,
+gl_memimg* gl_memimg_alloc(int w, int h, uint32_t fourcc,
                                    sc_gpu_memory_kind memory, uint64_t modifier,
                                    int renderable) {
-    if (!_sc_gl_egl_init()) return NULL;
+    if (!gl_egl_init()) return NULL;
     (void)modifier;   /* 预留：modifier 协商；首版 LINEAR */
     int bpp = fourccBpp(fourcc);
-    if (!bpp) { _sc_gpu_log("egl: memimg 分配暂仅支持 RGB 系 fourcc"); return NULL; }
+    if (!bpp) { gpu_log("egl: memimg 分配暂仅支持 RGB 系 fourcc"); return NULL; }
 
-    _sc_gl_memimg* m = (_sc_gl_memimg*)calloc(1, sizeof(_sc_gl_memimg));
+    gl_memimg* m = (gl_memimg*)calloc(1, sizeof(gl_memimg));
     if (!m) return NULL;
     m->dma_fd = -1;
     m->width = w; m->height = h; m->fourcc = fourcc;
@@ -235,7 +235,7 @@ _sc_gl_memimg* _sc_gl_memimg_alloc(int w, int h, uint32_t fourcc,
         if (egl.dma_fd < 0) {
             egl.dma_fd = open("/dev/dma_heap/linux,cma", O_RDWR | O_CLOEXEC);
             if (egl.dma_fd < 0) {
-                _sc_gpu_log("egl: 打开 dma-heap 失败(%d)", errno);
+                gpu_log("egl: 打开 dma-heap 失败(%d)", errno);
                 free(m);
                 return NULL;
             }
@@ -246,7 +246,7 @@ _sc_gl_memimg* _sc_gl_memimg_alloc(int w, int h, uint32_t fourcc,
             .len = m->size, .fd_flags = O_RDWR | O_CLOEXEC, .heap_flags = 0,
         };
         if (ioctl(egl.dma_fd, DMA_HEAP_IOCTL_ALLOC, &ad) < 0) {
-            _sc_gpu_log("egl: dma-heap 分配失败(%d)", errno);
+            gpu_log("egl: dma-heap 分配失败(%d)", errno);
             free(m);
             return NULL;
         }
@@ -259,7 +259,7 @@ _sc_gl_memimg* _sc_gl_memimg_alloc(int w, int h, uint32_t fourcc,
                          (renderable ? GBM_BO_USE_RENDERING : 0);
         m->bo = gbm_bo_create(egl.gbm, (uint32_t)w, (uint32_t)h, fourcc, flags);
         if (!m->bo) {
-            _sc_gpu_log("egl: gbm_bo_create 失败(%d)", errno);
+            gpu_log("egl: gbm_bo_create 失败(%d)", errno);
             free(m);
             return NULL;
         }
@@ -275,16 +275,16 @@ _sc_gl_memimg* _sc_gl_memimg_alloc(int w, int h, uint32_t fourcc,
 
     m->image = createDmaBufImage(w, h, fourcc, m->planes, m->fd, m->stride, m->offset);
     if (m->image == EGL_NO_IMAGE_KHR) {
-        _sc_gpu_log("egl: eglCreateImage 失败(%d)", eglGetError());
-        _sc_gl_memimg_free(m);
+        gpu_log("egl: eglCreateImage 失败(%d)", eglGetError());
+        gl_memimg_free(m);
         return NULL;
     }
     return m;
 }
 
-_sc_gl_memimg* _sc_gl_memimg_import(const sc_gpu_memory_frame* src) {
-    if (!_sc_gl_egl_init()) return NULL;
-    _sc_gl_memimg* m = (_sc_gl_memimg*)calloc(1, sizeof(_sc_gl_memimg));
+gl_memimg* gl_memimg_import(const sc_gpu_memory_frame* src) {
+    if (!gl_egl_init()) return NULL;
+    gl_memimg* m = (gl_memimg*)calloc(1, sizeof(gl_memimg));
     if (!m) return NULL;
     m->dma_fd = -1;
     m->width = src->width; m->height = src->height;
@@ -298,7 +298,7 @@ _sc_gl_memimg* _sc_gl_memimg_import(const sc_gpu_memory_frame* src) {
     m->image = createDmaBufImage(m->width, m->height, m->fourcc,
                                  m->planes, m->fd, m->stride, m->offset);
     if (m->image == EGL_NO_IMAGE_KHR) {
-        _sc_gpu_log("egl: 导入 eglCreateImage 失败(%d)", eglGetError());
+        gpu_log("egl: 导入 eglCreateImage 失败(%d)", eglGetError());
         free(m);
         return NULL;
     }
@@ -306,7 +306,7 @@ _sc_gl_memimg* _sc_gl_memimg_import(const sc_gpu_memory_frame* src) {
     return m;
 }
 
-bool _sc_gl_memimg_export(_sc_gl_memimg* m, sc_gpu_memory_frame* out) {
+bool gl_memimg_export(gl_memimg* m, sc_gpu_memory_frame* out) {
     if (!m) return false;
     out->planes = m->planes;
     for (int p = 0; p < m->planes; p++) {
@@ -321,17 +321,17 @@ bool _sc_gl_memimg_export(_sc_gl_memimg* m, sc_gpu_memory_frame* out) {
     return true;
 }
 
-void* _sc_gl_memimg_egl_image(_sc_gl_memimg* m) {
+void* gl_memimg_egl_image(gl_memimg* m) {
     return m ? (void*)m->image : NULL;
 }
 
-void* _sc_gl_memimg_map(_sc_gl_memimg* m, uint32_t* out_stride) {
+void* gl_memimg_map(gl_memimg* m, uint32_t* out_stride) {
     if (!m || m->fd[0] < 0) return NULL;
     if (!m->map_ptr) {
         m->map_ptr = mmap(NULL, m->size, PROT_READ | PROT_WRITE, MAP_SHARED,
                           m->fd[0], 0);
         if (m->map_ptr == MAP_FAILED) {
-            _sc_gpu_log("egl: mmap 失败(%d)", errno);
+            gpu_log("egl: mmap 失败(%d)", errno);
             m->map_ptr = NULL;
             return NULL;
         }
@@ -340,16 +340,16 @@ void* _sc_gl_memimg_map(_sc_gl_memimg* m, uint32_t* out_stride) {
     return m->map_ptr;
 }
 
-void _sc_gl_memimg_unmap(_sc_gl_memimg* m) {
+void gl_memimg_unmap(gl_memimg* m) {
     if (m && m->map_ptr) {
         munmap(m->map_ptr, m->size);
         m->map_ptr = NULL;
     }
 }
 
-void _sc_gl_memimg_free(_sc_gl_memimg* m) {
+void gl_memimg_free(gl_memimg* m) {
     if (!m) return;
-    _sc_gl_memimg_unmap(m);
+    gl_memimg_unmap(m);
     if (m->image != EGL_NO_IMAGE_KHR && egl.pDestroyImage)
         egl.pDestroyImage(egl.dpy, m->image);
     if (m->bo) {
@@ -366,7 +366,7 @@ void _sc_gl_memimg_free(_sc_gl_memimg* m) {
 
 /* ---- fence ------------------------------------------------- */
 
-int _sc_gl_egl_fence_fd(void) {
+int gl_egl_fence_fd(void) {
     if (!egl.inited || !egl.has_fence) return -1;
     static const EGLint attribs[] = { EGL_NONE };
     EGLSyncKHR sync = egl.pCreateSync(egl.dpy, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);

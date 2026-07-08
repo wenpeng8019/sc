@@ -109,10 +109,10 @@ struct wl_output;
 #define wl_surface_interface _glfw_wl_surface_interface
 #define wp_fractional_scale_v1_interface _glfw_wp_fractional_scale_v1_interface
 
-#define GLFW_WAYLAND_WINDOW_STATE         _sc_windowWayland  wl;
+#define GLFW_WAYLAND_WINDOW_STATE         wl_window_t  wl;
 #define GLFW_WAYLAND_LIBRARY_WINDOW_STATE _GLFWlibraryWayland wl;
-#define GLFW_WAYLAND_MONITOR_STATE        _sc_monitorWayland wl;
-#define GLFW_WAYLAND_CURSOR_STATE         _sc_cursorWayland  wl;
+#define GLFW_WAYLAND_MONITOR_STATE        wl_monitor_t wl;
+#define GLFW_WAYLAND_CURSOR_STATE         wl_cursor_t  wl;
 
 struct wl_cursor_image
 {
@@ -326,7 +326,7 @@ typedef struct _GLFWscaleWayland
 
 // Wayland-specific per-window data
 //
-typedef struct _sc_windowWayland
+typedef struct wl_window_t
 {
     int                         width, height;
     int                         fbWidth, fbHeight;
@@ -386,7 +386,7 @@ typedef struct _sc_windowWayland
         uint32_t                    buttonPressSerial;
         const char*                 cursorName;
     } fallback;
-} _sc_windowWayland;
+} wl_window_t;
 
 // Wayland-specific global data
 //
@@ -571,7 +571,7 @@ typedef struct _GLFWlibraryWayland
 
 // Wayland-specific per-monitor data
 //
-typedef struct _sc_monitorWayland
+typedef struct wl_monitor_t
 {
     struct wl_output*           output;
     uint32_t                    name;
@@ -580,11 +580,11 @@ typedef struct _sc_monitorWayland
     int                         x;
     int                         y;
     int32_t                     scale;
-} _sc_monitorWayland;
+} wl_monitor_t;
 
 // Wayland-specific per-cursor data
 //
-typedef struct _sc_cursorWayland
+typedef struct wl_cursor_t
 {
     struct wl_cursor*           cursor;
     struct wl_cursor*           cursorHiDPI;
@@ -592,7 +592,7 @@ typedef struct _sc_cursorWayland
     int                         width, height;
     int                         xhot, yhot;
     int                         currentImage;
-} _sc_cursorWayland;
+} wl_cursor_t;
 
 bool wayland_connect(int platformID, platform_st* platform);
 int wayland_init(void);

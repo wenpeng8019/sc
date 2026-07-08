@@ -35,7 +35,7 @@ static MLModelConfiguration* configFor(int units) {
     return cfg;
 }
 
-bool _sc_spc_coreml_load(_sc_spc_model_t* m, const char* path, int units) {
+bool spc_coreml_load(spc_model_t* m, const char* path, int units) {
     CoreMlModel* c = (CoreMlModel*)calloc(1, sizeof(CoreMlModel));
     if (!c) return false;
 
@@ -45,7 +45,7 @@ bool _sc_spc_coreml_load(_sc_spc_model_t* m, const char* path, int units) {
                                        configuration:configFor(units)
                                                error:&err];
     if (!model) {
-        _sc_spc_log("coreml: 模型加载失败: %s",
+        spc_log("coreml: 模型加载失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         free(c);
         return false;
@@ -56,7 +56,7 @@ bool _sc_spc_coreml_load(_sc_spc_model_t* m, const char* path, int units) {
     c->inName  = model.modelDescription.inputDescriptionsByName.allKeys.firstObject;
     c->outName = model.modelDescription.outputDescriptionsByName.allKeys.firstObject;
     if (!c->inName || !c->outName) {
-        _sc_spc_log("coreml: 模型无输入/输出描述");
+        spc_log("coreml: 模型无输入/输出描述");
         c->model = nil;
         free(c);
         return false;
@@ -65,7 +65,7 @@ bool _sc_spc_coreml_load(_sc_spc_model_t* m, const char* path, int units) {
     return true;
 }
 
-void _sc_spc_coreml_destroy(_sc_spc_model_t* m) {
+void spc_coreml_destroy(spc_model_t* m) {
     CoreMlModel* c = (CoreMlModel*)m->backend;
     if (!c) return;
     c->model = nil; c->url = nil; c->inName = nil; c->outName = nil;
@@ -73,7 +73,7 @@ void _sc_spc_coreml_destroy(_sc_spc_model_t* m) {
     m->backend = NULL;
 }
 
-bool _sc_spc_coreml_run1(_sc_spc_model_t* m, sc_tensor* in, sc_tensor* out) {
+bool spc_coreml_run1(spc_model_t* m, sc_tensor* in, sc_tensor* out) {
     CoreMlModel* c = (CoreMlModel*)m->backend;
     if (!c) return false;
 
@@ -86,14 +86,14 @@ bool _sc_spc_coreml_run1(_sc_spc_model_t* m, sc_tensor* in, sc_tensor* out) {
         }
         NSError* err = nil;
         MLMultiArray* arr = [[MLMultiArray alloc]
-            initWithDataPointer:_sc_spc_tsdata(in)
+            initWithDataPointer:spc_tsdata(in)
                           shape:shape
                        dataType:MLMultiArrayDataTypeFloat32
                         strides:strides
                     deallocator:nil
                           error:&err];
         if (!arr) {
-            _sc_spc_log("coreml: 输入包装失败: %s",
+            spc_log("coreml: 输入包装失败: %s",
                         err ? err.localizedDescription.UTF8String : "?");
             return false;
         }
@@ -104,20 +104,20 @@ bool _sc_spc_coreml_run1(_sc_spc_model_t* m, sc_tensor* in, sc_tensor* out) {
 
         id<MLFeatureProvider> result = [c->model predictionFromFeatures:feed error:&err];
         if (!result) {
-            _sc_spc_log("coreml: 推理失败: %s",
+            spc_log("coreml: 推理失败: %s",
                         err ? err.localizedDescription.UTF8String : "?");
             return false;
         }
         MLMultiArray* y = [result featureValueForName:c->outName].multiArrayValue;
-        if (!y) { _sc_spc_log("coreml: 输出 %s 非张量", c->outName.UTF8String); return false; }
+        if (!y) { spc_log("coreml: 输出 %s 非张量", c->outName.UTF8String); return false; }
         if (y.count != out->numel) {
-            _sc_spc_log("coreml: 输出元素数 %ld ≠ 目标张量 %lld",
+            spc_log("coreml: 输出元素数 %ld ≠ 目标张量 %lld",
                         (long)y.count, (long long)out->numel);
             return false;
         }
 
         /* 读出（fp16/fp64 自动转 f32） */
-        float* dst = (float*)_sc_spc_tsdata(out);
+        float* dst = (float*)spc_tsdata(out);
         __block bool ok = true;
         MLMultiArrayDataType dt = y.dataType;
         NSInteger n = y.count;
@@ -135,12 +135,12 @@ bool _sc_spc_coreml_run1(_sc_spc_model_t* m, sc_tensor* in, sc_tensor* out) {
                 ok = false;
             }
         }];
-        if (!ok) _sc_spc_log("coreml: 输出 dtype %ld 未支持", (long)dt);
+        if (!ok) spc_log("coreml: 输出 dtype %ld 未支持", (long)dt);
         return ok;
     }
 }
 
-int _sc_spc_coreml_ane_ratio(_sc_spc_model_t* m) {
+int spc_coreml_ane_ratio(spc_model_t* m) {
     CoreMlModel* c = (CoreMlModel*)m->backend;
     if (!c) return -1;
 
@@ -166,7 +166,7 @@ int _sc_spc_coreml_ane_ratio(_sc_spc_model_t* m) {
                         NSMutableString* sup = [NSMutableString string];
                         for (id d in usage.supportedComputeDevices)
                             [sup appendFormat:@"%@ ", NSStringFromClass([d class])];
-                        _sc_spc_log("plan: %s -> %s (支持: %s)",
+                        spc_log("plan: %s -> %s (支持: %s)",
                                     op.operatorName.UTF8String,
                                     NSStringFromClass([usage.preferredComputeDevice class]).UTF8String,
                                     sup.UTF8String);
@@ -178,7 +178,7 @@ int _sc_spc_coreml_ane_ratio(_sc_spc_model_t* m) {
                 }
                 done_ok = true;
             } else {
-                _sc_spc_log("coreml: ComputePlan 加载失败: %s",
+                spc_log("coreml: ComputePlan 加载失败: %s",
                             err ? err.localizedDescription.UTF8String : "?");
             }
             dispatch_semaphore_signal(sem);

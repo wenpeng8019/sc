@@ -11,14 +11,14 @@ static bool nullInit(const sc_gpu_desc* desc) { (void)desc; return true; }
 static void nullShutdown(void) {}
 static void* nullDevice(void) { return (void*)0; }
 
-static bool nullSurfaceCreate(_sc_gpu_surface_t* surf) { (void)surf; return true; }
-static void nullSurfaceDestroy(_sc_gpu_surface_t* surf) { (void)surf; }
-static void nullSurfaceActivate(_sc_gpu_surface_t* surf) { (void)surf; }
-static void nullSurfaceResize(_sc_gpu_surface_t* surf, int w, int h) {
+static bool nullSurfaceCreate(gpu_surface_t* surf) { (void)surf; return true; }
+static void nullSurfaceDestroy(gpu_surface_t* surf) { (void)surf; }
+static void nullSurfaceActivate(gpu_surface_t* surf) { (void)surf; }
+static void nullSurfaceResize(gpu_surface_t* surf, int w, int h) {
     (void)surf; (void)w; (void)h;
 }
 
-static bool nullFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
+static bool nullFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     f->width = surf->desc.width;
     f->height = surf->desc.height;
     f->sample_count = surf->desc.sample_count;
@@ -28,7 +28,7 @@ static bool nullFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
 }
 static void nullFrameEnd(void) {}
 
-static const _sc_gpu_env_api nullApi = {
+static const gpu_env_api nullApi = {
     .name = "null",
     .kind = SC_GPU_BACKEND_NULL,
     .init = nullInit,
@@ -42,4 +42,4 @@ static const _sc_gpu_env_api nullApi = {
     .frame_end = nullFrameEnd,
 };
 
-const _sc_gpu_env_api* _sc_gpu_env_null(void) { return &nullApi; }
+const gpu_env_api* gpu_env_null(void) { return &nullApi; }

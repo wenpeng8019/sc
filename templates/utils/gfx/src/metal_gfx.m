@@ -267,7 +267,7 @@ static bool mtlInit(const sc_gfx_desc* desc) {
     (void)desc;
     memset((void*)&mtl, 0, sizeof(mtl));
     mtl.device = (__bridge id<MTLDevice>)sc_gpu_device();
-    if (!mtl.device) { _sc_gfx_log("metal: gpu env 未交付设备"); return false; }
+    if (!mtl.device) { gfx_log("metal: gpu env 未交付设备"); return false; }
     mtl.queue = [mtl.device newCommandQueue];
     mtl.sem = dispatch_semaphore_create(MTL_MAX_INFLIGHT);
     for (int i = 0; i < MTL_MAX_INFLIGHT; i++) {
@@ -309,7 +309,7 @@ static void mtlGfxFinish(void) {
 
 /* ---- buffer ------------------------------------------------ */
 
-static bool mtlBufferCreate(_sc_gfx_buffer_t* buf) {
+static bool mtlBufferCreate(gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)calloc(1, sizeof(MtlBuffer));
     if (!b) return false;
     b->numSlots = (buf->desc.usage == SC_GFX_USAGE_IMMUTABLE) ? 1 : MTL_MAX_INFLIGHT;
@@ -328,7 +328,7 @@ static bool mtlBufferCreate(_sc_gfx_buffer_t* buf) {
     return true;
 }
 
-static void mtlBufferDestroy(_sc_gfx_buffer_t* buf) {
+static void mtlBufferDestroy(gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     if (!b) return;
     for (int i = 0; i < b->numSlots; i++) {
@@ -340,7 +340,7 @@ static void mtlBufferDestroy(_sc_gfx_buffer_t* buf) {
 }
 
 /* 每帧首次更新时轮转副本（sokol 语义：同帧多次 append 写同一副本） */
-static void mtlBufferUpdate(_sc_gfx_buffer_t* buf, const sc_gfx_range* data, int offset) {
+static void mtlBufferUpdate(gfx_buffer_t* buf, const sc_gfx_range* data, int offset) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     if (!b) return;
     if (b->numSlots > 1 && b->updFrame != mtl.frameIndex) {
@@ -350,7 +350,7 @@ static void mtlBufferUpdate(_sc_gfx_buffer_t* buf, const sc_gfx_range* data, int
     memcpy((uint8_t*)b->buf[b->active].contents + offset, data->ptr, data->size);
 }
 
-static id<MTLBuffer> mtlActiveBuf(_sc_gfx_buffer_t* buf) {
+static id<MTLBuffer> mtlActiveBuf(gfx_buffer_t* buf) {
     MtlBuffer* b = (MtlBuffer*)buf->backend;
     return b ? b->buf[b->active] : nil;
 }
@@ -358,7 +358,7 @@ static id<MTLBuffer> mtlActiveBuf(_sc_gfx_buffer_t* buf) {
 /* ---- image ------------------------------------------------- */
 
 /* 子图像上传（cube 面 / 数组层 / 3D 深度 / mip 链） */
-static void imageUploadData(_sc_gfx_image_t* img, id<MTLTexture> tex,
+static void imageUploadData(gfx_image_t* img, id<MTLTexture> tex,
                             const sc_gfx_image_data* data) {
     const sc_gfx_image_desc* d = &img->desc;
     int bpp = formatByteSize(d->format);
@@ -406,7 +406,7 @@ static void imageUploadData(_sc_gfx_image_t* img, id<MTLTexture> tex,
     }
 }
 
-static bool mtlImageCreate(_sc_gfx_image_t* img) {
+static bool mtlImageCreate(gfx_image_t* img) {
     MtlImage* m = (MtlImage*)calloc(1, sizeof(MtlImage));
     if (!m) return false;
     const sc_gfx_image_desc* d = &img->desc;
@@ -415,12 +415,12 @@ static bool mtlImageCreate(_sc_gfx_image_t* img) {
     if (d->memimg) {
         id<MTLTexture> tex = (__bridge id<MTLTexture>)sc_gpu_memimg_native(d->memimg);
         if (!tex) {
-            _sc_gfx_log("metal: memimg %u 无效", d->memimg);
+            gfx_log("metal: memimg %u 无效", d->memimg);
             free(m);
             return false;
         }
         if ((int)tex.width != d->width || (int)tex.height != d->height) {
-            _sc_gfx_log("metal: memimg 尺寸与 desc 不一致");
+            gfx_log("metal: memimg 尺寸与 desc 不一致");
             free(m);
             return false;
         }
@@ -463,7 +463,7 @@ static bool mtlImageCreate(_sc_gfx_image_t* img) {
     return true;
 }
 
-static void mtlImageDestroy(_sc_gfx_image_t* img) {
+static void mtlImageDestroy(gfx_image_t* img) {
     MtlImage* m = (MtlImage*)img->backend;
     if (!m) return;
     mtlDeferRelease(m->tex);
@@ -472,7 +472,7 @@ static void mtlImageDestroy(_sc_gfx_image_t* img) {
     img->backend = NULL;
 }
 
-static void mtlImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* data) {
+static void mtlImageUpdate(gfx_image_t* img, const sc_gfx_image_data* data) {
     MtlImage* m = (MtlImage*)img->backend;
     if (!m || img->desc.render_target) return;
     imageUploadData(img, m->tex, data);
@@ -480,7 +480,7 @@ static void mtlImageUpdate(_sc_gfx_image_t* img, const sc_gfx_image_data* data) 
 
 /* ---- sampler ----------------------------------------------- */
 
-static bool mtlSamplerCreate(_sc_gfx_sampler_t* smp) {
+static bool mtlSamplerCreate(gfx_sampler_t* smp) {
     MtlSampler* m = (MtlSampler*)calloc(1, sizeof(MtlSampler));
     if (!m) return false;
     const sc_gfx_sampler_desc* d = &smp->desc;
@@ -514,7 +514,7 @@ static bool mtlSamplerCreate(_sc_gfx_sampler_t* smp) {
     return true;
 }
 
-static void mtlSamplerDestroy(_sc_gfx_sampler_t* smp) {
+static void mtlSamplerDestroy(gfx_sampler_t* smp) {
     MtlSampler* m = (MtlSampler*)smp->backend;
     if (!m) return;
     mtlDeferRelease(m->smp);
@@ -532,19 +532,19 @@ static bool compileStage(const sc_gfx_shader_stage_desc* sd,
     NSString* src = [[NSString alloc] initWithBytes:sd->code.ptr
                                              length:sd->code.size
                                            encoding:NSUTF8StringEncoding];
-    if (!src) { _sc_gfx_log("metal: 着色器源码非 UTF-8"); return false; }
+    if (!src) { gfx_log("metal: 着色器源码非 UTF-8"); return false; }
     NSError* err = nil;
     MTLCompileOptions* opt = [[MTLCompileOptions alloc] init];
     id<MTLLibrary> lib = [mtl.device newLibraryWithSource:src options:opt error:&err];
     if (!lib) {
-        _sc_gfx_log("metal: MSL 编译失败: %s",
+        gfx_log("metal: MSL 编译失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         return false;
     }
     NSString* entry = sd->entry ? [NSString stringWithUTF8String:sd->entry] : @"main0";
     id<MTLFunction> fn = [lib newFunctionWithName:entry];
     if (!fn) {
-        _sc_gfx_log("metal: 入口 %s 不存在", entry.UTF8String);
+        gfx_log("metal: 入口 %s 不存在", entry.UTF8String);
         return false;
     }
     *outLib = lib;
@@ -552,7 +552,7 @@ static bool compileStage(const sc_gfx_shader_stage_desc* sd,
     return true;
 }
 
-static bool mtlShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* desc) {
+static bool mtlShaderCreate(gfx_shader_t* shd, const sc_gfx_shader_desc* desc) {
     MtlShader* m = (MtlShader*)calloc(1, sizeof(MtlShader));
     if (!m) return false;
     bool ok = compileStage(&desc->vs, &m->vsLib, &m->vsFn)
@@ -568,7 +568,7 @@ static bool mtlShaderCreate(_sc_gfx_shader_t* shd, const sc_gfx_shader_desc* des
     return true;
 }
 
-static void mtlShaderDestroy(_sc_gfx_shader_t* shd) {
+static void mtlShaderDestroy(gfx_shader_t* shd) {
     MtlShader* m = (MtlShader*)shd->backend;
     if (!m) return;
     mtlDeferRelease(m->vsLib); mtlDeferRelease(m->fsLib); mtlDeferRelease(m->csLib);
@@ -581,7 +581,7 @@ static void mtlShaderDestroy(_sc_gfx_shader_t* shd) {
 
 /* ---- pipeline ---------------------------------------------- */
 
-static bool mtlPipelineCreate(_sc_gfx_pipeline_t* pip) {
+static bool mtlPipelineCreate(gfx_pipeline_t* pip) {
     MtlShader* shd = (MtlShader*)pip->shader->backend;
     if (!shd) return false;
     MtlPipeline* m = (MtlPipeline*)calloc(1, sizeof(MtlPipeline));
@@ -593,7 +593,7 @@ static bool mtlPipelineCreate(_sc_gfx_pipeline_t* pip) {
         NSError* err = nil;
         m->cps = [mtl.device newComputePipelineStateWithFunction:shd->csFn error:&err];
         if (!m->cps) {
-            _sc_gfx_log("metal: 计算管线创建失败: %s",
+            gfx_log("metal: 计算管线创建失败: %s",
                         err ? err.localizedDescription.UTF8String : "?");
             free(m);
             return false;
@@ -662,7 +662,7 @@ static bool mtlPipelineCreate(_sc_gfx_pipeline_t* pip) {
     NSError* err = nil;
     m->rps = [mtl.device newRenderPipelineStateWithDescriptor:rp error:&err];
     if (!m->rps) {
-        _sc_gfx_log("metal: 渲染管线创建失败: %s",
+        gfx_log("metal: 渲染管线创建失败: %s",
                     err ? err.localizedDescription.UTF8String : "?");
         free(m);
         return false;
@@ -724,7 +724,7 @@ static bool mtlPipelineCreate(_sc_gfx_pipeline_t* pip) {
     return true;
 }
 
-static void mtlPipelineDestroy(_sc_gfx_pipeline_t* pip) {
+static void mtlPipelineDestroy(gfx_pipeline_t* pip) {
     MtlPipeline* m = (MtlPipeline*)pip->backend;
     if (!m) return;
     mtlDeferRelease(m->rps); mtlDeferRelease(m->cps); mtlDeferRelease(m->dss);
@@ -746,9 +746,9 @@ static void ensureCmd(void) {
     mtl.presentCount = 0;
 }
 
-static void mtlBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
-                         int color_count, _sc_gfx_image_t* resolves[],
-                         _sc_gfx_image_t* depth) {
+static void mtlBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[],
+                         int color_count, gfx_image_t* resolves[],
+                         gfx_image_t* depth) {
     ensureCmd();
 
     if (pass->compute) {
@@ -762,7 +762,7 @@ static void mtlBeginPass(const sc_gfx_pass* pass, _sc_gfx_image_t* colors[],
         /* 交换链 pass：渲染目标经 gpu env 交付（含 resize 竞态校验） */
         sc_gpu_frame f;
         if (!sc_gpu_frame_acquire(&f)) {
-            _sc_gfx_log("metal: frame_acquire 失败");
+            gfx_log("metal: frame_acquire 失败");
             return;
         }
         id<MTLTexture> target = (__bridge id<MTLTexture>)f.color;
@@ -875,7 +875,7 @@ static void mtlApplyScissor(int x, int y, int w, int h, bool topLeft) {
                                                (NSUInteger)w, (NSUInteger)h }];
 }
 
-static void mtlApplyPipeline(_sc_gfx_pipeline_t* pip) {
+static void mtlApplyPipeline(gfx_pipeline_t* pip) {
     MtlPipeline* m = (MtlPipeline*)pip->backend;
     if (!m) return;
     mtl.curPip = m;
@@ -898,11 +898,11 @@ static void mtlApplyPipeline(_sc_gfx_pipeline_t* pip) {
                           blue:m->blendColor[2] alpha:m->blendColor[3]];
 }
 
-static void mtlApplyBindings(_sc_gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
-                             _sc_gfx_buffer_t* vbufs[], _sc_gfx_buffer_t* ibuf,
-                             _sc_gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
-                             _sc_gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
-                             _sc_gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
+static void mtlApplyBindings(gfx_pipeline_t* pip, const sc_gfx_bindings* bnd,
+                             gfx_buffer_t* vbufs[], gfx_buffer_t* ibuf,
+                             gfx_image_t* imgs[][SC_GFX_MAX_IMAGES],
+                             gfx_sampler_t* smps[][SC_GFX_MAX_SAMPLERS],
+                             gfx_buffer_t* sbufs[][SC_GFX_MAX_STORAGE_BUFFERS]) {
     (void)pip;
 
     /* 计算 pass */
@@ -970,7 +970,7 @@ static void mtlApplyUniforms(int stage, int slot, const void* data, size_t size)
     id<MTLBuffer> ring = mtl.ubRing[mtlFrameSlot()];
     int pos = (mtl.ubPos + 255) & ~255;
     if ((size_t)pos + size > MTL_UB_RING_SIZE) {
-        _sc_gfx_log("metal: uniform 环缓冲溢出");
+        gfx_log("metal: uniform 环缓冲溢出");
         return;
     }
     memcpy((uint8_t*)ring.contents + pos, data, size);
@@ -1065,7 +1065,7 @@ static void mtlQueryPixelformat(sc_gpu_pixel_format fmt, sc_gfx_pixelformat_info
 
 /* ---- vtable ------------------------------------------------ */
 
-static const _sc_gfx_backend_api mtlApi = {
+static const gfx_backend_api mtlApi = {
     .name = "metal",
     .init = mtlInit,
     .shutdown = mtlShutdown,
@@ -1095,6 +1095,6 @@ static const _sc_gfx_backend_api mtlApi = {
     .query_pixelformat = mtlQueryPixelformat,
 };
 
-const _sc_gfx_backend_api* _sc_gfx_backend_metal(void) { return &mtlApi; }
+const gfx_backend_api* gfx_backend_metal(void) { return &mtlApi; }
 
 #endif /* SC_GPU_METAL */

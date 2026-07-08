@@ -172,14 +172,14 @@ typedef HRESULT (WINAPI * PFN_GetDpiForMonitor)(HMONITOR,MONITOR_DPI_TYPE,UINT*,
 typedef LONG (WINAPI * PFN_RtlVerifyVersionInfo)(OSVERSIONINFOEXW*,ULONG,ULONGLONG);
 #define RtlVerifyVersionInfo g_wsi.win32.ntdll.RtlVerifyVersionInfo_
 
-#define GLFW_WIN32_WINDOW_STATE         _sc_windowWin32  win32;
-#define GLFW_WIN32_LIBRARY_WINDOW_STATE _sc_libraryWin32 win32;
-#define GLFW_WIN32_MONITOR_STATE        _sc_monitorWin32 win32;
-#define GLFW_WIN32_CURSOR_STATE         _sc_cursorWin32  win32;
+#define GLFW_WIN32_WINDOW_STATE         win32_window_t  win32;
+#define GLFW_WIN32_LIBRARY_WINDOW_STATE win32_library_t win32;
+#define GLFW_WIN32_MONITOR_STATE        win32_monitor_t win32;
+#define GLFW_WIN32_CURSOR_STATE         win32_cursor_t  win32;
 
 // Win32-specific per-window data
 //
-typedef struct _sc_windowWin32
+typedef struct win32_window_t
 {
     HWND                handle;
     HICON               bigIcon;
@@ -202,11 +202,11 @@ typedef struct _sc_windowWin32
     int                 lastCursorPosX, lastCursorPosY;
     // The last received high surrogate when decoding pairs of UTF-16 messages
     WCHAR               highSurrogate;
-} _sc_windowWin32;
+} win32_window_t;
 
 // Win32-specific global data
 //
-typedef struct _sc_libraryWin32
+typedef struct win32_library_t
 {
     HINSTANCE           instance;
     HWND                helperWindowHandle;
@@ -269,11 +269,11 @@ typedef struct _sc_libraryWin32
         HINSTANCE                       instance;
         PFN_RtlVerifyVersionInfo        RtlVerifyVersionInfo_;
     } ntdll;
-} _sc_libraryWin32;
+} win32_library_t;
 
 // Win32-specific per-monitor data
 //
-typedef struct _sc_monitorWin32
+typedef struct win32_monitor_t
 {
     HMONITOR            handle;
     // This size matches the static size of DISPLAY_DEVICE.DeviceName
@@ -283,14 +283,14 @@ typedef struct _sc_monitorWin32
     char                publicDisplayName[32];
     bool                modesPruned;
     bool                modeChanged;
-} _sc_monitorWin32;
+} win32_monitor_t;
 
 // Win32-specific per-cursor data
 //
-typedef struct _sc_cursorWin32
+typedef struct win32_cursor_t
 {
     HCURSOR             handle;
-} _sc_cursorWin32;
+} win32_cursor_t;
 
 
 bool win32_connect(int platformID, struct platform_t* platform);

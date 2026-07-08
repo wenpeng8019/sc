@@ -44,7 +44,7 @@ typedef struct MtlMemimg {
 
 static struct {
     id<MTLDevice> device;
-    _sc_gpu_surface_t* acquired[MTL_MAX_ACQUIRED];   /* 本帧已取 drawable 的 surface */
+    gpu_surface_t* acquired[MTL_MAX_ACQUIRED];   /* 本帧已取 drawable 的 surface */
     int acquiredCount;
 } env;
 
@@ -101,7 +101,7 @@ static bool mtlInit(const sc_gpu_desc* desc) {
     (void)desc;
     memset((void*)&env, 0, sizeof(env));
     env.device = MTLCreateSystemDefaultDevice();
-    if (!env.device) { _sc_gpu_log("metal: 无可用设备"); return false; }
+    if (!env.device) { gpu_log("metal: 无可用设备"); return false; }
     return true;
 }
 
@@ -116,14 +116,14 @@ static void* mtlDevice(void) {
 
 /* ---- surface ----------------------------------------------- */
 
-static bool mtlSurfaceCreate(_sc_gpu_surface_t* surf) {
+static bool mtlSurfaceCreate(gpu_surface_t* surf) {
     MtlSurface* s = (MtlSurface*)calloc(1, sizeof(MtlSurface));
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
         /* 内存交换链：环成员 = memimg 的 IOSurface 纹理 */
         for (int i = 0; i < surf->desc.image_count; i++) {
-            _sc_gpu_memimg_t* img = _sc_gpu_lookup_memimg(surf->ring_imgs[i]);
+            gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[i]);
             MtlMemimg* m = img ? (MtlMemimg*)img->backend : NULL;
             if (!m || !m->tex) { free(s); return false; }
             s->ringTex[i] = m->tex;
@@ -155,7 +155,7 @@ static bool mtlSurfaceCreate(_sc_gpu_surface_t* surf) {
     return true;
 }
 
-static void mtlSurfaceDestroy(_sc_gpu_surface_t* surf) {
+static void mtlSurfaceDestroy(gpu_surface_t* surf) {
     MtlSurface* s = (MtlSurface*)surf->backend;
     if (!s) return;
     for (int i = 0; i < env.acquiredCount; i++) {
@@ -170,11 +170,11 @@ static void mtlSurfaceDestroy(_sc_gpu_surface_t* surf) {
     surf->backend = NULL;
 }
 
-static void mtlSurfaceActivate(_sc_gpu_surface_t* surf) {
+static void mtlSurfaceActivate(gpu_surface_t* surf) {
     (void)surf;   /* Metal 无"当前上下文"概念；当前 surface 由公共层持有 */
 }
 
-static void mtlSurfaceResize(_sc_gpu_surface_t* surf, int w, int h) {
+static void mtlSurfaceResize(gpu_surface_t* surf, int w, int h) {
     MtlSurface* s = (MtlSurface*)surf->backend;
     if (!s) return;
     (void)w; (void)h;   /* surf->desc 已由公共层更新 */
@@ -184,7 +184,7 @@ static void mtlSurfaceResize(_sc_gpu_surface_t* surf, int w, int h) {
 
 /* ---- 帧交付 ------------------------------------------------ */
 
-static bool mtlFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
+static bool mtlFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     MtlSurface* s = (MtlSurface*)surf->backend;
     if (!s) return false;
 
@@ -205,7 +205,7 @@ static bool mtlFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
     }
 
     if (!s->drawable) s->drawable = [s->layer nextDrawable];
-    if (!s->drawable) { _sc_gpu_log("metal: nextDrawable 失败"); return false; }
+    if (!s->drawable) { gpu_log("metal: nextDrawable 失败"); return false; }
 
     id<MTLTexture> target = s->drawable.texture;
     int w = (int)target.width;
@@ -250,7 +250,7 @@ static void mtlFrameEnd(void) {
 
 /* ---- memimg（IOSurface） ------------------------------------ */
 
-static bool mtlMemimgAlloc(_sc_gpu_memimg_t* img) {
+static bool mtlMemimgAlloc(gpu_memimg_t* img) {
     MtlMemimg* m = (MtlMemimg*)calloc(1, sizeof(MtlMemimg));
     if (!m) return false;
     const sc_gpu_memimg_desc* d = &img->desc;
@@ -258,7 +258,7 @@ static bool mtlMemimgAlloc(_sc_gpu_memimg_t* img) {
     /* IOSurface：32 位 BGRA（'BGRA'）；YUV 导入路径待扩 */
     MTLPixelFormat mfmt = toMtlFormat(d->format);
     if (mfmt != MTLPixelFormatBGRA8Unorm && mfmt != MTLPixelFormatRGBA8Unorm) {
-        _sc_gpu_log("metal: memimg 暂仅支持 BGRA8/RGBA8");
+        gpu_log("metal: memimg 暂仅支持 BGRA8/RGBA8");
         free(m);
         return false;
     }
@@ -273,7 +273,7 @@ static bool mtlMemimgAlloc(_sc_gpu_memimg_t* img) {
     };
     m->iosurf = IOSurfaceCreate((__bridge CFDictionaryRef)props);
     if (!m->iosurf) {
-        _sc_gpu_log("metal: IOSurfaceCreate 失败");
+        gpu_log("metal: IOSurfaceCreate 失败");
         free(m);
         return false;
     }
@@ -287,7 +287,7 @@ static bool mtlMemimgAlloc(_sc_gpu_memimg_t* img) {
                (d->render_target ? MTLTextureUsageRenderTarget : 0);
     m->tex = [env.device newTextureWithDescriptor:td iosurface:m->iosurf plane:0];
     if (!m->tex) {
-        _sc_gpu_log("metal: IOSurface 纹理创建失败");
+        gpu_log("metal: IOSurface 纹理创建失败");
         CFRelease(m->iosurf);
         free(m);
         return false;
@@ -296,10 +296,10 @@ static bool mtlMemimgAlloc(_sc_gpu_memimg_t* img) {
     return true;
 }
 
-static bool mtlMemimgImport(_sc_gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
+static bool mtlMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
     /* mac 导入源 = IOSurfaceRef（native 字段） */
     if (!src->native) {
-        _sc_gpu_log("metal: memimg_import 需 native=IOSurfaceRef");
+        gpu_log("metal: memimg_import 需 native=IOSurfaceRef");
         return false;
     }
     MtlMemimg* m = (MtlMemimg*)calloc(1, sizeof(MtlMemimg));
@@ -322,7 +322,7 @@ static bool mtlMemimgImport(_sc_gpu_memimg_t* img, const sc_gpu_memory_frame* sr
     return true;
 }
 
-static bool mtlMemimgExport(_sc_gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
+static bool mtlMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
     (void)with_fence;   /* mac 验证版：无 fence（sync_fd=-1，消费前 sc_gfx_finish） */
     MtlMemimg* m = (MtlMemimg*)img->backend;
     if (!m) return false;
@@ -338,12 +338,12 @@ static bool mtlMemimgExport(_sc_gpu_memimg_t* img, sc_gpu_memory_frame* out, boo
     return true;
 }
 
-static void* mtlMemimgNative(_sc_gpu_memimg_t* img) {
+static void* mtlMemimgNative(gpu_memimg_t* img) {
     MtlMemimg* m = (MtlMemimg*)img->backend;
     return m ? (__bridge void*)m->tex : NULL;   /* gfx 后端消费 MTLTexture */
 }
 
-static void* mtlMemimgMap(_sc_gpu_memimg_t* img, int plane, uint32_t* out_stride) {
+static void* mtlMemimgMap(gpu_memimg_t* img, int plane, uint32_t* out_stride) {
     (void)plane;
     MtlMemimg* m = (MtlMemimg*)img->backend;
     if (!m) return NULL;
@@ -352,13 +352,13 @@ static void* mtlMemimgMap(_sc_gpu_memimg_t* img, int plane, uint32_t* out_stride
     return IOSurfaceGetBaseAddress(m->iosurf);
 }
 
-static void mtlMemimgUnmap(_sc_gpu_memimg_t* img, int plane) {
+static void mtlMemimgUnmap(gpu_memimg_t* img, int plane) {
     (void)plane;
     MtlMemimg* m = (MtlMemimg*)img->backend;
     if (m) IOSurfaceUnlock(m->iosurf, kIOSurfaceLockReadOnly, NULL);
 }
 
-static void mtlMemimgFree(_sc_gpu_memimg_t* img) {
+static void mtlMemimgFree(gpu_memimg_t* img) {
     MtlMemimg* m = (MtlMemimg*)img->backend;
     if (!m) return;
     m->tex = nil;
@@ -367,15 +367,15 @@ static void mtlMemimgFree(_sc_gpu_memimg_t* img) {
     img->backend = NULL;
 }
 
-static bool mtlSurfaceDequeue(_sc_gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
-    _sc_gpu_memimg_t* img = _sc_gpu_lookup_memimg(surf->ring_imgs[slot]);
+static bool mtlSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
+    gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[slot]);
     if (!img) return false;
     return mtlMemimgExport(img, out, false);
 }
 
 /* ---- vtable ------------------------------------------------ */
 
-static const _sc_gpu_env_api mtlApi = {
+static const gpu_env_api mtlApi = {
     .name = "metal",
     .kind = SC_GPU_BACKEND_METAL,
     .init = mtlInit,
@@ -397,6 +397,6 @@ static const _sc_gpu_env_api mtlApi = {
     .surface_dequeue = mtlSurfaceDequeue,
 };
 
-const _sc_gpu_env_api* _sc_gpu_env_metal(void) { return &mtlApi; }
+const gpu_env_api* gpu_env_metal(void) { return &mtlApi; }
 
 #endif /* SC_GPU_METAL */

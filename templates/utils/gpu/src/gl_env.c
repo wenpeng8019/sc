@@ -37,7 +37,7 @@
 
 typedef struct GlSurface {
     /* WINDOW */
-    _sc_gl_ctx* ctx;
+    gl_ctx* ctx;
     GLuint      vao;      /* core profile 必需的全局 VAO */
 #if defined(__linux__)
     /* MEMORY：环槽 EGLImage 包装纹理 + FBO；共享深度 rbo */
@@ -49,7 +49,7 @@ typedef struct GlSurface {
 } GlSurface;
 
 static struct {
-    _sc_gpu_surface_t* acquired[GL_MAX_ACQUIRED];
+    gpu_surface_t* acquired[GL_MAX_ACQUIRED];
     int acquiredCount;
 #if defined(__linux__)
     GLuint headlessVao;   /* headless 上下文的全局 VAO */
@@ -67,7 +67,7 @@ static bool glInit(const sc_gpu_desc* desc) {
 
 static void glShutdown(void) {
 #if defined(__linux__)
-    _sc_gl_egl_shutdown();
+    gl_egl_shutdown();
 #endif
     memset(&env, 0, sizeof(env));
 }
@@ -78,22 +78,22 @@ static void* glDevice(void) { return NULL; }   /* GL 无设备概念（上下文
 
 #if defined(__linux__)
 /* MEMORY surface（linux）：headless 上下文 + 每槽 EGLImage→tex+FBO */
-static bool glMemorySurfaceCreate(_sc_gpu_surface_t* surf, GlSurface* s) {
-    if (!_sc_gl_egl_init()) return false;
-    _sc_gl_egl_make_current();
+static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
+    if (!gl_egl_init()) return false;
+    gl_egl_make_current();
     if (!env.headlessVao) glGenVertexArrays(1, &env.headlessVao);
     glBindVertexArray(env.headlessVao);
     if (!env.pImageTarget) {
         env.pImageTarget = (PFN_scEGLImageTargetTexture2DOES)
-            _sc_gl_get_proc("glEGLImageTargetTexture2DOES");
+            gl_get_proc("glEGLImageTargetTexture2DOES");
         if (!env.pImageTarget) {
-            _sc_gpu_log("gl: 无 GL_OES_EGL_image 扩展");
+            gpu_log("gl: 无 GL_OES_EGL_image 扩展");
             return false;
         }
     }
 
     if (surf->desc.sample_count > 1)
-        _sc_gpu_log("gl: MEMORY surface MSAA 暂不支持（忽略）");
+        gpu_log("gl: MEMORY surface MSAA 暂不支持（忽略）");
 
     if (surf->desc.depth_format != SC_GPU_PIXELFORMAT_NONE) {
         glGenRenderbuffers(1, &s->depthRbo);
@@ -102,8 +102,8 @@ static bool glMemorySurfaceCreate(_sc_gpu_surface_t* surf, GlSurface* s) {
                               surf->desc.width, surf->desc.height);
     }
     for (int i = 0; i < surf->desc.image_count; i++) {
-        _sc_gpu_memimg_t* img = _sc_gpu_lookup_memimg(surf->ring_imgs[i]);
-        void* eglimg = img ? _sc_gl_memimg_egl_image((_sc_gl_memimg*)img->backend) : NULL;
+        gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[i]);
+        void* eglimg = img ? gl_memimg_egl_image((gl_memimg*)img->backend) : NULL;
         if (!eglimg) return false;
         glGenTextures(1, &s->ringTex[i]);
         glBindTexture(GL_TEXTURE_2D, s->ringTex[i]);
@@ -116,7 +116,7 @@ static bool glMemorySurfaceCreate(_sc_gpu_surface_t* surf, GlSurface* s) {
             glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
                                       GL_RENDERBUFFER, s->depthRbo);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-            _sc_gpu_log("gl: MEMORY 环槽 %d FBO 不完整", i);
+            gpu_log("gl: MEMORY 环槽 %d FBO 不完整", i);
             return false;
         }
         s->ringFence[i] = -1;
@@ -126,7 +126,7 @@ static bool glMemorySurfaceCreate(_sc_gpu_surface_t* surf, GlSurface* s) {
 }
 #endif
 
-static bool glSurfaceCreate(_sc_gpu_surface_t* surf) {
+static bool glSurfaceCreate(gpu_surface_t* surf) {
     GlSurface* s = (GlSurface*)calloc(1, sizeof(GlSurface));
     if (!s) return false;
 
@@ -140,16 +140,16 @@ static bool glSurfaceCreate(_sc_gpu_surface_t* surf) {
         surf->backend = s;
         return true;
 #else
-        _sc_gpu_log("gl: mac 上 MEMORY surface 请用 Metal 后端");
+        gpu_log("gl: mac 上 MEMORY surface 请用 Metal 后端");
         free(s);
         return false;
 #endif
     }
 
     if (surf->desc.sample_count > 1)
-        _sc_gpu_log("gl: 交换链 MSAA 暂不支持（忽略 sample_count）");
+        gpu_log("gl: 交换链 MSAA 暂不支持（忽略 sample_count）");
     /* macOS 上限 4.1 core（scc tar glcore@410 对应） */
-    s->ctx = _sc_gl_ctx_create(surf->desc.native_window, surf->desc.native_display,
+    s->ctx = gl_ctx_create(surf->desc.native_window, surf->desc.native_display,
                                4, 1, surf->desc.swap_interval);
     if (!s->ctx) { free(s); return false; }
     /* 创建后即为当前上下文 */
@@ -159,7 +159,7 @@ static bool glSurfaceCreate(_sc_gpu_surface_t* surf) {
     return true;
 }
 
-static void glSurfaceDestroy(_sc_gpu_surface_t* surf) {
+static void glSurfaceDestroy(gpu_surface_t* surf) {
     GlSurface* s = (GlSurface*)surf->backend;
     if (!s) return;
     for (int i = 0; i < env.acquiredCount; i++) {
@@ -170,7 +170,7 @@ static void glSurfaceDestroy(_sc_gpu_surface_t* surf) {
     }
 #if defined(__linux__)
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-        _sc_gl_egl_make_current();
+        gl_egl_make_current();
         for (int i = 0; i < surf->desc.image_count; i++) {
             if (s->ringFbo[i]) glDeleteFramebuffers(1, &s->ringFbo[i]);
             if (s->ringTex[i]) glDeleteTextures(1, &s->ringTex[i]);
@@ -183,40 +183,40 @@ static void glSurfaceDestroy(_sc_gpu_surface_t* surf) {
     }
 #endif
     if (s->ctx) {
-        _sc_gl_ctx_make_current(s->ctx);
+        gl_ctx_make_current(s->ctx);
         if (s->vao) glDeleteVertexArrays(1, &s->vao);
-        _sc_gl_ctx_destroy(s->ctx);
+        gl_ctx_destroy(s->ctx);
     }
     free(s);
     surf->backend = NULL;
 }
 
-static void glSurfaceActivate(_sc_gpu_surface_t* surf) {
+static void glSurfaceActivate(gpu_surface_t* surf) {
     if (surf && surf->backend) {
         GlSurface* s = (GlSurface*)surf->backend;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
 #if defined(__linux__)
-            _sc_gl_egl_make_current();
+            gl_egl_make_current();
             glBindVertexArray(env.headlessVao);
 #endif
             return;
         }
-        _sc_gl_ctx_make_current(s->ctx);
+        gl_ctx_make_current(s->ctx);
         glBindVertexArray(s->vao);
     } else {
-        _sc_gl_ctx_make_current(NULL);
+        gl_ctx_make_current(NULL);
     }
 }
 
-static void glSurfaceResize(_sc_gpu_surface_t* surf, int w, int h) {
+static void glSurfaceResize(gpu_surface_t* surf, int w, int h) {
     (void)w; (void)h;
     GlSurface* s = (GlSurface*)surf->backend;
-    if (s) _sc_gl_ctx_resize(s->ctx);
+    if (s) gl_ctx_resize(s->ctx);
 }
 
 /* ---- 帧交付 ------------------------------------------------ */
 
-static bool glFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
+static bool glFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     GlSurface* s = (GlSurface*)surf->backend;
     if (!s) return false;
 
@@ -252,7 +252,7 @@ static bool glFrameAcquire(_sc_gpu_surface_t* surf, sc_gpu_frame* f) {
 
 static void glFrameEnd(void) {
     for (int i = 0; i < env.acquiredCount; i++) {
-        _sc_gpu_surface_t* surf = env.acquired[i];
+        gpu_surface_t* surf = env.acquired[i];
         GlSurface* s = (GlSurface*)surf->backend;
         if (!s) continue;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
@@ -261,13 +261,13 @@ static void glFrameEnd(void) {
             if (surf->ring_cur >= 0) {
                 if (s->ringFence[surf->ring_cur] >= 0)
                     close(s->ringFence[surf->ring_cur]);
-                s->ringFence[surf->ring_cur] = _sc_gl_egl_fence_fd();
+                s->ringFence[surf->ring_cur] = gl_egl_fence_fd();
                 if (s->ringFence[surf->ring_cur] < 0)
                     glFinish();   /* 无 fence 扩展 → CPU 同步退化 */
             }
 #endif
         } else {
-            _sc_gl_ctx_swap(s->ctx);   /* swap 不改变 current */
+            gl_ctx_swap(s->ctx);   /* swap 不改变 current */
         }
     }
     env.acquiredCount = 0;
@@ -277,8 +277,8 @@ static void glFrameEnd(void) {
 
 #if defined(__linux__)
 
-static bool glMemimgAlloc(_sc_gpu_memimg_t* img) {
-    _sc_gl_memimg* m = _sc_gl_memimg_alloc(img->desc.width, img->desc.height,
+static bool glMemimgAlloc(gpu_memimg_t* img) {
+    gl_memimg* m = gl_memimg_alloc(img->desc.width, img->desc.height,
                                            img->desc.fourcc, img->desc.memory,
                                            img->desc.modifier,
                                            img->desc.render_target);
@@ -286,45 +286,45 @@ static bool glMemimgAlloc(_sc_gpu_memimg_t* img) {
     return m != NULL;
 }
 
-static bool glMemimgImport(_sc_gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
-    _sc_gl_memimg* m = _sc_gl_memimg_import(src);
+static bool glMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
+    gl_memimg* m = gl_memimg_import(src);
     img->backend = m;
     return m != NULL;
 }
 
-static bool glMemimgExport(_sc_gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
-    if (!_sc_gl_memimg_export((_sc_gl_memimg*)img->backend, out)) return false;
+static bool glMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
+    if (!gl_memimg_export((gl_memimg*)img->backend, out)) return false;
     if (with_fence) {
-        out->sync_fd = _sc_gl_egl_fence_fd();
+        out->sync_fd = gl_egl_fence_fd();
         if (out->sync_fd < 0) glFinish();
     }
     return true;
 }
 
-static void* glMemimgNative(_sc_gpu_memimg_t* img) {
-    return _sc_gl_memimg_egl_image((_sc_gl_memimg*)img->backend);
+static void* glMemimgNative(gpu_memimg_t* img) {
+    return gl_memimg_egl_image((gl_memimg*)img->backend);
 }
 
-static void* glMemimgMap(_sc_gpu_memimg_t* img, int plane, uint32_t* out_stride) {
+static void* glMemimgMap(gpu_memimg_t* img, int plane, uint32_t* out_stride) {
     (void)plane;
-    return _sc_gl_memimg_map((_sc_gl_memimg*)img->backend, out_stride);
+    return gl_memimg_map((gl_memimg*)img->backend, out_stride);
 }
 
-static void glMemimgUnmap(_sc_gpu_memimg_t* img, int plane) {
+static void glMemimgUnmap(gpu_memimg_t* img, int plane) {
     (void)plane;
-    _sc_gl_memimg_unmap((_sc_gl_memimg*)img->backend);
+    gl_memimg_unmap((gl_memimg*)img->backend);
 }
 
-static void glMemimgFree(_sc_gpu_memimg_t* img) {
-    _sc_gl_memimg_free((_sc_gl_memimg*)img->backend);
+static void glMemimgFree(gpu_memimg_t* img) {
+    gl_memimg_free((gl_memimg*)img->backend);
     img->backend = NULL;
 }
 
-static bool glSurfaceDequeue(_sc_gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
+static bool glSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
     GlSurface* s = (GlSurface*)surf->backend;
-    _sc_gpu_memimg_t* img = _sc_gpu_lookup_memimg(surf->ring_imgs[slot]);
+    gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[slot]);
     if (!s || !img) return false;
-    if (!_sc_gl_memimg_export((_sc_gl_memimg*)img->backend, out)) return false;
+    if (!gl_memimg_export((gl_memimg*)img->backend, out)) return false;
     out->sync_fd = s->ringFence[slot];   /* 所有权交给调用方 */
     s->ringFence[slot] = -1;
     return true;
@@ -334,7 +334,7 @@ static bool glSurfaceDequeue(_sc_gpu_surface_t* surf, int slot, sc_gpu_memory_fr
 
 /* ---- vtable ------------------------------------------------ */
 
-static const _sc_gpu_env_api glApi = {
+static const gpu_env_api glApi = {
     .name = "gl",
     .kind = SC_GPU_BACKEND_GL,
     .init = glInit,
@@ -358,6 +358,6 @@ static const _sc_gpu_env_api glApi = {
 #endif
 };
 
-const _sc_gpu_env_api* _sc_gpu_env_gl(void) { return &glApi; }
+const gpu_env_api* gpu_env_gl(void) { return &glApi; }
 
 #endif /* SC_GPU_GL */
