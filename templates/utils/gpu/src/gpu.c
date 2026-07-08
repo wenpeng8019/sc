@@ -177,10 +177,10 @@ int sc_gpu_init(const sc_gpu_desc* desc) {
 void sc_gpu_shutdown(void) {
     if (g_gpu.api) {
         for (int i = 1; i < g_gpu.surface_pool.size; i++)
-            if (g_gpu.surfaces[i].state == _SC_GPU_SLOT_VALID)
+            if (g_gpu.surfaces[i].state == GPU_SLOT_VALID)
                 sc_gpu_destroy_surface(g_gpu.surfaces[i].id);
         for (int i = 1; i < g_gpu.memimg_pool.size; i++)
-            if (g_gpu.memimgs[i].state == _SC_GPU_SLOT_VALID &&
+            if (g_gpu.memimgs[i].state == GPU_SLOT_VALID &&
                 g_gpu.api->memimg_free)
                 g_gpu.api->memimg_free(&g_gpu.memimgs[i]);
         g_gpu.api->shutdown();
@@ -247,9 +247,9 @@ sc_gpu_surface sc_gpu_make_surface(const sc_gpu_surface_desc* desc) {
         }
     }
 
-    surf->state = g_gpu.api->surface_create(surf) ? _SC_GPU_SLOT_VALID
-                                                    : _SC_GPU_SLOT_FAILED;
-    if (surf->state == _SC_GPU_SLOT_FAILED &&
+    surf->state = g_gpu.api->surface_create(surf) ? GPU_SLOT_VALID
+                                                    : GPU_SLOT_FAILED;
+    if (surf->state == GPU_SLOT_FAILED &&
         surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
         for (int i = 0; i < surf->desc.image_count; i++)
             sc_gpu_memimg_free(surf->ring_imgs[i]);
@@ -266,20 +266,20 @@ void sc_gpu_destroy_surface(sc_gpu_surface hnd) {
         g_gpu.cur_surface_id = 0;
         g_gpu.api->surface_activate(NULL);
     }
-    if (surf->state == _SC_GPU_SLOT_VALID) g_gpu.api->surface_destroy(surf);
+    if (surf->state == GPU_SLOT_VALID) g_gpu.api->surface_destroy(surf);
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
         for (int i = 0; i < surf->desc.image_count; i++)
             if (surf->ring_imgs[i]) sc_gpu_memimg_free(surf->ring_imgs[i]);
     }
     surf->id = 0;
-    surf->state = _SC_GPU_SLOT_FREE;
+    surf->state = GPU_SLOT_FREE;
     poolRelease(&g_gpu.surface_pool, hnd);
 }
 
 void sc_gpu_make_current(sc_gpu_surface hnd) {
     if (!g_gpu.valid) return;
     gpu_surface_t* surf = gpu_lookup_surface(hnd);
-    if (!surf || surf->state != _SC_GPU_SLOT_VALID) {
+    if (!surf || surf->state != GPU_SLOT_VALID) {
         gpu_log("make_current: 无效 surface"); return;
     }
     g_gpu.cur_surface = surf;
@@ -294,7 +294,7 @@ sc_gpu_surface sc_gpu_query_current_surface(void) {
 void sc_gpu_surface_resize(sc_gpu_surface hnd, int width, int height) {
     if (!g_gpu.valid || width <= 0 || height <= 0) return;
     gpu_surface_t* surf = gpu_lookup_surface(hnd);
-    if (!surf || surf->state != _SC_GPU_SLOT_VALID) return;
+    if (!surf || surf->state != GPU_SLOT_VALID) return;
     if (surf->desc.width == width && surf->desc.height == height) return;
     surf->desc.width = width;
     surf->desc.height = height;
@@ -304,7 +304,7 @@ void sc_gpu_surface_resize(sc_gpu_surface hnd, int width, int height) {
 int sc_gpu_query_surface_info(sc_gpu_surface hnd, sc_gpu_surface_desc* out) {
     if (!g_gpu.valid || !out) return 0;
     gpu_surface_t* surf = hnd ? gpu_lookup_surface(hnd) : g_gpu.cur_surface;
-    if (!surf || surf->state != _SC_GPU_SLOT_VALID) return 0;
+    if (!surf || surf->state != GPU_SLOT_VALID) return 0;
     *out = surf->desc;
     return 1;
 }
@@ -326,11 +326,11 @@ int sc_gpu_frame_acquire(sc_gpu_frame* out) {
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY && surf->ring_cur < 0) {
         int slot = surf->ring_acquire;
         int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
-        if (st != _SC_GPU_RING_FREE) {
+        if (st != GPU_RING_FREE) {
             gpu_log("frame_acquire: 环满（消费端未归还）");
             return 0;
         }
-        surf->ring_state[slot] = _SC_GPU_RING_ACQUIRED;
+        surf->ring_state[slot] = GPU_RING_ACQUIRED;
         surf->ring_cur = slot;
         if (g_gpu.mem_acquired_count < 16)
             g_gpu.mem_acquired[g_gpu.mem_acquired_count++] = surf;
@@ -347,7 +347,7 @@ void sc_gpu_frame_end(void) {
         gpu_surface_t* surf = g_gpu.mem_acquired[i];
         if (surf->ring_cur >= 0) {
             __atomic_store_n(&surf->ring_state[surf->ring_cur],
-                             _SC_GPU_RING_RENDERED, __ATOMIC_RELEASE);
+                             GPU_RING_RENDERED, __ATOMIC_RELEASE);
             surf->ring_acquire = (surf->ring_acquire + 1) % surf->desc.image_count;
             surf->ring_cur = -1;
         }
@@ -381,8 +381,8 @@ sc_gpu_memimg sc_gpu_memimg_alloc(const sc_gpu_memimg_desc* desc) {
         poolRelease(&g_gpu.memimg_pool, id);
         return 0;
     }
-    img->state = g_gpu.api->memimg_alloc(img) ? _SC_GPU_SLOT_VALID
-                                                : _SC_GPU_SLOT_FAILED;
+    img->state = g_gpu.api->memimg_alloc(img) ? GPU_SLOT_VALID
+                                                : GPU_SLOT_FAILED;
     return id;
 }
 
@@ -401,15 +401,15 @@ sc_gpu_memimg sc_gpu_memimg_import(const sc_gpu_memory_frame* src) {
     img->desc.width = src->width;
     img->desc.height = src->height;
     img->desc.fourcc = src->fourcc;
-    img->state = g_gpu.api->memimg_import(img, src) ? _SC_GPU_SLOT_VALID
-                                                      : _SC_GPU_SLOT_FAILED;
+    img->state = g_gpu.api->memimg_import(img, src) ? GPU_SLOT_VALID
+                                                      : GPU_SLOT_FAILED;
     return id;
 }
 
 int sc_gpu_memimg_export(sc_gpu_memimg hnd, sc_gpu_memory_frame* out, int with_fence) {
     if (!g_gpu.valid || !out) return 0;
     gpu_memimg_t* img = gpu_lookup_memimg(hnd);
-    if (!img || img->state != _SC_GPU_SLOT_VALID || !g_gpu.api->memimg_export) return 0;
+    if (!img || img->state != GPU_SLOT_VALID || !g_gpu.api->memimg_export) return 0;
     memset(out, 0, sizeof(*out));
     out->sync_fd = -1;
     if (!g_gpu.api->memimg_export(img, out, with_fence != 0)) return 0;
@@ -420,21 +420,21 @@ int sc_gpu_memimg_export(sc_gpu_memimg hnd, sc_gpu_memory_frame* out, int with_f
 void* sc_gpu_memimg_native(sc_gpu_memimg hnd) {
     if (!g_gpu.valid) return NULL;
     gpu_memimg_t* img = gpu_lookup_memimg(hnd);
-    if (!img || img->state != _SC_GPU_SLOT_VALID || !g_gpu.api->memimg_native) return NULL;
+    if (!img || img->state != GPU_SLOT_VALID || !g_gpu.api->memimg_native) return NULL;
     return g_gpu.api->memimg_native(img);
 }
 
 void* sc_gpu_memimg_map(sc_gpu_memimg hnd, int plane, uint32_t* out_stride) {
     if (!g_gpu.valid) return NULL;
     gpu_memimg_t* img = gpu_lookup_memimg(hnd);
-    if (!img || img->state != _SC_GPU_SLOT_VALID || !g_gpu.api->memimg_map) return NULL;
+    if (!img || img->state != GPU_SLOT_VALID || !g_gpu.api->memimg_map) return NULL;
     return g_gpu.api->memimg_map(img, plane, out_stride);
 }
 
 void sc_gpu_memimg_unmap(sc_gpu_memimg hnd, int plane) {
     if (!g_gpu.valid) return;
     gpu_memimg_t* img = gpu_lookup_memimg(hnd);
-    if (!img || img->state != _SC_GPU_SLOT_VALID || !g_gpu.api->memimg_unmap) return;
+    if (!img || img->state != GPU_SLOT_VALID || !g_gpu.api->memimg_unmap) return;
     g_gpu.api->memimg_unmap(img, plane);
 }
 
@@ -442,10 +442,10 @@ void sc_gpu_memimg_free(sc_gpu_memimg hnd) {
     if (!g_gpu.valid) return;
     gpu_memimg_t* img = gpu_lookup_memimg(hnd);
     if (!img) return;
-    if (img->state == _SC_GPU_SLOT_VALID && g_gpu.api->memimg_free)
+    if (img->state == GPU_SLOT_VALID && g_gpu.api->memimg_free)
         g_gpu.api->memimg_free(img);
     img->id = 0;
-    img->state = _SC_GPU_SLOT_FREE;
+    img->state = GPU_SLOT_FREE;
     poolRelease(&g_gpu.memimg_pool, hnd);
 }
 
@@ -454,18 +454,18 @@ void sc_gpu_memimg_free(sc_gpu_memimg hnd) {
 int sc_gpu_memory_dequeue(sc_gpu_surface hnd, sc_gpu_memory_frame* out) {
     if (!g_gpu.valid || !out) return 0;
     gpu_surface_t* surf = gpu_lookup_surface(hnd);
-    if (!surf || surf->state != _SC_GPU_SLOT_VALID ||
+    if (!surf || surf->state != GPU_SLOT_VALID ||
         surf->desc.kind != SC_GPU_SURFACE_MEMORY) return 0;
     int slot = surf->ring_dequeue;
     int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
-    if (st != _SC_GPU_RING_RENDERED) return 0;   /* 无成帧 */
+    if (st != GPU_RING_RENDERED) return 0;   /* 无成帧 */
     memset(out, 0, sizeof(*out));
     out->sync_fd = -1;
     if (!g_gpu.api->surface_dequeue ||
         !g_gpu.api->surface_dequeue(surf, slot, out)) return 0;
     out->img = surf->ring_imgs[slot];
     out->slot = (uint32_t)slot;
-    __atomic_store_n(&surf->ring_state[slot], _SC_GPU_RING_DEQUEUED, __ATOMIC_RELEASE);
+    __atomic_store_n(&surf->ring_state[slot], GPU_RING_DEQUEUED, __ATOMIC_RELEASE);
     surf->ring_dequeue = (surf->ring_dequeue + 1) % surf->desc.image_count;
     return 1;
 }
@@ -476,9 +476,9 @@ void sc_gpu_memory_enqueue(sc_gpu_surface hnd, uint32_t slot) {
     if (!surf || surf->desc.kind != SC_GPU_SURFACE_MEMORY ||
         slot >= (uint32_t)surf->desc.image_count) return;
     int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
-    if (st != _SC_GPU_RING_DEQUEUED) {
+    if (st != GPU_RING_DEQUEUED) {
         gpu_log("memory_enqueue: 槽 %u 非消费中状态", slot);
         return;
     }
-    __atomic_store_n(&surf->ring_state[slot], _SC_GPU_RING_FREE, __ATOMIC_RELEASE);
+    __atomic_store_n(&surf->ring_state[slot], GPU_RING_FREE, __ATOMIC_RELEASE);
 }

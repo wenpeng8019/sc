@@ -155,7 +155,7 @@ static void outputHandleDone(void* userData, struct wl_output* output)
             return;
     }
 
-    impl_on_monitor(monitor, SC_CONNECTED, _SC_INSERT_LAST);
+    impl_on_monitor(monitor, SC_CONNECTED, WSI_INSERT_LAST);
 }
 
 static void outputHandleScale(void* userData,

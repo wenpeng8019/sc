@@ -250,7 +250,7 @@ void wsi_free(void* block)
 void impl_on_error(int code, const char* format, ...)
 {
     error_st* error = &t_thread_error;
-    char description[_SC_MESSAGE_SIZE];
+    char description[WSI_MESSAGE_SIZE];
 
     if (format)
     {

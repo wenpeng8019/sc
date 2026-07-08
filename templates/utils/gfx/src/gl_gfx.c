@@ -30,6 +30,9 @@
 #if defined(__APPLE__)
   #define GL_SILENCE_DEPRECATION
   #include <OpenGL/gl3.h>
+  #include <OpenGL/OpenGL.h>          /* CGL：当前上下文 */
+  #include <OpenGL/CGLIOSurface.h>    /* memimg 绑定：IOSurface → rect 纹理 */
+  #include <IOSurface/IOSurfaceRef.h>
 #elif defined(__linux__)
   #define GL_GLEXT_PROTOTYPES
   #include <GL/gl.h>
@@ -354,7 +357,10 @@ static bool glImageCreate(gfx_image_t* img) {
     if (!m) return false;
     const sc_gfx_image_desc* d = &img->desc;
 
-    /* memimg 绑定：纹理存储来自 gpu env 的 EGLImage（linux） */
+    /* memimg 绑定：纹理存储来自 gpu env 的平台原语
+     * linux = EGLImage→GL_TEXTURE_2D；mac = IOSurface→GL_TEXTURE_RECTANGLE
+     * （rect 纹理可作渲染目标/FBO 附件；采样需 sampler2DRect，普通
+     *  sampler2D 着色器不适用 —— NSGL 无 EGLImage，此为唯一包装途径） */
     if (d->memimg) {
 #if defined(__linux__)
         static PFN_scEGLImageTargetTexture2DOES pImageTarget;
@@ -379,8 +385,31 @@ static bool glImageCreate(gfx_image_t* img) {
         pImageTarget(GL_TEXTURE_2D, eglimg);
         img->backend = m;
         return true;
+#elif defined(__APPLE__)
+        IOSurfaceRef iosurf = (IOSurfaceRef)sc_gpu_memimg_native(d->memimg);
+        if (!iosurf) {
+            gfx_log("gl: memimg %u 无效", d->memimg);
+            free(m);
+            return false;
+        }
+        m->target = GL_TEXTURE_RECTANGLE;
+        glGenTextures(1, &m->tex);
+        glBindTexture(GL_TEXTURE_RECTANGLE, m->tex);
+        CGLError err = CGLTexImageIOSurface2D(CGLGetCurrentContext(),
+                                              GL_TEXTURE_RECTANGLE, GL_RGBA8,
+                                              d->width, d->height,
+                                              GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                                              iosurf, 0);
+        if (err != kCGLNoError) {
+            gfx_log("gl: CGLTexImageIOSurface2D 失败 (%d)", (int)err);
+            glDeleteTextures(1, &m->tex);
+            free(m);
+            return false;
+        }
+        img->backend = m;
+        return true;
 #else
-        gfx_log("gl: mac 上 memimg 绑定请用 Metal 后端");
+        gfx_log("gl: 本平台 memimg 绑定未支持");
         free(m);
         return false;
 #endif

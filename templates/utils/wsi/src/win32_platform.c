@@ -15,8 +15,8 @@
 // Reports the specified error, appending information about the last Win32 error
 static void win32_InputError(int error, const char* description)
 {
-    WCHAR buffer[_SC_MESSAGE_SIZE] = L"";
-    char message[_SC_MESSAGE_SIZE] = "";
+    WCHAR buffer[WSI_MESSAGE_SIZE] = L"";
+    char message[WSI_MESSAGE_SIZE] = "";
 
     FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM |
                        FORMAT_MESSAGE_IGNORE_INSERTS |
@@ -643,7 +643,7 @@ static void win32_poll_monitors(void)
 
     for (adapterIndex = 0;  ;  adapterIndex++)
     {
-        int type = _SC_INSERT_LAST;
+        int type = WSI_INSERT_LAST;
 
         ZeroMemory(&adapter, sizeof(adapter));
         adapter.cb = sizeof(adapter);
@@ -655,7 +655,7 @@ static void win32_poll_monitors(void)
             continue;
 
         if (adapter.StateFlags & DISPLAY_DEVICE_PRIMARY_DEVICE)
-            type = _SC_INSERT_FIRST;
+            type = WSI_INSERT_FIRST;
 
         for (displayIndex = 0;  ;  displayIndex++)
         {
@@ -693,7 +693,7 @@ static void win32_poll_monitors(void)
 
             impl_on_monitor(monitor, SC_CONNECTED, type);
 
-            type = _SC_INSERT_LAST;
+            type = WSI_INSERT_LAST;
         }
 
         // HACK: If an active adapter does not have any display devices

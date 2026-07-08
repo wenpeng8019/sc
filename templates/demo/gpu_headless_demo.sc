@@ -9,7 +9,7 @@
 # 验证方式：渲染三角形 → map 映射 CPU → 写 PPM 文件肉眼校验。
 #   真实链路中 map 换成把 frame.fd / frame.native 交给 v4l2 / VideoToolbox。
 #
-# 用法（macOS，从仓库根目录运行；Metal 后端）：
+# 用法（macOS，从仓库根目录运行；默认 Metal，GPU_BACKEND=gl 切 NSGL 无屏）：
 #   SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
 #                -framework OpenGL -framework IOSurface" \
 #       ./compiler/build/scc templates/demo/gpu_headless_demo.sc
@@ -66,6 +66,10 @@ fnc main: i4
     # ---- gpu headless 初始化（无 native_window，不建默认 surface） ----
     var gd: ::sc_gpu_desc
     ::memset(&gd, 0, sizeof(::sc_gpu_desc))
+    # GPU_BACKEND=gl 切 OpenGL 后端（默认平台首选：mac=Metal）
+    var envb: char& = (::getenv("GPU_BACKEND"): char&)
+    if envb != nil && envb[0] == (103: char)        # 'g'
+        gd.backend = 2                              # SC_GPU_BACKEND_GL
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n"
         return 1
@@ -92,13 +96,21 @@ fnc main: i4
         gpu_shutdown()
         return 1
 
-    # ---- 着色器（scc 产物，Metal） ----
+    # ---- 着色器（scc 产物，按后端选 Metal/GL） ----
     var vsn: u8 = 0
     var fsn: u8 = 0
     var rjn: u8 = 0
-    var vs: char& = (load_file("templates/demo/gpu_shader/out/vs_main.metal20000.metal", &vsn): char&)
-    var fs: char& = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
-    var rj: char& = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
+    var vs: char& = nil
+    var fs: char& = nil
+    var rj: char& = nil
+    if bk == 2
+        vs = (load_file("templates/demo/gpu_shader/out/vs_main.glcore410.vert", &vsn): char&)
+        fs = (load_file("templates/demo/gpu_shader/out/fs_main.glcore410.frag", &fsn): char&)
+        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.glcore410.reflect.json", &rjn): char&)
+    else
+        vs = (load_file("templates/demo/gpu_shader/out/vs_main.metal20000.metal", &vsn): char&)
+        fs = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
+        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
     if vs == nil || fs == nil || rj == nil
         print "着色器产物缺失：先 scc 编译 gpu_shader/gpu_tri.ss\n"
         return 1

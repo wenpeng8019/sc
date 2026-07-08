@@ -20,17 +20,17 @@ void gpu_log(const char* fmt, ...);
 /* ---- surface 资源体 ---------------------------------------- */
 
 typedef enum gpu_slot_state {
-    _SC_GPU_SLOT_FREE = 0,
-    _SC_GPU_SLOT_VALID,
-    _SC_GPU_SLOT_FAILED,
+    GPU_SLOT_FREE = 0,
+    GPU_SLOT_VALID,
+    GPU_SLOT_FAILED,
 } gpu_slot_state;
 
 /* MEMORY surface 环槽状态（单生产者/单消费者；跨线程用 __atomic 读写） */
 typedef enum gpu_ring_state {
-    _SC_GPU_RING_FREE = 0,     /* 可供渲染 acquire */
-    _SC_GPU_RING_ACQUIRED,     /* 渲染中（本帧） */
-    _SC_GPU_RING_RENDERED,     /* 渲染完，可 dequeue */
-    _SC_GPU_RING_DEQUEUED,     /* 消费中，等 enqueue 归还 */
+    GPU_RING_FREE = 0,     /* 可供渲染 acquire */
+    GPU_RING_ACQUIRED,     /* 渲染中（本帧） */
+    GPU_RING_RENDERED,     /* 渲染完，可 dequeue */
+    GPU_RING_DEQUEUED,     /* 消费中，等 enqueue 归还 */
 } gpu_ring_state;
 
 typedef struct gpu_surface_t {

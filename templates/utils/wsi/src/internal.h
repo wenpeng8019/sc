@@ -1,10 +1,10 @@
 
 #pragma once
 
-#define _SC_INSERT_FIRST      0
-#define _SC_INSERT_LAST       1
+#define WSI_INSERT_FIRST      0
+#define WSI_INSERT_LAST       1
 
-#define _SC_MESSAGE_SIZE      1024
+#define WSI_MESSAGE_SIZE      1024
 
 typedef int (*GLFWproc)(void);
 
@@ -25,7 +25,7 @@ typedef struct library_t        library_st;
 struct error_t
 {
     int             code;
-    char            description[_SC_MESSAGE_SIZE];
+    char            description[WSI_MESSAGE_SIZE];
 };
 
 // Initialization configuration

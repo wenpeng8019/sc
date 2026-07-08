@@ -64,7 +64,7 @@ void impl_on_monitor(monitor_st* monitor, int action, int placement)
 {
     assert(monitor != NULL);
     assert(action == SC_CONNECTED || action == SC_DISCONNECTED);
-    assert(placement == _SC_INSERT_FIRST || placement == _SC_INSERT_LAST);
+    assert(placement == WSI_INSERT_FIRST || placement == WSI_INSERT_LAST);
 
     if (action == SC_CONNECTED)
     {
@@ -73,7 +73,7 @@ void impl_on_monitor(monitor_st* monitor, int action, int placement)
             wsi_realloc(g_wsi.monitors,
                           sizeof(monitor_st*) * g_wsi.monitorCount);
 
-        if (placement == _SC_INSERT_FIRST)
+        if (placement == WSI_INSERT_FIRST)
         {
             memmove(g_wsi.monitors + 1,
                     g_wsi.monitors,

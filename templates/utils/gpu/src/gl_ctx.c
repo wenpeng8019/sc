@@ -41,13 +41,12 @@ gl_ctx* gl_ctx_create(void* native_window, void* native_display,
     (void)native_display;
     gl_ctx* c = (gl_ctx*)calloc(1, sizeof(gl_ctx));
     if (!c) return NULL;
-    c->view = (__bridge NSView*)native_window;
-    if (!c->view) { free(c); return NULL; }
+    c->view = (__bridge NSView*)native_window;   /* NULL = 无屏上下文（离屏 FBO 渲染） */
 
     NSOpenGLPixelFormatAttribute a[16];
     int i = 0;
     a[i++] = NSOpenGLPFAAccelerated;
-    a[i++] = NSOpenGLPFADoubleBuffer;
+    if (c->view) a[i++] = NSOpenGLPFADoubleBuffer;   /* 无屏不需要交换链 */
     a[i++] = NSOpenGLPFAClosestPolicy;
     a[i++] = NSOpenGLPFAOpenGLProfile;
     int gv = major * 10 + minor;
@@ -65,14 +64,16 @@ gl_ctx* gl_ctx_create(void* native_window, void* native_display,
     c->ctx = [[NSOpenGLContext alloc] initWithFormat:c->pf shareContext:nil];
     if (!c->ctx) { c->pf = nil; free(c); return NULL; }
 
-    NSOpenGLContext* ctx = c->ctx;
-    NSView* view = c->view;
-    void (^attach)(void) = ^{
-        view.wantsBestResolutionOpenGLSurface = YES;   /* retina：像素级帧缓冲 */
-        [ctx setView:view];
-    };
-    if ([NSThread isMainThread]) attach();
-    else dispatch_sync(dispatch_get_main_queue(), attach);
+    if (c->view) {
+        NSOpenGLContext* ctx = c->ctx;
+        NSView* view = c->view;
+        void (^attach)(void) = ^{
+            view.wantsBestResolutionOpenGLSurface = YES;   /* retina：像素级帧缓冲 */
+            [ctx setView:view];
+        };
+        if ([NSThread isMainThread]) attach();
+        else dispatch_sync(dispatch_get_main_queue(), attach);
+    }
 
     [c->ctx makeCurrentContext];
     GLint si = swap_interval;
@@ -96,7 +97,7 @@ void gl_ctx_make_current(gl_ctx* c) {
 }
 
 void gl_ctx_swap(gl_ctx* c) {
-    if (c && c->ctx) [c->ctx flushBuffer];
+    if (c && c->ctx && c->view) [c->ctx flushBuffer];
 }
 
 void gl_ctx_resize(gl_ctx* c) {

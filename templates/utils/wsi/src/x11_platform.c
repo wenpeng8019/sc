@@ -101,7 +101,7 @@ void x11_ReleaseErrorHandler(void)
 // Reports the specified error, appending information about the last X error
 void x11_InputError(int error, const char* message)
 {
-    char buffer[_SC_MESSAGE_SIZE];
+    char buffer[WSI_MESSAGE_SIZE];
     XGetErrorText(g_wsi.x11.display, g_wsi.x11.errorCode,
                   buffer, sizeof(buffer));
 
@@ -1107,9 +1107,9 @@ void x11_poll_monitors(void)
             }
 
             if (monitor->x11.output == primary)
-                type = _SC_INSERT_FIRST;
+                type = WSI_INSERT_FIRST;
             else
-                type = _SC_INSERT_LAST;
+                type = WSI_INSERT_LAST;
 
             impl_on_monitor(monitor, SC_CONNECTED, type);
 
@@ -1137,7 +1137,7 @@ void x11_poll_monitors(void)
 
         impl_on_monitor(wsi_alloc_monitor("Display", widthMM, heightMM),
                           SC_CONNECTED,
-                          _SC_INSERT_FIRST);
+                          WSI_INSERT_FIRST);
     }
 }
 

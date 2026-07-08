@@ -260,19 +260,19 @@ void sc_gfx_shutdown(void) {
     if (g_gfx.api) {
         /* 逐资源销毁（后端仍活着时） */
         for (int i = 1; i < g_gfx.pipeline_pool.size; i++)
-            if (g_gfx.pipelines[i].slot.state == _SC_GFX_SLOT_VALID)
+            if (g_gfx.pipelines[i].slot.state == GFX_SLOT_VALID)
                 g_gfx.api->pipeline_destroy(&g_gfx.pipelines[i]);
         for (int i = 1; i < g_gfx.shader_pool.size; i++)
-            if (g_gfx.shaders[i].slot.state == _SC_GFX_SLOT_VALID)
+            if (g_gfx.shaders[i].slot.state == GFX_SLOT_VALID)
                 g_gfx.api->shader_destroy(&g_gfx.shaders[i]);
         for (int i = 1; i < g_gfx.sampler_pool.size; i++)
-            if (g_gfx.samplers[i].slot.state == _SC_GFX_SLOT_VALID)
+            if (g_gfx.samplers[i].slot.state == GFX_SLOT_VALID)
                 g_gfx.api->sampler_destroy(&g_gfx.samplers[i]);
         for (int i = 1; i < g_gfx.image_pool.size; i++)
-            if (g_gfx.images[i].slot.state == _SC_GFX_SLOT_VALID)
+            if (g_gfx.images[i].slot.state == GFX_SLOT_VALID)
                 g_gfx.api->image_destroy(&g_gfx.images[i]);
         for (int i = 1; i < g_gfx.buffer_pool.size; i++)
-            if (g_gfx.buffers[i].slot.state == _SC_GFX_SLOT_VALID)
+            if (g_gfx.buffers[i].slot.state == GFX_SLOT_VALID)
                 g_gfx.api->buffer_destroy(&g_gfx.buffers[i]);
         g_gfx.api->shutdown();
     }
@@ -315,10 +315,10 @@ sc_gfx_buffer sc_gfx_make_buffer(const sc_gfx_buffer_desc* desc) {
     resolveBufferDesc(&buf->desc);
     if (buf->desc.usage == SC_GFX_USAGE_IMMUTABLE && !buf->desc.data.ptr) {
         gfx_log("make_buffer: IMMUTABLE 须提供初始数据");
-        buf->slot.state = _SC_GFX_SLOT_FAILED;
+        buf->slot.state = GFX_SLOT_FAILED;
     } else {
-        buf->slot.state = g_gfx.api->buffer_create(buf) ? _SC_GFX_SLOT_VALID
-                                                          : _SC_GFX_SLOT_FAILED;
+        buf->slot.state = g_gfx.api->buffer_create(buf) ? GFX_SLOT_VALID
+                                                          : GFX_SLOT_FAILED;
     }
     return id;
 }
@@ -336,8 +336,8 @@ sc_gfx_image sc_gfx_make_image(const sc_gfx_image_desc* desc) {
     img->slot.id = id;
     img->desc = *desc;
     resolveImageDesc(&img->desc);
-    img->slot.state = g_gfx.api->image_create(img) ? _SC_GFX_SLOT_VALID
-                                                     : _SC_GFX_SLOT_FAILED;
+    img->slot.state = g_gfx.api->image_create(img) ? GFX_SLOT_VALID
+                                                     : GFX_SLOT_FAILED;
     return id;
 }
 
@@ -350,8 +350,8 @@ sc_gfx_sampler sc_gfx_make_sampler(const sc_gfx_sampler_desc* desc) {
     smp->slot.id = id;
     smp->desc = *desc;
     resolveSamplerDesc(&smp->desc);
-    smp->slot.state = g_gfx.api->sampler_create(smp) ? _SC_GFX_SLOT_VALID
-                                                       : _SC_GFX_SLOT_FAILED;
+    smp->slot.state = g_gfx.api->sampler_create(smp) ? GFX_SLOT_VALID
+                                                       : GFX_SLOT_FAILED;
     return id;
 }
 
@@ -368,7 +368,7 @@ sc_gfx_shader sc_gfx_make_shader(const sc_gfx_shader_desc* desc) {
     if (desc->reflect_json) {
         if (!gfx_parse_reflect(desc->reflect_json, &shd->reflect)) {
             gfx_log("make_shader: 反射清单解析失败");
-            shd->slot.state = _SC_GFX_SLOT_FAILED;
+            shd->slot.state = GFX_SLOT_FAILED;
             return id;
         }
     } else {
@@ -388,15 +388,15 @@ sc_gfx_shader sc_gfx_make_shader(const sc_gfx_shader_desc* desc) {
             strncpy(s->name, is->name, sizeof(s->name) - 1);
         }
     }
-    shd->slot.state = g_gfx.api->shader_create(shd, desc) ? _SC_GFX_SLOT_VALID
-                                                            : _SC_GFX_SLOT_FAILED;
+    shd->slot.state = g_gfx.api->shader_create(shd, desc) ? GFX_SLOT_VALID
+                                                            : GFX_SLOT_FAILED;
     return id;
 }
 
 sc_gfx_pipeline sc_gfx_make_pipeline(const sc_gfx_pipeline_desc* desc) {
     if (!g_gfx.valid || !desc) return 0;
     gfx_shader_t* shd = gfx_lookup_shader(desc->shader);
-    if (!shd || shd->slot.state != _SC_GFX_SLOT_VALID) {
+    if (!shd || shd->slot.state != GFX_SLOT_VALID) {
         gfx_log("make_pipeline: 无效 shader");
         return 0;
     }
@@ -408,8 +408,8 @@ sc_gfx_pipeline sc_gfx_make_pipeline(const sc_gfx_pipeline_desc* desc) {
     pip->desc = *desc;
     pip->shader = shd;
     resolvePipelineDesc(&pip->desc);
-    pip->slot.state = g_gfx.api->pipeline_create(pip) ? _SC_GFX_SLOT_VALID
-                                                        : _SC_GFX_SLOT_FAILED;
+    pip->slot.state = g_gfx.api->pipeline_create(pip) ? GFX_SLOT_VALID
+                                                        : GFX_SLOT_FAILED;
     return id;
 }
 
@@ -418,9 +418,9 @@ sc_gfx_pipeline sc_gfx_make_pipeline(const sc_gfx_pipeline_desc* desc) {
         if (!g_gfx.valid) return;                                            \
         gfx_##name##_t* res = gfx_lookup_##name(hnd);                  \
         if (!res) return;                                                      \
-        if (res->slot.state == _SC_GFX_SLOT_VALID) g_gfx.api->apifn(res);    \
+        if (res->slot.state == GFX_SLOT_VALID) g_gfx.api->apifn(res);    \
         res->slot.id = 0;                                                      \
-        res->slot.state = _SC_GFX_SLOT_FREE;                                   \
+        res->slot.state = GFX_SLOT_FREE;                                   \
         gfx_pool_release(&g_gfx.poolfield, hnd);                         \
     }
 
@@ -435,7 +435,7 @@ DESTROY_IMPL(pipeline, pipeline_pool, sc_gfx_pipeline, pipeline_destroy)
 void sc_gfx_update_buffer(sc_gfx_buffer hnd, const sc_gfx_range* data) {
     if (!g_gfx.valid || !data || !data->ptr) return;
     gfx_buffer_t* buf = gfx_lookup_buffer(hnd);
-    if (!buf || buf->slot.state != _SC_GFX_SLOT_VALID) return;
+    if (!buf || buf->slot.state != GFX_SLOT_VALID) return;
     if (buf->desc.usage == SC_GFX_USAGE_IMMUTABLE) {
         gfx_log("update_buffer: IMMUTABLE 不可更新"); return;
     }
@@ -448,7 +448,7 @@ void sc_gfx_update_buffer(sc_gfx_buffer hnd, const sc_gfx_range* data) {
 int sc_gfx_append_buffer(sc_gfx_buffer hnd, const sc_gfx_range* data) {
     if (!g_gfx.valid || !data || !data->ptr) return 0;
     gfx_buffer_t* buf = gfx_lookup_buffer(hnd);
-    if (!buf || buf->slot.state != _SC_GFX_SLOT_VALID) return 0;
+    if (!buf || buf->slot.state != GFX_SLOT_VALID) return 0;
     /* 按 4 字节对齐追加 */
     int offset = (buf->append_pos + 3) & ~3;
     if ((size_t)offset + data->size > buf->desc.size) {
@@ -464,7 +464,7 @@ int sc_gfx_append_buffer(sc_gfx_buffer hnd, const sc_gfx_range* data) {
 void sc_gfx_update_image(sc_gfx_image hnd, const sc_gfx_image_data* data) {
     if (!g_gfx.valid || !data) return;
     gfx_image_t* img = gfx_lookup_image(hnd);
-    if (!img || img->slot.state != _SC_GFX_SLOT_VALID) return;
+    if (!img || img->slot.state != GFX_SLOT_VALID) return;
     if (img->desc.usage == SC_GFX_USAGE_IMMUTABLE) {
         gfx_log("update_image: IMMUTABLE 不可更新"); return;
     }
@@ -475,9 +475,9 @@ void sc_gfx_update_image(sc_gfx_image hnd, const sc_gfx_image_data* data) {
 
 static int slotToState(gfx_slot_state s) {
     switch (s) {
-        case _SC_GFX_SLOT_VALID:  return SC_GFX_RESOURCESTATE_VALID;
-        case _SC_GFX_SLOT_FAILED: return SC_GFX_RESOURCESTATE_FAILED;
-        case _SC_GFX_SLOT_ALLOC:  return SC_GFX_RESOURCESTATE_INITIAL;
+        case GFX_SLOT_VALID:  return SC_GFX_RESOURCESTATE_VALID;
+        case GFX_SLOT_FAILED: return SC_GFX_RESOURCESTATE_FAILED;
+        case GFX_SLOT_ALLOC:  return SC_GFX_RESOURCESTATE_INITIAL;
         default:                  return SC_GFX_RESOURCESTATE_INVALID;
     }
 }
@@ -514,12 +514,12 @@ void sc_gfx_begin_pass(const sc_gfx_pass* pass) {
     for (int i = 0; i < SC_GFX_MAX_COLOR_ATTACHMENTS; i++) {
         if (!p.colors[i].image) break;
         colors[i] = gfx_lookup_image(p.colors[i].image);
-        if (!colors[i] || colors[i]->slot.state != _SC_GFX_SLOT_VALID) {
+        if (!colors[i] || colors[i]->slot.state != GFX_SLOT_VALID) {
             gfx_log("begin_pass: 无效颜色附件 %d", i); return;
         }
         if (p.resolves[i].image) {
             resolves[i] = gfx_lookup_image(p.resolves[i].image);
-            if (!resolves[i] || resolves[i]->slot.state != _SC_GFX_SLOT_VALID) {
+            if (!resolves[i] || resolves[i]->slot.state != GFX_SLOT_VALID) {
                 gfx_log("begin_pass: 无效 resolve 附件 %d", i); return;
             }
             has_resolve[i] = true;
@@ -528,7 +528,7 @@ void sc_gfx_begin_pass(const sc_gfx_pass* pass) {
     }
     if (p.depth_stencil.image) {
         depth = gfx_lookup_image(p.depth_stencil.image);
-        if (!depth || depth->slot.state != _SC_GFX_SLOT_VALID) {
+        if (!depth || depth->slot.state != GFX_SLOT_VALID) {
             gfx_log("begin_pass: 无效深度附件"); return;
         }
     }
@@ -563,7 +563,7 @@ void sc_gfx_apply_scissor(int x, int y, int w, int h, int origin_top_left) {
 void sc_gfx_apply_pipeline(sc_gfx_pipeline hnd) {
     if (!g_gfx.valid || !g_gfx.in_pass) return;
     gfx_pipeline_t* pip = gfx_lookup_pipeline(hnd);
-    if (!pip || pip->slot.state != _SC_GFX_SLOT_VALID) {
+    if (!pip || pip->slot.state != GFX_SLOT_VALID) {
         gfx_log("apply_pipeline: 无效管线"); return;
     }
     g_gfx.cur_pipeline = pip;
@@ -638,7 +638,7 @@ void sc_gfx_commit(void) {
     /* 每帧重置 append 位置（stream 语义） */
     for (int i = 1; i < g_gfx.buffer_pool.size; i++) {
         gfx_buffer_t* b = &g_gfx.buffers[i];
-        if (b->slot.state == _SC_GFX_SLOT_VALID && b->desc.usage == SC_GFX_USAGE_STREAM) {
+        if (b->slot.state == GFX_SLOT_VALID && b->desc.usage == SC_GFX_USAGE_STREAM) {
             b->append_pos = 0;
             b->append_overflow = false;
         }

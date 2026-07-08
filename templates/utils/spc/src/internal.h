@@ -15,9 +15,9 @@
 void spc_log(const char* fmt, ...);
 
 typedef enum spc_slot_state {
-    _SC_SPC_SLOT_FREE = 0,
-    _SC_SPC_SLOT_VALID,
-    _SC_SPC_SLOT_FAILED,
+    SPC_SLOT_FREE = 0,
+    SPC_SLOT_VALID,
+    SPC_SLOT_FAILED,
 } spc_slot_state;
 
 typedef struct spc_buffer_t {

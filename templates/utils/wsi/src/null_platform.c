@@ -23,7 +23,7 @@ void null_poll_monitors(void)
     monitor_st* monitor = wsi_alloc_monitor("Null SuperNoop 0",
                                               (int) (mode.width * 25.4f / dpi),
                                               (int) (mode.height * 25.4f / dpi));
-    impl_on_monitor(monitor, SC_CONNECTED, _SC_INSERT_FIRST);
+    impl_on_monitor(monitor, SC_CONNECTED, WSI_INSERT_FIRST);
 }
 
 //////////////////////////////////////////////////////////////////////////

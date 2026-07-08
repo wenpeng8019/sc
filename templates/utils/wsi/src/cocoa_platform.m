@@ -577,7 +577,7 @@ static void cocoa_poll_monitors(void)
             monitor->ns.fallbackRefreshRate = getFallbackRefreshRate(displays[i]);
         CGDisplayModeRelease(mode);
 
-        impl_on_monitor(monitor, SC_CONNECTED, _SC_INSERT_LAST);
+        impl_on_monitor(monitor, SC_CONNECTED, WSI_INSERT_LAST);
     }
 
     for (uint32_t i = 0;  i < disconnectedCount;  i++)

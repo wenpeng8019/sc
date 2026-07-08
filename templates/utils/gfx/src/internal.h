@@ -55,10 +55,10 @@ bool gfx_parse_reflect(const char* json, gfx_reflect* out);
 /* ---- 资源公共体 ------------------------------------------- */
 
 typedef enum gfx_slot_state {
-    _SC_GFX_SLOT_FREE = 0,
-    _SC_GFX_SLOT_ALLOC,      /* id 已分配，资源未创建 */
-    _SC_GFX_SLOT_VALID,
-    _SC_GFX_SLOT_FAILED,
+    GFX_SLOT_FREE = 0,
+    GFX_SLOT_ALLOC,      /* id 已分配，资源未创建 */
+    GFX_SLOT_VALID,
+    GFX_SLOT_FAILED,
 } gfx_slot_state;
 
 typedef struct gfx_slot {

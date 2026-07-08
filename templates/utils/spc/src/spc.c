@@ -225,13 +225,13 @@ void sc_spc_shutdown(void) {
 #if defined(__APPLE__)
     if (S.valid) {
         for (int i = 1; i < S.model_pool.size; i++)
-            if (S.models[i].state == _SC_SPC_SLOT_VALID)
+            if (S.models[i].state == SPC_SLOT_VALID)
                 spc_coreml_destroy(&S.models[i]);
         for (int i = 1; i < S.kernel_pool.size; i++)
-            if (S.kernels[i].state == _SC_SPC_SLOT_VALID)
+            if (S.kernels[i].state == SPC_SLOT_VALID)
                 spc_mtl_kernel_destroy(&S.kernels[i]);
         for (int i = 1; i < S.buffer_pool.size; i++)
-            if (S.buffers[i].state == _SC_SPC_SLOT_VALID)
+            if (S.buffers[i].state == SPC_SLOT_VALID)
                 spc_mtl_buffer_destroy(&S.buffers[i]);
         spc_mtl_shutdown();
     }
@@ -261,7 +261,7 @@ sc_spc_buffer sc_spc_make_buffer(const sc_spc_buffer_desc* desc) {
     b->size = desc->size;
 #if defined(__APPLE__)
     b->state = spc_mtl_buffer_create(b, desc->data, desc->size)
-             ? _SC_SPC_SLOT_VALID : _SC_SPC_SLOT_FAILED;
+             ? SPC_SLOT_VALID : SPC_SLOT_FAILED;
 #endif
     return id;
 }
@@ -291,7 +291,7 @@ int sc_spc_buffer_to_tensor(sc_spc_buffer hnd, sc_tensor* t) {
 
 int sc_spc_buffer_read(sc_spc_buffer hnd, void* dst, uint64_t size, uint64_t offset) {
     spc_buffer_t* b = lookupBuffer(hnd);
-    if (!S.valid || !b || b->state != _SC_SPC_SLOT_VALID || !dst) return 0;
+    if (!S.valid || !b || b->state != SPC_SLOT_VALID || !dst) return 0;
     if (offset + size > b->size) { spc_log("buffer_read: 越界"); return 0; }
 #if defined(__APPLE__)
     return spc_mtl_buffer_read(b, dst, size, offset) ? 1 : 0;
@@ -302,7 +302,7 @@ int sc_spc_buffer_read(sc_spc_buffer hnd, void* dst, uint64_t size, uint64_t off
 
 int sc_spc_buffer_write(sc_spc_buffer hnd, const void* src, uint64_t size, uint64_t offset) {
     spc_buffer_t* b = lookupBuffer(hnd);
-    if (!S.valid || !b || b->state != _SC_SPC_SLOT_VALID || !src) return 0;
+    if (!S.valid || !b || b->state != SPC_SLOT_VALID || !src) return 0;
     if (offset + size > b->size) { spc_log("buffer_write: 越界"); return 0; }
 #if defined(__APPLE__)
     return spc_mtl_buffer_write(b, src, size, offset) ? 1 : 0;
@@ -315,10 +315,10 @@ void sc_spc_destroy_buffer(sc_spc_buffer hnd) {
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b) return;
 #if defined(__APPLE__)
-    if (b->state == _SC_SPC_SLOT_VALID) spc_mtl_buffer_destroy(b);
+    if (b->state == SPC_SLOT_VALID) spc_mtl_buffer_destroy(b);
 #endif
     b->id = 0;
-    b->state = _SC_SPC_SLOT_FREE;
+    b->state = SPC_SLOT_FREE;
     poolRelease(&S.buffer_pool, hnd);
 }
 
@@ -333,8 +333,8 @@ sc_spc_kernel sc_spc_make_kernel(const sc_spc_kernel_desc* desc) {
     k->id = id;
     parseReflect(k, desc->reflect_json, desc->entry);
 #if defined(__APPLE__)
-    k->state = spc_mtl_kernel_create(k, desc) ? _SC_SPC_SLOT_VALID
-                                                  : _SC_SPC_SLOT_FAILED;
+    k->state = spc_mtl_kernel_create(k, desc) ? SPC_SLOT_VALID
+                                                  : SPC_SLOT_FAILED;
 #endif
     return id;
 }
@@ -343,17 +343,17 @@ void sc_spc_destroy_kernel(sc_spc_kernel hnd) {
     spc_kernel_t* k = lookupKernel(hnd);
     if (!S.valid || !k) return;
 #if defined(__APPLE__)
-    if (k->state == _SC_SPC_SLOT_VALID) spc_mtl_kernel_destroy(k);
+    if (k->state == SPC_SLOT_VALID) spc_mtl_kernel_destroy(k);
 #endif
     k->id = 0;
-    k->state = _SC_SPC_SLOT_FREE;
+    k->state = SPC_SLOT_FREE;
     poolRelease(&S.kernel_pool, hnd);
 }
 
 int sc_spc_dispatch(sc_spc_kernel hnd, int gx, int gy, int gz,
                     const sc_spc_bindings* bindings) {
     spc_kernel_t* k = lookupKernel(hnd);
-    if (!S.valid || !k || k->state != _SC_SPC_SLOT_VALID) return 0;
+    if (!S.valid || !k || k->state != SPC_SLOT_VALID) return 0;
     if (gx <= 0 || gy <= 0 || gz <= 0) { spc_log("dispatch: 网格无效"); return 0; }
 
     static const sc_spc_bindings zero;
@@ -416,8 +416,8 @@ sc_spc_model sc_spc_model_load(const char* path, int compute_units) {
     memset(m, 0, sizeof(*m));
     m->id = id;
 #if defined(__APPLE__)
-    m->state = spc_coreml_load(m, path, compute_units) ? _SC_SPC_SLOT_VALID
-                                                           : _SC_SPC_SLOT_FAILED;
+    m->state = spc_coreml_load(m, path, compute_units) ? SPC_SLOT_VALID
+                                                           : SPC_SLOT_FAILED;
 #endif
     return id;
 }
@@ -426,16 +426,16 @@ void sc_spc_destroy_model(sc_spc_model hnd) {
     spc_model_t* m = lookupModel(hnd);
     if (!S.valid || !m) return;
 #if defined(__APPLE__)
-    if (m->state == _SC_SPC_SLOT_VALID) spc_coreml_destroy(m);
+    if (m->state == SPC_SLOT_VALID) spc_coreml_destroy(m);
 #endif
     m->id = 0;
-    m->state = _SC_SPC_SLOT_FREE;
+    m->state = SPC_SLOT_FREE;
     poolRelease(&S.model_pool, hnd);
 }
 
 int sc_spc_model_run1(sc_spc_model hnd, sc_tensor* in, sc_tensor* out) {
     spc_model_t* m = lookupModel(hnd);
-    if (!S.valid || !m || m->state != _SC_SPC_SLOT_VALID || !in || !out) return 0;
+    if (!S.valid || !m || m->state != SPC_SLOT_VALID || !in || !out) return 0;
     if (in->dtype != TS_DT_F4 || out->dtype != TS_DT_F4 ||
         !spc_tscontig(in) || !spc_tscontig(out)) {
         spc_log("model_run1: 须 DT_F4 C-连续张量");
@@ -450,7 +450,7 @@ int sc_spc_model_run1(sc_spc_model hnd, sc_tensor* in, sc_tensor* out) {
 
 int sc_spc_model_ane_ratio(sc_spc_model hnd) {
     spc_model_t* m = lookupModel(hnd);
-    if (!S.valid || !m || m->state != _SC_SPC_SLOT_VALID) return -1;
+    if (!S.valid || !m || m->state != SPC_SLOT_VALID) return -1;
 #if defined(__APPLE__)
     return spc_coreml_ane_ratio(m);
 #else

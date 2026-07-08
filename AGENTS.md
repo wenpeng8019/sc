@@ -51,7 +51,7 @@ gpu(GPU 运行环境,≈sokol_app 去窗口)── device·surface交换链·mem
 | gpu env | ✅ Metal(metal_env.m)+ GL(NSGL) | GLX(gl_ctx.c)+ EGL headless/memimg(gl_egl.c,**盲写待板验**) | WGL 已写未实测;**无 D3D** |
 | gfx | ✅ Metal + GL4.1 双后端三角形实测 | gl_gfx.c 应可用(未实测);**无 Vulkan** | **缺 GL 加载器**(gl_gfx.c #error);**无 D3D** |
 | spc | ✅ Metal kernel + MPSGraph + CoreML/ANE(86% 实测) | 待补(Vulkan/GLES31 kernel、RKNN model) | 待补 |
-| 无表面渲染 | ✅ IOSurface 双模验证 | dma-buf 路径盲写 | 无 |
+| 无表面渲染 | ✅ IOSurface 双后端双模验证（Metal + NSGL 无屏） | dma-buf 路径盲写 | 无 |
 
 ## 4. 新后端接入指南(Vulkan / D3D)
 
