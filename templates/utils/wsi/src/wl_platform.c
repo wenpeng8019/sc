@@ -71,6 +71,8 @@
 #include "idle-inhibit-unstable-v1-client-protocol-code.h"
 #undef types
 
+#include <limits.h>
+
 #define GLFW_BORDER_SIZE    4
 #define GLFW_CAPTION_HEIGHT 24
 
@@ -1606,7 +1608,7 @@ static bool resizeWindow(window_st* window, int width, int height)
     return true;
 }
 
-static void wayland_UpdateBufferScaleFromOutputs(window_st* window)
+void wayland_UpdateBufferScaleFromOutputs(window_st* window)
 {
     if (wl_compositor_get_version(g_wsi.wl.compositor) <
         WL_SURFACE_SET_BUFFER_SCALE_SINCE_VERSION)
