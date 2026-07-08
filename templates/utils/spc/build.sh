@@ -16,12 +16,13 @@ cd "$SCRIPT_DIR"
 
 SRC_DIR="src"
 TARGET=""
+TARGET_EXPLICIT=""
 CC=""
 AR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --target|-t) TARGET="$2"; shift 2 ;;
+        --target|-t) TARGET="$2"; TARGET_EXPLICIT=1; shift 2 ;;
         --cc)        CC="$2";     shift 2 ;;
         --ar)        AR="$2";     shift 2 ;;
         -h|--help)
@@ -78,7 +79,7 @@ for o in "${OBJS[@]}"; do [[ -n "$o" ]] && REAL_OBJS+=("$o"); done
 $AR rcs "$LIB" "${REAL_OBJS[@]}"
 echo "  -> $LIB"
 
-if [[ -z "${TARGET_EXPLICIT:-}" ]]; then
+if [[ -z "$TARGET_EXPLICIT" ]]; then
     ln -sf "$LIB" libspc.a
     echo "  -> libspc.a -> $LIB"
 fi

@@ -33,6 +33,7 @@ tests/run.sh               # 仅跑回归比对（需先 ./build.sh build）
 tests/run.sh --update      # 仅更新黄金文件
 tests/run_linalg_dual_path.sh  # 默认核 vs SCC_WITH_LAPACK 路径一致性检查
 tests/bench_ts.sh          # 轻量性能基线（ts_basic + dnn）
+tests/linux_wsl_validate.sh --with-vulkaninfo --with-shader-tri  # Linux/WSL 平台适配验证
 python3 tests/numpy_parity_smoke.py  # 与 numpy 对拍 smoke（需 numpy）
 ```
 
