@@ -76,12 +76,11 @@ viewport/scissor 钳制。
 
 ## 4. 构建
 
-```sh
-./build.sh                        # 宿主构建 → libgfx.<triple>.a + libgfx.a
-```
+无需预构建：`inc gfx.sc` 即用（`add src/*` 源码动态编译）。模块库按需：
+`../../compiler/build/scc . --build` → libgfx.a。
 
-后端宏与 utils/gpu 的 build.sh 同套（darwin: Metal+GL；linux: GL）。
-macOS 链接框架见 [.sc](.sc)。
+后端宏与 gpu 同套（internal.h 自推导：darwin: Metal+GL；linux: GL）。
+macOS 链接框架见 [.sc](.sc)（编译器自动注入）。
 
 ## 5. sc 侧用法
 
@@ -91,13 +90,9 @@ macOS 链接框架见 [.sc](.sc)。
 [templates/demo/gpu_headless_demo.sc](../../demo/gpu_headless_demo.sc)。
 
 ```sh
-./templates/utils/wsi/build.sh
-./templates/utils/gpu/build.sh
-./templates/utils/gfx/build.sh
+./templates/utils/wsi/build.sh    # 仅 wsi 需预编（libwsi.a 已入库）；gpu/gfx 源码动态编译
 ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
-SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
-             -framework Metal -framework QuartzCore -framework OpenGL" \
-    ./compiler/build/scc templates/demo/gpu_demo.sc     # Metal 三角形
+./compiler/build/scc templates/demo/gpu_demo.sc     # Metal 三角形（框架链接自动注入，零 SCC_LDFLAGS）
 # GPU_BACKEND=gl 前缀同一命令 → OpenGL 后端（同一三角形）
 ```
 
@@ -112,9 +107,8 @@ SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation \
 
 ```
 gfx.h                 公开 C API（枚举 / desc / 函数）
-gfx.sc                sc FFI 描述
-.sc                   scc 本地构建配置（macOS 框架 ldflags）
-build.sh              静态库构建
+gfx.sc                sc FFI 描述（add src/*.c 动态编译交付）
+.sc                   模块构建/链接配置（按目标段注入，见 compiler.md §7.4）
 src/internal.h        后端 vtable、资源池、反射结构
 src/gfx.c             公共层：池/句柄/缺省值/校验/分派
 src/gfx_reflect.c     反射清单 JSON 极简解析器（无外部依赖）

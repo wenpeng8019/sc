@@ -4,7 +4,7 @@
  * 与 Metal 渲染后端同构的 vtable 实现；上下文/交换链在 gpu 模块
  * （env 层：gl_env.c + gl_ctx.c / gl_egl.c），本文件假定上下文已 current。
  *
- * 两套编译形态（build.sh 注入）：
+ * 两套编译形态（平台宏 internal.h 自推导，形态宏模块 .sc 段注入）：
  *   默认        桌面 GL 4.1 core（macOS 上限，对应 scc tar glcore@410）
  *   SC_GPU_GLES OpenGL ES 3.0/3.1（嵌入式/移动，对应 tar gles@300/310）：
  *     · 头文件 = 入库 Khronos 官方头（gpu/khr/），链 libGLESv2

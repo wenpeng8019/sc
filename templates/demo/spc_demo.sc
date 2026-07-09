@@ -4,8 +4,7 @@
 #   graph 面 :MPSGraph matmul,GPU 结果 vs ts CPU matmul
 #   model 面 :CoreML tiny 模型推理(倾向 ANE),MLComputePlan 查证调度
 #
-# 前置(从仓库根目录运行；平台框架链接由编译器自动注入，零 SCC_LDFLAGS):
-#   ./builtins/gpu/build.sh && ./builtins/spc/build.sh
+# 前置(从仓库根目录运行；gpu/spc 源码动态编译，平台框架链接由编译器自动注入，零 SCC_LDFLAGS):
 #   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #   python3 templates/demo/spc_model/gen.py        # 生成 tiny.mlmodelc(需 coremltools)
 #   ./compiler/build/scc templates/demo/spc_demo.sc

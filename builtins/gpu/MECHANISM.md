@@ -76,7 +76,8 @@ typedef struct gpu_env_api {
 ```
 
 - **编译宏**：`SC_GPU_METAL` / `SC_GPU_GL`（darwin 两者全开，linux 仅 GL）+
-  `SC_GPU_GLES`（GL 后端的 ES 编译形态，见 §4）。宏由两库的 build.sh 同步注入——
+  `SC_GPU_GLES`（GL 后端的 ES 编译形态，见 §4）。平台宏由两库 internal.h 按目标
+  自推导，形态宏由模块 .sc 段配置同步注入——
   gfx 的翻译器选择必须与 gpu 的 env 选择一致。
 - **运行时选择**：`desc.backend` 显式指定或平台默认（mac=Metal）。**不静默降级**：
   要 Metal 没 Metal 就是失败，不偷偷换 GL——图形后端的行为差异（坐标系、精度、

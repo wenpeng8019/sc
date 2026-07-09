@@ -43,13 +43,10 @@ CPU——这是正确行为,不是集成失败。
 ## 4. 构建与验证
 
 ```sh
-./templates/utils/gpu/build.sh && ./templates/utils/spc/build.sh
+# gpu/spc 源码动态编译，框架链接自动注入，零 SCC_LDFLAGS
 ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 python3 templates/demo/spc_model/gen.py     # 需 pip install coremltools
-SCC_LDFLAGS="-framework Cocoa -framework Metal -framework QuartzCore \
-  -framework IOSurface -framework OpenGL -framework MetalPerformanceShaders \
-  -framework MetalPerformanceShadersGraph -framework CoreML -framework Foundation" \
-  ./compiler/build/scc templates/demo/spc_demo.sc
+./compiler/build/scc templates/demo/spc_demo.sc
 ```
 
 [spc_demo.sc](../../demo/spc_demo.sc) 三重验证:kernel saxpy GPU vs
@@ -59,9 +56,8 @@ ts CPU 允差、graph matmul GPU vs CPU、model 推理数值 + ANE 占比。
 
 ```
 spc.h                 公开 C API(三入口:buffer/kernel/dispatch、mm、model)
-spc.sc                sc FFI 描述(inc ts.sc,张量互操作)
-.sc                   scc 本地构建配置(macOS 框架 ldflags)
-build.sh              静态库构建(一期仅 darwin)
+spc.sc                sc FFI 描述(inc ts.sc,张量互操作;add src/* 动态编译交付)
+.sc                   模块构建/链接配置(按目标段注入,见 compiler.md §7.4)
 src/internal.h        资源体、张量字段助手、darwin 函数声明
 src/spc.c             公共层:池/句柄/反射解析/校验(单实现暂不抽 vtable)
 src/metal_spc.m       kernel 面:Metal compute(独立队列、管线反射对位)
