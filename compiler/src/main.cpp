@@ -98,6 +98,9 @@ static void usage() {
               << "             目标平台头解析复用交叉编译配置（triple/sysroot/inc/cflags）；\n"
               << "             完全不带 --clang 则退化为头文件文本匹配\n"
               << "  --emit-sc  从 AST 再生成规范化 sc 源码\n"
+              << "  --emit-glsl  .ss：改用自研 GLSL 文本发射产出（对照/兜底通道；默认产物链为\n"
+              << "             全目标 SPIR-V 中枢：vulkan 直落 .spv，metal/gl/gles 经 SPIRV-Cross 扇出）\n"
+              << "  --emit-spv   .ss：非 vulkan 目标也额外落盘 <entry>.spv 中间文件\n"
               << "  --api      输出模块导出接口摘要（仅 @导出 定义项签名，形如 C 头；配合 -o 缺省 stdout）\n"
               << "  --graph    程序结构依赖图（proggraph）：默认整程序（递归解析全部 inc 依赖），\n"
               << "             Decl 级节点 + 调用/类型/读写/方法/构造/宏/token/模块边，从 main（可执行）\n"
@@ -2715,6 +2718,7 @@ int main(int argc, char** argv) {
 
     // ---- 1. 解析命令行参数 ----
     std::string input, output, mode = "run";  // 默认：编译+执行
+    bool emitGlslText = false, emitSpvFiles = false;   // .ss 双 emit 选项（--emit-glsl / --emit-spv）
     std::vector<std::string> progArgs;        // '--' 后透传给被执行程序的参数
     std::vector<std::string> cmdLibs;         // -l 指定的链接库名
     std::vector<std::string> cmdCflags;       // -D / --cflags 指定的 C 编译选项（最高优先级）
@@ -2762,6 +2766,8 @@ int main(int argc, char** argv) {
             cmdLibs.push_back(a.substr(2));                  // -lm 写法
         else if (a == "--build") mode = "build";             // 构建产物模式
         else if (a == "--emit-c") mode = "c";                // 转译 C 模式
+        else if (a == "--emit-glsl") emitGlslText = true;    // .ss：自研 GLSL 文本发射（对照/兜底）
+        else if (a == "--emit-spv") emitSpvFiles = true;     // .ss：额外落盘 SPIR-V 中间文件
         else if (a == "--ast") mode = "ast";                 // AST JSON 模式
         else if (a == "--emit-sc") mode = "sc";              // 再生 sc 模式
         else if (a == "--api") mode = "api";                 // 导出接口摘要模式（仅 @导出 签名）
@@ -2864,7 +2870,7 @@ int main(int argc, char** argv) {
                 std::filesystem::path op(output);
                 outDir = op.has_parent_path() ? op.parent_path().string() : ".";
             }
-            return compileShaderSource(src, input, outDir);
+            return compileShaderSource(src, input, outDir, emitGlslText, emitSpvFiles);
         }
     }
 

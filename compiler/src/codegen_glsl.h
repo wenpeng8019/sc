@@ -31,8 +31,14 @@ std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target);
 // 字段偏移。低版本目标（无显式 binding）resources 项保留 name 供运行时按名绑定。
 std::string emitReflectionJson(const Program& prog, const GlslTarget& target);
 
-// .ss 源到 GLSL 的端到端驱动：lex → parse(shaderMode=true) → shader_sema → emitGlsl。
-// outDir 为空 → 打印到 stdout（各阶段带分隔头 + 反射清单）；否则写入
-// outDir/<entry>.<ext> 与 outDir/<stem>.reflect.json。返回进程退出码（0 成功）。
+// .ss 源到产物的端到端驱动：lex → parse(shaderMode=true) → shader_sema → 发射。
+// 默认产物链全目标统一 SPIR-V 中枢（codegen_spirv 直发）：vulkan 直落 .spv，
+// metal 经 SPIRV-Cross→MSL，glcore/gles 经 SPIRV-Cross 反译 GLSL。
+// emitGlslText：--emit-glsl —— gl/gles/metal(内部 vulkan 语义) 改用自研 codegen_glsl
+//   文本发射（对照/兜底通道，产物同名）。
+// emitSpvFiles：--emit-spv —— 非 vulkan 目标也额外落盘 <entry><tag>.spv 中间文件。
+// outDir 为空 → 打印到 stdout（二进制 .spv 仅提示不入 stdout）；否则写入 outDir。
+// 返回进程退出码（0 成功）。
 int compileShaderSource(const std::string& src, const std::string& srcPath,
-                        const std::string& outDir);
+                        const std::string& outDir,
+                        bool emitGlslText = false, bool emitSpvFiles = false);

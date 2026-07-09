@@ -9,6 +9,7 @@
 
 #ifdef SCC_WITH_SPIRV_CROSS
 #include "spirv_msl.hpp"
+#include "spirv_glsl.hpp"
 #include <exception>
 
 namespace scc_shader {
@@ -37,6 +38,22 @@ std::string spirvToMsl(const std::vector<uint32_t>& spirv, const MslOptions& opt
     }
 }
 
+std::string spirvToGlsl(const std::vector<uint32_t>& spirv, const GlslOptions& opt) {
+    if (spirv.empty())
+        throw CompileError("SPIR-V 输入为空（非法或截断的 .spv）", 0);
+    try {
+        spirv_cross::CompilerGLSL glsl(spirv);
+        spirv_cross::CompilerGLSL::Options o = glsl.get_common_options();
+        o.version = opt.version;
+        o.es = opt.es;
+        o.enable_420pack_extension = false;   // GL4.1 无 GL_ARB_shading_language_420pack
+        glsl.set_common_options(o);
+        return glsl.compile();
+    } catch (const std::exception& e) {
+        throw CompileError(std::string("SPIRV-Cross 转译 GLSL 失败：") + e.what(), 0);
+    }
+}
+
 } // namespace scc_shader
 
 #else // !SCC_WITH_SPIRV_CROSS
@@ -44,6 +61,10 @@ std::string spirvToMsl(const std::vector<uint32_t>& spirv, const MslOptions& opt
 namespace scc_shader {
 
 std::string spirvToMsl(const std::vector<uint32_t>&, const MslOptions&) {
+    throw CompileError("此 scc 构建未集成 SPIRV-Cross（需 -DSCC_WITH_SPIRV_CROSS=ON 且 vendor/spirv-cross 存在）", 0);
+}
+
+std::string spirvToGlsl(const std::vector<uint32_t>&, const GlslOptions&) {
     throw CompileError("此 scc 构建未集成 SPIRV-Cross（需 -DSCC_WITH_SPIRV_CROSS=ON 且 vendor/spirv-cross 存在）", 0);
 }
 

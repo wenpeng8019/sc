@@ -22,4 +22,15 @@ struct MslOptions {
 // 把 SPIR-V 字（uint32 数组）转译为 MSL 源文本；失败抛 CompileError。
 std::string spirvToMsl(const std::vector<uint32_t>& spirv, const MslOptions& opt);
 
+struct GlslOptions {
+    uint32_t version = 410;   // GLSL #version 整数（410/300/100 等）
+    bool es = false;          // true = GLSL ES（300 es / 100 legacy）
+};
+
+// 把 SPIR-V 转译为指定版本的 GLSL 源文本（默认产物链：全目标统一 SPIR-V 中枢，
+// gl/gles 经本函数反译；自研 codegen_glsl 作对照/兜底/--emit-glsl）。
+// 无显式 binding 目标由 SPIRV-Cross 自动剔除 set/binding 限定，运行时按名绑定；
+// ES100 走 legacy 形态（attribute/varying/gl_FragData/struct uniform）。
+std::string spirvToGlsl(const std::vector<uint32_t>& spirv, const GlslOptions& opt);
+
 } // namespace scc_shader

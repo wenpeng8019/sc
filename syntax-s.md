@@ -116,11 +116,12 @@ flowchart LR
 - **AST 直发 SPIR-V**：发射形式与 glslang 同构（Logical 寻址、OpVariable + Load/Store、
   不做 SSA/phi，结构化控制流 OpSelectionMerge/OpLoopMerge，数学库走 GLSL.std.450
   扩展指令集）——驱动与 SPIRV-Cross 均消费无碍，无需优化器。
-- **双 emit**：`codegen_spirv` 是主路径（metal/vulkan 已切）；`codegen_glsl` 保留——
-  glcore/gles 目标的默认产物 + 交叉验证对照（已决：维护一段时间，退役条件见
-  §14.3）。`--emit-spv` 落盘 SPIR-V 中间文件。
+- **双 emit**：`codegen_spirv` 是默认链唯一发射器（全目标）；`codegen_glsl` 保留作
+  对照/兜底，经 `--emit-glsl` 输出（产物同名可替换，见 §14.3）。`--emit-spv` 落盘
+  SPIR-V 中间文件。
 - **默认产物链**：metal 目标 = SPIR-V→SPIRV-Cross→MSL；vulkan 目标 = **直落 `.spv`**
-  （不再输出 GLSL 文本要求用户自跑 glslangValidator）；glcore/gles = 自研 GLSL 文本。
+  （不再输出 GLSL 文本要求用户自跑 glslangValidator）；glcore/gles = SPIRV-Cross 反译
+  GLSL（ES100 legacy 形态）。
 - **glslang 整体移除**（vendor/glslang-src、SCC_WITH_GLSLANG、shader_spv 封装）；
   SPIRV-Cross 保留（SCC_WITH_SPIRV_CROSS）。
 - 反射清单仍由 AST 侧自研生成（emitReflectionJson，不变）。
@@ -616,13 +617,13 @@ flowchart LR
 | **M4 产物资源化** | 默认输出 `<stem>.shader.h/.c`：字节数组（SPIR-V/MSL/GLSL 文本）+ 自动 enum id + 反射 JSON 字符串 + 查询函数；`--files` 保留散文件输出 | gpu_demo 改资源模式（零运行时文件路径）实机渲染 |
 | **M5 语言完备性** | 按 §16 优先级逐批实现，反向对齐 SPIR-V 能力 | 每批能力：用例 + 验证链 + 能力矩阵行更新 |
 
-已决（2026-07-09）：**保留双 emit，维护一段时间**——glcore/gles 目标维持自研
-codegen_glsl 发射；语言演进期两个独立后端互为黄金交叉验证。实测结论存档：
-SPIRV-Cross 反译全版本无硬技术障碍（glcore410 过 glslangValidator + GL 实机；
-ES100 legacy 含 `--flatten-ubo` 整块上传模式，甚至优于逐名平铺契约）；且 ES100
-语言面冻结（P1/P2 能力其硬件本无），自研发射维护成本不随语言完备性增长。
-**退役条件**：Linux/板端验证跑稳、或双份维护在 P0 批次成为实际负担时，
-按「≥300 先切、ES100 最后」渐进切换到 SPIRV-Cross 单路径。
+已决（2026-07-09，细化）：**默认产物链全目标统一 SPIR-V 中枢**——vulkan 直落 .spv，
+metal 经 SPIRV-Cross→MSL，**glcore/gles 也经 SPIRV-Cross 反译 GLSL**（ES100 走 legacy
+形态）。codegen_glsl **保留**但退出默认链：作对照/兜底/`--emit-glsl` 特殊输出
+（自研文本发射，产物同名可直接替换）。实测存档：SPIRV-Cross 反译全版本无硬障碍
+（glcore410 过 glslangValidator + GL 实机；ES100 legacy 含 struct uniform 与
+`--flatten-ubo` 整块上传两形态）。**退役评估**：跑稳一段时间后若对照价值衰减，
+再移除 codegen_glsl（ES2 运行时 uniform 上传契约届时按反译输出形态对齐）。
 
 ### 14.4 四期（原二期存目，部分已提前落地）
 - ✅ `comp` 计算链路：计算内建映射 + `local_size` 发射/反射携带 + storage/SSBO；

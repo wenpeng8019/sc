@@ -654,7 +654,8 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
 // ShaderStage（AST）→ 阶段种类映射已随 glslang 移除（SPIR-V 直发自携阶段）。
 
 int compileShaderSource(const std::string& src, const std::string& srcPath,
-                        const std::string& outDir) {
+                        const std::string& outDir,
+                        bool emitGlslText, bool emitSpvFiles) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
 
@@ -727,78 +728,78 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         for (const auto& target : prog.shaderTargets) {
             // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
             std::string tag = multi ? ("." + glTargetTag(target)) : "";
+            std::string reflect = emitReflectionJson(prog, target);
+            auto writeReflect = [&]() -> bool {
+                if (outDir.empty()) {
+                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
+                                stem.c_str(), tag.c_str(), reflect.c_str());
+                    return true;
+                }
+                return write(outDir + "/" + stem + tag + ".reflect.json", reflect);
+            };
 
-            // ---- Vulkan 目标：自研 AST→SPIR-V 直发，产物 <entry>.spv ----
-            // （三期主路径首个落点；spirv-val/spirv-dis/SPIRV-Cross 均可直接消费）
-            if (target.isVulkan()) {
-                auto sunits = emitSpirv(prog, target);
-                if (sunits.empty()) {
+            // ---- --emit-glsl：自研 codegen_glsl 文本发射（对照 / 兜底通道）----
+            // gl/gles 产该目标方言；vulkan 产 Vulkan-GLSL；metal 产其内部
+            // Vulkan-GLSL(450) 中间语形态。产物 <entry><tag>.<stage ext>。
+            if (emitGlslText) {
+                GlslTarget gt = target;
+                if (target.isMetal()) { gt.api = GlApi::Vulkan; gt.version = 450; }
+                auto units = emitGlsl(prog, gt);
+                if (units.empty()) {
                     std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                     return 1;
                 }
-                std::string reflect = emitReflectionJson(prog, target);
-                for (const auto& u : sunits) {
-                    std::string bin((const char*)u.words.data(), u.words.size() * 4);
-                    if (outDir.empty()) {
-                        std::fprintf(stderr, "ss: %s%s.spv（%zu 字）需 -o 输出目录（二进制不入 stdout）\n",
-                                     u.entry.c_str(), tag.c_str(), u.words.size());
-                        continue;
-                    }
-                    if (!write(outDir + "/" + u.entry + tag + ".spv", bin)) return 1;
+                for (const auto& u : units) {
+                    if (outDir.empty())
+                        std::printf("// ===== %s%s.%s =====\n%s\n",
+                                    u.entry.c_str(), tag.c_str(), u.ext.c_str(), u.text.c_str());
+                    else if (!write(outDir + "/" + u.entry + tag + "." + u.ext, u.text)) return 1;
                 }
-                if (outDir.empty())
-                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
-                                stem.c_str(), tag.c_str(), reflect.c_str());
-                else if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
+                if (!writeReflect()) return 1;
                 continue;
             }
 
-            // ---- Metal 目标：AST → SPIR-V（自研直发）→ MSL（spirv-cross）----
-            // 能力门控已在 shaderSemaCheck 按 metal 目标自身的能力矩阵完成。
-            // 每阶段产 <entry>.metal（入口 main→阶段名）。
-            if (target.isMetal()) {
-                auto sunits = emitSpirv(prog, target);
-                if (sunits.empty()) {
-                    std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
-                    return 1;
+            // ---- 默认产物链：全目标统一 SPIR-V 中枢（codegen_spirv 直发）----
+            //   vulkan  → 直落 .spv
+            //   metal   → SPIRV-Cross → MSL
+            //   gl/gles → SPIRV-Cross 反译 GLSL（ES100 走 legacy 形态）
+            // --emit-spv：非 vulkan 目标也额外落盘 .spv 中间文件。
+            auto sunits = emitSpirv(prog, target);
+            if (sunits.empty()) {
+                std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                return 1;
+            }
+            for (const auto& u : sunits) {
+                if (target.isVulkan() || emitSpvFiles) {
+                    std::string bin((const char*)u.words.data(), u.words.size() * 4);
+                    if (outDir.empty())
+                        std::fprintf(stderr, "ss: %s%s.spv（%zu 字）需 -o 输出目录（二进制不入 stdout）\n",
+                                     u.entry.c_str(), tag.c_str(), u.words.size());
+                    else if (!write(outDir + "/" + u.entry + tag + ".spv", bin)) return 1;
                 }
-                std::string reflect = emitReflectionJson(prog, target);
-                for (const auto& u : sunits) {
+                if (target.isVulkan()) continue;
+                if (target.isMetal()) {
                     scc_shader::MslOptions mo;
                     mo.mslVersion = (uint32_t)target.version;
-                    mo.renameEntry = u.entry;            // 多阶段链入同一 metallib 时避免 main0 冲突
+                    mo.renameEntry = u.entry;        // 多阶段链入同一 metallib 时避免 main0 冲突
                     std::string msl = scc_shader::spirvToMsl(u.words, mo);
                     if (outDir.empty())
                         std::printf("// ===== %s%s.metal =====\n%s\n",
                                     u.entry.c_str(), tag.c_str(), msl.c_str());
                     else if (!write(outDir + "/" + u.entry + tag + ".metal", msl)) return 1;
+                    continue;
                 }
+                scc_shader::GlslOptions go;
+                go.version = (uint32_t)target.version;
+                go.es = target.isES();
+                std::string text = scc_shader::spirvToGlsl(u.words, go);
+                const char* ext = stageExt(u.stage);
                 if (outDir.empty())
-                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
-                                stem.c_str(), tag.c_str(), reflect.c_str());
-                else if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
-                continue;
-            }
-
-            auto units = emitGlsl(prog, target);
-            std::string reflect = emitReflectionJson(prog, target);
-
-            if (units.empty()) {
-                std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
-                return 1;
-            }
-
-            if (outDir.empty()) {
-                for (const auto& u : units)
                     std::printf("// ===== %s%s.%s =====\n%s\n",
-                                u.entry.c_str(), tag.c_str(), u.ext.c_str(), u.text.c_str());
-                std::printf("// ===== %s%s.reflect.json =====\n%s\n",
-                            stem.c_str(), tag.c_str(), reflect.c_str());
-            } else {
-                for (const auto& u : units)
-                    if (!write(outDir + "/" + u.entry + tag + "." + u.ext, u.text)) return 1;
-                if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
+                                u.entry.c_str(), tag.c_str(), ext, text.c_str());
+                else if (!write(outDir + "/" + u.entry + tag + "." + ext, text)) return 1;
             }
+            if (!writeReflect()) return 1;
         }
         return 0;
     } catch (const CompileError& e) {
