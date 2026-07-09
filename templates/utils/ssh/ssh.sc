@@ -10,8 +10,9 @@
 #
 # native 依赖经 sc 的 `add` 指令声明，不在编译器里硬编码（区别于 ssl 的 stem 注入）：
 #   · add libssh2.a  —— 自包含静态库 = libssh2 + mbedTLS（密码学后端）。
-#                       由同目录 build_libssh2.sh 从 vendor/libssh2 + vendor/mbedtls 生成
-#                       （host 构建，git 忽略的产物）；首次使用前先跑一次该脚本。
+#                       由同目录 build.sh 从 vendor/libssh2 + vendor/mbedtls 生成
+#                       （git 忽略的产物；宿主裸名 libssh2.a，交叉 libssh2.<签名>.a）；
+#                       首次使用前先跑一次 build.sh（跨平台：./build.sh --target ...）。
 #   libssh2 自身不含密码学，全权委托 vendored mbedTLS（与默认 TLS 后端同源，零系统依赖）。
 #
 # 已知限制：libssh2 的 mbedTLS 后端**不协商 ssh-ed25519 主机密钥**（只提供 ECDSA / RSA）。
@@ -30,7 +31,7 @@
 
 inc sys.sc                                     # sock_connect / sock_close（跨平台 socket）
 inc mem.sc                                     # chunk / chunk0（动态内存）
-inc "../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（'::' 逃逸到 C 域按名调用）
+inc "../../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（'::' 逃逸到 C 域按名调用）
 
 # 把 native 静态库并入工程（路径相对本 .sc 目录解析）。
 add libssh2.a

@@ -48,8 +48,10 @@ vendor/glfw/
 vendor/sokol/
 vendor/bgfx/
 
-# ssh 组件自包含静态库（host 构建产物，由 templates/utils/build_libssh2.sh 生成）
-templates/utils/libssh2.a
+# ssh 组件自包含静态库（由 templates/utils/ssh/build.sh 生成）
+# 宿主裸名 libssh2.a + 交叉签名变体 libssh2.<triple>.a 均为本地产物
+templates/utils/ssh/libssh2.a
+templates/utils/ssh/libssh2.*.a
 
 # plib 跨平台库模板构建产物
 templates/plib/*.a

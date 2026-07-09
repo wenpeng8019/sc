@@ -10,8 +10,8 @@ EXT_BASE="$HOME/.vscode/extensions"
 EXTS=("vscode-sc:sc-lang-0.1.0" "vscode-sg:sg-lang-0.1.0" "vscode-ast:sc-ast-view-0.1.0")
 
 # ssh 组件自包含静态库（libssh2 + mbedTLS）—— git 忽略的本地产物
-SSH_LIB="$ROOT/templates/utils/libssh2.a"
-SSH_BUILDER="$ROOT/templates/utils/build_libssh2.sh"
+SSH_LIB="$ROOT/templates/utils/ssh/libssh2.a"
+SSH_BUILDER="$ROOT/templates/utils/ssh/build.sh"
 
 usage() {
     cat <<EOF
@@ -24,7 +24,7 @@ usage() {
              加 --update 重新生成黄金文件：./build.sh test --update
   install    安装 scc 到 \$PREFIX/bin (默认 /usr/local/bin)，并安装 VSCode 插件（高亮 + AST 视图 + Markdown 预览 sc 高亮）
   uninstall  卸载 scc 与 VSCode 插件
-  ssh        构造 ssh 组件自包含静态库 templates/utils/libssh2.a（libssh2 + mbedTLS，强制重建）
+  ssh        构造 ssh 组件自包含静态库 templates/utils/ssh/libssh2.a（libssh2 + mbedTLS，强制重建）
   clean      清理构建产物
 EOF
 }
@@ -34,7 +34,7 @@ EOF
 ensure_libssh2() {
     [ -f "$SSH_LIB" ] && return 0
     [ -d "$ROOT/vendor/libssh2" ] && [ -d "$ROOT/vendor/mbedtls" ] || return 0
-    echo "==> 首次构造 ssh 组件库 templates/utils/libssh2.a（libssh2 + mbedTLS）"
+    echo "==> 首次构造 ssh 组件库 templates/utils/ssh/libssh2.a（libssh2 + mbedTLS）"
     sh "$SSH_BUILDER" || echo "    告警: ssh 组件库构建失败，inc ssh.sc 前请手动跑 $SSH_BUILDER"
 }
 
