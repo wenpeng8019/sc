@@ -12,5 +12,9 @@ cflags  = -DSC_GPU_GLES
 inc     = khr
 ldflags = -lGLESv2 -lEGL -lgbm
 
+[windows]
+# Vulkan loader 导入库（MSVC=vulkan-1.lib / mingw=-lvulkan-1）；窗口句柄来自 wsi（HWND）
+ldflags = -lvulkan-1
+
 [linux]
 ldflags = -lGL -lEGL -lgbm -lvulkan -lX11

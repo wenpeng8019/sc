@@ -134,6 +134,8 @@ static const gpu_env_api* pickBackend(sc_gpu_backend want) {
     return gpu_env_metal();
 #elif defined(SC_GPU_GL)
     return gpu_env_gl();
+#elif defined(SC_GPU_VULKAN)
+    return gpu_env_vulkan();
 #else
     return gpu_env_null();
 #endif

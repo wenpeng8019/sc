@@ -24,8 +24,13 @@
 #ifdef SC_GPU_VULKAN
 
 /* 平台 surface 扩展类型（须在包含 vulkan.h 前定义） */
-#define VK_USE_PLATFORM_XLIB_KHR
-#define VK_USE_PLATFORM_WAYLAND_KHR
+#if defined(_WIN32)
+  #define VK_USE_PLATFORM_WIN32_KHR
+  #include <windows.h>
+#else
+  #define VK_USE_PLATFORM_XLIB_KHR
+  #define VK_USE_PLATFORM_WAYLAND_KHR
+#endif
 #include "../gpu_vk.h"
 
 #include <stdlib.h>
@@ -76,6 +81,7 @@ typedef struct {
     sc_gpu_vk_device dev;                 /* device() 返回本结构指针 */
     bool             hasXlib;
     bool             hasWayland;
+    bool             hasWin32;
     VkSurfaceCtx*    cur;                  /* 当前 surface（sync 访问器用） */
 } VkEnv;
 
@@ -92,6 +98,7 @@ static bool ext_present(const VkExtensionProperties* list, uint32_t n, const cha
 }
 
 /* 复刻 wsi 平台判定：优先 XDG_SESSION_TYPE，退化按 WAYLAND_DISPLAY 存在性。 */
+#if !defined(_WIN32)
 static bool prefer_wayland(void) {
     const char* session = getenv("XDG_SESSION_TYPE");
     const char* wl  = getenv("WAYLAND_DISPLAY");
@@ -103,6 +110,7 @@ static bool prefer_wayland(void) {
     if (wl && wl[0]) return true;   /* wsi 无 XDG 时先试 Wayland */
     return false;                   /* 否则 X11 */
 }
+#endif
 
 /* sc_gpu 像素格式 → VkFormat（颜色）。 */
 static VkFormat vk_color_format(sc_gpu_pixel_format f) {
@@ -168,6 +176,12 @@ static bool vkInit(const sc_gpu_desc* desc) {
     uint32_t nWanted = 0;
     if (ext_present(exts, nExt, VK_KHR_SURFACE_EXTENSION_NAME))
         wanted[nWanted++] = VK_KHR_SURFACE_EXTENSION_NAME;
+#if defined(_WIN32)
+    if (ext_present(exts, nExt, VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
+        wanted[nWanted++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+        g_vk.hasWin32 = true;
+    }
+#else
     if (ext_present(exts, nExt, VK_KHR_XLIB_SURFACE_EXTENSION_NAME)) {
         wanted[nWanted++] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
         g_vk.hasXlib = true;
@@ -176,6 +190,7 @@ static bool vkInit(const sc_gpu_desc* desc) {
         wanted[nWanted++] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
         g_vk.hasWayland = true;
     }
+#endif
     free(exts);
 
     VkApplicationInfo app = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO };
@@ -466,9 +481,26 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
     if (!c) return false;
     c->native_window = surf->desc.native_window;
     c->native_display = surf->desc.native_display;
-    c->wayland = prefer_wayland();
 
-    /* --- 创建 VkSurfaceKHR --- */
+    /* --- 创建 VkSurfaceKHR（按平台） --- */
+#if defined(_WIN32)
+    c->wayland = false;
+    if (g_vk.hasWin32) {
+        VkWin32SurfaceCreateInfoKHR w32 = { .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };
+        w32.hinstance = GetModuleHandle(NULL);
+        w32.hwnd = (HWND)c->native_window;
+        if (vkCreateWin32SurfaceKHR(g_vk.dev.instance, &w32, NULL, &c->surface) != VK_SUCCESS) {
+            gpu_log("vulkan: vkCreateWin32SurfaceKHR 失败");
+            free(c);
+            return false;
+        }
+    } else {
+        gpu_log("vulkan: 无可用窗口 surface 扩展");
+        free(c);
+        return false;
+    }
+#else
+    c->wayland = prefer_wayland();
     if (c->wayland && g_vk.hasWayland) {
         VkWaylandSurfaceCreateInfoKHR wsci = { .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR };
         wsci.display = (struct wl_display*)c->native_display;
@@ -493,6 +525,7 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
         free(c);
         return false;
     }
+#endif
 
     /* 确认队列族支持呈现 */
     VkBool32 sup = VK_FALSE;

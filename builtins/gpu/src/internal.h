@@ -32,6 +32,10 @@
   #ifndef SC_GPU_VULKAN
   #define SC_GPU_VULKAN 1
   #endif
+#elif defined(_WIN32)
+  #ifndef SC_GPU_VULKAN
+  #define SC_GPU_VULKAN 1
+  #endif
 #endif
 
 void gpu_log(const char* fmt, ...);
