@@ -1,0 +1,81 @@
+// ===== shader_p0.reflect.json =====
+{
+  "target": {"api": "glcore", "version": 410, "explicitBinding": false, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "vs_main",
+      "stage": "vert",
+      "entry": "main",
+      "file": "vs_main.vert",
+      "inputs": [],
+      "outputs": [{"name": "clip", "builtin": "position"}, {"name": "col", "type": "vec3", "location": 0}]
+    },
+    {
+      "name": "fs_main",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_main.frag",
+      "inputs": [{"name": "col", "type": "vec3", "location": 0}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+
+  ]
+}
+
+// ===== vs_main.vert =====
+#version 410 core
+// generated from vs_main (vert) target glcore410
+
+layout(location=0) out vec3 v_col;
+
+void main() {
+    float acc = 0.0;
+    for (int i = 0; (i < 8); i++) {
+        if ((i == 3)) {
+            continue;
+        }
+        if ((i > 6)) {
+            break;
+        }
+        acc += float(i);
+    }
+    float s = 0.0;
+    int k = 4;
+    do {
+        s += float(k);
+        k--;
+    } while ((k > 0));
+    vec4 v = vec4(0.0, 0.0, 0.0, 1.0);
+    v.xy = vec2((s * 0.01), (acc * 0.01));
+    gl_Position = v;
+    v_col = vec3(0.5, 0.5, 0.5);
+}
+
+// ===== fs_main.frag =====
+#version 410 core
+// generated from fs_main (frag) target glcore410
+
+layout(location=0) in vec3 v_col;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    int m = int((v_col.x * 8.0));
+    float r = 0.0;
+    if (m == 1 || m == 2) {
+        r = 0.25;
+    }
+    else if (m == 3) {
+        r = 0.5;
+        r = (r + 0.25);
+    }
+    else if (m == 4) {
+        r = (r + 0.25);
+    }
+    else {
+        r = 1.0;
+    }
+    f_color = vec4(r, r, r, 1.0);
+    return;
+}

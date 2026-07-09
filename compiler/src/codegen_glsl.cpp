@@ -279,6 +279,70 @@ struct Emitter {
                 indent++; for (const auto& b : s->body) stmt(b.get()); indent--;
                 pad(); os << "}\n";
                 break;
+            case Stmt::DoWhileS:
+                pad(); os << "do {\n";
+                indent++; for (const auto& b : s->body) stmt(b.get()); indent--;
+                pad(); os << "} while (" << expr(s->expr.get()) << ");\n";
+                break;
+            case Stmt::ForS: {
+                // `for i = 0; ...` 惯例：init 赋值目标未声明时按 int 声明（与 SPIR-V 后端一致）
+                pad(); os << "for (";
+                if (s->forInit) {
+                    if (s->forInit->kind == Expr::Binary && s->forInit->op == "=" &&
+                        s->forInit->a && s->forInit->a->kind == Expr::Ident)
+                        os << "int ";
+                    os << exprTop(s->forInit.get());
+                }
+                os << "; ";
+                if (s->forCond) os << expr(s->forCond.get());
+                os << "; ";
+                if (s->forStep) os << exprTop(s->forStep.get());
+                os << ") {\n";
+                indent++; for (const auto& b : s->body) stmt(b.get()); indent--;
+                pad(); os << "}\n";
+                break;
+            }
+            case Stmt::BreakS:
+                pad(); os << "break;\n";
+                break;
+            case Stmt::ContinueS:
+                pad(); os << "continue;\n";
+                break;
+            case Stmt::CaseS: {
+                // case（自动 break、through 贯穿）→ if-else 链（与 SPIR-V 后端同构降级；
+                // 贯穿体内联后续 arm）
+                std::string sel = expr(s->expr.get());
+                bool first = true;
+                int defaultIdx = -1;
+                for (size_t ai = 0; ai < s->caseArms.size(); ai++) {
+                    const auto& arm = s->caseArms[ai];
+                    if (arm.labels.empty()) { defaultIdx = (int)ai; continue; }
+                    std::string cond;
+                    for (const auto& l : arm.labels) {
+                        if (!cond.empty()) cond += " || ";
+                        cond += sel + " == " + expr(l.get());
+                    }
+                    pad();
+                    os << (first ? "if (" : "else if (") << cond << ") {\n";
+                    first = false;
+                    indent++;
+                    for (size_t k = ai; k < s->caseArms.size(); k++) {
+                        for (const auto& x : s->caseArms[k].body) stmt(x.get());
+                        if (!s->caseArms[k].through) break;
+                    }
+                    indent--;
+                    pad(); os << "}\n";
+                }
+                if (defaultIdx >= 0) {
+                    pad();
+                    os << (first ? "{\n" : "else {\n");
+                    indent++;
+                    for (const auto& x : s->caseArms[(size_t)defaultIdx].body) stmt(x.get());
+                    indent--;
+                    pad(); os << "}\n";
+                }
+                break;
+            }
             default:
                 pad(); os << "// TODO stmt\n";
                 break;

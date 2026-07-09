@@ -208,6 +208,13 @@ GRAPH_UNIT=(
     tests/cases/graph_demo.sc
 )
 
+# 着色器双 emit 黄金（syntax-s）：同一 .ss 锁两条链——默认链（SPIR-V→SPIRV-Cross
+# 反译，stdout 文本）+ --emit-glsl（自研文本发射，对照/兜底通道）。
+# 纯文本比对，无 spirv-val/glslangValidator 外部工具依赖。
+SHADER_EMIT=(
+    tests/cases/shader_p0.ss
+)
+
 pass=0 fail=0 upd=0
 TMP="$(mktemp)"
 TMPERR="$(mktemp)"
@@ -322,6 +329,23 @@ for src in "${GRAPH_UNIT[@]}"; do
     else
         g="$(printf '%s' "$g" | norm_graph)"
         snapshot "$name (graph=unit)" "$GOLDEN/$name.graph.json" "$g"
+    fi
+done
+
+# 着色器双 emit：默认链（stdout 文本）与 --emit-glsl 各锁一份黄金。
+for src in "${SHADER_EMIT[@]}"; do
+    name="$(basename "$src" .ss)"
+    t="$("$SCC" "$src" 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "  ✗ $name (shader)：scc 失败"; sed 's/^/      /' <<<"$t"; fail=$((fail + 1))
+    else
+        snapshot "$name (shader)" "$GOLDEN/$name.shader.txt" "$t"
+    fi
+    t="$("$SCC" "$src" --emit-glsl 2>&1)"; rc=$?
+    if [ "$rc" != 0 ]; then
+        echo "  ✗ $name (shader emit-glsl)：scc 失败"; sed 's/^/      /' <<<"$t"; fail=$((fail + 1))
+    else
+        snapshot "$name (shader emit-glsl)" "$GOLDEN/$name.shader.glsl.txt" "$t"
     fi
 done
 

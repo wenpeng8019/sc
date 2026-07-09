@@ -376,6 +376,8 @@ struct StageEmitter {
     Words funcVars;      // 入口块首的 OpVariable 集（SPIR-V 要求）
     Words body;          // 当前函数体指令流
     bool terminated = false;   // 当前基本块是否已终结
+    struct LoopCtx { uint32_t mergeL, contL; };
+    std::vector<LoopCtx> loops;    // break/continue 目标栈
 
     StageEmitter(Builder& bb, const Program& p, const Decl& st,
                  const std::unordered_map<std::string, const Decl*>& ss)
@@ -763,6 +765,17 @@ struct StageEmitter {
             case Expr::Index:
                 return load(lvalue(e));
             case Expr::Unary: {
+                if (e->op == "++" || e->op == "--") {   // 前缀：新值
+                    Ptr p = lvalue(e->a.get());
+                    Val cur = load(p);
+                    const TI& ti = b.info(cur.type);
+                    Val one = ti.isFloat() ? Val{b.constF(1.0f), b.tF32()}
+                            : ti.isUnsigned() ? Val{b.constU(1), b.tU32()}
+                            : Val{b.constI(1), b.tI32()};
+                    Val nv = arith(e->op == "++" ? "+" : "-", cur, one, e->line);
+                    store(p, nv);
+                    return nv;
+                }
                 if (e->op == "-") {
                     Val v = rvalue(e->a.get());
                     const TI& ti = b.info(v.type);
@@ -777,6 +790,17 @@ struct StageEmitter {
                     return {ins(OpNot, v.type, {v.id}), v.type};
                 }
                 err("shader 暂不支持一元 `" + e->op + "`", e->line);
+            }
+            case Expr::PostUnary: {                      // 后缀 i++/i--：旧值
+                Ptr p = lvalue(e->a.get());
+                Val cur = load(p);
+                const TI& ti = b.info(cur.type);
+                Val one = ti.isFloat() ? Val{b.constF(1.0f), b.tF32()}
+                        : ti.isUnsigned() ? Val{b.constU(1), b.tU32()}
+                        : Val{b.constI(1), b.tI32()};
+                Val nv = arith(e->op == "++" ? "+" : "-", cur, one, e->line);
+                store(p, nv);
+                return cur;
             }
             case Expr::Binary:  return binary(e);
             case Expr::Ternary: {
@@ -806,7 +830,43 @@ struct StageEmitter {
         const std::string& op = e->op;
         // 赋值族
         if (op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=") {
-            Ptr dst = lvalue(e->a.get());
+            // 多分量 swizzle 写入 v.xy = ...：load 整向量 → VectorShuffle 合成 → store
+            if (op == "=" && e->a && e->a->kind == Expr::Member &&
+                isSwz(e->a->text) && e->a->text.size() > 1) {
+                Ptr basep = lvalue(e->a->a.get());
+                const TI& bi = b.info(basep.type);
+                if (bi.k != TI::Vec) err("swizzle 写入作用于非向量", e->line);
+                Val rhs = rvalue(e->b.get());
+                const TI& ri = b.info(rhs.type);
+                if (ri.k != TI::Vec || ri.n != (int)e->a->text.size())
+                    err("swizzle 写入右侧分量数不符", e->line);
+                Val cur = load(basep);
+                // shuffle 索引：未被写分量取原向量(0..n-1)，被写分量取 rhs(n+j)
+                std::vector<uint32_t> idx((size_t)bi.n);
+                for (int i = 0; i < bi.n; i++) idx[(size_t)i] = (uint32_t)i;
+                for (size_t j = 0; j < e->a->text.size(); j++)
+                    idx[(size_t)swzIdx(e->a->text[j])] = (uint32_t)(bi.n + (int)j);
+                std::vector<uint32_t> ops = {cur.id, rhs.id};
+                ops.insert(ops.end(), idx.begin(), idx.end());
+                Val merged = {ins(OpVectorShuffle, basep.type, ops), basep.type};
+                store(basep, merged);
+                return merged;
+            }
+            Ptr dst;
+            // `for i = 0; ...` 惯例：赋值目标未声明时自动声明（类型取右侧）
+            if (op == "=" && e->a && e->a->kind == Expr::Ident &&
+                !vars.count(e->a->text) && !ioMap.count(e->a->text) &&
+                !resBlocks.count(e->a->text) && !samplers.count(e->a->text)) {
+                Val rhs = rvalue(e->b.get());
+                uint32_t ptrT = b.tPtr(ScFunction, rhs.type);
+                uint32_t v = b.id();
+                put(funcVars, OpVariable, {ptrT, v, ScFunction});
+                b.name(v, e->a->text);
+                vars[e->a->text] = {v, rhs.type, ScFunction};
+                store(vars[e->a->text], rhs);
+                return rhs;
+            }
+            dst = lvalue(e->a.get());
             Val rhs = rvalue(e->b.get());
             if (op != "=") {
                 Val cur = load(dst);
@@ -1098,12 +1158,118 @@ struct StageEmitter {
                 put(body, OpBranchConditional, {c.id, bodyL, mergeL});
                 terminated = true;
                 newBlock(bodyL);
+                loops.push_back({mergeL, contL});
                 for (const auto& x : s->body) stmt(x.get(), depth + 1);
+                loops.pop_back();
                 branch(contL);
                 newBlock(contL);
                 put(body, OpBranch, {headL});
                 terminated = true;
                 newBlock(mergeL);
+                break;
+            }
+            case Stmt::DoWhileS: {
+                // do-while：body 先行；continue 块里求条件回跳 header
+                uint32_t headL = b.id(), bodyL = b.id(), contL = b.id(), mergeL = b.id();
+                branch(headL);
+                newBlock(headL);
+                put(body, OpLoopMerge, {mergeL, contL, 0});
+                put(body, OpBranch, {bodyL});
+                terminated = true;
+                newBlock(bodyL);
+                loops.push_back({mergeL, contL});
+                for (const auto& x : s->body) stmt(x.get(), depth + 1);
+                loops.pop_back();
+                branch(contL);
+                newBlock(contL);
+                Val c = rvalue(s->expr.get());
+                put(body, OpBranchConditional, {c.id, headL, mergeL});
+                terminated = true;
+                newBlock(mergeL);
+                break;
+            }
+            case Stmt::ForS: {
+                if (s->forColl || s->forRangeLo || s->forRangeHi)
+                    err("shader 暂不支持 for-in 形态（见 syntax-s §16 P0）", s->line);
+                if (s->forInit) rvalue(s->forInit.get());
+                uint32_t headL = b.id(), checkL = b.id(), bodyL = b.id(),
+                         contL = b.id(), mergeL = b.id();
+                branch(headL);
+                newBlock(headL);
+                put(body, OpLoopMerge, {mergeL, contL, 0});
+                put(body, OpBranch, {checkL});
+                terminated = true;
+                newBlock(checkL);
+                if (s->forCond) {
+                    Val c = rvalue(s->forCond.get());
+                    put(body, OpBranchConditional, {c.id, bodyL, mergeL});
+                } else {
+                    put(body, OpBranch, {bodyL});
+                }
+                terminated = true;
+                newBlock(bodyL);
+                loops.push_back({mergeL, contL});
+                for (const auto& x : s->body) stmt(x.get(), depth + 1);
+                loops.pop_back();
+                branch(contL);
+                newBlock(contL);
+                if (s->forStep) rvalue(s->forStep.get());
+                put(body, OpBranch, {headL});
+                terminated = true;
+                newBlock(mergeL);
+                break;
+            }
+            case Stmt::BreakS:
+                if (loops.empty()) err("break 不在循环内", s->line);
+                put(body, OpBranch, {loops.back().mergeL});
+                terminated = true;
+                break;
+            case Stmt::ContinueS:
+                if (loops.empty()) err("continue 不在循环内", s->line);
+                put(body, OpBranch, {loops.back().contL});
+                terminated = true;
+                break;
+            case Stmt::CaseS: {
+                // case 多路分支（自动 break 语义）→ if-else 链等价降级：
+                // 每 arm 标签集比较求或 → SelectionMerge 嵌套
+                Val sel = rvalue(s->expr.get());
+                std::function<void(size_t)> emitArm = [&](size_t ai) {
+                    if (ai >= s->caseArms.size()) return;
+                    const auto& arm = s->caseArms[ai];
+                    if (arm.labels.empty()) {          // default arm（恒命中）
+                        for (const auto& x : arm.body) stmt(x.get(), depth + 1);
+                        return;
+                    }
+                    Val hit = {0, 0};
+                    for (const auto& l : arm.labels) {
+                        Val lv = rvalue(l.get());
+                        lv = coerce(lv, sel.type, s->line);
+                        const TI& ti = b.info(sel.type);
+                        Val eq = {ins(ti.isFloat() ? OpFOrdEqual : OpIEqual,
+                                      b.tBool(), {sel.id, lv.id}), b.tBool()};
+                        hit = hit.id ? Val{ins(OpLogicalOr, b.tBool(), {hit.id, eq.id}), b.tBool()}
+                                     : eq;
+                    }
+                    uint32_t thenL = b.id(), mergeL = b.id();
+                    uint32_t elseL = (ai + 1 < s->caseArms.size()) ? b.id() : mergeL;
+                    put(body, OpSelectionMerge, {mergeL, 0});
+                    put(body, OpBranchConditional, {hit.id, thenL, elseL});
+                    terminated = true;
+                    newBlock(thenL);
+                    // arm 体 + through 贯穿链（自动 break 语义；through 内联后续 arm 体）
+                    for (size_t k = ai; k < s->caseArms.size(); k++) {
+                        for (const auto& x : s->caseArms[k].body) stmt(x.get(), depth + 1);
+                        if (!s->caseArms[k].through) break;
+                    }
+                    branch(mergeL);
+                    if (elseL != mergeL) {
+                        newBlock(elseL);
+                        emitArm(ai + 1);
+                        branch(mergeL);
+                    }
+                    newBlock(mergeL);
+                };
+                emitArm(0);
                 break;
             }
             default:
