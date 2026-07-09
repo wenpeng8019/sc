@@ -775,6 +775,106 @@ proggraph 把整程序 AST 烘成「结构对象依赖图」（节点 = fnc/rpc/
 
 ------
 
+## 13. 语言机制的 C 代码生成落地
+
+> 本章收录各语法机制在 codegen_c 的 C 落地细节（自 compiler.md 移入——
+> 「机制怎么变成 C」属机制规格，编译器手册只保留流水线与工程行为）。
+
+### 13.1 伪类（成员函数与函数指针字段）
+
+- 成员函数在结构体定义内实现（签名字段 + 缩进函数体），生成带接收者的
+  C 函数（名字修饰 `Obj_method`，首参 `Obj *_this`），函数体内 `this`
+  映射为参数 `_this`；`o.m(...)` / `p->m(...)` 调用时自动注入接收者
+  （`&o` / `p`）。`@fnc Obj::m` 仅声明形态生成 extern 原型（C 侧实现）。
+- 普通函数指针字段 `cb: fnc: ...`（无函数体）展开为普通 C 函数指针，
+  调用不注入接收者。
+- 调用实参不足时默认补 0：指针/数组/函数指针补 `NULL`，按值聚合补
+  `(T){0}`，标量补 `0`；覆盖普通函数、成员函数、函数指针、rpc/run。
+- 字段默认值：为含默认值的类型生成 `static inline T T__default(void)` 初始化器，
+  未指定字段零初始化。
+
+### 13.2 伪形参函数（rpc）三件套
+
+`rpc name: ret, a: T, b: T` 展开为：
+
+- `struct name { ret _; T a; T b; };` —— 同名参数结构体，返回槽 `_` 为首成员
+  （省略返回类型时无 `_`；无参且无返回时生成 `char _;` 占位）；
+- `void name_rpc(struct name *_p);` —— 实际函数（本模块未导出时 `static`；
+  仅声明形态为 extern，由外部 C 侧实现）；
+- `static inline ret name(...)` —— 调用包装：装填结构体 → 执行 → 取返回槽，
+  即 `sync work(args)` 当前线程驱动的落地。
+
+实现要点：结构体仅用 struct tag（不 typedef），C 中 tag 与函数名分属不同命名
+空间，故可同名。函数体内参数引用改写为 `_p->x`，`return e` 改写为
+`_p->_ = e; return;`。`@rpc` 导出时头文件包含完整三件套。
+
+rpc 是「流程」原语，**禁止裸 `rpc()` 直接调用**：codegen 在 emitExpr 的 Call
+分支拦截「目标名在 rpcs 表且非驱动上下文」并报错。须经驱动选定执行形态——
+`sync`（当前线程直接执行，经上面的调用包装）、`async`（事件循环，→ §7）、
+`run`（独立线程，→ §13.3）、队列 `<<`（投递，→ §6）。`sync E` 由
+`Expr::Sync` 承载，仅放行其内层 rpc 调用（`emitRpcCallOK` 标志）。
+
+### 13.3 run 语句（多线程）
+
+`run rpc调用[, &t]` 以 rpc 调用创建线程（目标必须是 rpc，需 `inc mt.sc`）：
+
+```c
+{   /* run work(a, b), &t */
+    struct work _rp = {0};
+    _rp.x = a; _rp.y = b;
+    thread_run((void (*)(void *))work_rpc, &_rp, sizeof(_rp), (thread **)(&t));
+}
+```
+
+出参为空（无 `, &t`）时传 `NULL` → detach 自释放。`thread_run` 为线程原语
+（op_impl 实现）：单次 `malloc(sizeof(thread) + psize + 实现私有区)` 的联合
+实体，参数 memcpy 到 thread 紧随位置；joinable 由 `thread_join` 等待并整块
+回收。程序含 run 语句时自动输出 `thread_run` 的 extern 原型。
+
+### 13.4 链表结构体（def T: ~）与 chain 偏移注入
+
+- 解析期：`def T: ~ {}` 置 `Decl::linked`，并在字段表**末尾**追加两个
+  `synthetic` 真实字段 `_prev`/`_next`（`T*`）——后续成员访问、零初始化、
+  头文件导出均按普通字段处理，`--emit-sc` 跳过 synthetic 字段还原原貌。
+  `~` 仅允许 `{}` 结构体；显式定义 `_prev`/`_next` 报错。
+- 代码生成期：`chain::append/push` 方法调用糖处，编译器取实参静态类型 T
+  （须为 `linked` 结构体一级指针，否则报错），自动追加尾参
+  `offsetof(T, _prev)`。chain 以 `_off` 记录该偏移，其余无类型实参的
+  操作（pop/last/revert/cut 等）经 `_off` 间接寻址 `_prev`/`_next`。
+- `prev`/`next` 上下文关键字：成员访问位（`.`/`->`）且基址静态类型为
+  `linked` 结构体时，语义推断与 C 生成统一映射为 `_prev`/`_next`
+  （codegen_c `memberFieldName`）；普通结构体的同名字段不受影响。
+  解析期链表结构体禁止显式定义 `prev`/`next`（与 `_prev`/`_next` 同列）。
+  运行时链表语义见 §3。
+
+### 13.5 print 与 stringify(...) 格式化关键字
+
+- `print(fmt, ...)`：成员表/全局表/函数表均无 `print` 时按关键字处理，
+  生成 `print(fmt, ...)` 调用并在单元头部输出 extern 原型；要求单元
+  `inc io.sc`（拉入 `builtins/io/io_impl.c` 链接），否则编译报错。
+  级别前缀解析、SC_LOG 过滤、时间戳格式化全部在运行时 `print` 内完成。
+- `stringify(值[, 缓存, 大小])`：JSON 格式化关键字（空括号 `string()`
+  仍走 T() 堆构造糖；同名定义遮蔽时按普通调用），要求 `inc adt.sc`（依赖内置
+  `string`）与 `inc io.sc`（依赖选项类型 `stringify_t`）。可选选项块
+  `stringify<key:val, ...>(...)`：parser 在 `parsePostfix` 中遇 `stringify` 后紧跟 `<`
+  时解析键值对（值限整数字面量）挂到 `Expr::sofOpts`；codegen 据此构造
+  `(stringify_t){ .compact = N }` 作为末参传入格式化器（当前仅 `compact` 键）。
+  代码生成按实参静态类型（`exprVType` + 数组维度表 `varDims`）登记格式化请求
+  `sofReqs`（key = 规范类型名 + `_p`×指针级 + `_a`+维长），按实参个数静态派发：
+  1 参→`stringify_KEY(值, opt)` 返回 `string`；3 参→`stringify_KEY_buf(值, 缓存, 大小, opt)`
+  在缓存内构建（截断保证 NUL 结尾）返回 `char *`；其他个数报错。
+  函数体先写入暂存流，结束后回填支撑代码：格式化原语
+  （`sc__sof_i64/u64/f64/bool/char/cstr/ptr/named_ptr/amp_*/str`）、缩进原语
+  `sc__sof_nl(string*, stringify_t, int)`、按值字段闭包递归生成的聚合格式化器
+  `sc__sof_T(string*, T*, stringify_t, int depth)`（输出 JSON 对象，键加双引号；
+  `compact:1` 紧凑单行，否则按 `_depth` 逐层 2 空格缩进多行美化）、
+  每请求包装 `static string stringify_KEY(..., stringify_t)`（聚合一级指针含 nil 检查后解引用）
+  及按需的缓存变体 `static char *stringify_KEY_buf(...)`。结构体指针成员→`"类型名@0x地址"`，
+  标量指针成员→`"&值"`。转 C 时支撑代码写入独立 `stringify.h`（含 include guard），
+  生成的 `.c` 在类型定义之后 `#include`（编译单元 `<token>_stringify.h`；
+  `--emit-c -o` 同级 `stringify.h`；输出到 stdout 时回退内联自包含）。
+  多维数组、未知类型编译报错；枚举按 i64 处理。
+
 ## 附录 A：各机制编译器落点
 
 | 机制 | lexer | AST | parser | semantic | codegen |
@@ -800,5 +900,6 @@ proggraph 把整程序 AST 烘成「结构对象依赖图」（节点 = fnc/rpc/
 - 依赖图 tok → §10
 - 内存分配（sc_alloc/chunk 池/金丝雀）→ §11
 - 图算法 graph（builtins ↔ scc 共用算法模块）→ §12
+- 语言机制的 C 代码生成落地（伪类/rpc/run/链表 chain/print/stringify）→ §13
 
 > 张量 `ts`、`adt` 等是**标准库**而非语言机制，见 [REFERENCE.md](REFERENCE.md)。

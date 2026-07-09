@@ -87,7 +87,7 @@ MSVC 远端编译配方要点（见 [templates/targets/windows-x64.target](templ
 
 **解法**：**已内建修复**。编译器在每个程序 `main` 入口注入 `SC_CONSOLE_UTF8()`
 （见 [builtins/platform.h](builtins/platform.h)，属编译器默认注入行为之一，参见
-[compiler-defaults.md](compiler-defaults.md) §2），在任何输出前把本进程控制台的输出/输入代码页
+[compiler.md](compiler.md) §15.2），在任何输出前把本进程控制台的输出/输入代码页
 切到 UTF-8（65001）：
 
 ```c
@@ -112,6 +112,6 @@ MSVC 远端编译配方要点（见 [templates/targets/windows-x64.target](templ
 ## 参考
 
 
-- 交叉编译总览：[cross-compile.md](cross-compile.md)
+- 交叉编译总览：[compiler.md](compiler.md) §5
 - 调试技巧：[debugging.md](debugging.md)
 - 内置模块契约：[builtins/REFERENCE.md](builtins/REFERENCE.md)
