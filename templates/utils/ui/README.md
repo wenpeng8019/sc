@@ -56,18 +56,15 @@
 - `src/ui_internal.h`：共享数据结构 + 平台后端 hook 契约。
 - `src/cocoa_ui.m`：macOS(Cocoa) 后端（NSView/NSControl，参考 wsi）。
 - `src/null_ui.c`：其他平台的空实现（仅维护逻辑树，不建原生控件）。
-- `build.sh`：独立静态库构建脚本（按三元组选后端）。
+- `build.sh`：scc 薄包装（`scc . --build`；后端宏在模块 [.sc](.sc) 段配置）。
 
 ## 5. 构建
 
 ```sh
 cd templates/utils/ui
-./build.sh
+./build.sh                       # → libui.a
+./build.sh --target <目标档>     # → libui.<suffix|triple>.a（交叉）
 ```
-
-产物：
-- `libui.<triple>.a`
-- `libui.a`
 
 说明：
 - 该模块依赖 `wsi.h`（`sc_window*` 与平台常量）。

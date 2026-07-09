@@ -1,6 +1,6 @@
 #include "ui_internal.h"
 
-#if !defined(SC_UI_COCOA) && !defined(SC_UI_WIN32)
+#if !defined(SC_UI_COCOA) && !defined(SC_UI_WIN32) && !defined(SC_UI_NK)
 
 /* ============================================================
  * ui null 后端 —— 非本机图形平台的空实现
@@ -30,4 +30,4 @@ int ui_backend_set_font(sc_ui_ctx* ctx, const char* path, float size)
     return 0;
 }
 
-#endif /* !SC_UI_COCOA && !SC_UI_WIN32 */
+#endif /* !SC_UI_COCOA && !SC_UI_WIN32 && !SC_UI_NK */

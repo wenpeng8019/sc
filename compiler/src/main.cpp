@@ -640,8 +640,9 @@ static int buildModuleLib(const std::filesystem::path& moduleDir,
         std::string lang;
         if (ext == ".m")
             lang = targetDarwin ? " -fobjc-arc -x objective-c" : " -x c";
+        // lang 在模块段 cflags 之前：默认 ARC 可被段配置 -fno-objc-arc 覆盖（MRC 源）
         std::string cmd = (isCxx ? pickCXX() : pickCC()) + " -O2 -g" + tc.machine
-            + tc.cflags + mc.cflags + lang + (shared ? " -fPIC" : "") + incs
+            + tc.cflags + lang + mc.cflags + (shared ? " -fPIC" : "") + incs
             + " -c " + s.string() + " -o " + o.string();
         std::cerr << "  " << (isCxx ? "CXX " : "CC  ") << s.filename().string() << "\n";
         if (std::system(cmd.c_str()) != 0) {
@@ -2358,9 +2359,10 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                                                  : " -x c";   // 平台守卫空化
                     // 模块段配置 cflags（如 GLES 形态的 -DSC_GPU_GLES -I khr）
                     // 作用于本模块 add 的实现源编译；srcDir 即模块目录。
+                    // langFlags 在段 cflags 之前：默认 ARC 可被 -fno-objc-arc 覆盖。
                     const ModuleConfig amc = loadModuleConfig(srcDir, tc);
                     std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
-                        + extraCFlags + amc.cflags + langFlags
+                        + extraCFlags + langFlags + amc.cflags
                         + " -I " + srcDir.string()
                         + " -I " + tmpDir.string()
                         + " -c " + resolved.string() + " -o " + obj.string();

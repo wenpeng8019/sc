@@ -107,23 +107,26 @@ WSI 当前边界如下。
 
 ### 4.1 宿主构建
 
-在模块目录执行：
+build.sh 已降为 scc 薄包装（仅做 Wayland 协议头生成 + 调
+`scc . --build`）；平台后端宏与链接项在模块 [.sc](.sc) 段配置
+（见 compiler.md §7.4/§7.6）。在模块目录执行：
 
   cd templates/utils/wsi
   ./build.sh
 
-产物：
-- libwsi.<triple>.a
-- libwsi.a（宿主构建时生成，指向或复制自带 triple 后缀版本）
+产物：libwsi.a（实体文件）
 
 
 ### 4.2 交叉构建
 
-示例：
+工具链经 scc 机制配置（SCC_* 环境变量 / --target 目标档，
+见 compiler.md §5），产物自动带变体后缀：
 
-  ./build.sh --target aarch64-linux-gnu
-  ./build.sh --cc cl --ar lib
-  ./build.sh --cc x86_64-w64-mingw32-gcc --target x86_64-windows-gnu
+  SCC_TARGET_TRIPLE=aarch64-linux-gnu SCC_CC=aarch64-linux-gnu-gcc ./build.sh
+  ./build.sh --target ../../targets/aarch64-linux.target
+  # → libwsi.<target_suffix|triple>.a
+
+（MSVC 变体经远程构建产出，见 compiler.md §6）
 
 
 ### 4.3 Linux 依赖
