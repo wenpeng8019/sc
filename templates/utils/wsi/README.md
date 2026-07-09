@@ -285,7 +285,7 @@ Debian/Ubuntu 推荐安装：
   `wp_viewport`。
 - `resizeFallbackEdge()`：resize 时重建对应尺寸 buffer 并重新 attach
   （旧 buffer 销毁）。
-- `_GLFWfallbackEdgeWayland` 结构：`viewport` 成员替换为每边独立的
+- `SC_fallbackEdgeWayland` 结构：`viewport` 成员替换为每边独立的
   `buffer`；原共享的 `fallback.buffer` 字段删除。
 
 代价：每条边多几十 KB 内存、resize 时重建小 buffer——可忽略。

@@ -4,7 +4,7 @@
 #
 # 平台后端宏 / 头路径 / 链接项全部在模块 .sc 段配置（scc 直读，
 # 见 compiler.md §7.4/§7.6）；本脚本只做两件事：
-#   1. Linux 目标：wayland-scanner 从 protocols/*.xml 生成协议头
+#   1. Linux 目标：wayland-scanner 从 wayland-protocols/*.xml 生成协议头
 #      到 build/wayland-protocols（wl_*.c include；[linux] 段 inc 指向）
 #   2. 调 scc 模块库构建：scc . --build [透传参数]
 #
@@ -49,7 +49,7 @@ fractional-scale-v1-client-protocol:fractional-scale-v1.xml \
 xdg-activation-v1-client-protocol:xdg-activation-v1.xml \
 idle-inhibit-unstable-v1-client-protocol:idle-inhibit-unstable-v1.xml"
     for entry in $WL_PROTOS; do
-        base="${entry%%:*}"; xml="protocols/${entry##*:}"
+        base="${entry%%:*}"; xml="wayland-protocols/${entry##*:}"
         wayland-scanner client-header "$xml" "${WL_PROTO_DIR}/${base}.h"
         wayland-scanner private-code  "$xml" "${WL_PROTO_DIR}/${base}-code.h"
     done

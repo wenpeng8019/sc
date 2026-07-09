@@ -110,7 +110,7 @@ struct wl_output;
 #define wp_fractional_scale_v1_interface _glfw_wp_fractional_scale_v1_interface
 
 #define GLFW_WAYLAND_WINDOW_STATE         wl_window_t  wl;
-#define GLFW_WAYLAND_LIBRARY_WINDOW_STATE _GLFWlibraryWayland wl;
+#define GLFW_WAYLAND_LIBRARY_WINDOW_STATE wl_ibrary_t wl;
 #define GLFW_WAYLAND_MONITOR_STATE        wl_monitor_t wl;
 #define GLFW_WAYLAND_CURSOR_STATE         wl_cursor_t  wl;
 
@@ -304,28 +304,27 @@ typedef void (* PFN_libdecor_state_free)(struct libdecor_state*);
 #define libdecor_state_new g_wsi.wl.libdecor.libdecor_state_new_
 #define libdecor_state_free g_wsi.wl.libdecor.libdecor_state_free_
 
-typedef struct _GLFWfallbackEdgeWayland
+typedef struct SC_fallbackEdgeWayland
 {
     struct wl_surface*          surface;
     struct wl_subsurface*       subsurface;
     struct wl_buffer*           buffer;
-} _GLFWfallbackEdgeWayland;
+} SC_fallbackEdgeWayland;
 
-typedef struct _GLFWofferWayland
+typedef struct SC_offerWayland
 {
     struct wl_data_offer*       offer;
     bool                    text_plain_utf8;
     bool                    text_uri_list;
-} _GLFWofferWayland;
+} SC_offerWayland;
 
-typedef struct _GLFWscaleWayland
+typedef struct SC_scaleWayland
 {
     struct wl_output*           output;
     int32_t                     factor;
-} _GLFWscaleWayland;
+} SC_scaleWayland;
 
 // Wayland-specific per-window data
-//
 typedef struct wl_window_t
 {
     int                         width, height;
@@ -364,7 +363,7 @@ typedef struct wl_window_t
     // We need to track the monitors the window spans on to calculate the
     // optimal scaling factor.
     int32_t                     bufferScale;
-    _GLFWscaleWayland*          outputScales;
+    SC_scaleWayland*          outputScales;
     size_t                      outputScaleCount;
     size_t                      outputScaleSize;
 
@@ -381,7 +380,7 @@ typedef struct wl_window_t
 
     struct {
         bool                    decorations;
-        _GLFWfallbackEdgeWayland    top, left, right, bottom;
+        SC_fallbackEdgeWayland    top, left, right, bottom;
         double                      pointerX, pointerY;
         uint32_t                    buttonPressSerial;
         const char*                 cursorName;
@@ -389,8 +388,7 @@ typedef struct wl_window_t
 } wl_window_t;
 
 // Wayland-specific global data
-//
-typedef struct _GLFWlibraryWayland
+typedef struct wl_ibrary_t
 {
     struct wl_display*          display;
     struct wl_registry*         registry;
@@ -411,7 +409,7 @@ typedef struct _GLFWlibraryWayland
     struct xdg_activation_v1*               activationManager;
     struct wp_fractional_scale_manager_v1*  fractionalScaleManager;
 
-    _GLFWofferWayland*          offers;
+    SC_offerWayland*          offers;
     unsigned int                offerCount;
 
     struct wl_data_offer*       selectionOffer;
@@ -567,10 +565,9 @@ typedef struct _GLFWlibraryWayland
         PFN_libdecor_state_new libdecor_state_new_;
         PFN_libdecor_state_free libdecor_state_free_;
     } libdecor;
-} _GLFWlibraryWayland;
+} wl_ibrary_t;
 
 // Wayland-specific per-monitor data
-//
 typedef struct wl_monitor_t
 {
     struct wl_output*           output;
@@ -583,7 +580,6 @@ typedef struct wl_monitor_t
 } wl_monitor_t;
 
 // Wayland-specific per-cursor data
-//
 typedef struct wl_cursor_t
 {
     struct wl_cursor*           cursor;
@@ -595,74 +591,5 @@ typedef struct wl_cursor_t
 } wl_cursor_t;
 
 bool wayland_connect(int platformID, platform_st* platform);
-int wayland_init(void);
-void wayland_terminate(void);
-
-bool wayland_create_window(window_st* window, const wnd_config_st* wndconfig);
-void wayland_destroy_window(window_st* window);
-void wayland_set_window_title(window_st* window, const char* title);
-void wayland_set_window_icon(window_st* window, int count, const GLFWimage* images);
-void wayland_get_window_pos(window_st* window, int* xpos, int* ypos);
-void wayland_set_window_pos(window_st* window, int xpos, int ypos);
-void wayland_get_window_size(window_st* window, int* width, int* height);
-void wayland_set_window_size(window_st* window, int width, int height);
-void wayland_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);
-void wayland_set_window_aspect_ratio(window_st* window, int numer, int denom);
-void wayland_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
-void wayland_get_window_content_scale(window_st* window, float* xscale, float* yscale);
-void wayland_iconify_window(window_st* window);
-void wayland_restore_window(window_st* window);
-void wayland_maximize_window(window_st* window);
-void wayland_show_window(window_st* window);
-void wayland_hide_window(window_st* window);
-void wayland_request_window_attention(window_st* window);
-void wayland_focus_window(window_st* window);
-void wayland_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
-bool wayland_window_focused(window_st* window);
-bool wayland_window_iconified(window_st* window);
-bool wayland_window_visible(window_st* window);
-bool wayland_window_maximized(window_st* window);
-bool wayland_window_hovered(window_st* window);
-void wayland_set_window_resizable(window_st* window, bool enabled);
-void wayland_set_window_decorated(window_st* window, bool enabled);
-void wayland_set_window_floating(window_st* window, bool enabled);
-float wayland_get_window_opacity(window_st* window);
-void wayland_set_window_opacity(window_st* window, float opacity);
-void wayland_set_window_mouse_passthrough(window_st* window, bool enabled);
-
-void wayland_set_mouse_raw_motion(window_st* window, bool enabled);
-bool wayland_mouse_raw_motion_supported(void);
-
-void wayland_poll_events(void);
-void wayland_wait_events(void);
-void wayland_wait_eventsTimeout(double timeout);
-void wayland_post_empty_event(void);
-
-void wayland_get_cursor_pos(window_st* window, double* xpos, double* ypos);
-void wayland_set_cursor_pos(window_st* window, double xpos, double ypos);
-void wayland_set_cursorMode(window_st* window, int mode);
-const char* wayland_get_scancode_name(int scancode);
-int wayland_get_key_scancode(int key);
-bool wayland_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
-bool wayland_create_standard_cursor(cursor_st* cursor, int shape);
-void wayland_destroy_cursor(cursor_st* cursor);
-void wayland_set_cursor(window_st* window, cursor_st* cursor);
-void wayland_set_clipboard_string(const char* string);
-const char* wayland_get_clipboard_string(void);
-
-void wsi_free_monitorWayland(monitor_st* monitor);
-void wayland_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
-void wayland_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
-void wayland_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
-GLFWvidmode* wayland_get_video_modes(monitor_st* monitor, int* count);
-bool wayland_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
-bool wayland_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
-void wayland_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
-
-void wayland_AddOutput(uint32_t name, uint32_t version);
-void wayland_UpdateBufferScaleFromOutputs(window_st* window);
-
-void wayland_AddSeatListener(struct wl_seat* seat);
-void wayland_AddDataDeviceListener(struct wl_data_device* device);
 
 #endif // WL_PLATFORM_H
