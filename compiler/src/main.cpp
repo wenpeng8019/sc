@@ -48,9 +48,14 @@
 #include <vector>
 
 static void usage() {
-    std::cerr << "用法: scc <input.sc | -> [选项] [-- 程序参数...]\n"
+    std::cerr << "用法: scc <input.sc | 模块目录 | -> [选项] [-- 程序参数...]\n"
               << "  默认：转 C 后直接编译并执行（类似解释器，不保存中间文件）\n"
-              << "        C 编译器优先级：环境变量 SCC_CC > CC > 当前目录 .sc 配置文件 > gcc\n"
+              << "  模块目录输入（含 src/ 子目录）+ --build：通用 C/C++ 模块库构建——\n"
+              << "        编译 src/ 下 .c/.m/.cpp/.cc/.cxx 为 lib<名>[.<suffix>].a（-o *.so/*.dylib 产动态库）；\n"
+              << "        -I = 模块根(+public .h) + src + builtins；选项取工具链配置 + 模块 .sc 段配置；\n"
+              << "        模块 .sc 支持 [target] INI 段（fnmatch 匹配 target_suffix/triple/平台族），\n"
+              << "        段键 cflags/ldflags/inc/lib/libs；消费侧（inc <模块>.sc）按目标段自动注入\n"
+              << "        C 编译器选择：$SCC_CC > $CC > gcc；C++：$SCC_CXX > $CXX > g++\n"
               << "        .sc 配置文件格式：key = value，每行一项（# 行注释）：\n"
               << "          cc     = clang          # C 编译器（环境变量 SCC_CC/CC 优先）\n"
               << "          cflags = -O2 -Wall      # 编译选项（SCC_CFLAGS 优先）\n"
@@ -221,6 +226,9 @@ static std::string readConfig(const std::string& key) {
     while (std::getline(fin, line)) {
         std::string l = trim(line);
         if (l.empty() || l[0] == '#') continue;
+        // 遇 INI 段头即停：段内属模块构建/链接配置（loadModuleConfig 消费），
+        // cwd 项目配置只认无段区——避免从模块目录运行 scc 时误读目标段键。
+        if (l.front() == '[') break;
         size_t eq = l.find('=');
         if (eq == std::string::npos) continue;
         if (trim(l.substr(0, eq)) == key) return trim(stripInlineComment(l.substr(eq + 1)));
@@ -480,6 +488,189 @@ static std::filesystem::path resolveAddArtifact(const std::filesystem::path& p,
     return p;
 }
 
+// ---------------- 模块构建/链接配置（<模块目录>/.sc，INI 段扩展） ----------------
+// C 侧实现的 sc 子模块（目录含 src/）以模块目录下 .sc 文件自描述其
+// 平台编译/链接需求，取代编译器内的硬编码注入表与模块 build.sh：
+//   # 无段 = 所有目标通用（追加）
+//   cflags  = -DFOO
+//   [darwin]                 # 段名 fnmatch 匹配：target_suffix → triple → 平台族
+//   ldflags = -framework Metal -framework QuartzCore
+//   [*gles*]                 # 形态编码进 target_suffix（自由文本，如 aarch64-linux-gnu-gles）
+//   ldflags = -lGLESv2 -lEGL -lgbm
+//   [linux]
+//   ldflags = -lGL -lEGL -lgbm
+// 键：cflags / ldflags / inc（':' 分隔 → -I，相对模块目录）/ lib（→ -L）/ libs（→ -l）。
+// 段自上而下取首个命中（互斥形态如 GL/GLES 由段顺序表达：特殊在前、一般在后）；
+// 无段键恒追加。消费侧（inc <模块>.sc 构建）与模块库构建（scc <目录> --build）共用。
+struct ModuleConfig {
+    std::string cflags;    // 编译选项（含 inc 展开的 -I）
+    std::string ldflags;   // 链接选项（含 lib/libs 展开；交付给最终链接）
+};
+
+#include <fnmatch.h>
+
+static ModuleConfig loadModuleConfig(const std::filesystem::path& moduleDir,
+                                     const ToolConfig& tc) {
+    ModuleConfig mc;
+    std::ifstream fin(moduleDir / ".sc");
+    if (!fin) return mc;
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t\r");
+        if (a == std::string::npos) return std::string();
+        size_t b = s.find_last_not_of(" \t\r");
+        return s.substr(a, b - a + 1);
+    };
+    // 匹配键：target_suffix（含形态标签）→ triple → 平台族；host 构建用宿主族
+    const std::string effTriple = tc.triple.empty() ? hostTriple() : tc.triple;
+    const std::vector<std::string> keys = {
+        tc.targetSuffix.empty() ? effTriple : tc.targetSuffix,
+        effTriple,
+        platformFamily(effTriple),
+    };
+    std::string line, section;          // section 空 = 无段（通用）
+    bool sectionMatched = false;        // 已有段命中（后续段跳过 = 首个命中独占）
+    bool inMatched = false;             // 当前行处于命中段（或无段区）
+    auto applyKV = [&](const std::string& k, const std::string& v) {
+        if (k == "cflags")       mc.cflags += " " + v;
+        else if (k == "ldflags") mc.ldflags += " " + v;
+        else if (k == "inc")
+            for (auto& p : splitBy(v, ":"))
+                mc.cflags += " -I " + (std::filesystem::path(p).is_absolute()
+                                           ? p : (moduleDir / p).string());
+        else if (k == "lib")
+            for (auto& p : splitBy(v, ":"))
+                mc.ldflags += " -L " + (std::filesystem::path(p).is_absolute()
+                                            ? p : (moduleDir / p).string());
+        else if (k == "libs")
+            for (auto& l : splitBy(v, " ,")) mc.ldflags += " -l" + l;
+        // 其余键（cc= 等项目工具链键）不属模块配置，忽略
+    };
+    inMatched = true;                    // 文件开头 = 无段区
+    while (std::getline(fin, line)) {
+        std::string l = trim(line);
+        if (l.empty() || l[0] == '#') continue;
+        if (l.front() == '[' && l.back() == ']') {
+            section = trim(l.substr(1, l.size() - 2));
+            if (sectionMatched) { inMatched = false; continue; }  // 已命中：后续段全跳过
+            inMatched = false;
+            for (auto& k : keys)
+                if (fnmatch(section.c_str(), k.c_str(), 0) == 0) {
+                    inMatched = true;
+                    sectionMatched = true;
+                    break;
+                }
+            continue;
+        }
+        if (!inMatched) continue;
+        size_t eq = l.find('=');
+        if (eq == std::string::npos) continue;
+        applyKV(trim(l.substr(0, eq)), trim(stripInlineComment(l.substr(eq + 1))));
+    }
+    return mc;
+}
+
+// ---------------- 模块库构建（scc <模块目录> --build） ----------------
+// 把「目录含 src/ 的 C/C++ 实现 sc 子模块」编译归档为库——通用 C 模块构建，
+// 替代各模块手写 build.sh：
+//   · 源 = src/ 下 .c/.m/.cpp/.cc/.cxx（排序）；.m 在 darwin 目标按 ObjC 编译
+//     （-fobjc-arc -x objective-c），非 darwin 按 -x c（源文件平台自守卫空化）；
+//     C++ 源用 CXX 编译器（SCC_CXX/CXX/配置 cxx，缺省 g++）
+//   · include = 模块根（public .h/C ABI 签名）+ src/ + builtins 根（platform.h）
+//     + builtins 上级（"builtins/x/x.h" 形式引用）
+//   · 编译/链接选项 = 工具链配置（--target/环境/cwd .sc）+ 模块 .sc 段配置
+//   · 产物按 -o 后缀：缺省/.a = 静态库 lib<目录名>[.<suffix>].a（ar rcs，
+//     ldflags 不参与——供消费侧注入）；.so/.dylib = 动态库（-fPIC 编译，
+//     -shared 链接，模块段 ldflags 参与；含 C++ 源时用 CXX 驱动链接）
+static std::string pickCC();
+static std::string pickCXX();
+static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start);
+
+static int buildModuleLib(const std::filesystem::path& moduleDir,
+                          std::string output, const ToolConfig& tc) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path srcDir = moduleDir / "src";
+    const std::string name = fs::weakly_canonical(moduleDir).filename().string();
+
+    std::vector<fs::path> srcs;
+    bool anyCxx = false;
+    for (auto& e : fs::directory_iterator(srcDir, ec)) {
+        if (!e.is_regular_file()) continue;
+        const std::string ext = e.path().extension().string();
+        if (ext == ".c" || ext == ".m") srcs.push_back(e.path());
+        else if (ext == ".cpp" || ext == ".cc" || ext == ".cxx") {
+            srcs.push_back(e.path());
+            anyCxx = true;
+        }
+    }
+    std::sort(srcs.begin(), srcs.end());
+    if (srcs.empty()) {
+        std::cerr << "错误: 模块 src/ 下无 .c/.m/.cpp/.cc/.cxx 源文件（"
+                  << srcDir.string() << "）\n";
+        return 1;
+    }
+
+    const std::string suf = tc.triple.empty()
+        ? std::string{}
+        : "." + (tc.targetSuffix.empty() ? tc.triple : tc.targetSuffix);
+    if (output.empty())
+        output = (moduleDir / ("lib" + name + suf + ".a")).string();
+    const bool shared = endsWith(output, ".so") || endsWith(output, ".dylib");
+
+    const ModuleConfig mc = loadModuleConfig(moduleDir, tc);
+    const bool targetDarwin =
+        platformFamily(tc.triple.empty() ? hostTriple() : tc.triple) == "darwin";
+    const fs::path builtins = findBuiltinsDir(fs::weakly_canonical(moduleDir));
+    std::string incs = " -I " + moduleDir.string() + " -I " + srcDir.string();
+    if (!builtins.empty()) {
+        incs += " -I " + builtins.string();
+        if (builtins.has_parent_path()) incs += " -I " + builtins.parent_path().string();
+    }
+
+    char tmpl[] = "/tmp/scc_modlib_XXXXXX";
+    char* dirC = mkdtemp(tmpl);
+    if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
+    const fs::path tmpDir(dirC);
+
+    std::vector<fs::path> objs;
+    for (auto& s : srcs) {
+        const fs::path o = tmpDir / (s.stem().string() + ".o");
+        const std::string ext = s.extension().string();
+        const bool isCxx = (ext == ".cpp" || ext == ".cc" || ext == ".cxx");
+        std::string lang;
+        if (ext == ".m")
+            lang = targetDarwin ? " -fobjc-arc -x objective-c" : " -x c";
+        std::string cmd = (isCxx ? pickCXX() : pickCC()) + " -O2 -g" + tc.machine
+            + tc.cflags + mc.cflags + lang + (shared ? " -fPIC" : "") + incs
+            + " -c " + s.string() + " -o " + o.string();
+        std::cerr << "  " << (isCxx ? "CXX " : "CC  ") << s.filename().string() << "\n";
+        if (std::system(cmd.c_str()) != 0) {
+            std::cerr << "错误: 模块源编译失败（" << cmd << "）\n";
+            fs::remove_all(tmpDir, ec);
+            return 1;
+        }
+        objs.push_back(o);
+    }
+    int rc;
+    if (shared) {
+        // 动态库：模块段 ldflags 参与链接；含 C++ 源用 CXX 驱动（带 C++ 运行时）
+        std::string cmd = (anyCxx ? pickCXX() : pickCC()) + " -g" + tc.machine
+            + " -shared";
+        for (auto& o : objs) cmd += " " + o.string();
+        cmd += " -o " + output + tc.ldflags + mc.ldflags;
+        rc = std::system(cmd.c_str()) == 0 ? 0 : 1;
+        if (rc != 0) std::cerr << "错误: 动态库链接失败（" << cmd << "）\n";
+    } else {
+        std::string arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + output;
+        for (auto& o : objs) arCmd += " " + o.string();
+        rc = std::system(arCmd.c_str()) == 0 ? 0 : 1;
+        if (rc != 0) std::cerr << "错误: 归档失败（" << arCmd << "）\n";
+    }
+    fs::remove_all(tmpDir, ec);
+    if (rc == 0) std::cerr << "  -> " << output << "\n";
+    return rc;
+}
+
 // 远程工具链构建分发：把本机生成的 C 推到远端编译。
 //   output 非空 → --build（取回产物到 output）；output 空 → 远端运行（progArgs 透传）。
 //   deps：add 指令引入的原生依赖（源码远端重编 / 预编译产物链接）。
@@ -499,7 +690,8 @@ static std::string builtinsContentHash(const std::filesystem::path& dir) {
          it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (ec || !it->is_regular_file(ec)) continue;
         const std::string ext = it->path().extension().string();
-        if (ext == ".sc" || ext == ".h" || ext == ".caps" || ext == ".a")
+        if (ext == ".sc" || ext == ".h" || ext == ".caps" || ext == ".a"
+            || it->path().filename() == ".sc")   // 模块配置隐藏文件（ext 为空）
             files.push_back(it->path());
     }
     std::sort(files.begin(), files.end());
@@ -780,6 +972,20 @@ static std::string pickCC() {
     std::string conf = readConfig("cc");
     if (!conf.empty()) return conf;
     return "gcc";
+}
+
+// 选择系统 C++ 编译器（模块库构建的 .cpp/.cc/.cxx 源）：
+// SCC_CXX > CXX > 目标档/.sc 配置 cxx 项 > 缺省 g++
+static std::string pickCXX() {
+    const char* cxx = std::getenv("SCC_CXX");
+    if (cxx && *cxx) return cxx;
+    cxx = std::getenv("CXX");
+    if (cxx && *cxx) return cxx;
+    auto it = g_profile.find("cxx");
+    if (it != g_profile.end() && !it->second.empty()) return it->second;
+    std::string conf = readConfig("cxx");
+    if (!conf.empty()) return conf;
+    return "g++";
 }
 
 // ---------------- mbedTLS 后端：按目标工具链现场编译 vendor 源码（跨平台正确） ----------------
@@ -1967,49 +2173,22 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
             }
 #endif
         }
-        // gpu / gfx / spc（builtins GPU 模块体系）+ wsi（窗口库）——平台链接注入：
-        //   模块实现为源码动态编译（模块 .sc 逐文件 add src 源码，.m 自动 ObjC），
-        //   其平台框架/系统库依赖由此处按目标平台族自动注入，用户零 SCC_LDFLAGS。
-        //   darwin 框架集为实测；linux 按形态分组（GLES 形态 = cflags 含
-        //   -DSC_GPU_GLES → GLESv2；否则桌面 GL），板验前为合理缺省。
-        if (scStem == "gpu" || scStem == "gfx" || scStem == "spc" || scStem == "wsi") {
-            const std::string fam =
-                platformFamily(tc.triple.empty() ? hostTriple() : tc.triple);
-            auto addLd = [&](const char* flag) {
-                if (extraLd && extraLd->find(flag) == std::string::npos)
-                    *extraLd += std::string(" ") + flag;
-            };
-            if (fam == "darwin") {
-                if (scStem == "wsi") {
-                    addLd("-framework Cocoa");
-                    addLd("-framework IOKit");
-                    addLd("-framework CoreFoundation");
-                    addLd("-framework QuartzCore");
-                } else {
-                    /* gpu/gfx/spc 共用基础集（查重防重复注入） */
-                    addLd("-framework Cocoa");
-                    addLd("-framework Metal");
-                    addLd("-framework QuartzCore");
-                    addLd("-framework OpenGL");
-                    addLd("-framework IOSurface");
-                    addLd("-framework CoreFoundation");
-                    if (scStem == "spc") {
-                        addLd("-framework MetalPerformanceShaders");
-                        addLd("-framework MetalPerformanceShadersGraph");
-                        addLd("-framework CoreML");
-                        addLd("-framework Foundation");
-                    }
+        // 模块自描述链接/编译配置（<模块目录>/.sc，INI 段扩展；loadModuleConfig）：
+        //   模块（gpu/gfx/spc/wsi 及任何用户模块）在其目录 .sc 里按目标段声明
+        //   平台框架/系统库依赖与编译选项，消费单元构建时自动注入——取代编译器
+        //   内按模块名硬编码的注入表，用户零 SCC_LDFLAGS。段匹配见 loadModuleConfig。
+        {
+            const ModuleConfig mcfg = loadModuleConfig(scDir, tc);
+            if (!mcfg.cflags.empty()) unitCFlags += mcfg.cflags;
+            if (extraLd && !mcfg.ldflags.empty()) {
+                auto toks = splitBy(mcfg.ldflags, " ");
+                for (size_t ti = 0; ti < toks.size(); ti++) {
+                    std::string unit = toks[ti];   // "-framework X" 两词元并为一单元查重
+                    if (unit == "-framework" && ti + 1 < toks.size())
+                        unit += " " + toks[++ti];
+                    if (extraLd->find(unit) == std::string::npos)
+                        *extraLd += " " + unit;
                 }
-            } else if (fam == "linux") {
-                if (scStem == "gpu" || scStem == "gfx") {
-                    const bool gles =
-                        tc.cflags.find("-DSC_GPU_GLES") != std::string::npos;
-                    if (gles) addLd("-lGLESv2");
-                    else      addLd("-lGL");
-                    addLd("-lEGL");
-                    addLd("-lgbm");
-                }
-                /* wsi linux（X11/Wayland 后端选择）待板验注入 */
             }
         }
         // op —— 默认导入的语言运行时（chain/异步内核）。异步内核基于 pthread，故需链接
@@ -2177,8 +2356,11 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     if (ext == ".m")
                         langFlags = targetDarwin ? " -fobjc-arc -x objective-c"
                                                  : " -x c";   // 平台守卫空化
+                    // 模块段配置 cflags（如 GLES 形态的 -DSC_GPU_GLES -I khr）
+                    // 作用于本模块 add 的实现源编译；srcDir 即模块目录。
+                    const ModuleConfig amc = loadModuleConfig(srcDir, tc);
                     std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
-                        + extraCFlags + langFlags
+                        + extraCFlags + amc.cflags + langFlags
                         + " -I " + srcDir.string()
                         + " -I " + tmpDir.string()
                         + " -c " + resolved.string() + " -o " + obj.string();
@@ -2626,6 +2808,22 @@ int main(int argc, char** argv) {
     }
 
     // ---- 2. 读取源码（文件或 stdin）----
+    // 目录输入 = C/C++ 模块库构建（目录含 src/，见 buildModuleLib）：
+    //   scc <模块目录> --build [--target <档>] [-o lib.a|.so|.dylib]
+    //   通用 C 模块编译，替代各模块手写 build.sh。
+    if (input != "-" && std::filesystem::is_directory(input)) {
+        const std::filesystem::path mdir(input);
+        if (!std::filesystem::is_directory(mdir / "src")) {
+            std::cerr << "错误: " << input << " 不是 sc 子模块目录（缺 src/ 源码子目录）\n";
+            return 1;
+        }
+        if (mode != "build") {
+            std::cerr << "错误: 模块目录输入仅支持 --build（构建 lib<名>[.<suffix>].a）\n";
+            return 1;
+        }
+        ToolConfig tc = loadToolConfig(cmdLibs, adtOpt, cmdCflags);
+        return buildModuleLib(mdir, output, tc);
+    }
     std::stringstream ss;
     if (input == "-") {
         ss << std::cin.rdbuf();   // stdin 模式：管道输入
