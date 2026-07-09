@@ -2334,6 +2334,7 @@ WSI_API void sc_wsi_win_set_pos(sc_window* window, int xpos, int ypos);
  *  @ingroup window
  */
 WSI_API void sc_wsi_win_get_size(sc_window* window, int* width, int* height);
+WSI_API void sc_wsi_win_get_framebuffer_size(sc_window* window, int* width, int* height);
 WSI_API void sc_wsi_win_set_size(sc_window* window, int width, int height);
 
 /*! @brief Sets the size limits of the specified window.

@@ -497,6 +497,24 @@ WSI_API void sc_wsi_win_get_size(sc_window* handle, int* width, int* height)
     g_wsi.platform.getWindowSize(window, width, height);
 }
 
+WSI_API void sc_wsi_win_get_framebuffer_size(sc_window* handle, int* width, int* height)
+{
+    if (width)
+        *width = 0;
+    if (height)
+        *height = 0;
+
+    if (!g_wsi.initialized) {
+        impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
+        return;
+    }
+
+    window_st* window = (window_st*) handle;
+    assert(window != NULL);
+
+    g_wsi.platform.getFramebufferSize(window, width, height);
+}
+
 WSI_API void sc_wsi_win_set_size(sc_window* handle, int width, int height)
 {
     assert(width >= 0);

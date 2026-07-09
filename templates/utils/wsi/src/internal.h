@@ -222,6 +222,7 @@ struct platform_t
     void (*getWindowPos)(window_st*,int*,int*);
     void (*setWindowPos)(window_st*,int,int);
     void (*getWindowSize)(window_st*,int*,int*);
+    void (*getFramebufferSize)(window_st*,int*,int*);
     void (*setWindowSize)(window_st*,int,int);
     void (*setWindowSizeLimits)(window_st*,int,int,int,int);
     void (*setWindowAspectRatio)(window_st*,int,int);

@@ -53,15 +53,13 @@ fnc main: i4
         return 1
     wsi_win_show(win)
 
-    # 帧缓冲像素尺寸 = 逻辑尺寸 × 内容缩放（Retina）
+    # 帧缓冲像素尺寸由窗口系统给出（Retina/Wayland buffer_scale 等）
     var w: i4 = 0
     var h: i4 = 0
     wsi_win_get_size(win, &w, &h)
-    var sx: f4 = 1.0
-    var sy: f4 = 1.0
-    wsi_win_get_content_scale(win, &sx, &sy)
-    var fbw: i4 = (((w: f4) * sx): i4)
-    var fbh: i4 = (((h: f4) * sy): i4)
+    var fbw: i4 = 0
+    var fbh: i4 = 0
+    wsi_win_get_framebuffer_size(win, &fbw, &fbh)
 
     # ---- gpu 初始化（默认 surface 的 native handle 来自 wsi） ----
     var gd: ::sc_gpu_desc
@@ -70,16 +68,18 @@ fnc main: i4
     gd.surface.native_display = wsi_win_get_native_display(win)
     gd.surface.width  = fbw
     gd.surface.height = fbh
-    # GPU_BACKEND=gl 切 OpenGL 后端（默认平台首选：mac=Metal）
+    # GPU_BACKEND=gl 切 OpenGL；=vulkan 切 Vulkan（默认平台首选：mac=Metal linux=GL）
     var envb: char& = (::getenv("GPU_BACKEND"): char&)
     if envb != nil && envb[0] == (103: char)        # 'g'
         gd.backend = 2                              # SC_GPU_BACKEND_GL
+    if envb != nil && envb[0] == (118: char)        # 'v'
+        gd.backend = 3                              # SC_GPU_BACKEND_VULKAN
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n"
         wsi_terminate()
         return 1
     var bk: i4 = gpu_query_backend()
-    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Null)\n"
+    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=Null)\n"
 
     # ---- gfx 渲染层（后端种类跟随 gpu） ----
     var fd: ::sc_gfx_desc
@@ -101,6 +101,11 @@ fnc main: i4
         vs = (load_file("templates/demo/gpu_shader/out/vs_main.glcore410.vert", &vsn): char&)
         fs = (load_file("templates/demo/gpu_shader/out/fs_main.glcore410.frag", &fsn): char&)
         rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.glcore410.reflect.json", &rjn): char&)
+    else if bk == 3
+        # Vulkan 吃 SPIR-V 二进制（glslangValidator 离线编译 .vert/.frag → .spv）
+        vs = (load_file("templates/demo/gpu_shader/out/vs_main.vulkan450.spv", &vsn): char&)
+        fs = (load_file("templates/demo/gpu_shader/out/fs_main.vulkan450.spv", &fsn): char&)
+        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.vulkan450.reflect.json", &rjn): char&)
     else
         vs = (load_file("templates/demo/gpu_shader/out/vs_main.metal20000.metal", &vsn): char&)
         fs = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
@@ -141,15 +146,24 @@ fnc main: i4
     var bnd: ::sc_gfx_bindings
     ::memset(&bnd, 0, sizeof(::sc_gfx_bindings))
     print "三角形已上屏，关闭窗口以退出...\n"
+    # 帧缓冲像素尺寸由窗口系统给出：Wayland 上 buffer_scale 可能在窗口 show 之后
+    # 才由 output enter 事件更新，故每帧重查并按需重建交换链。
+    var cur_fbw: i4 = fbw
+    var cur_fbh: i4 = fbh
     while wsi_win_get_should_close(win) == 0
         wsi_poll_events()
         var nw: i4 = 0
         var nh: i4 = 0
         wsi_win_get_size(win, &nw, &nh)
-        if nw != w || nh != h
+        var nfbw: i4 = 0
+        var nfbh: i4 = 0
+        wsi_win_get_framebuffer_size(win, &nfbw, &nfbh)
+        if nfbw != cur_fbw || nfbh != cur_fbh
             w = nw
             h = nh
-            gpu_resize((((w: f4) * sx): i4), (((h: f4) * sy): i4))
+            cur_fbw = nfbw
+            cur_fbh = nfbh
+            gpu_resize(nfbw, nfbh)
 
         var pass: ::sc_gfx_pass           # 全零 = 交换链 pass，默认 clear
         ::memset(&pass, 0, sizeof(::sc_gfx_pass))

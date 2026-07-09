@@ -3575,6 +3575,16 @@ static void wayland_get_window_size(window_st* window, int* width, int* height)
         *height = window->wl.height;
 }
 
+static void wayland_get_framebuffer_size(window_st* window, int* width, int* height)
+{
+    // Wayland 服务端缩放：帧缓冲像素 = 逻辑尺寸 × buffer_scale（同步于
+    // output enter 事件，可在窗口 show 之后才更新）。
+    if (width)
+        *width = window->wl.fbWidth;
+    if (height)
+        *height = window->wl.fbHeight;
+}
+
 static void wayland_set_window_size(window_st* window, int width, int height)
 {
     if (window->monitor)
@@ -4503,6 +4513,7 @@ bool wayland_connect(int platformID, platform_st* platform)
         .getWindowPos = wayland_get_window_pos,
         .setWindowPos = wayland_set_window_pos,
         .getWindowSize = wayland_get_window_size,
+        .getFramebufferSize = wayland_get_framebuffer_size,
         .setWindowSize = wayland_set_window_size,
         .getWindowFrameSize = wayland_get_window_frame_size,
         .setWindowSizeLimits = wayland_set_window_size_limits,

@@ -1485,6 +1485,22 @@ static void cocoa_get_window_size(window_st* window, int* width, int* height)
     } // autoreleasepool
 }
 
+static void cocoa_get_framebuffer_size(window_st* window, int* width, int* height)
+{
+    @autoreleasepool {
+
+    // Retina：帧缓冲像素 = 内容区 points 经 backing store 缩放
+    const NSRect points = [window->ns.view frame];
+    const NSRect fbRect = [window->ns.view convertRectToBacking:points];
+
+    if (width)
+        *width = (int) fbRect.size.width;
+    if (height)
+        *height = (int) fbRect.size.height;
+
+    } // autoreleasepool
+}
+
 static void cocoa_set_window_size(window_st* window, int width, int height)
 {
     @autoreleasepool {
@@ -2888,6 +2904,7 @@ bool cocoa_connect(int platformID, platform_st* platform)
         .getWindowPos               = cocoa_get_window_pos,
         .setWindowPos               = cocoa_set_window_pos,
         .getWindowSize              = cocoa_get_window_size,
+        .getFramebufferSize         = cocoa_get_framebuffer_size,
         .setWindowSize              = cocoa_set_window_size,
         .getWindowFrameSize         = cocoa_get_window_frame_size,
         .setWindowSizeLimits        = cocoa_set_window_size_limits,

@@ -83,6 +83,7 @@ add libwsi.a
 @fnc wsi_win_get_pos:: window: ::sc_window&, xpos: i4&, ypos: i4&
 @fnc wsi_win_set_pos:: window: ::sc_window&, xpos: i4, ypos: i4
 @fnc wsi_win_get_size:: window: ::sc_window&, width: i4&, height: i4&
+@fnc wsi_win_get_framebuffer_size:: window: ::sc_window&, width: i4&, height: i4&
 @fnc wsi_win_set_size:: window: ::sc_window&, width: i4, height: i4
 @fnc wsi_win_set_size_limits:: window: ::sc_window&, minwidth: i4, minheight: i4, maxwidth: i4, maxheight: i4
 @fnc wsi_win_set_size_aspect_ratio:: window: ::sc_window&, numer: i4, denom: i4

@@ -194,6 +194,7 @@ float null_get_window_opacity(window_st* window);
 void null_get_window_pos(window_st* window, int* xpos, int* ypos);
 void null_set_window_pos(window_st* window, int xpos, int ypos);
 void null_get_window_size(window_st* window, int* width, int* height);
+void null_get_framebuffer_size(window_st* window, int* width, int* height);
 void null_set_window_size(window_st* window, int width, int height);
 void null_get_window_frame_size(window_st* window, int* left, int* top, int* right, int* bottom);
 void null_set_window_size_limits(window_st* window, int minwidth, int minheight, int maxwidth, int maxheight);

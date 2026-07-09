@@ -118,6 +118,12 @@ static const gpu_env_api* pickBackend(sc_gpu_backend want) {
 #else
             return NULL;
 #endif
+        case SC_GPU_BACKEND_VULKAN:
+#ifdef SC_GPU_VULKAN
+            return gpu_env_vulkan();
+#else
+            return NULL;
+#endif
         case SC_GPU_BACKEND_NULL:
             return gpu_env_null();
         case SC_GPU_BACKEND_DEFAULT:

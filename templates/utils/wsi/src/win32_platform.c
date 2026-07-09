@@ -1798,6 +1798,12 @@ static void win32_get_window_size(window_st* window, int* width, int* height)
         *height = area.bottom;
 }
 
+static void win32_get_framebuffer_size(window_st* window, int* width, int* height)
+{
+    // Win32 客户区即像素，无服务端缩放：帧缓冲尺寸 == 窗口尺寸
+    win32_get_window_size(window, width, height);
+}
+
 static void win32_set_window_size(window_st* window, int width, int height)
 {
     if (window->monitor)
@@ -3500,6 +3506,7 @@ bool win32_connect(int platformID, platform_st* platform)
         .getWindowPos = win32_get_window_pos,
         .setWindowPos = win32_set_window_pos,
         .getWindowSize = win32_get_window_size,
+        .getFramebufferSize = win32_get_framebuffer_size,
         .setWindowSize = win32_set_window_size,
         .getWindowFrameSize = win32_get_window_frame_size,
         .setWindowSizeLimits = win32_set_window_size_limits,

@@ -34,6 +34,11 @@ examples/*.c
 examples/*.h
 examples/*.dSYM/
 templates/demo/gpu_shader/out/
+templates/demo/gpu_demo
+templates/demo/gpu_shader/*.frag
+templates/demo/gpu_shader/*.vert
+templates/demo/gpu_shader/*.metal
+templates/demo/gpu_shader/*.reflect.json
 templates/demo/spc_kernel/out/
 templates/demo/spc_model/tiny.mlmodelc/
 templates/demo/spc_model/tiny.mlpackage/

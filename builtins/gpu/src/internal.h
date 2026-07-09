@@ -29,6 +29,9 @@
   #ifndef SC_GPU_GL
   #define SC_GPU_GL 1
   #endif
+  #ifndef SC_GPU_VULKAN
+  #define SC_GPU_VULKAN 1
+  #endif
 #endif
 
 void gpu_log(const char* fmt, ...);
@@ -119,6 +122,9 @@ const gpu_env_api* gpu_env_metal(void);
 #endif
 #ifdef SC_GPU_GL
 const gpu_env_api* gpu_env_gl(void);
+#endif
+#ifdef SC_GPU_VULKAN
+const gpu_env_api* gpu_env_vulkan(void);
 #endif
 const gpu_env_api* gpu_env_null(void);
 

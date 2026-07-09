@@ -62,6 +62,7 @@ typedef enum sc_gpu_backend {
     SC_GPU_BACKEND_DEFAULT = 0,   /* 平台默认：mac=Metal, linux/win=GL */
     SC_GPU_BACKEND_METAL,
     SC_GPU_BACKEND_GL,
+    SC_GPU_BACKEND_VULKAN,        /* Vulkan（linux；SPIR-V + set/binding 反射） */
     SC_GPU_BACKEND_NULL,          /* 空后端（无硬件/测试） */
 } sc_gpu_backend;
 

@@ -1955,7 +1955,10 @@ static void createKeyTables(void)
                                           scancodeMax - scancodeMin + 1,
                                           &width);
 
-    for (int scancode = scancodeMin;  scancode <= scancodeMax;  scancode++)
+    // Some X servers (e.g. MobaXterm) may return a NULL mapping or zero
+    // keysyms-per-keycode; skip the traditional fallback lookup in that case
+    // to avoid dereferencing a NULL/short keysyms table.
+    for (int scancode = scancodeMin;  keysyms && width > 0 && scancode <= scancodeMax;  scancode++)
     {
         // Translate the un-translated key codes using traditional X11 KeySym
         // lookups
@@ -1970,7 +1973,8 @@ static void createKeyTables(void)
             g_wsi.x11.scancodes[g_wsi.x11.keycodes[scancode]] = scancode;
     }
 
-    XFree(keysyms);
+    if (keysyms)
+        XFree(keysyms);
 }
 
 
@@ -3165,6 +3169,12 @@ static void x11_get_window_size(window_st* window, int* width, int* height)
         *width = attribs.width;
     if (height)
         *height = attribs.height;
+}
+
+static void x11_get_framebuffer_size(window_st* window, int* width, int* height)
+{
+    // X11 无服务端缩放：窗口尺寸本身即像素，帧缓冲尺寸 == 窗口尺寸
+    x11_get_window_size(window, width, height);
 }
 
 static void x11_set_window_size(window_st* window, int width, int height)
@@ -5066,6 +5076,7 @@ bool x11_connect(int platformID, platform_st* platform)
         .getWindowPos = x11_get_window_pos,
         .setWindowPos = x11_set_window_pos,
         .getWindowSize = x11_get_window_size,
+        .getFramebufferSize = x11_get_framebuffer_size,
         .setWindowSize = x11_set_window_size,
         .getWindowFrameSize = x11_get_window_frame_size,
         .setWindowSizeLimits = x11_set_window_size_limits,

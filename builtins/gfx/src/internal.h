@@ -28,6 +28,9 @@
   #ifndef SC_GPU_GL
   #define SC_GPU_GL 1
   #endif
+  #ifndef SC_GPU_VULKAN
+  #define SC_GPU_VULKAN 1
+  #endif
 #endif
 
 void gfx_log(const char* fmt, ...);
@@ -179,6 +182,9 @@ const gfx_backend_api* gfx_backend_metal(void);
 #endif
 #ifdef SC_GPU_GL
 const gfx_backend_api* gfx_backend_gl(void);
+#endif
+#ifdef SC_GPU_VULKAN
+const gfx_backend_api* gfx_backend_vulkan(void);
 #endif
 const gfx_backend_api* gfx_backend_null(void);
 

@@ -13,4 +13,4 @@ inc     = khr
 ldflags = -lGLESv2 -lEGL -lgbm
 
 [linux]
-ldflags = -lGL -lEGL -lgbm
+ldflags = -lGL -lEGL -lgbm -lvulkan -lX11

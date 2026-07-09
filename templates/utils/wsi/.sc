@@ -18,3 +18,5 @@ cflags  = -DWSI_WIN32 -DUNICODE -DOEMRESOURCE -DWSI_SHARED -DWSI_EXPORTS
 [linux]
 cflags  = -DWSI_X11 -DWSI_WAYLAND -DWSI_SHARED -DWSI_EXPORTS
 inc     = build/wayland-protocols
+# X11/Wayland 运行时 dlopen（glfw 遗产），链接期只需 libm（round 等）+ libdl
+ldflags = -lm -ldl

@@ -31,6 +31,7 @@ add src/gl_env.c
 add src/gl_egl.c
 add src/gl_ctx.m
 add src/metal_env.m
+add src/vulkan_env.c
 
 # === 生命周期 ===
 @fnc gpu_init:: i4, desc: const ::sc_gpu_desc&

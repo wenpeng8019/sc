@@ -213,6 +213,12 @@ static const gfx_backend_api* pickBackend(void) {
 #else
             return NULL;
 #endif
+        case SC_GPU_BACKEND_VULKAN:
+#ifdef SC_GPU_VULKAN
+            return gfx_backend_vulkan();
+#else
+            return NULL;
+#endif
         case SC_GPU_BACKEND_NULL:
         default:
             return gfx_backend_null();

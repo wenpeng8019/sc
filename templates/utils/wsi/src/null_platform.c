@@ -318,6 +318,15 @@ void null_get_window_size(window_st* window, int* width, int* height)
         *height = window->null.height;
 }
 
+void null_get_framebuffer_size(window_st* window, int* width, int* height)
+{
+    // null 后端无实际表面：帧缓冲像素尺寸 == 窗口逻辑尺寸
+    if (width)
+        *width = window->null.width;
+    if (height)
+        *height = window->null.height;
+}
+
 void null_set_window_size(window_st* window, int width, int height)
 {
     if (window->monitor)
@@ -910,6 +919,7 @@ bool null_connect(int platformID, platform_st* platform)
         .getWindowPos               = null_get_window_pos,
         .setWindowPos               = null_set_window_pos,
         .getWindowSize              = null_get_window_size,
+        .getFramebufferSize         = null_get_framebuffer_size,
         .setWindowSize              = null_set_window_size,
         .getWindowFrameSize         = null_get_window_frame_size,
         .setWindowSizeLimits        = null_set_window_size_limits,
