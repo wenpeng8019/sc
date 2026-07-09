@@ -49,7 +49,7 @@ GPU **空间计算**（渲染着色 + 并行计算）开发扩展。定位与主
 ### 1.1 技术栈边界（自研 vs 开源）
 
 **一句话**：前端全自研；后端自研到 **SPIR-V 二进制发射**（GLSL 文本发射并存，服务 gl/gles
-目标与调试）；SPIR-V→各平台语言的扇出用成熟开源件（SPIRV-Cross），**跨后端翻译不重复造轮子**。
+目标与调试，去留待定）；SPIR-V→各平台语言的扇出用成熟开源件（SPIRV-Cross），**跨后端翻译不重复造轮子**。
 
 | 层 | 归属 | 对应件 | 理由 |
 |----|------|--------|------|
@@ -116,12 +116,11 @@ flowchart LR
 - **AST 直发 SPIR-V**：发射形式与 glslang 同构（Logical 寻址、OpVariable + Load/Store、
   不做 SSA/phi，结构化控制流 OpSelectionMerge/OpLoopMerge，数学库走 GLSL.std.450
   扩展指令集）——驱动与 SPIRV-Cross 均消费无碍，无需优化器。
-- **双 emit → 单发射器**（方案演进，已决）：`codegen_spirv` 是唯一自研后端；
-  gl/gles 目标的 GLSL 产物也由 SPIR-V 经 SPIRV-Cross 反译产出（含 ES100 平铺），
-  `--emit-glsl` 调试输出同路；`codegen_glsl` 逐目标退役，反射清单生成保留。
-  理由：维护一套 SPIR-V 全集 ≪ 维护双后端；`--emit-spv` 落盘 SPIR-V 中间文件。
+- **双 emit**：`codegen_spirv` 是主路径（metal/vulkan 已切）；`codegen_glsl` 保留——
+  glcore/gles 目标的默认产物（ES100 平铺 uniform 等运行时契约与 gl_gfx 深度耦合）；
+  是否统一到 SPIRV-Cross 反译待定（见 §14.3 未决项）。`--emit-spv` 落盘 SPIR-V 中间文件。
 - **默认产物链**：metal 目标 = SPIR-V→SPIRV-Cross→MSL；vulkan 目标 = **直落 `.spv`**
-  （不再输出 GLSL 文本要求用户自跑 glslangValidator）；glcore/gles = SPIRV-Cross 反译 GLSL。
+  （不再输出 GLSL 文本要求用户自跑 glslangValidator）；glcore/gles = 自研 GLSL 文本。
 - **glslang 整体移除**（vendor/glslang-src、SCC_WITH_GLSLANG、shader_spv 封装）；
   SPIRV-Cross 保留（SCC_WITH_SPIRV_CROSS）。
 - 反射清单仍由 AST 侧自研生成（emitReflectionJson，不变）。
@@ -617,12 +616,11 @@ flowchart LR
 | **M4 产物资源化** | 默认输出 `<stem>.shader.h/.c`：字节数组（SPIR-V/MSL/GLSL 文本）+ 自动 enum id + 反射 JSON 字符串 + 查询函数；`--files` 保留散文件输出 | gpu_demo 改资源模式（零运行时文件路径）实机渲染 |
 | **M5 语言完备性** | 按 §16 优先级逐批实现，反向对齐 SPIR-V 能力 | 每批能力：用例 + 验证链 + 能力矩阵行更新 |
 
-未决（M3 时定）：~~glcore/gles 目标是否统一到 SPIRV-Cross GLSL 后端~~——**已决：统一**。
-维护一套 SPIR-V 全集发射器远比两套后端容易；SPIRV-Cross GLSL 后端覆盖全版本
-（含 ES100 平铺 uniform 选项）。codegen_glsl 的 GLSL 文本发射逐目标退役（反射清单
-生成 emitReflectionJson 是 AST 侧设施，保留）；风险项「SPIRV-Cross 输出与 gl_gfx
-按名绑定/ES100 平铺反射契约对齐」在切换时逐目标验证（反射清单的名字规则向
-SPIRV-Cross 输出看齐）。
+未决（讨论中）：glcore/gles 目标是否统一到 SPIRV-Cross GLSL 后端、codegen_glsl 是否退役。
+支持统一：维护一套 SPIR-V 全集 ≪ 两套后端；SPIRV-Cross GLSL 后端覆盖全版本。
+支持保留：自研 GLSL 发射的 ES100 平铺 uniform 等运行时契约与 gl_gfx 深度对齐，
+且产物可读性/可控性更强；切换需逐目标验证反射契约（按名绑定/平铺清单）。
+现状：metal/vulkan 已切新链；glcore/gles 维持自研 GLSL 发射（双 emit 并存）。
 
 ### 14.4 四期（原二期存目，部分已提前落地）
 - ✅ `comp` 计算链路：计算内建映射 + `local_size` 发射/反射携带 + storage/SSBO；
