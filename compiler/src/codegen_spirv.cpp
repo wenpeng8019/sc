@@ -72,8 +72,9 @@ enum Op : uint16_t {
     OpBitwiseOr = 197, OpBitwiseXor = 198, OpBitwiseAnd = 199, OpNot = 200,
     OpLoopMerge = 246, OpSelectionMerge = 247,
     OpLabel = 248, OpBranch = 249, OpBranchConditional = 250,
-    OpReturn = 253, OpReturnValue = 254,
+    OpKill = 252, OpReturn = 253, OpReturnValue = 254,
     OpName = 5, OpMemberName = 6,
+    OpFunctionCall = 57,
 };
 
 // GLSL.std.450 扩展指令号（用到的子集）
@@ -1018,9 +1019,32 @@ struct StageEmitter {
             return {ins(OpImageSampleExplicitLod, v4,
                         {args[0].id, args[1].id, 0x2, b.constF(0.0f)}), v4};
         }
-        // 核心指令内建
+        // OpFunctionCall(内建函数均处理不到这里)
         if (fn == "dot" && args.size() == 2)
             return {ins(OpDot, b.tF32(), {args[0].id, args[1].id}), b.tF32()};
+        // 辅助函数调用（OpFunctionCall）
+        {
+            const Decl* hd = nullptr;
+            for (const auto& d : prog.decls)
+                if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None
+                    && d->name == fn) { hd = d.get(); break; }
+            if (hd) {
+                emitHelper(*hd);   // 幂等：已发射过则跳过
+                auto& h = helpers.at(fn);
+                uint32_t retT = helperRetType(fn);
+                uint32_t r = b.id();
+                // OpFunctionCall 只接受值 id 列（Logical 地址模型）
+                std::vector<uint32_t> real = {retT, r, h.second};
+                for (size_t i = 0; i < args.size(); i++) {
+                    const auto& f = hd->structCommon.fields[i];
+                    uint32_t pt = typeIdOf(f.type, f.line);
+                    Val a = coerce(args[i], pt, e->line);
+                    real.push_back(a.id);
+                }
+                putV(body, OpFunctionCall, real);
+                return {r, retT};
+            }
+        }
         // GLSL.std.450 内建（浮点族；min/max/clamp/abs 的整型变体按首参类别选）
         static const std::unordered_map<std::string, uint32_t> g450f = {
             {"round", GRound}, {"trunc", GTrunc}, {"sign", GFSign},
@@ -1117,10 +1141,23 @@ struct StageEmitter {
         if (absorbedTop(s, depth)) return;
         switch (s->kind) {
             case Stmt::ExprS:
+                // discard 在 sc/ss 里可写作裸 discard 语句（解析为 ExprS 含 Ident "discard"）
+                if (s->expr && s->expr->kind == Expr::Ident && s->expr->text == "discard") {
+                    if (stage.shaderStage != ShaderStage::Frag)
+                        err("discard 仅在 frag 阶段有效", s->line);
+                    put(body, OpKill, {});
+                    terminated = true;
+                    break;
+                }
                 if (s->expr) rvalue(s->expr.get());
                 break;
             case Stmt::ReturnS:
-                put(body, OpReturn, {});
+                if (s->expr) {
+                    Val v = rvalue(s->expr.get());
+                    put(body, OpReturnValue, {v.id});
+                } else {
+                    put(body, OpReturn, {});
+                }
                 terminated = true;
                 break;
             case Stmt::VarS:
@@ -1317,7 +1354,79 @@ struct StageEmitter {
         }
     }
 
-    // 编译期常量表达式 → 常量 id（失败返回 0）；vec 构造字面量支持
+    // 辅助函数表：name → (OpTypeFunction id, OpFunction id)
+    std::unordered_map<std::string, std::pair<uint32_t,uint32_t>> helpers;
+
+    // 发射单个辅助函数（百差Prog里第一次用到时惰性发射）
+    void emitHelper(const Decl& d) {
+        if (helpers.count(d.name)) return;
+        // 返回类型
+        uint32_t retT = d.structCommon.type
+            ? typeIdOf(*d.structCommon.type, d.line) : b.tVoid();
+        // 参数类型
+        std::vector<uint32_t> paramTypes;
+        for (const auto& f : d.structCommon.fields)
+            paramTypes.push_back(typeIdOf(f.type, f.line));
+        // OpTypeFunction(retT, params...)
+        std::string ftKey = "hfn_" + d.name;
+        uint32_t fnT = b.type(ftKey, [&]{
+            uint32_t r = b.id();
+            std::vector<uint32_t> ops = {r, retT};
+            ops.insert(ops.end(), paramTypes.begin(), paramTypes.end());
+            putV(b.secTypes, OpTypeFunction, ops);
+            return r;
+        });
+        uint32_t fnId = b.id();
+        b.name(fnId, d.name);
+        helpers[d.name] = {fnT, fnId};
+        // 内嵌发射：保存/恢复主入口状态
+        auto savedVars = vars; auto savedBody = std::move(body);
+        auto savedFV = std::move(funcVars); bool savedTerm = terminated;
+        auto savedLoops = loops;
+        uint32_t savedSOV = scalarOutVar, savedSOT = scalarOutType;
+        vars.clear(); body.clear(); funcVars.clear(); terminated = false; loops.clear();
+        // 参数设为 Function 局部变量（入口处 OpVariable + 写入）
+        for (size_t i = 0; i < d.structCommon.fields.size(); i++) {
+            const auto& f = d.structCommon.fields[i];
+            uint32_t pt = paramTypes[i];
+            uint32_t pptr = b.tPtr(ScFunction, pt);
+            uint32_t pv = b.id();
+            put(funcVars, OpVariable, {pptr, pv, ScFunction});
+            b.name(pv, f.name);
+            vars[f.name] = {pv, pt, ScFunction};
+        }
+        scalarOutVar = 0; scalarOutType = 0;  // 辅助函数不用 I/O
+        // 如果辅助函数有返回值，return e → OpReturnValue
+        for (const auto& s : d.body) stmt(s.get(), 0);
+        if (!terminated) {
+            if (retT == b.tVoid()) { put(body, OpReturn, {}); }
+            else {
+                // 这里不应到达（所有路径应已 return），不过保安全
+                uint32_t zero = (b.info(retT).k == TI::F32) ? b.constF(0.0f) : b.constI(0);
+                put(body, OpReturnValue, {zero});
+            }
+            terminated = true;
+        }
+        uint32_t entryL = b.id();
+        put(b.secFunc, OpFunction, {retT, fnId, 0, fnT});
+        put(b.secFunc, OpLabel, {entryL});
+        b.secFunc.insert(b.secFunc.end(), funcVars.begin(), funcVars.end());
+        b.secFunc.insert(b.secFunc.end(), body.begin(), body.end());
+        put(b.secFunc, OpFunctionEnd, {});
+        // 恢复
+        vars = std::move(savedVars); body = std::move(savedBody);
+        funcVars = std::move(savedFV); terminated = savedTerm; loops = std::move(savedLoops);
+        scalarOutVar = savedSOV; scalarOutType = savedSOT;
+    }
+
+    // 带参数考虑的辅助函数返回类型（俩山1个参数的返回类型）
+    uint32_t helperRetType(const std::string& name) {
+        for (const auto& d : prog.decls)
+            if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None
+                && d->name == name && d->structCommon.type)
+                return typeIdOf(*d->structCommon.type, d->line);
+        return b.tVoid();
+    }
     uint32_t constExpr(const Expr* e) {
         if (!e) return 0;
         if (e->kind == Expr::FloatLit) return b.constF(std::strtof(e->text.c_str(), nullptr));
@@ -1356,6 +1465,13 @@ struct StageEmitter {
             scalarOutType = typeIdOf(*stage.structCommon.type, stage.line);
         }
 
+        // 辅助函数（prog 里 shaderStage==None的 FuncD）在主入口之前发射
+        // （惰性解局：首次 call 时可能不知道哪些辅助函数会被用到，
+        //  为简单起见把全部辅助函数都发射）
+        for (const auto& d : prog.decls)
+            if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None)
+                emitHelper(*d);
+
         uint32_t tv = b.tVoid();
         uint32_t fnT = b.type("fn_void", [&]{
             uint32_t r = b.id();
@@ -1366,6 +1482,7 @@ struct StageEmitter {
         b.name(fnId, "main");
         uint32_t entryL = b.id();
 
+        // 辅助函数的 return 需发 OpReturnValue
         for (const auto& s : stage.body) stmt(s.get(), 0);
         if (!terminated) { put(body, OpReturn, {}); terminated = true; }
 

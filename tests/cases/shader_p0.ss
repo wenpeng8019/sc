@@ -1,10 +1,14 @@
 # shader_p0 —— syntax-s §16 P0 控制流批次回归用例（双后端黄金对照）
-# 覆盖：for(init 自动声明/++/break/continue)、do-while、case(多标签/through/
-# default)、swizzle 读写、强转、标量↔向量运算。
-# 目标 glcore@410：默认链(SPIR-V→SPIRV-Cross 反译)与 --emit-glsl(自研文本)
-# 均产纯文本,适合 stdout 黄金比对。
+# 覆盖：辅助函数(OpFunctionCall)、discard(OpKill)、for/do-while/break/
+# continue、case(多标签/through/default)、swizzle 读写、++ --、强转。
 
 tar glcore@410
+
+fnc clamp01: f4, x: f4
+    return clamp(x, 0.0, 1.0)
+
+fnc lerp3: vec3, a: vec3, b: vec3, t: f4
+    return a + (b - a) * t
 
 @def VsIn: {
     vid: i4 builtin vertex_id
@@ -31,9 +35,10 @@ vert vs_main: VsOut, in: VsIn
     while k > 0
     var v: vec4 = vec4(0.0, 0.0, 0.0, 1.0)
     v.xy = vec2(s * 0.01, acc * 0.01)
+    let pos[3]: vec2 = {vec2(-0.5, -0.5), vec2(0.5, -0.5), vec2(0.0, 0.5)}
     var o: VsOut
-    o.clip = v
-    o.col = vec3(0.5, 0.5, 0.5)
+    o.clip = vec4(pos[in.vid], 0.0, 1.0)
+    o.col = lerp3(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), clamp01((in.vid: f4) * 0.5))
     return o
 
 frag fs_main: vec4, in: VsOut
@@ -49,4 +54,7 @@ frag fs_main: vec4, in: VsOut
             r = r + 0.25
         :
             r = 1.0
-    return vec4(r, r, r, 1.0)
+    var a: f4 = clamp01(in.col.x)
+    if a < 0.01
+        discard
+    return vec4(in.col * r, a)
