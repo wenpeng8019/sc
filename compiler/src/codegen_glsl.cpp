@@ -3,7 +3,6 @@
 #include "lexer.h"
 #include "parser.h"
 #include "shader_sema.h"
-#include "shader_spv.h"
 #include "shader_msl.h"
 #include "error.h"
 
@@ -652,14 +651,7 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
     return j.str();
 }
 
-// ShaderStage（AST）→ SpvStage（glslang 封装）阶段种类映射。
-static scc_shader::SpvStage toSpvStage(ShaderStage s) {
-    switch (s) {
-        case ShaderStage::Frag: return scc_shader::SpvStage::Fragment;
-        case ShaderStage::Comp: return scc_shader::SpvStage::Compute;
-        default:                return scc_shader::SpvStage::Vertex;
-    }
-}
+// ShaderStage（AST）→ 阶段种类映射已随 glslang 移除（SPIR-V 直发自携阶段）。
 
 int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir) {
@@ -761,23 +753,21 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                 continue;
             }
 
-            // ---- Metal 目标：内部走 Vulkan-GLSL(450) → SPIR-V(glslang) → MSL(spirv-cross) ----
-            // 能力门控已在 shaderSemaCheck 按 metal 目标自身的能力矩阵完成；此处 Vulkan-GLSL
-            // 仅作中间语（450 支持全部所需能力）。每阶段产 <entry>.metal（入口 main→阶段名）。
+            // ---- Metal 目标：AST → SPIR-V（自研直发）→ MSL（spirv-cross）----
+            // 能力门控已在 shaderSemaCheck 按 metal 目标自身的能力矩阵完成。
+            // 每阶段产 <entry>.metal（入口 main→阶段名）。
             if (target.isMetal()) {
-                GlslTarget vk; vk.api = GlApi::Vulkan; vk.version = 450;
-                auto units = emitGlsl(prog, vk);
-                if (units.empty()) {
+                auto sunits = emitSpirv(prog, target);
+                if (sunits.empty()) {
                     std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                     return 1;
                 }
                 std::string reflect = emitReflectionJson(prog, target);
-                for (const auto& u : units) {
-                    std::vector<uint32_t> spv = scc_shader::glslToSpirv(u.text, toSpvStage(u.stage));
+                for (const auto& u : sunits) {
                     scc_shader::MslOptions mo;
                     mo.mslVersion = (uint32_t)target.version;
                     mo.renameEntry = u.entry;            // 多阶段链入同一 metallib 时避免 main0 冲突
-                    std::string msl = scc_shader::spirvToMsl(spv, mo);
+                    std::string msl = scc_shader::spirvToMsl(u.words, mo);
                     if (outDir.empty())
                         std::printf("// ===== %s%s.metal =====\n%s\n",
                                     u.entry.c_str(), tag.c_str(), msl.c_str());

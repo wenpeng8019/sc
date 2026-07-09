@@ -490,7 +490,10 @@ struct StageEmitter {
             {   std::vector<uint32_t> ops = {structT};
                 ops.insert(ops.end(), memberTypes.begin(), memberTypes.end());
                 putV(b.secTypes, OpTypeStruct, ops); }
-            b.name(structT, d->name);
+            // 类型名带 _blk 后缀、实例名用块名——与旧链 GLSL 的
+            // `uniform Params_blk {...} Params;` 对齐，令 SPIRV-Cross 产出的
+            // MSL 参数名 = 块名（spc/gfx 运行时按名对位缓冲的契约）。
+            b.name(structT, d->name + "_blk");
             // SPIR-V 1.0/Vulkan1.0：UBO=Block+Uniform；SSBO=BufferBlock+Uniform；
             // push=Block+PushConstant（与 glslang 同形）
             put(b.secDeco, OpDecorate, {structT, std430 ? (uint32_t)DecBufferBlock : (uint32_t)DecBlock});
