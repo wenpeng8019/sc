@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "scm__Users_wenpeng_dev_c_sc_examples_feature4_lib_sc.h"
+#include "scm_examples_feature4_lib_sc.h"
 
 typedef struct sc_point sc_point;
 typedef struct sc_obj sc_obj;

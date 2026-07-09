@@ -1,13 +1,13 @@
-codec_test.sc:725:15: warning: integer literal is too large to be represented in a signed integer type, interpreting as unsigned [-Wimplicitly-unsigned-literal]
-  725 |     vals[5] = 18446744073709551615;
-      |               ^
-codec_test.sc:736:34: warning: integer literal is too large to be represented in a signed integer type, interpreting as unsigned [-Wimplicitly-unsigned-literal]
-  736 |     if (!(sc_codec_varint_encode(18446744073709551615, ((uint8_t*)(&(buf[0])))) == 10)) {
-      |                                  ^
-codec_test.sc:738:68: warning: integer literal is too large to be represented in a signed integer type, interpreting as unsigned [-Wimplicitly-unsigned-literal]
-  738 |         printf("  #   左值 = %d\n", (int)(sc_codec_varint_encode(18446744073709551615, ((uint8_t*)(&(buf[0]))))));
-      |                                                                  ^
-3 warnings generated.
+codec_test.sc: In function ‘sc_test_codec_test_32’:
+codec_test.sc:725:15: warning: integer constant is so large that it is unsigned
+  725 |     vals[5] = 18446744073709551615
+      |               ^~~~~~~~~~~~~~~~~~~~
+codec_test.sc:736:34: warning: integer constant is so large that it is unsigned
+  736 |     assert codec_varint_encode(18446744073709551615, (&buf[0]: u1&)) == 10, "u64 max → 10 bytes"
+      |                                  ^~~~~~~~~~~~~~~~~~~~
+codec_test.sc:738:68: warning: integer constant is so large that it is unsigned
+  738 |     buf[0] = 200
+      |                                                                    ^                   
 ok 1 - CRC-32 IEEE 802.3 标准检验值
 ok 2 - CRC-32 流式分块与一次性一致
 ok 3 - Adler-32 RFC 1950 向量

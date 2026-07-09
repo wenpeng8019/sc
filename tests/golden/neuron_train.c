@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "scm__Users_wenpeng_dev_c_sc_builtins_neuron_neuron_sc.h"
+#include "scm_builtins_neuron_neuron_sc.h"
 
 static const float sc_LR = 0.05f;
 static const float sc_B1 = 0.9f;

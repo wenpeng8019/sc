@@ -935,12 +935,8 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
     }
 }
 
-// 生成合法的 C 标识符作为模块文件名/头文件名 token（如输入路径 "foo/bar-baz.sc" → token "scm_foo_bar_baz"）
-static std::string moduleFileToken(const std::string& s) {
-    std::string out = "scm_";
-    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
-    return out;
-}
+// 生成合法的 C 标识符作为模块文件名/头文件名 token：见 codegen_c.h 的 moduleFileToken
+//   （位于项目根下的模块取相对根路径为基串，使 token 机器无关）。
 
 // 生成合法的 C 预处理器宏名作为 include guard（如输入路径 "foo/bar-baz.sc" → guard "FOO_BAR_BAZ_SC_H"）
 static std::string guardFromHeaderName(const std::string& hname) {

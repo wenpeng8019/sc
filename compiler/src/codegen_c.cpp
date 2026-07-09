@@ -153,12 +153,6 @@ bool endsWith(const std::string& s, const std::string& suffix) {
            s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-std::string moduleFileToken(const std::string& s) {
-    std::string out = "scm_";
-    for (unsigned char ch : s) out += std::isalnum(ch) ? (char)ch : '_';
-    return out;
-}
-
 std::string moduleHeaderName(const std::string& s) {
     return moduleFileToken(s) + ".h";
 }
@@ -7853,6 +7847,31 @@ struct CGen {
 };
 
 } // namespace
+
+// 模块 token 的机器无关基串：模块位于项目根（g_projectRoot = builtins 上级）之下时，
+//   取「相对项目根」的路径作基串（如 /abs/repo/examples/x.sc → examples/x.sc），
+//   使生成的 scm_<token>.h 名与 include guard 不含机器绝对前缀（跨机/远程回归稳定）。
+//   项目根未知、或模块逃出根（相对路径以 ".." 起）时回退原字符串（保唯一性）。
+//   外部链接（供 main.cpp 复用同一份实现，避免与 codegen 端 token 归一化漂移）。
+static std::string moduleTokenBase(const std::string& s) {
+    namespace fs = std::filesystem;
+    if (!g_projectRoot.empty()) {
+        std::error_code ec;
+        fs::path rel = fs::relative(fs::path(s), fs::path(g_projectRoot), ec);
+        if (!ec && !rel.empty()) {
+            const std::string r = rel.generic_string();
+            if (r != "." && r.rfind("..", 0) != 0) return r;  // 未逃出项目根
+        }
+    }
+    return s;
+}
+
+std::string moduleFileToken(const std::string& s) {
+    const std::string base = moduleTokenBase(s);
+    std::string out = "scm_";
+    for (unsigned char ch : base) out += std::isalnum(ch) ? (char)ch : '_';
+    return out;
+}
 
 void setRefCheck(bool on) { g_refCheck = on; }
 bool getRefCheck() { return g_refCheck; }

@@ -4,8 +4,8 @@
 #
 # 目标：
 # 1) scc 在 Linux 上构建 + 回归验证
-# 2) builtins 相关库（gpu/spc）在目标平台的构建可用性验证
-# 3) GPU 路径（Vulkan）工具链可用性检查，及 shader-tri 构建验证
+# 2) GPU 路径（Vulkan）工具链可用性检查，及 shader-tri 构建验证
+#    （builtins 库 gpu/spc/gfx 由 scc 按需内建编译，shader-tri 已覆盖该路径）
 #
 # 用法：
 #   tests/linux_wsl_validate.sh
@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
 选项:
   --quick             快速模式（跳过 tests/run.sh 快照回归）
   --skip-regression   跳过回归（同 --quick）
-  --with-shader-tri   额外构建 examples/shader-tri
+  --with-shader-tri   额外构建 examples/shader-tri（覆盖 gpu builtin 内建路径）
   --with-vulkaninfo   额外执行 vulkaninfo 摘要检查
   -h, --help          显示帮助
 EOF
@@ -65,30 +65,18 @@ else
     echo "检测到原生 Linux 环境"
 fi
 
-echo "==> [1/5] 构建 scc"
+echo "==> [1/3] 构建 scc"
 ./build.sh build
 
-echo "==> [2/5] 语言特性与黄金回归"
+echo "==> [2/3] 语言特性与黄金回归"
 if [[ "$RUN_REGRESSION" == "1" ]]; then
     bash "$ROOT/tests/run.sh"
 else
     echo "跳过 tests/run.sh（quick 模式）"
 fi
 
-echo "==> [3/5] builtins 相关库构建：gpu"
-(
-    cd "$ROOT/templates/utils/gpu"
-    ./build.sh
-)
-
-echo "==> [4/5] builtins 相关库构建：spc"
-(
-    cd "$ROOT/templates/utils/spc"
-    ./build.sh
-)
-
 if [[ "$RUN_VULKANINFO" == "1" ]]; then
-    echo "==> [5/5] Vulkan 工具链摘要"
+    echo "==> [3/3] Vulkan 工具链摘要"
     if command -v vulkaninfo >/dev/null 2>&1; then
         vulkaninfo --summary || {
             echo "警告: vulkaninfo 执行失败（可能未配置 ICD/GPU 驱动）" >&2
@@ -96,10 +84,12 @@ if [[ "$RUN_VULKANINFO" == "1" ]]; then
     else
         echo "警告: 未安装 vulkaninfo（Ubuntu 可安装 vulkan-tools）" >&2
     fi
+else
+    echo "==> [3/3] Vulkan 工具链摘要：跳过（使用 --with-vulkaninfo 开启）"
 fi
 
 if [[ "$RUN_SHADER_TRI" == "1" ]]; then
-    echo "==> [extra] shader-tri 构建验证"
+    echo "==> [extra] shader-tri 构建验证（内建 gpu builtin 路径）"
     (
         cd "$ROOT/examples/shader-tri"
         ./build.sh

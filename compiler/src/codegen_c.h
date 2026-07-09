@@ -51,6 +51,10 @@ void setRefSrcFile(const std::string& path);
 //   使 builtins/adt、templates/utils/wsi 等任意分组层级模块均落为根相对可解析路径。
 void setProjectRoot(const std::string& path);
 
+// 模块路径 → 合法 C 标识符 token（scm_ 前缀）：位于项目根下时以「相对项目根」路径为
+//   基串，令生成的 scm_<token>.h 名/guard 机器无关（跨机、远程构建回归稳定）。
+std::string moduleFileToken(const std::string& s);
+
 // 单元测试模式开关（--test）：开启时本单元被视为测试目标。
 //   tst 用例编译为 static 测试函数；用户 main 被屏蔽；合成 runner main 串起
 //   模块 init/drop 与各用例（setjmp 隔离失败、TAP 风格报告、失败数即退出码）。

@@ -1,6 +1,6 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "scm__Users_wenpeng_dev_c_sc_tests_cases_mod_cross_mod_cross_lib_sc.h"
+#include "scm_tests_cases_mod_cross_mod_cross_lib_sc.h"
 
 typedef struct sc_com__project {
     uint32_t size;

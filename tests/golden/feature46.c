@@ -1,7 +1,7 @@
 /* 由 scc 生成，请勿手工修改 */
 #include "platform.h"
-#include "scm__Users_wenpeng_dev_c_sc_examples_feature46_feature46_config_sc.h"
-#include "scm__Users_wenpeng_dev_c_sc_examples_feature46_feature46_logger_sc.h"
+#include "scm_examples_feature46_feature46_config_sc.h"
+#include "scm_examples_feature46_feature46_logger_sc.h"
 
 typedef struct sc_com__project {
     uint32_t size;
