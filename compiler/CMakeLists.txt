@@ -18,6 +18,7 @@ add_executable(scc
     src/codegen_sc.cpp
     # GPU/着色器扩展（syntax-g）后端：.sg 源 → Vulkan-GLSL 文本。与 codegen_c 解耦。
     src/codegen_glsl.cpp
+    src/codegen_spirv.cpp
     # GPU/着色器扩展发行后端：SPIR-V → MSL（SPIRV-Cross 封装）。未集成时为安全失败桩。
     src/shader_msl.cpp
     # GPU/着色器扩展中枢 IR：GLSL → SPIR-V（glslang 封装）。未集成时为安全失败桩。

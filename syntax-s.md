@@ -40,44 +40,43 @@ GPU **空间计算**（渲染着色 + 并行计算）开发扩展。定位与主
 ## 1. 设计原则
 
 - **中枢 IR 是 SPIR-V**。整个着色器工具链在业界已收敛到 SPIR-V 作为交换格式；sc 不重新发明，而是把它当作事实标准的目标中枢（与 sc→C99→系统 cc 的哲学同构：生成中间表示，交给成熟后端）。
-- **一期产物是 Vulkan-GLSL 文本**，而非直接发射 SPIR-V 二进制。理由见 §2、§11。
+- **三期（当前）：AST 直发 SPIR-V**（`codegen_spirv`），去除 glslang 中转；自研 GLSL 文本发射保留（双 emit：gl/gles 目标产物 + 调试选项）。理由见 §2.2。
 - **Mac 优先**：作者主力平台为 macOS，Metal 后端优先级高于 D3D/GLES。落地路径见 §2.3。
-- **零运行时膨胀**：一期 scc 不链接任何 shader 库；SPIR-V 编译交给**运行时**的
-  glslang/shaderc（见 §10）。
+- **依赖最小化**：scc 只链 SPIRV-Cross（跨后端扇出）；SPIR-V 生成自研，不再需要 glslang/shaderc。
 - **子集而非超集**：shader 方言是 sc 的严格子集——禁用堆分配、裸/自动指针、递归、函数指针
-  等 GPU 无法表达的构造（见 §4、§9）。
+  等 GPU 无法表达的构造（见 §4、§9）；完备性以 SPIR-V 能力为反向对齐目标，按优先级渐进（见 §16）。
 
 ### 1.1 技术栈边界（自研 vs 开源）
 
-**一句话**：前端全自研；后端自研到 GLSL 文本发射（二期可延伸到 SPIR-V 发射），GLSL→SPIR-V
-及 SPIR-V→各后端全部用成熟开源件（glslang/shaderc/SPIRV-Cross/MoltenVK），**后端不重复造轮子**。
+**一句话**：前端全自研；后端自研到 **SPIR-V 二进制发射**（GLSL 文本发射并存，服务 gl/gles
+目标与调试）；SPIR-V→各平台语言的扇出用成熟开源件（SPIRV-Cross），**跨后端翻译不重复造轮子**。
 
 | 层 | 归属 | 对应件 | 理由 |
 |----|------|--------|------|
 | 词法 / 语法 / 语义 | **自研** | lexer / parser / `shader_sema` | 复用 sc 现有前端，这是「语言是 sc」的根本 |
-| codegen（sc AST → Vulkan-GLSL 文本） | **自研** | `codegen_glsl.cpp` | 「sc→GLSL 的映射」无现成件可做；但仅文本发射，复杂度与现有 `codegen_c.cpp` 同级 |
-| GLSL 文本 → SPIR-V | **开源** | glslang / shaderc | 跟踪整个 GLSL/SPIR-V 规范的成熟编译器，自研 = 数年工作 + 永久维护负担 |
+| codegen（AST → SPIR-V 二进制） | **自研** | `codegen_spirv.cpp` | ss 是**受控子集**：只需为自己发射的模式生成 SPIR-V，不需要支持全 GLSL 规范；与 AST→GLSL 文本的语义映射工作量同级，只是编码形式不同 |
+| codegen（AST → GLSL 文本） | **自研** | `codegen_glsl.cpp` | gl/gles 目标产物（含 ES100 遗留形态/平铺 uniform 等运行时契约）+ 可读调试通道（--emit-glsl） |
 | SPIR-V → MSL / HLSL / GLSL | **开源** | SPIRV-Cross | 各后端绑定/精度/寄存器怪癖已被它解决 |
-| Vulkan+SPIR-V → Metal（运行时） | **开源** | MoltenVK | Mac 落地，无需自研 |
+| Vulkan+SPIR-V → Metal（运行时） | **开源** | MoltenVK | Mac 开发路径，无需自研 |
 
-这就是 sc 现有架构照搬到 GPU：sc 现在自研 前端 + `codegen_c`（sc→C 文本）→ 交给系统 C 编译器
-（gcc/clang）；shader 则自研 前端 + `codegen_glsl`（sc→GLSL 文本）→ 交给着色器工具链
-（glslang+SPIRV-Cross）。glslang/SPIRV-Cross 就是 GLSL/SPIR-V 世界里的「gcc」。
+~~GLSL 文本 → SPIR-V（glslang）~~：**已移除**。一期理由是「跟踪全 GLSL 规范的成熟编译器，
+自研 = 数年工作」——但实践证明前提不成立：我们不需要编译「任意 GLSL」，只需编译
+**自己发射器产出的受控模式**；而经 GLSL 文本中转会丢失 AST 语义（反向重推）、引入双重
+映射维护（sc→GLSL→SPIR-V 两张语义表），且 glslang 作为 vendored 静态库已是 scc 最重的
+构建依赖。AST→SPIR-V 与 AST→GLSL 在语义层面等价，发射目标不同而已。
 
 两点澄清：
 
-- **二期 `codegen_spirv`（sc→SPIR-V 二进制直发）算自研后端**，但它可选、为拿更强的语义/优化
-  控制而设；**即便做了它，SPIR-V→各后端的扇出仍用 SPIRV-Cross**——自研范围最多到「发射
-  SPIR-V」，绝不下探到跨后端翻译。
-- **开源依赖不污染 sc「转 C、少依赖」的定位**：一期按 §10，glslang/shaderc 是**应用的运行时
-  依赖**，不是 `scc` 的链接依赖——`scc` 一期零 shader 库依赖，产物仍是干净的 GLSL 文本 +
-  反射清单。
+- **自研范围最多到「发射 SPIR-V」，绝不下探到跨后端翻译**——SPIR-V→MSL/HLSL/各版本 GLSL
+  的扇出永远用 SPIRV-Cross。
+- **验证体系外部化**：发射器正确性靠 spirv-val（SPIRV-Tools，外部工具非链接依赖）+
+  SPIRV-Cross 反译 round-trip + 旧链产物对照 + demo 实机渲染四重验证。
 
 ---
 
 ## 2. 编译管线与路线
 
-### 2.1 一期管线（sc → Vulkan-GLSL 文本）
+### 2.1 一期管线（sc → Vulkan-GLSL 文本）——**历史，已被 §2.2 取代**
 
 ```mermaid
 flowchart LR
@@ -97,11 +96,38 @@ flowchart LR
 关键点：**scc 只负责到「Vulkan-GLSL 文本 + 反射清单」为止**。SPIR-V 生成与跨后端扇出全部
 交给成熟的开源件（glslang / shaderc / SPIRV-Cross），sc 一个后端都不用自己写。
 
-### 2.2 二期管线（sc → SPIR-V 直发）
+### 2.2 三期管线（AST → SPIR-V 直发，当前，进行中）
 
-成熟后，`codegen_spirv` 模块直接发射 SPIR-V 二进制，跳过文本 GLSL，获得更强的语义控制与
-优化空间（例如 sc 特有的类型/约束信息可直接编码为 SPIR-V decoration）。文本 GLSL 后端
-保留作为可读产物与调试通道。
+```mermaid
+flowchart LR
+    A[.ss 源码] --> B[scc 前端<br/>parser + shader_sema]
+    B --> C[shader AST]
+    C --> D[codegen_spirv<br/>自研直发]
+    C -."--emit-glsl / gl·gles 目标".-> E[codegen_glsl<br/>GLSL 文本]
+    D --> G[SPIR-V 中枢 IR]
+    G -->|vulkan 目标| I[.spv 产物直落盘]
+    G -->|metal 目标| J[SPIRV-Cross → MSL]
+    G -."--emit-spv".-> S[.spv 中间文件]
+    G -."二期评估".-> K[SPIRV-Cross → GLSL<br/>统一 gl/gles 路径]
+```
+
+要点：
+
+- **AST 直发 SPIR-V**：发射形式与 glslang 同构（Logical 寻址、OpVariable + Load/Store、
+  不做 SSA/phi，结构化控制流 OpSelectionMerge/OpLoopMerge，数学库走 GLSL.std.450
+  扩展指令集）——驱动与 SPIRV-Cross 均消费无碍，无需优化器。
+- **双 emit → 单发射器**（方案演进，已决）：`codegen_spirv` 是唯一自研后端；
+  gl/gles 目标的 GLSL 产物也由 SPIR-V 经 SPIRV-Cross 反译产出（含 ES100 平铺），
+  `--emit-glsl` 调试输出同路；`codegen_glsl` 逐目标退役，反射清单生成保留。
+  理由：维护一套 SPIR-V 全集 ≪ 维护双后端；`--emit-spv` 落盘 SPIR-V 中间文件。
+- **默认产物链**：metal 目标 = SPIR-V→SPIRV-Cross→MSL；vulkan 目标 = **直落 `.spv`**
+  （不再输出 GLSL 文本要求用户自跑 glslangValidator）；glcore/gles = SPIRV-Cross 反译 GLSL。
+- **glslang 整体移除**（vendor/glslang-src、SCC_WITH_GLSLANG、shader_spv 封装）；
+  SPIRV-Cross 保留（SCC_WITH_SPIRV_CROSS）。
+- 反射清单仍由 AST 侧自研生成（emitReflectionJson，不变）。
+
+历史：~~一期「Vulkan-GLSL 文本 + 运行时 glslang」→ 二期「glslang 静态链入 scc 离线完成」~~
+均已被本期取代；迁移期内旧链产物作为黄金对照。
 
 ### 2.3 Mac 优先的落地路径
 
@@ -579,17 +605,35 @@ flowchart LR
   Metal/GL 双后端）。
 - ✅ **P2**：跨平台窗口/输入模块 [utils/wsi](templates/utils/wsi/)（自研，glfw 同构）。
 
-### 14.3 二期（部分已提前落地）
+### 14.3 三期（SPIR-V 直发 + 产物资源化，**当前，进行中**）
+
+目标：去除 glslang，AST 直发 SPIR-V（§2.2）；产物从散文件改为可直接链入应用的资源文件。
+
+| 里程碑 | 内容 | 验收 |
+|---|---|---|
+| **M1 发射器骨架** | `codegen_spirv.cpp`：模块头/类型池/常量池/装饰/入口点；线性代码（表达式/赋值/return/swizzle/向量构造）；vert/frag I/O 变量 + uniform/sampler | 三角形 .ss 产物过 spirv-val；SPIRV-Cross→MSL 与 glslang 旧链产物语义对照 |
+| **M2 控制流与内建** | if/else、while/for（SelectionMerge/LoopMerge）；GLSL.std.450 数学库；纹理采样；comp 阶段（workgroup/计算内建/SSBO）；辅助函数（OpFunctionCall） | 全部现有 .ss 用例（含 saxpy comp）新链产物过验证 + demo 实机渲染 |
+| **M3 管线切换 + glslang 移除** | metal 目标走 AST→SPIR-V→SPIRV-Cross；vulkan 目标直落 .spv；`--emit-glsl`/`--emit-spv` 选项；删 vendor/glslang-src + SCC_WITH_GLSLANG + shader_spv 封装 | 244 回归 + 三 demo；scc 构建时间/体积显著下降 |
+| **M4 产物资源化** | 默认输出 `<stem>.shader.h/.c`：字节数组（SPIR-V/MSL/GLSL 文本）+ 自动 enum id + 反射 JSON 字符串 + 查询函数；`--files` 保留散文件输出 | gpu_demo 改资源模式（零运行时文件路径）实机渲染 |
+| **M5 语言完备性** | 按 §16 优先级逐批实现，反向对齐 SPIR-V 能力 | 每批能力：用例 + 验证链 + 能力矩阵行更新 |
+
+未决（M3 时定）：~~glcore/gles 目标是否统一到 SPIRV-Cross GLSL 后端~~——**已决：统一**。
+维护一套 SPIR-V 全集发射器远比两套后端容易；SPIRV-Cross GLSL 后端覆盖全版本
+（含 ES100 平铺 uniform 选项）。codegen_glsl 的 GLSL 文本发射逐目标退役（反射清单
+生成 emitReflectionJson 是 AST 侧设施，保留）；风险项「SPIRV-Cross 输出与 gl_gfx
+按名绑定/ES100 平铺反射契约对齐」在切换时逐目标验证（反射清单的名字规则向
+SPIRV-Cross 输出看齐）。
+
+### 14.4 四期（原二期存目，部分已提前落地）
 - ✅ `comp` 计算链路：计算内建映射 + `local_size` 发射/反射携带 + storage/SSBO；
   消费侧 [builtins/spc](builtins/spc/)（多维空间并行计算：kernel=Metal compute、
   graph=MPSGraph、model=CoreML/ANE）实机验证。待深化：`local_size` 语法、
-  barrier/共享内存语法。
+  barrier/共享内存语法（已列入 §16 P2）。
 - `@def` 共享布局（CPU↔GPU uniform 一致性校验，见 §7）。
-- `codegen_spirv`：SPIR-V 直发。
 - ✅ SPIRV-Cross→MSL 离线路径（`tar metal@2.0` 直产 MSL，已是默认发行路径）。
 
-### 14.4 远期
-- `codegen_msl` 直产 MSL。
+### 14.5 远期
+- `codegen_msl` 直产 MSL（跳过 SPIRV-Cross；仅当 SPIRV-Cross 成为痛点时）。
 - 评估 Slang 作为可选后端（autodiff/泛型多后端）。
 - 与 sc 的 `tok` 依赖图 / dnn 模板联动（compute shader 加速训练？——研究向）。
 
@@ -608,4 +652,64 @@ flowchart LR
 - **已定**（一期落地时确定，此处存档）：属性附着语法（`loc N` / `builtin X` 跟在字段后；
   `uniform|storage|push [set S binding B]` 跟在 `@def` 结构后）；反射清单 JSON schema
   （`stages[].{inputs,outputs,location,builtin}` + `resources[].{kind,set,binding,layout,members[].{offset,size}}`）。
+
+---
+
+## 16. SPIR-V 反向对齐优先级列表（M5 路线）
+
+原则：**SPIR-V（Shader 能力档）支持什么，ss 就应能表达什么**——以 SPIR-V 规范的
+能力/指令集为完备性清单反向核对，按「现有用例的直接缺口 → 图形完备 → 计算深化 →
+按需远期」排批。每项标注 SPIR-V 落点（指令/OpCapability），作为可核查的对齐依据。
+实现节奏：每批 = 语法（如需）+ shader_sema 门控 + codegen_spirv/glsl 双后端 +
+用例 + 能力矩阵（shader_caps.h）行。
+
+### P0 语言核心完备（现有用例的直接缺口）
+
+| 能力 | SPIR-V 落点 | 现状/备注 |
+|---|---|---|
+| `for` / `do-while` / `break` / `continue` | OpLoopMerge + OpBranch* | Emitter 现仅 if/while |
+| `switch`/`case` | OpSwitch | |
+| `discard`（frag） | OpKill / OpDemoteToHelperInvocation | |
+| swizzle 写入（`v.xy = ...`） | OpVectorShuffle + OpStore | 读侧已支持 |
+| 结构体值类型完备（嵌套/函数参数/返回/构造） | OpTypeStruct / OpCompositeConstruct | 现仅 I/O 与资源块 |
+| 数组完备（多维/函数参数/动态索引） | OpTypeArray / OpAccessChain | 一维已支持 |
+| 矩阵运算完备（mat*vec、vec*mat、mat*mat、转置/逆/行列式） | OpMatrixTimesVector 等 + GLSL.std.450 | |
+| 内建变量补全（front_facing/point_size/sample_id/…） | BuiltIn 装饰 | 现有 8 个 |
+| 编译期常量折叠 / `let` 常量 | OpConstant / OpSpecConstant（后者 P2） | |
+
+### P1 图形能力补全
+
+| 能力 | SPIR-V 落点 | 备注 |
+|---|---|---|
+| 纹理类型族：3D/Cube/Array/Shadow/MS | OpTypeImage 维度/Depth/MS 位 | 现仅 sampler2D |
+| 采样变体：textureLod/Grad/texelFetch/textureSize/Proj | OpImageSample*/OpImageFetch/OpImageQuery* | |
+| image load/store（无采样读写） | OpImageRead/OpImageWrite + Capability StorageImage* | spc kernel 面需要 |
+| derivative：dFdx/dFdy/fwidth | OpDPdx/OpDPdy/OpFwidth | frag 专属门控 |
+| 分离 texture/sampler（SPIR-V 原生形态） | OpTypeSampler + OpSampledImage | 现为 combined |
+| MRT 完备 + 深度输出组合 | Location/BuiltIn FragDepth | ES100 侧已有 gl_FragData |
+| UBO/SSBO 运行时数组 + 动态索引 | OpTypeRuntimeArray + Capability | |
+| push constant 完备（嵌套/数组） | PushConstant storage class | 基础已有 |
+
+### P2 计算深化
+
+| 能力 | SPIR-V 落点 | 备注 |
+|---|---|---|
+| `local_size` 的 .ss 语法 | ExecutionMode LocalSize | 现固定 64×1×1 |
+| shared 共享内存 | Workgroup storage class | |
+| barrier / memoryBarrier | OpControlBarrier / OpMemoryBarrier | |
+| 原子操作 | OpAtomic* | SSBO/shared 上 |
+| 特化常量 | OpSpecConstant* | 管线创建期调参 |
+| subgroup 基础（vote/ballot/shuffle） | Capability GroupNonUniform*（SPIR-V 1.3+） | 提升 SPIR-V 目标版本 |
+
+### P3 按需远期
+
+| 能力 | SPIR-V 落点 | 触发条件 |
+|---|---|---|
+| f16 / i64 / i8 标量 | Capability Float16/Int64/Int8 | 移动端带宽/ML 需求 |
+| 几何/细分/mesh/task 阶段 | Capability Geometry/Tessellation/MeshShadingEXT | 有真实用例再做 |
+| buffer_device_address（物理指针） | PhysicalStorageBuffer | Vulkan 高级路径 |
+| ray tracing / ray query | Capability RayTracingKHR | 平台成熟后 |
+| 多视图/多采样高级（sample shading 等） | 相应 Capability | XR 需求 |
+
+---
 

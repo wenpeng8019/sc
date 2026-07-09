@@ -1,4 +1,5 @@
 #include "codegen_glsl.h"
+#include "codegen_spirv.h"
 #include "lexer.h"
 #include "parser.h"
 #include "shader_sema.h"
@@ -734,6 +735,31 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         for (const auto& target : prog.shaderTargets) {
             // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
             std::string tag = multi ? ("." + glTargetTag(target)) : "";
+
+            // ---- Vulkan 目标：自研 AST→SPIR-V 直发，产物 <entry>.spv ----
+            // （三期主路径首个落点；spirv-val/spirv-dis/SPIRV-Cross 均可直接消费）
+            if (target.isVulkan()) {
+                auto sunits = emitSpirv(prog, target);
+                if (sunits.empty()) {
+                    std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                    return 1;
+                }
+                std::string reflect = emitReflectionJson(prog, target);
+                for (const auto& u : sunits) {
+                    std::string bin((const char*)u.words.data(), u.words.size() * 4);
+                    if (outDir.empty()) {
+                        std::fprintf(stderr, "ss: %s%s.spv（%zu 字）需 -o 输出目录（二进制不入 stdout）\n",
+                                     u.entry.c_str(), tag.c_str(), u.words.size());
+                        continue;
+                    }
+                    if (!write(outDir + "/" + u.entry + tag + ".spv", bin)) return 1;
+                }
+                if (outDir.empty())
+                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
+                                stem.c_str(), tag.c_str(), reflect.c_str());
+                else if (!write(outDir + "/" + stem + tag + ".reflect.json", reflect)) return 1;
+                continue;
+            }
 
             // ---- Metal 目标：内部走 Vulkan-GLSL(450) → SPIR-V(glslang) → MSL(spirv-cross) ----
             // 能力门控已在 shaderSemaCheck 按 metal 目标自身的能力矩阵完成；此处 Vulkan-GLSL
