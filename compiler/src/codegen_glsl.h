@@ -37,8 +37,13 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target);
 // emitGlslText：--emit-glsl —— gl/gles/metal(内部 vulkan 语义) 改用自研 codegen_glsl
 //   文本发射（对照/兜底通道，产物同名）。
 // emitSpvFiles：--emit-spv —— 非 vulkan 目标也额外落盘 <entry><tag>.spv 中间文件。
+// 产物形态：默认资源化 <stem>.shader.h/.c（字节数组 + enum id + 反射 JSON +
+//   按名查询函数，供 add 直接链入应用）；filesMode（--files）落散文件
+//   <entry><tag>.<ext> + <stem><tag>.reflect.json。
+// outPath：-o 原始值（资源模式的 stem 依据）；空 = stdout。
 // outDir 为空 → 打印到 stdout（二进制 .spv 仅提示不入 stdout）；否则写入 outDir。
 // 返回进程退出码（0 成功）。
 int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir,
-                        bool emitGlslText = false, bool emitSpvFiles = false);
+                        bool emitGlslText = false, bool emitSpvFiles = false,
+                        bool filesMode = false, const std::string& outPath = {});

@@ -614,7 +614,7 @@ flowchart LR
 | **M1 发射器骨架** | `codegen_spirv.cpp`：模块头/类型池/常量池/装饰/入口点；线性代码（表达式/赋值/return/swizzle/向量构造）；vert/frag I/O 变量 + uniform/sampler | 三角形 .ss 产物过 spirv-val；SPIRV-Cross→MSL 与 glslang 旧链产物语义对照 |
 | **M2 控制流与内建** | if/else、while/for（SelectionMerge/LoopMerge）；GLSL.std.450 数学库；纹理采样；comp 阶段（workgroup/计算内建/SSBO）；辅助函数（OpFunctionCall） | 全部现有 .ss 用例（含 saxpy comp）新链产物过验证 + demo 实机渲染 |
 | **M3 管线切换 + glslang 移除** | metal 目标走 AST→SPIR-V→SPIRV-Cross；vulkan 目标直落 .spv；`--emit-glsl`/`--emit-spv` 选项；删 vendor/glslang-src + SCC_WITH_GLSLANG + shader_spv 封装 | 244 回归 + 三 demo；scc 构建时间/体积显著下降 |
-| **M4 产物资源化** | 默认输出 `<stem>.shader.h/.c`：字节数组（SPIR-V/MSL/GLSL 文本）+ 自动 enum id + 反射 JSON 字符串 + 查询函数；`--files` 保留散文件输出 | gpu_demo 改资源模式（零运行时文件路径）实机渲染 |
+| **M4 产物资源化** ✅ | 默认输出 `<stem>.shader.h/.c`：字节数组（文本带尾 NUL）+ 自动 enum id + 反射 JSON 内嵌 + `_get(i)` 非 inline 取条目（FFI 用）；条目布局每目标三连 [reflect, 逐 stage]；`--files` 落散文件 | ✅ 三 demo（gpu/headless/spc）全改资源模式（零运行时文件路径）实机验证 |
 | **M5 语言完备性** | 按 §16 优先级逐批实现，反向对齐 SPIR-V 能力 | 每批能力：用例 + 验证链 + 能力矩阵行更新 |
 
 已决（2026-07-09，细化）：**默认产物链全目标统一 SPIR-V 中枢**——vulkan 直落 .spv，

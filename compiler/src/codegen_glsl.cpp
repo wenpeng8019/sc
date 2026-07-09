@@ -7,6 +7,7 @@
 #include "error.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -655,7 +656,8 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
 
 int compileShaderSource(const std::string& src, const std::string& srcPath,
                         const std::string& outDir,
-                        bool emitGlslText, bool emitSpvFiles) {
+                        bool emitGlslText, bool emitSpvFiles,
+                        bool filesMode, const std::string& outPath) {
     try {
         Program prog = parse(lex(src), /*shaderMode*/ true);
 
@@ -725,18 +727,21 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
             return true;
         };
 
+        // 产物收集（先收集后输出：默认打包资源文件，--files/--emit-* 落散文件）
+        struct Artifact {
+            std::string entry, stage, target, ext, data;
+            bool binary = false;
+        };
+        std::vector<Artifact> arts;
+        // 调试/对照通道蕴含散文件形态
+        const bool files = filesMode || emitGlslText || emitSpvFiles || outDir.empty();
+
         for (const auto& target : prog.shaderTargets) {
             // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
             std::string tag = multi ? ("." + glTargetTag(target)) : "";
-            std::string reflect = emitReflectionJson(prog, target);
-            auto writeReflect = [&]() -> bool {
-                if (outDir.empty()) {
-                    std::printf("// ===== %s%s.reflect.json =====\n%s\n",
-                                stem.c_str(), tag.c_str(), reflect.c_str());
-                    return true;
-                }
-                return write(outDir + "/" + stem + tag + ".reflect.json", reflect);
-            };
+            std::string ttag = glTargetTag(target);
+            arts.push_back({stem, "", ttag, "reflect.json",
+                            emitReflectionJson(prog, target), false});
 
             // ---- --emit-glsl：自研 codegen_glsl 文本发射（对照 / 兜底通道）----
             // gl/gles 产该目标方言；vulkan 产 Vulkan-GLSL；metal 产其内部
@@ -749,13 +754,8 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                     std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                     return 1;
                 }
-                for (const auto& u : units) {
-                    if (outDir.empty())
-                        std::printf("// ===== %s%s.%s =====\n%s\n",
-                                    u.entry.c_str(), tag.c_str(), u.ext.c_str(), u.text.c_str());
-                    else if (!write(outDir + "/" + u.entry + tag + "." + u.ext, u.text)) return 1;
-                }
-                if (!writeReflect()) return 1;
+                for (const auto& u : units)
+                    arts.push_back({u.entry, stageExt(u.stage), ttag, u.ext, u.text, false});
                 continue;
             }
 
@@ -772,34 +772,132 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
             for (const auto& u : sunits) {
                 if (target.isVulkan() || emitSpvFiles) {
                     std::string bin((const char*)u.words.data(), u.words.size() * 4);
-                    if (outDir.empty())
-                        std::fprintf(stderr, "ss: %s%s.spv（%zu 字）需 -o 输出目录（二进制不入 stdout）\n",
-                                     u.entry.c_str(), tag.c_str(), u.words.size());
-                    else if (!write(outDir + "/" + u.entry + tag + ".spv", bin)) return 1;
+                    arts.push_back({u.entry, stageExt(u.stage), ttag, "spv", bin, true});
                 }
                 if (target.isVulkan()) continue;
                 if (target.isMetal()) {
                     scc_shader::MslOptions mo;
                     mo.mslVersion = (uint32_t)target.version;
                     mo.renameEntry = u.entry;        // 多阶段链入同一 metallib 时避免 main0 冲突
-                    std::string msl = scc_shader::spirvToMsl(u.words, mo);
-                    if (outDir.empty())
-                        std::printf("// ===== %s%s.metal =====\n%s\n",
-                                    u.entry.c_str(), tag.c_str(), msl.c_str());
-                    else if (!write(outDir + "/" + u.entry + tag + ".metal", msl)) return 1;
+                    arts.push_back({u.entry, stageExt(u.stage), ttag, "metal",
+                                    scc_shader::spirvToMsl(u.words, mo), false});
                     continue;
                 }
                 scc_shader::GlslOptions go;
                 go.version = (uint32_t)target.version;
                 go.es = target.isES();
-                std::string text = scc_shader::spirvToGlsl(u.words, go);
-                const char* ext = stageExt(u.stage);
-                if (outDir.empty())
-                    std::printf("// ===== %s%s.%s =====\n%s\n",
-                                u.entry.c_str(), tag.c_str(), ext, text.c_str());
-                else if (!write(outDir + "/" + u.entry + tag + "." + ext, text)) return 1;
+                arts.push_back({u.entry, stageExt(u.stage), ttag, stageExt(u.stage),
+                                scc_shader::spirvToGlsl(u.words, go), false});
             }
-            if (!writeReflect()) return 1;
+        }
+
+        // ---- 散文件输出（--files / --emit-* / stdout）----
+        if (files) {
+            for (const auto& a : arts) {
+                std::string tag = multi ? ("." + a.target) : "";
+                std::string fname = a.entry + tag + "." + a.ext;
+                if (outDir.empty()) {
+                    if (a.binary)
+                        std::fprintf(stderr, "ss: %s（%zu 字节）需 -o 输出目录（二进制不入 stdout）\n",
+                                     fname.c_str(), a.data.size());
+                    else
+                        std::printf("// ===== %s =====\n%s\n", fname.c_str(), a.data.c_str());
+                    continue;
+                }
+                if (!write(outDir + "/" + fname, a.data)) return 1;
+            }
+            return 0;
+        }
+
+        // ---- 资源化输出（默认）：<stem>.shader.h / <stem>.shader.c ----
+        // 字节数组 + enum id + 反射 JSON + 按名查询，add 直接链入应用，
+        // 零运行时文件路径。文本产物尾部带 NUL（data 可当 C 字符串），
+        // size 不含 NUL；.spv 为原始二进制。
+        {
+            // 资源名/符号名取 -o 的 basename（无 -o 已在 files 分支处理）
+            std::string base = stem;
+            if (!outPath.empty()) {
+                std::filesystem::path op(outPath);
+                if (!op.stem().string().empty()) base = op.stem().string();
+            }
+            std::string sym;                       // C 标识符化
+            for (char c : base)
+                sym += (isalnum((unsigned char)c) ? c : '_');
+            if (sym.empty() || isdigit((unsigned char)sym[0])) sym = "_" + sym;
+            std::string SYM;
+            for (char c : sym) SYM += (char)toupper((unsigned char)c);
+
+            std::ostringstream h, c;
+            std::string guard = "SC_SHADER_" + SYM + "_H";
+            h << "/* generated by scc from " << std::filesystem::path(srcPath).filename().string()
+              << " —— 着色器资源（勿手改） */\n"
+              << "#ifndef " << guard << "\n#define " << guard << "\n\n"
+              << "#include <stddef.h>\n#include <string.h>\n\n"
+              << "#ifndef SC_SHADER_BLOB_DEFINED\n#define SC_SHADER_BLOB_DEFINED\n"
+              << "typedef struct sc_shader_blob {\n"
+              << "    const char* entry;    /* 入口名（.ss 阶段函数名；反射条目 = 源 stem） */\n"
+              << "    const char* stage;    /* \"vert\"/\"frag\"/\"comp\"；反射条目 = \"\" */\n"
+              << "    const char* target;   /* 目标 tag：\"metal20000\"/\"glcore410\"/... */\n"
+              << "    const char* ext;      /* \"metal\"/\"vert\"/\"spv\"/\"reflect.json\" */\n"
+              << "    const unsigned char* data;  /* 文本含结尾 NUL（可当 C 字符串） */\n"
+              << "    size_t size;                /* 字节数（文本不含结尾 NUL） */\n"
+              << "} sc_shader_blob;\n#endif\n\n";
+
+            h << "typedef enum {\n";
+            for (size_t i = 0; i < arts.size(); i++) {
+                const auto& a = arts[i];
+                std::string en;
+                for (char ch : a.entry + "_" + a.target + (a.ext == "spv" ? "_spv" : "")
+                               + (a.ext == "reflect.json" ? "_reflect" : ""))
+                    en += (char)(isalnum((unsigned char)ch) ? toupper((unsigned char)ch) : '_');
+                h << "    SC_SHADER_" << SYM << "_" << en << " = " << i << ",\n";
+            }
+            h << "    SC_SHADER_" << SYM << "_COUNT = " << arts.size() << "\n"
+              << "} sc_shader_" << sym << "_id;\n\n";
+            h << "extern const sc_shader_blob sc_shader_" << sym
+              << "[SC_SHADER_" << SYM << "_COUNT];\n\n";
+            h << "/* 按下标取条目（非 inline，供 FFI/动态语言绑定；越界返回 NULL） */\n"
+              << "const sc_shader_blob* sc_shader_" << sym << "_get(size_t i);\n\n";
+            h << "/* 按 (entry, target) 查产物；entry 传源 stem、ext 传 \"reflect.json\" 查反射。\n"
+              << "   target 可传 NULL = 单目标/任意目标首个命中。 */\n"
+              << "static inline const sc_shader_blob* sc_shader_" << sym
+              << "_find(const char* entry, const char* target, const char* ext) {\n"
+              << "    for (size_t i = 0; i < SC_SHADER_" << SYM << "_COUNT; i++) {\n"
+              << "        const sc_shader_blob* b = &sc_shader_" << sym << "[i];\n"
+              << "        if (entry && strcmp(b->entry, entry) != 0) continue;\n"
+              << "        if (target && strcmp(b->target, target) != 0) continue;\n"
+              << "        if (ext && strcmp(b->ext, ext) != 0) continue;\n"
+              << "        return b;\n"
+              << "    }\n    return 0;\n}\n\n"
+              << "#endif /* " << guard << " */\n";
+
+            c << "/* generated by scc from " << std::filesystem::path(srcPath).filename().string()
+              << " —— 着色器资源数据（勿手改） */\n"
+              << "#include \"" << base << ".shader.h\"\n\n";
+            for (size_t i = 0; i < arts.size(); i++) {
+                const auto& a = arts[i];
+                c << "static const unsigned char blob_" << i << "[] = {";
+                const std::string& d = a.data;
+                for (size_t j = 0; j < d.size(); j++) {
+                    if (j % 16 == 0) c << "\n    ";
+                    c << (unsigned)(unsigned char)d[j] << ",";
+                }
+                if (!a.binary) c << (d.empty() ? "\n    0" : " 0");   // 文本补 NUL
+                c << "\n};\n";
+            }
+            c << "\nconst sc_shader_blob sc_shader_" << sym << "[] = {\n";
+            for (size_t i = 0; i < arts.size(); i++) {
+                const auto& a = arts[i];
+                c << "    {\"" << a.entry << "\", \"" << a.stage << "\", \"" << a.target
+                  << "\", \"" << a.ext << "\", blob_" << i << ", " << a.data.size() << "},\n";
+            }
+            c << "};\n\n"
+              << "const sc_shader_blob* sc_shader_" << sym << "_get(size_t i) {\n"
+              << "    return i < SC_SHADER_" << SYM << "_COUNT ? &sc_shader_" << sym << "[i] : 0;\n"
+              << "}\n";
+
+            if (!write(outDir + "/" + base + ".shader.h", h.str())) return 1;
+            if (!write(outDir + "/" + base + ".shader.c", c.str())) return 1;
         }
         return 0;
     } catch (const CompileError& e) {

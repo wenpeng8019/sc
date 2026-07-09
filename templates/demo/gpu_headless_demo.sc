@@ -18,24 +18,19 @@ inc io.sc
 inc gpu.sc
 inc gfx.sc
 
-# 整文件读入 malloc 缓冲（尾部补 NUL）。失败返回 nil。
-@fnc load_file: &, path: const char&, out_size: u8&
-    var f: & = (::fopen(path, "rb"): &)
-    if f == nil
-        print "无法打开 ", path, "\n"
-        return nil
-    ::fseek(f, 0, 2)
-    var n: i8 = (::ftell(f): i8)
-    ::fseek(f, 0, 0)
-    var buf: char& = (::malloc(((n + 1): u8)): char&)
-    if (::fread(buf, 1, (n: u8), f): i8) != n
-        ::fclose(f)
-        ::free(buf)
-        return nil
-    buf[n] = (0: char)
-    ::fclose(f)
-    out_size[0] = (n: u8)
-    return buf
+# 着色器资源：scc 默认产物 gpu_tri.shader.c（与 gpu_demo 共享；每目标三连
+# [reflect, vs, fs]：metal20000=0..2、glcore410=3..5，见 .shader.h enum）。
+add gpu_shader/out/gpu_tri.shader.c
+
+def shader_blob: {
+    entry:  const char&
+    stage:  const char&
+    target: const char&
+    ext:    const char&
+    data:   const u1&
+    size:   u8
+}
+@fnc shader_gpu_tri_get:: shader_blob&, i: u8    # 绑 sc_shader_gpu_tri_get
 
 # BGRA 像素块 → PPM（P6，固定 256x256）
 @fnc save_ppm: i4, path: const char&, pix: const char&, stride: u4
@@ -95,33 +90,22 @@ fnc main: i4
         gpu_shutdown()
         return 1
 
-    # ---- 着色器（scc 产物，按后端选 Metal/GL） ----
-    var vsn: u8 = 0
-    var fsn: u8 = 0
-    var rjn: u8 = 0
-    var vs: char& = nil
-    var fs: char& = nil
-    var rj: char& = nil
+    # ---- 着色器（内嵌资源表，按后端选目标三连） ----
+    var base: u8 = 0                             # metal20000
     if bk == 2
-        vs = (load_file("templates/demo/gpu_shader/out/vs_main.glcore410.vert", &vsn): char&)
-        fs = (load_file("templates/demo/gpu_shader/out/fs_main.glcore410.frag", &fsn): char&)
-        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.glcore410.reflect.json", &rjn): char&)
-    else
-        vs = (load_file("templates/demo/gpu_shader/out/vs_main.metal20000.metal", &vsn): char&)
-        fs = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
-        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
-    if vs == nil || fs == nil || rj == nil
-        print "着色器产物缺失：先 scc 编译 gpu_shader/gpu_tri.ss\n"
-        return 1
+        base = 3                                 # glcore410
+    var brj: shader_blob& = shader_gpu_tri_get(base)
+    var bvs: shader_blob& = shader_gpu_tri_get(base + 1)
+    var bfs: shader_blob& = shader_gpu_tri_get(base + 2)
     var sd: ::sc_gfx_shader_desc
     ::memset(&sd, 0, sizeof(::sc_gfx_shader_desc))
-    sd.vs.code.ptr  = (vs: &)
-    sd.vs.code.size = vsn
+    sd.vs.code.ptr  = (bvs->data: &)
+    sd.vs.code.size = bvs->size
     sd.vs.entry     = "vs_main"
-    sd.fs.code.ptr  = (fs: &)
-    sd.fs.code.size = fsn
+    sd.fs.code.ptr  = (bfs->data: &)
+    sd.fs.code.size = bfs->size
     sd.fs.entry     = "fs_main"
-    sd.reflect_json = rj
+    sd.reflect_json = (brj->data: const char&)
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
         print "make_shader 失败\n"
@@ -236,8 +220,5 @@ fnc main: i4
     gfx_shutdown()
     gpu_memimg_free(mimg)
     gpu_shutdown()
-    ::free(vs)
-    ::free(fs)
-    ::free(rj)
     print "headless 渲染完成\n"
     return 0

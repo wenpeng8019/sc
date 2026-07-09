@@ -15,23 +15,18 @@ inc gpu.sc
 inc spc.sc
 
 # 整文件读入 malloc 缓冲(尾部补 NUL)。失败返回 nil。
-@fnc load_file: &, path: const char&, out_size: u8&
-    var f: & = (::fopen(path, "rb"): &)
-    if f == nil
-        print "无法打开 ", path, "\n"
-        return nil
-    ::fseek(f, 0, 2)
-    var n: i8 = (::ftell(f): i8)
-    ::fseek(f, 0, 0)
-    var buf: char& = (::malloc(((n + 1): u8)): char&)
-    if (::fread(buf, 1, (n: u8), f): i8) != n
-        ::fclose(f)
-        ::free(buf)
-        return nil
-    buf[n] = (0: char)
-    ::fclose(f)
-    out_size[0] = (n: u8)
-    return buf
+# 内核资源：scc 默认产物 saxpy.shader.c（单目标 metal：条目 0=reflect、1=cs_saxpy）。
+add spc_kernel/out/saxpy.shader.c
+
+def shader_blob: {
+    entry:  const char&
+    stage:  const char&
+    target: const char&
+    ext:    const char&
+    data:   const u1&
+    size:   u8
+}
+@fnc shader_saxpy_get:: shader_blob&, i: u8    # 绑 sc_shader_saxpy_get
 
 fnc main: i4
     # ---- 环境:gpu(headless)+ spc ----
@@ -51,13 +46,8 @@ fnc main: i4
     var fails: i4 = 0
 
     # ============ 1. kernel 面:saxpy(y = 2x + 1) ============
-    var msln: u8 = 0
-    var rjn: u8 = 0
-    var msl: char& = (load_file("templates/demo/spc_kernel/out/cs_saxpy.metal", &msln): char&)
-    var rj: char& = (load_file("templates/demo/spc_kernel/out/saxpy.reflect.json", &rjn): char&)
-    if msl == nil || rj == nil
-        print "内核产物缺失:先 scc 编译 spc_kernel/saxpy.ss\n"
-        return 1
+    var brj: shader_blob& = shader_saxpy_get(0)      # reflect.json
+    var bms: shader_blob& = shader_saxpy_get(1)      # cs_saxpy.metal
 
     var x: tensor& = arange(0.0, 1024.0, 1.0, DT_F4)
     var y: tensor& = ones_like(x)
@@ -66,10 +56,10 @@ fnc main: i4
 
     var kd: ::sc_spc_kernel_desc
     ::memset(&kd, 0, sizeof(::sc_spc_kernel_desc))
-    kd.code.ptr  = (msl: &)
-    kd.code.size = msln
+    kd.code.ptr  = (bms->data: &)
+    kd.code.size = bms->size
     kd.entry     = "cs_saxpy"
-    kd.reflect_json = rj
+    kd.reflect_json = (brj->data: const char&)
     var krn: u4 = spc_make_kernel(&kd)
     if krn == 0
         print "make_kernel 失败\n"
@@ -174,8 +164,6 @@ fnc main: i4
     a->drop()
     b->drop()
     c_gpu->drop()
-    ::free(msl)
-    ::free(rj)
     spc_shutdown()
     gpu_shutdown()
 

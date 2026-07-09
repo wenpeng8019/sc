@@ -2,18 +2,18 @@
 # GPU 代码（Metal / GL 三角形）
 #
 # 链路（本 demo 的意义即验证此闭环）：
-#   gpu_shader/gpu_tri.ss ──scc──▶ vs_main.metal20000.metal / vs_main.glcore410.vert
-#                                  + gpu_tri.<tar>.reflect.json
+#   gpu_shader/gpu_tri.ss ──scc──▶ gpu_tri.shader.h/.c（资源化：字节数组 +
+#                                  反射 JSON 内嵌，每目标三连 [reflect, vs, fs]）
 #                                        │
 #   wsi 窗口 ─▶ gpu_init（环境：device + surface 交换链）
-#              └▶ gfx_init（渲染）─▶ gfx_make_shader(直接吃 scc 产物)
+#              └▶ gfx_init（渲染）─▶ gfx_make_shader(直接吃内嵌资源)
 #                          └▶ gfx_make_pipeline ─▶ 帧循环 gfx_draw(3)
 #
 # 用法（macOS，从仓库根目录运行；gpu/gfx 源码动态编译，平台框架链接由编译器自动注入，零 SCC_LDFLAGS）：
 #   ./templates/utils/wsi/build.sh                 # 仅 wsi 需预编（libwsi.a 已入库，改源码后重跑）
 #   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
 #   ./compiler/build/scc templates/demo/gpu_demo.sc
-#   ./templates/demo/gpu_demo                      # 需从仓库根运行（着色器按相对路径加载）
+#   ./templates/demo/gpu_demo                      # 着色器已内嵌，任意目录可运行
 #   GPU_BACKEND=gl ./templates/demo/gpu_demo       # 切 OpenGL 后端
 
 inc io.sc
@@ -21,25 +21,20 @@ inc ../utils/wsi/wsi.sc
 inc gpu.sc
 inc gfx.sc
 
-# 整文件读入 malloc 缓冲（尾部补 NUL，文本产物可当 C 串用）。失败返回 nil。
-@fnc load_file: &, path: const char&, out_size: u8&
-    var f: & = (::fopen(path, "rb"): &)
-    if f == nil
-        print "无法打开 ", path, "\n"
-        return nil
-    ::fseek(f, 0, 2)                        # SEEK_END
-    var n: i8 = (::ftell(f): i8)
-    ::fseek(f, 0, 0)                        # SEEK_SET
-    var buf: char& = (::malloc(((n + 1): u8)): char&)
-    if (::fread(buf, 1, (n: u8), f): i8) != n
-        print "读取失败 ", path, "\n"
-        ::fclose(f)
-        ::free(buf)
-        return nil
-    buf[n] = (0: char)
-    ::fclose(f)
-    out_size[0] = (n: u8)
-    return buf
+# 着色器资源：scc 默认产物 gpu_tri.shader.h/.c（字节数组 + 反射 JSON 内嵌，
+# 零运行时文件路径）；条目布局每目标三连：[reflect, vs, fs]（见 .shader.h enum）。
+# sc 侧按同布局定义结构认领 C 符号（TU 各自独立，链接期按符号对接）。
+add gpu_shader/out/gpu_tri.shader.c
+
+def shader_blob: {
+    entry:  const char&
+    stage:  const char&
+    target: const char&
+    ext:    const char&
+    data:   const u1&
+    size:   u8
+}
+@fnc shader_gpu_tri_get:: shader_blob&, i: u8    # 绑 sc_shader_gpu_tri_get（越界返 nil）
 
 fnc main: i4
     # ---- wsi 窗口 ----
@@ -90,32 +85,20 @@ fnc main: i4
         wsi_terminate()
         return 1
 
-    # ---- 着色器：直接消费 scc 编译 .ss 的产物（按后端选目标产物） ----
-    var vsn: u8 = 0
-    var fsn: u8 = 0
-    var rjn: u8 = 0
-    var vs: char& = nil
-    var fs: char& = nil
-    var rj: char& = nil
+    # ---- 着色器：直接消费内嵌资源表（按后端选目标三连 [reflect, vs, fs]）----
+    var base: u8 = 0                             # metal20000
     if bk == 2
-        vs = (load_file("templates/demo/gpu_shader/out/vs_main.glcore410.vert", &vsn): char&)
-        fs = (load_file("templates/demo/gpu_shader/out/fs_main.glcore410.frag", &fsn): char&)
-        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.glcore410.reflect.json", &rjn): char&)
-    else if bk == 3
-        # Vulkan 吃 SPIR-V 二进制（glslangValidator 离线编译 .vert/.frag → .spv）
-        vs = (load_file("templates/demo/gpu_shader/out/vs_main.vulkan450.spv", &vsn): char&)
-        fs = (load_file("templates/demo/gpu_shader/out/fs_main.vulkan450.spv", &fsn): char&)
-        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.vulkan450.reflect.json", &rjn): char&)
-    else
-        vs = (load_file("templates/demo/gpu_shader/out/vs_main.metal20000.metal", &vsn): char&)
-        fs = (load_file("templates/demo/gpu_shader/out/fs_main.metal20000.metal", &fsn): char&)
-        rj = (load_file("templates/demo/gpu_shader/out/gpu_tri.metal20000.reflect.json", &rjn): char&)
-    if vs == nil || fs == nil || rj == nil
-        print "着色器产物缺失：先运行 scc 编译 gpu_shader/gpu_tri.ss（见文件头用法）\n"
-        gfx_shutdown()
-        gpu_shutdown()
-        wsi_terminate()
-        return 1
+        base = 3                                 # glcore410
+    if bk == 3
+        base = 6                                 # vulkan450（SPIR-V 二进制）
+    var brj: shader_blob& = shader_gpu_tri_get(base)
+    var bvs: shader_blob& = shader_gpu_tri_get(base + 1)
+    var bfs: shader_blob& = shader_gpu_tri_get(base + 2)
+    var rj: const char& = (brj->data: const char&)
+    var vs: const u1&   = bvs->data
+    var vsn: u8         = bvs->size
+    var fs: const u1&   = bfs->data
+    var fsn: u8         = bfs->size
 
     var sd: ::sc_gfx_shader_desc
     ::memset(&sd, 0, sizeof(::sc_gfx_shader_desc))
@@ -183,9 +166,6 @@ fnc main: i4
     gfx_destroy_shader(shd)
     gfx_shutdown()
     gpu_shutdown()
-    ::free(vs)
-    ::free(fs)
-    ::free(rj)
     wsi_win_destroy(win)
     wsi_terminate()
     print "已退出\n"
