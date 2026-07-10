@@ -1078,7 +1078,7 @@ static void vkSurfaceDestroy(gpu_surface_t* surf) {
 }
 
 static void vkSurfaceActivate(gpu_surface_t* surf) {
-    g_vk.cur = (VkSurfaceCtx*)surf->backend;
+    g_vk.cur = surf ? (VkSurfaceCtx*)surf->backend : NULL;
 }
 
 static void recreate_swapchain(VkSurfaceCtx* c, gpu_surface_t* surf) {
