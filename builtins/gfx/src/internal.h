@@ -17,7 +17,7 @@
 #include <stdbool.h>
 
 /* ---- 编译期后端开关：按目标平台自推导（与 gpu/src/internal.h 同源逻辑）----
- * darwin → Metal + GL；linux → GL + Vulkan；windows → Vulkan（GL/D3D 待补）。
+ * darwin → Metal + GL；linux → GL + Vulkan；windows → GL（WGL；Vulkan/D3D 待补）。
  * 平台判定用 platform.h 的 P_XXX（尊重交叉目标 SC_TARGET_*，非裸 __APPLE__/_WIN32）。
  * SC_GPU_GLES 由目标档 cflags 显式给出。 */
 #if P_DARWIN
@@ -35,8 +35,8 @@
   #define SC_GPU_VULKAN 1
   #endif
 #elif P_WIN
-  #ifndef SC_GPU_VULKAN
-  #define SC_GPU_VULKAN 1
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
   #endif
 #endif
 

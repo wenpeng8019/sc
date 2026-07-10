@@ -13,8 +13,9 @@ inc     = khr
 ldflags = -lGLESv2 -lEGL -lgbm
 
 [windows]
-# Vulkan loader 导入库（MSVC=vulkan-1.lib / mingw=-lvulkan-1）；窗口句柄来自 wsi（HWND）
-ldflags = -lvulkan-1
+# WGL 桌面 GL：GL 函数 = opengl32；ChoosePixelFormat/SetPixelFormat/SwapBuffers = gdi32；
+# GetDC/ReleaseDC = user32。（Vulkan/D3D 后端尚未启用，其导入库待适配时再补）
+ldflags = -lopengl32 -lgdi32 -luser32
 
 [linux]
 ldflags = -lGL -lEGL -lgbm -lvulkan -lX11

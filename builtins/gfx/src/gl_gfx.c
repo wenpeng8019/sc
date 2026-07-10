@@ -58,8 +58,10 @@
   #include <EGL/egl.h>
   /* GL_OES_EGL_image（memimg 绑定：EGLImage → 纹理） */
   typedef void (*PFN_scEGLImageTargetTexture2DOES)(GLenum target, void* image);
+#elif P_WIN
+  #include "../../gpu/src/gl_win.h"   /* 桌面 GL：windows.h + GL/gl.h + GL 1.2+ 加载器 */
 #else
-  #error "gl_gfx.c: Windows 需 GL 加载器（待补）"
+  #error "gl_gfx.c: 未知平台的桌面 GL 加载器（待补）"
 #endif
 
 #define GL_UB_RING_SIZE (1 * 1024 * 1024)
@@ -257,6 +259,9 @@ static void ensureUbRing(void) {
 static bool glGfxInit(const sc_gfx_desc* desc) {
     (void)desc;
     memset(&gl, 0, sizeof(gl));
+#if P_WIN
+    if (!scgl_win_load()) gfx_log("gl: 部分 GL 1.2+ 函数未装载（驱动可能过旧）");
+#endif
     return true;
 }
 

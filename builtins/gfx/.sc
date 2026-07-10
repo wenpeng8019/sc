@@ -10,8 +10,8 @@ inc     = ../gpu/khr
 ldflags = -lGLESv2 -lEGL -lgbm
 
 [windows]
-# Vulkan loader 导入库（MSVC=vulkan-1.lib / mingw=-lvulkan-1）
-ldflags = -lvulkan-1
+# WGL 桌面 GL：GL 函数 = opengl32（与 gpu 同链一套，重复自去重）
+ldflags = -lopengl32
 
 [linux]
 ldflags = -lGL -lEGL -lgbm -lvulkan

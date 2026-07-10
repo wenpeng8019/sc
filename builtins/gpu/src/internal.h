@@ -14,7 +14,7 @@
 
 /* ---- 编译期后端开关：按目标平台自推导（无需构建系统注入） ----
  * 源文件由 scc 动态编译（模块 .sc 逐文件 add src 源码）：平台即配置——
- *   darwin → Metal + GL；linux → GL + Vulkan；windows → Vulkan（GL/D3D 待补）。
+ *   darwin → Metal + GL；linux → GL + Vulkan；windows → GL（WGL；Vulkan/D3D 待补）。
  * 平台判定用 platform.h 的 P_XXX（而非裸 __APPLE__/_WIN32）：交叉编译时
  * scc 注入 SC_TARGET_{WIN,DARWIN,LINUX}，令「目标平台」压过 C 编译器预定义的
  * 「宿主平台」宏——例如 mac 上不带 -target 交叉到 win，裸 __APPLE__ 会误真，
@@ -36,8 +36,8 @@
   #define SC_GPU_VULKAN 1
   #endif
 #elif P_WIN
-  #ifndef SC_GPU_VULKAN
-  #define SC_GPU_VULKAN 1
+  #ifndef SC_GPU_GL
+  #define SC_GPU_GL 1
   #endif
 #endif
 

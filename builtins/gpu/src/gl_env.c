@@ -47,6 +47,8 @@
   #include <unistd.h>
   /* GL_OES_EGL_image（Mesa 桌面 GL 亦暴露） */
   typedef void (*PFN_scEGLImageTargetTexture2DOES)(GLenum target, void* image);
+#elif P_WIN
+  #include "gl_win.h"                 /* 桌面 GL：windows.h + GL/gl.h + GL 1.2+ 加载器 */
 #endif
 
 #define GL_MAX_ACQUIRED 16
@@ -295,6 +297,9 @@ static bool glSurfaceCreate(gpu_surface_t* surf) {
     s->ctx = gl_ctx_create(surf->desc.native_window, surf->desc.native_display,
                                4, 1, surf->desc.swap_interval);
     if (!s->ctx) { free(s); return false; }
+#endif
+#if P_WIN
+    scgl_win_load();   /* 桌面 GL：上下文已 current，装载 GL 1.2+ 函数指针 */
 #endif
     /* 创建后即为当前上下文 */
     glGenVertexArrays(1, &s->vao);
