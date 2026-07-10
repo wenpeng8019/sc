@@ -204,7 +204,7 @@ int sc_spc_init(const sc_spc_desc* desc) {
     S.desc.kernel_pool_size = DEF(S.desc.kernel_pool_size, 32);
     S.desc.model_pool_size  = DEF(S.desc.model_pool_size, 8);
 
-#if defined(__APPLE__)
+#if P_DARWIN
     if (!spc_mtl_init()) { spc_log("init: Metal 初始化失败"); return 0; }
 #else
     spc_log("init: 本平台 spc 后端待补（一期仅 darwin）");
@@ -222,7 +222,7 @@ int sc_spc_init(const sc_spc_desc* desc) {
 }
 
 void sc_spc_shutdown(void) {
-#if defined(__APPLE__)
+#if P_DARWIN
     if (S.valid) {
         for (int i = 1; i < S.model_pool.size; i++)
             if (S.models[i].state == SPC_SLOT_VALID)
@@ -244,7 +244,7 @@ void sc_spc_shutdown(void) {
 int sc_spc_isvalid(void) { return S.valid ? 1 : 0; }
 
 void sc_spc_finish(void) {
-#if defined(__APPLE__)
+#if P_DARWIN
     if (S.valid) spc_mtl_finish();
 #endif
 }
@@ -259,7 +259,7 @@ sc_spc_buffer sc_spc_make_buffer(const sc_spc_buffer_desc* desc) {
     memset(b, 0, sizeof(*b));
     b->id = id;
     b->size = desc->size;
-#if defined(__APPLE__)
+#if P_DARWIN
     b->state = spc_mtl_buffer_create(b, desc->data, desc->size)
              ? SPC_SLOT_VALID : SPC_SLOT_FAILED;
 #endif
@@ -293,7 +293,7 @@ int sc_spc_buffer_read(sc_spc_buffer hnd, void* dst, uint64_t size, uint64_t off
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b || b->state != SPC_SLOT_VALID || !dst) return 0;
     if (offset + size > b->size) { spc_log("buffer_read: 越界"); return 0; }
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_mtl_buffer_read(b, dst, size, offset) ? 1 : 0;
 #else
     return 0;
@@ -304,7 +304,7 @@ int sc_spc_buffer_write(sc_spc_buffer hnd, const void* src, uint64_t size, uint6
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b || b->state != SPC_SLOT_VALID || !src) return 0;
     if (offset + size > b->size) { spc_log("buffer_write: 越界"); return 0; }
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_mtl_buffer_write(b, src, size, offset) ? 1 : 0;
 #else
     return 0;
@@ -314,7 +314,7 @@ int sc_spc_buffer_write(sc_spc_buffer hnd, const void* src, uint64_t size, uint6
 void sc_spc_destroy_buffer(sc_spc_buffer hnd) {
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b) return;
-#if defined(__APPLE__)
+#if P_DARWIN
     if (b->state == SPC_SLOT_VALID) spc_mtl_buffer_destroy(b);
 #endif
     b->id = 0;
@@ -332,7 +332,7 @@ sc_spc_kernel sc_spc_make_kernel(const sc_spc_kernel_desc* desc) {
     memset(k, 0, sizeof(*k));
     k->id = id;
     parseReflect(k, desc->reflect_json, desc->entry);
-#if defined(__APPLE__)
+#if P_DARWIN
     k->state = spc_mtl_kernel_create(k, desc) ? SPC_SLOT_VALID
                                                   : SPC_SLOT_FAILED;
 #endif
@@ -342,7 +342,7 @@ sc_spc_kernel sc_spc_make_kernel(const sc_spc_kernel_desc* desc) {
 void sc_spc_destroy_kernel(sc_spc_kernel hnd) {
     spc_kernel_t* k = lookupKernel(hnd);
     if (!S.valid || !k) return;
-#if defined(__APPLE__)
+#if P_DARWIN
     if (k->state == SPC_SLOT_VALID) spc_mtl_kernel_destroy(k);
 #endif
     k->id = 0;
@@ -372,7 +372,7 @@ int sc_spc_dispatch(sc_spc_kernel hnd, int gx, int gy, int gz,
             return 0;
         }
     }
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_mtl_dispatch(k, gx, gy, gz, bindings, bufs) ? 1 : 0;
 #else
     return 0;
@@ -399,7 +399,7 @@ int sc_spc_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
         spc_log("mm: 张量须 C-连续");
         return 0;
     }
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_mpsg_mm(a, b, out);
 #else
     return 0;
@@ -415,7 +415,7 @@ sc_spc_model sc_spc_model_load(const char* path, int compute_units) {
     spc_model_t* m = &S.models[slotIndex(id)];
     memset(m, 0, sizeof(*m));
     m->id = id;
-#if defined(__APPLE__)
+#if P_DARWIN
     m->state = spc_coreml_load(m, path, compute_units) ? SPC_SLOT_VALID
                                                            : SPC_SLOT_FAILED;
 #endif
@@ -425,7 +425,7 @@ sc_spc_model sc_spc_model_load(const char* path, int compute_units) {
 void sc_spc_destroy_model(sc_spc_model hnd) {
     spc_model_t* m = lookupModel(hnd);
     if (!S.valid || !m) return;
-#if defined(__APPLE__)
+#if P_DARWIN
     if (m->state == SPC_SLOT_VALID) spc_coreml_destroy(m);
 #endif
     m->id = 0;
@@ -441,7 +441,7 @@ int sc_spc_model_run1(sc_spc_model hnd, sc_tensor* in, sc_tensor* out) {
         spc_log("model_run1: 须 DT_F4 C-连续张量");
         return 0;
     }
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_coreml_run1(m, in, out) ? 1 : 0;
 #else
     return 0;
@@ -451,7 +451,7 @@ int sc_spc_model_run1(sc_spc_model hnd, sc_tensor* in, sc_tensor* out) {
 int sc_spc_model_ane_ratio(sc_spc_model hnd) {
     spc_model_t* m = lookupModel(hnd);
     if (!S.valid || !m || m->state != SPC_SLOT_VALID) return -1;
-#if defined(__APPLE__)
+#if P_DARWIN
     return spc_coreml_ane_ratio(m);
 #else
     return -1;

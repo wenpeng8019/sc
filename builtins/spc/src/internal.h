@@ -2,7 +2,7 @@
  * internal.h —— spc 模块内部：资源体、darwin 实现函数声明
  * ============================================================
  * 一期只有 darwin（Metal kernel + MPSGraph + CoreML）真实现，
- * 公共层 spc.c 经 #ifdef __APPLE__ 直连——刻意不抽 vtable，
+ * 公共层 spc.c 经 #if P_DARWIN 直连——刻意不抽 vtable，
  * 待二期 Vulkan/RKNN 后端进场时再抽（避免为单实现造抽象）。
  * ============================================================ */
 
@@ -10,6 +10,7 @@
 #define SC_SPC_INTERNAL_H
 
 #include "../spc.h"
+#include "../../platform.h"   /* 平台判定宏 P_DARWIN（尊重交叉目标 SC_TARGET_*） */
 #include <stdbool.h>
 
 void spc_log(const char* fmt, ...);
@@ -75,7 +76,7 @@ static inline bool spc_tscontig(const sc_tensor* t) {
 }
 
 /* ---- darwin 实现（metal_spc.m / mpsg_spc.m / coreml_spc.m） -- */
-#if defined(__APPLE__)
+#if P_DARWIN
 bool spc_mtl_init(void);
 void spc_mtl_shutdown(void);
 void spc_mtl_finish(void);

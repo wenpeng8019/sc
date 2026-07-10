@@ -60,4 +60,6 @@ templates/utils/ssh/libssh2.*.a
 
 # plib 跨平台库模板构建产物
 templates/plib/*.a
-# libwsi.a/libui.a 已是预编交付实体（scc 薄包装构建，随 git 入库），不再忽略
+# wsi host 默认档 = 本地构建产物，不入库（交叉交付变体 libwsi.<triple>.a 仍可随 git 交付）；
+# libui.a 仍为预编交付实体（随 git 入库）
+templates/utils/wsi/libwsi.a

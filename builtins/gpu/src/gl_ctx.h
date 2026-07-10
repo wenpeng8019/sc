@@ -7,8 +7,10 @@
 #ifndef SC_GPU_GL_CTX_H
 #define SC_GPU_GL_CTX_H
 
+#include "../../platform.h"   /* 平台判定宏 P_DARWIN/P_LINUX/P_WIN（尊重交叉目标 SC_TARGET_*） */
+
 /* 后端宏自推导（与 internal.h 同源逻辑；gl_ctx.m 独立于 internal.h） */
-#if !defined(SC_GPU_GL) && (defined(__APPLE__) || defined(__linux__))
+#if !defined(SC_GPU_GL) && (P_DARWIN || P_LINUX)
 #define SC_GPU_GL 1
 #endif
 

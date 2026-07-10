@@ -17,7 +17,7 @@ bool sc_poll_posix(struct pollfd* fds, nfds_t count, double* timeout)
         {
             const uint64_t base = wsi_clock_ns();
 
-#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__CYGWIN__)
+#if P_LINUX || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__CYGWIN__)
             const time_t seconds = (time_t) *timeout;
             const long nanoseconds = (long) ((*timeout - seconds) * 1e9);
             const struct timespec ts = { seconds, nanoseconds };

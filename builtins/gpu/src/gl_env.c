@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__APPLE__)
+#if P_DARWIN
   #define GL_SILENCE_DEPRECATION
   #include <OpenGL/gl3.h>
   #include <OpenGL/OpenGL.h>          /* CGL：当前上下文 */
@@ -33,7 +33,7 @@
   #include <IOSurface/IOSurfaceRef.h> /* IOSurface C API */
   #include <CoreFoundation/CoreFoundation.h>
   /* mac 无 EGL 原生 fence：dequeue 前 frame_end 已 glFinish，sync_fd 恒 -1 */
-#elif defined(__linux__)
+#elif P_LINUX
   #if defined(SC_GPU_GLES)
     #include <GLES3/gl31.h>           /* 入库 Khronos 头（khr/） */
     #include <GLES2/gl2ext.h>
@@ -61,12 +61,12 @@ typedef struct GlSurface {
     GLuint      vao;      /* core profile / ES3 惯用的全局 VAO */
     /* MEMORY：环槽 memimg 包装纹理 + FBO；共享深度 rbo
      * linux = EGLImage→GL_TEXTURE_2D；mac = IOSurface→GL_TEXTURE_RECTANGLE */
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
     GLuint ringTex[SC_GPU_MAX_MEMORY_IMAGES];
     GLuint ringFbo[SC_GPU_MAX_MEMORY_IMAGES];
     GLuint depthRbo;
 #endif
-#if defined(__linux__)
+#if P_LINUX
     int    ringFence[SC_GPU_MAX_MEMORY_IMAGES];   /* frame_end 存的 sync_fd */
 #endif
 } GlSurface;
@@ -74,13 +74,13 @@ typedef struct GlSurface {
 static struct {
     gpu_surface_t* acquired[GL_MAX_ACQUIRED];
     int acquiredCount;
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
     GLuint headlessVao;   /* headless 上下文的全局 VAO */
 #endif
-#if defined(__APPLE__)
+#if P_DARWIN
     gl_ctx* headlessCtx;  /* 无屏 NSGL 上下文（view=NULL） */
 #endif
-#if defined(__linux__)
+#if P_LINUX
     PFN_scEGLImageTargetTexture2DOES pImageTarget;
 #endif
 } env;
@@ -94,10 +94,10 @@ static bool glInit(const sc_gpu_desc* desc) {
 }
 
 static void glShutdown(void) {
-#if defined(__linux__)
+#if P_LINUX
     gl_egl_shutdown();
 #endif
-#if defined(__APPLE__)
+#if P_DARWIN
     if (env.headlessCtx) {
         gl_ctx_make_current(env.headlessCtx);
         if (env.headlessVao) glDeleteVertexArrays(1, &env.headlessVao);
@@ -111,7 +111,7 @@ static void* glDevice(void) { return NULL; }   /* GL 无设备概念（上下文
 
 /* ---- surface ----------------------------------------------- */
 
-#if defined(__linux__)
+#if P_LINUX
 /* MEMORY surface（linux）：headless 上下文 + 每槽 EGLImage→tex+FBO */
 static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
     if (!gl_egl_init()) return false;
@@ -163,7 +163,7 @@ static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
 }
 #endif
 
-#if defined(__APPLE__)
+#if P_DARWIN
 /* mac memimg：IOSurface（与 metal_env 同源语），纯 C 用 CF API 创建 */
 typedef struct GlMacMemimg {
     IOSurfaceRef iosurf;
@@ -260,14 +260,14 @@ static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return true;
 }
-#endif /* __APPLE__ */
+#endif /* P_DARWIN */
 
 static bool glSurfaceCreate(gpu_surface_t* surf) {
     GlSurface* s = (GlSurface*)calloc(1, sizeof(GlSurface));
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
         if (!glMemorySurfaceCreate(surf, s)) {
             /* 失败清理由 surface_destroy 兼顾 */
             surf->backend = s;
@@ -312,9 +312,9 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
             break;
         }
     }
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if defined(__linux__)
+#if P_LINUX
         gl_egl_make_current();
 #else
         if (env.headlessCtx) gl_ctx_make_current(env.headlessCtx);
@@ -322,7 +322,7 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
         for (int i = 0; i < surf->desc.image_count; i++) {
             if (s->ringFbo[i]) glDeleteFramebuffers(1, &s->ringFbo[i]);
             if (s->ringTex[i]) glDeleteTextures(1, &s->ringTex[i]);
-#if defined(__linux__)
+#if P_LINUX
             if (s->ringFence[i] >= 0) close(s->ringFence[i]);
 #endif
         }
@@ -353,10 +353,10 @@ static void glSurfaceActivate(gpu_surface_t* surf) {
     if (surf && surf->backend) {
         GlSurface* s = (GlSurface*)surf->backend;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if defined(__linux__)
+#if P_LINUX
             gl_egl_make_current();
             glBindVertexArray(env.headlessVao);
-#elif defined(__APPLE__)
+#elif P_DARWIN
             macHeadlessCurrent();
 #endif
             return;
@@ -393,7 +393,7 @@ static bool glFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
         if (surf->ring_cur < 0) return false;
         f->gl_fbo = s->ringFbo[surf->ring_cur];
         f->width = surf->desc.width;
@@ -428,8 +428,8 @@ static void glFrameEnd(void) {
         GlSurface* s = (GlSurface*)surf->backend;
         if (!s) continue;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if defined(__linux__)
-            /* 栅栏随命令流提交，存入本帧槽位（dequeue 时交付） */
+#if P_LINUX
+            /* 栓栏随命令流提交，存入本帧槽位（dequeue 时交付） */
             if (surf->ring_cur >= 0) {
                 if (s->ringFence[surf->ring_cur] >= 0)
                     close(s->ringFence[surf->ring_cur]);
@@ -437,7 +437,7 @@ static void glFrameEnd(void) {
                 if (s->ringFence[surf->ring_cur] < 0)
                     glFinish();   /* 无 fence 扩展 → CPU 同步退化 */
             }
-#elif defined(__APPLE__)
+#elif P_DARWIN
             glFinish();   /* NSGL 无导出 fence：CPU 同步，dequeue 即可消费 */
 #endif
         } else {
@@ -453,7 +453,7 @@ static void glFrameEnd(void) {
 
 /* ---- memimg（linux：dma-buf/EGLImage） ---------------------- */
 
-#if defined(__linux__)
+#if P_LINUX
 
 static bool glMemimgAlloc(gpu_memimg_t* img) {
     gl_memimg* m = gl_memimg_alloc(img->desc.width, img->desc.height,
@@ -508,11 +508,11 @@ static bool glSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame*
     return true;
 }
 
-#endif /* __linux__ */
+#endif /* P_LINUX */
 
 /* ---- memimg（mac：IOSurface） ------------------------------ */
 
-#if defined(__APPLE__)
+#if P_DARWIN
 
 static bool glMemimgAlloc(gpu_memimg_t* img) {
     const sc_gpu_memimg_desc* d = &img->desc;
@@ -597,7 +597,7 @@ static bool glSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame*
     return glMemimgExport(img, out, false);   /* frame_end 已 glFinish，sync_fd=-1 */
 }
 
-#endif /* __APPLE__ */
+#endif /* P_DARWIN */
 
 /* ---- vtable ------------------------------------------------ */
 
@@ -613,7 +613,7 @@ static const gpu_env_api glApi = {
     .surface_resize = glSurfaceResize,
     .frame_acquire = glFrameAcquire,
     .frame_end = glFrameEnd,
-#if defined(__linux__) || defined(__APPLE__)
+#if P_LINUX || P_DARWIN
     .memimg_alloc = glMemimgAlloc,
     .memimg_import = glMemimgImport,
     .memimg_export = glMemimgExport,

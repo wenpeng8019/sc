@@ -21,7 +21,7 @@
 /* ============================================================
  * macOS —— NSOpenGL
  * ============================================================ */
-#if defined(__APPLE__)
+#if P_DARWIN
 
 #define GL_SILENCE_DEPRECATION
 #import <Cocoa/Cocoa.h>
@@ -120,7 +120,7 @@ void* gl_get_proc(const char* name) {
 /* ============================================================
  * Windows —— WGL
  * ============================================================ */
-#elif defined(_WIN32)
+#elif P_WIN
 
 #ifndef UNICODE
 #define UNICODE
@@ -215,7 +215,7 @@ void* gl_get_proc(const char* name) {
 /* ============================================================
  * Linux —— GLX（X11）
  * ============================================================ */
-#elif defined(__linux__)
+#elif P_LINUX
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>

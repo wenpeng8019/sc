@@ -9,7 +9,8 @@
  *     设备，统计 ANE 占比——程序化确证，不靠猜
  * ============================================================ */
 
-#if defined(__APPLE__)
+#include "../../platform.h"   /* 平台判定宏（尊重交叉目标 SC_TARGET_*）；须先于守卫 */
+#if P_DARWIN
 
 #include "internal.h"
 #include <string.h>
@@ -190,4 +191,4 @@ int spc_coreml_ane_ratio(spc_model_t* m) {
     return -1;   /* macOS < 14.4 无 MLComputePlan */
 }
 
-#endif /* __APPLE__ */
+#endif /* P_DARWIN */

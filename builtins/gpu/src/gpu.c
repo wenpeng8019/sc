@@ -333,7 +333,7 @@ int sc_gpu_frame_acquire(sc_gpu_frame* out) {
     /* MEMORY：公共层调度环槽（后端按 ring_cur 填句柄） */
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY && surf->ring_cur < 0) {
         int slot = surf->ring_acquire;
-        int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
+        int st = sc_get_acq(&surf->ring_state[slot]);
         if (st != GPU_RING_FREE) {
             gpu_log("frame_acquire: 环满（消费端未归还）");
             return 0;
@@ -354,8 +354,7 @@ void sc_gpu_frame_end(void) {
     for (int i = 0; i < g_gpu.mem_acquired_count; i++) {
         gpu_surface_t* surf = g_gpu.mem_acquired[i];
         if (surf->ring_cur >= 0) {
-            __atomic_store_n(&surf->ring_state[surf->ring_cur],
-                             GPU_RING_RENDERED, __ATOMIC_RELEASE);
+            sc_set_rel(&surf->ring_state[surf->ring_cur], GPU_RING_RENDERED);
             surf->ring_acquire = (surf->ring_acquire + 1) % surf->desc.image_count;
             surf->ring_cur = -1;
         }
@@ -465,7 +464,7 @@ int sc_gpu_memory_dequeue(sc_gpu_surface hnd, sc_gpu_memory_frame* out) {
     if (!surf || surf->state != GPU_SLOT_VALID ||
         surf->desc.kind != SC_GPU_SURFACE_MEMORY) return 0;
     int slot = surf->ring_dequeue;
-    int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
+    int st = sc_get_acq(&surf->ring_state[slot]);
     if (st != GPU_RING_RENDERED) return 0;   /* 无成帧 */
     memset(out, 0, sizeof(*out));
     out->sync_fd = -1;
@@ -473,7 +472,7 @@ int sc_gpu_memory_dequeue(sc_gpu_surface hnd, sc_gpu_memory_frame* out) {
         !g_gpu.api->surface_dequeue(surf, slot, out)) return 0;
     out->img = surf->ring_imgs[slot];
     out->slot = (uint32_t)slot;
-    __atomic_store_n(&surf->ring_state[slot], GPU_RING_DEQUEUED, __ATOMIC_RELEASE);
+    sc_set_rel(&surf->ring_state[slot], GPU_RING_DEQUEUED);
     surf->ring_dequeue = (surf->ring_dequeue + 1) % surf->desc.image_count;
     return 1;
 }
@@ -483,10 +482,10 @@ void sc_gpu_memory_enqueue(sc_gpu_surface hnd, uint32_t slot) {
     gpu_surface_t* surf = gpu_lookup_surface(hnd);
     if (!surf || surf->desc.kind != SC_GPU_SURFACE_MEMORY ||
         slot >= (uint32_t)surf->desc.image_count) return;
-    int st = __atomic_load_n(&surf->ring_state[slot], __ATOMIC_ACQUIRE);
+    int st = sc_get_acq(&surf->ring_state[slot]);
     if (st != GPU_RING_DEQUEUED) {
         gpu_log("memory_enqueue: 槽 %u 非消费中状态", slot);
         return;
     }
-    __atomic_store_n(&surf->ring_state[slot], GPU_RING_FREE, __ATOMIC_RELEASE);
+    sc_set_rel(&surf->ring_state[slot], GPU_RING_FREE);
 }

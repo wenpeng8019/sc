@@ -1,7 +1,7 @@
 /* ============================================================
  * gl_egl.h —— Linux EGL headless（GBM/DRM/dma-heap）内部接口
  * ============================================================
- * gl_env.c 消费（#ifdef __linux__）；实现见 gl_egl.c。
+ * gl_env.c 消费（#if P_LINUX）；实现见 gl_egl.c。
  * 职责：无窗口 GL 上下文（EGL surfaceless）、memimg 底层
  *（GBM BO / dma-heap → EGLImage）、fence 导出。
  * ============================================================ */

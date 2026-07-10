@@ -84,7 +84,7 @@
 // 线程/TLS/互斥与时钟不再由 wsi 自带的平台文件提供，统一由 sc 的 builtins/platform.h
 // 跨平台层承担（编译期 TLS 宏 + 单调时钟）；相应的 posix/macos/win32 thread/time 源已删除。
 
-#if defined(_WIN32)
+#if P_WIN
  #define GLFW_BUILD_WIN32_MODULE
 #else
  #define GLFW_BUILD_POSIX_MODULE

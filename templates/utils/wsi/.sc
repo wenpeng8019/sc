@@ -14,6 +14,9 @@ ldflags = -framework Cocoa -framework IOKit -framework CoreFoundation -framework
 
 [windows]
 cflags  = -DWSI_WIN32 -DUNICODE -DOEMRESOURCE -DWSI_SHARED -DWSI_EXPORTS
+# win32 后端：窗口/监视器/原始输入 = user32；GDI 绘制 = gdi32；拖放 = shell32
+# （-l<名> 经 scc 翻译层转 <名>.lib；MSVC 控制台子系统不自动链接这些 GUI 库）
+ldflags = -luser32 -lgdi32 -lshell32
 
 [linux]
 cflags  = -DWSI_X11 -DWSI_WAYLAND -DWSI_SHARED -DWSI_EXPORTS

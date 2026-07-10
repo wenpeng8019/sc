@@ -10,6 +10,8 @@ cflags = -DSC_UI_COCOA -fno-objc-arc
 
 [windows]
 cflags = -DSC_UI_WIN32
+# win32 原生控件：窗口/消息 = user32；字体/绘制 = gdi32（-l<名> → <名>.lib）
+ldflags = -luser32 -lgdi32
 
 [linux]
 cflags = -DSC_UI_NK

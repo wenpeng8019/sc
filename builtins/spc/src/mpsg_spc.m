@@ -6,7 +6,8 @@
  * 一期：matmul（2D，float32）。张量数据经 NSData no-copy 包装。
  * ============================================================ */
 
-#if defined(__APPLE__)
+#include "../../platform.h"   /* 平台判定宏（尊重交叉目标 SC_TARGET_*）；须先于守卫 */
+#if P_DARWIN
 
 #include "internal.h"
 #include <string.h>
@@ -62,4 +63,4 @@ int spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
     return 1;
 }
 
-#endif /* __APPLE__ */
+#endif /* P_DARWIN */

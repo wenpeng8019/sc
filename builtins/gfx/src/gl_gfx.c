@@ -45,13 +45,13 @@
   #ifndef GL_CLAMP_TO_BORDER
     #define GL_CLAMP_TO_BORDER GL_CLAMP_TO_EDGE
   #endif
-#elif defined(__APPLE__)
+#elif P_DARWIN
   #define GL_SILENCE_DEPRECATION
   #include <OpenGL/gl3.h>
   #include <OpenGL/OpenGL.h>          /* CGL：当前上下文 */
   #include <OpenGL/CGLIOSurface.h>    /* memimg 绑定：IOSurface → rect 纹理 */
   #include <IOSurface/IOSurfaceRef.h>
-#elif defined(__linux__)
+#elif P_LINUX
   #define GL_GLEXT_PROTOTYPES
   #include <GL/gl.h>
   #include <GL/glext.h>
@@ -380,7 +380,7 @@ static bool glImageCreate(gfx_image_t* img) {
      * （rect 纹理可作渲染目标/FBO 附件；采样需 sampler2DRect，普通
      *  sampler2D 着色器不适用 —— NSGL 无 EGLImage，此为唯一包装途径） */
     if (d->memimg) {
-#if defined(__linux__)
+#if P_LINUX
         static PFN_scEGLImageTargetTexture2DOES pImageTarget;
         if (!pImageTarget) {
             pImageTarget = (PFN_scEGLImageTargetTexture2DOES)
@@ -403,7 +403,7 @@ static bool glImageCreate(gfx_image_t* img) {
         pImageTarget(GL_TEXTURE_2D, eglimg);
         img->backend = m;
         return true;
-#elif defined(__APPLE__)
+#elif P_DARWIN
         IOSurfaceRef iosurf = (IOSurfaceRef)sc_gpu_memimg_native(d->memimg);
         if (!iosurf) {
             gfx_log("gl: memimg %u 无效", d->memimg);

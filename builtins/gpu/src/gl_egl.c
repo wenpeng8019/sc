@@ -11,7 +11,7 @@
  * ============================================================ */
 
 #include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
-#if defined(SC_GPU_GL) && defined(__linux__)
+#if defined(SC_GPU_GL) && P_LINUX
 
 #include "gl_egl.h"
 
@@ -529,4 +529,4 @@ void gl_egl_win_swap(gl_egl_win* w) {
     if (w) eglSwapBuffers(w->dpy, w->surf);
 }
 
-#endif /* SC_GPU_GL && __linux__ */
+#endif /* SC_GPU_GL && P_LINUX */

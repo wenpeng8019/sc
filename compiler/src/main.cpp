@@ -658,7 +658,7 @@ static int buildModuleLib(const std::filesystem::path& moduleDir,
         const bool isCxx = (ext == ".cpp" || ext == ".cc" || ext == ".cxx");
         std::string cmd;
         if (msvc) {
-            // MSVC：cl 按扩展名自判 C/C++（.m ObjC 不支持，由平台段配置避开）；incs 经翻译层转 /I
+            // MSVC：cl 按扩展名自判 C/C++；.m（ObjC）由 ccCompileCmd 加 /TC 按 C 编（守卫空化）；incs 经翻译层转 /I
             cmd = ccCompileCmd(isCxx ? ccModCxx : ccModC, true,
                 tc.cflags + mc.cflags + tc.machine + incs, {}, s, o);
         } else {
@@ -1099,6 +1099,9 @@ static std::string ccCompileCmd(const std::string& cc, bool msvc,
         MsvcFlags mf = translateGccFlags(gccFlags);
         std::string cmd = cc + " /nologo /utf-8 /std:c17 /experimental:c11atomics"
                         + mf.cflags;
+        // .m（ObjC）：MSVC 恒非 darwin，按 C 编译（源文件平台守卫在非 apple 下自空化）。
+        //   cl 不识别 .m 扩展（D9024 当作对象文件忽略），用 /TC 强制以 C 处理。
+        if (src.extension() == ".m") cmd += " /TC";
         for (auto& d : incDirs) cmd += " /I " + q(d.string());
         cmd += " /c " + q(src.string()) + " /Fo" + q(obj.string());
         return cmd;
@@ -2533,7 +2536,7 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     const ModuleConfig amc = loadModuleConfig(srcDir, tc);
                     std::string ccCmd;
                     if (ccIsMsvc(pickCC())) {
-                        // MSVC：cl 按源文件扩展名自判 C/C++（.m ObjC 不支持，由平台段配置避开）
+                        // MSVC：cl 按源文件扩展名自判 C/C++；.m（ObjC）由 ccCompileCmd 加 /TC 按 C 编（守卫空化）
                         std::vector<std::filesystem::path> incDirs = { srcDir, tmpDir };
                         ccCmd = ccCompileCmd(pickCC(), true,
                             tc.machine + tc.cflags + extraCFlags + amc.cflags,

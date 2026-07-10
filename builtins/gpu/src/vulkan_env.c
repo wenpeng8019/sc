@@ -24,7 +24,7 @@
 #ifdef SC_GPU_VULKAN
 
 /* 平台 surface 扩展类型（须在包含 vulkan.h 前定义） */
-#if defined(_WIN32)
+#if P_WIN
   #define VK_USE_PLATFORM_WIN32_KHR
   #include <windows.h>
 #else
@@ -98,7 +98,7 @@ static bool ext_present(const VkExtensionProperties* list, uint32_t n, const cha
 }
 
 /* 复刻 wsi 平台判定：优先 XDG_SESSION_TYPE，退化按 WAYLAND_DISPLAY 存在性。 */
-#if !defined(_WIN32)
+#if !P_WIN
 static bool prefer_wayland(void) {
     const char* session = getenv("XDG_SESSION_TYPE");
     const char* wl  = getenv("WAYLAND_DISPLAY");
@@ -176,7 +176,7 @@ static bool vkInit(const sc_gpu_desc* desc) {
     uint32_t nWanted = 0;
     if (ext_present(exts, nExt, VK_KHR_SURFACE_EXTENSION_NAME))
         wanted[nWanted++] = VK_KHR_SURFACE_EXTENSION_NAME;
-#if defined(_WIN32)
+#if P_WIN
     if (ext_present(exts, nExt, VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
         wanted[nWanted++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
         g_vk.hasWin32 = true;
@@ -483,7 +483,7 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
     c->native_display = surf->desc.native_display;
 
     /* --- 创建 VkSurfaceKHR（按平台） --- */
-#if defined(_WIN32)
+#if P_WIN
     c->wayland = false;
     if (g_vk.hasWin32) {
         VkWin32SurfaceCreateInfoKHR w32 = { .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR };

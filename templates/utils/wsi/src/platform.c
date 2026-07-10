@@ -9,7 +9,7 @@
 //////////////////////////////////////////////////////////////////////////
 // 供各后端（win32/x11/wayland）按名加载系统库并取符号；cocoa 后端不依赖，
 // 但定义为平台无关，随 platform.c 一并编入，避免各后端各自实现一份。
-#if defined(_WIN32)
+#if P_WIN
  #include <windows.h>
 void* impl_platform_load_module(const char* path)
 {
@@ -82,9 +82,9 @@ WSI_API const char* sc_wsi_get_version_string(void)
         " monotonic"
 #endif
 #if defined(WSI_SHARED)
-#if defined(_WIN32)
+#if P_WIN
         " DLL"
-#elif defined(__APPLE__)
+#elif P_DARWIN
         " dynamic"
 #else
         " shared"
@@ -110,6 +110,11 @@ static const struct
 #endif
 #if defined(WSI_X11)
     { SC_PLATFORM_X11, x11_connect },
+#endif
+#if !defined(WSI_WIN32) && !defined(WSI_COCOA) && !defined(WSI_WAYLAND) && !defined(WSI_X11)
+    // 无任何真实后端时的占位：ISO C 不允许空数组 T a[]={}（MSVC 报错），
+    // 编辑器/仅 Null 构建走此分支。真实构建（.sc 带 -DWSI_WIN32 等）不含此项。
+    { SC_PLATFORM_NULL, null_connect },
 #endif
 };
 

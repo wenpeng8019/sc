@@ -37,13 +37,13 @@
 #define NK_RAWFB_IMPLEMENTATION
 #include "../vendor/nuklear_rawfb.h"
 
-#if defined(WSI_X11) || defined(__linux__) || defined(__unix__)
+#if defined(WSI_X11) || P_LINUX || P_UNIX
  #define NKUI_X11 1
  #include <X11/Xlib.h>
  #include <X11/Xutil.h>
 #endif
 
-#if defined(__linux__) || defined(__unix__)
+#if P_LINUX || P_UNIX
  #define NKUI_WAYLAND 1
  #include <wayland-client.h>
  #include <sys/mman.h>

@@ -10,7 +10,8 @@
  *   non-uniform threadgroups）；线程组尺寸 = 清单 local_size
  * ============================================================ */
 
-#if defined(__APPLE__)
+#include "../../platform.h"   /* 平台判定宏（尊重交叉目标 SC_TARGET_*）；须先于守卫 */
+#if P_DARWIN
 
 #include "internal.h"
 #include <string.h>
@@ -202,4 +203,4 @@ bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
     return true;
 }
 
-#endif /* __APPLE__ */
+#endif /* P_DARWIN */
