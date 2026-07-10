@@ -15,7 +15,9 @@
 #define HAVE_WINDOWS_H 1
 #define HAVE_WINSOCK2_H 1
 #define HAVE_WS2TCPIP_H 1
-#define HAVE_IOCTLSOCKET_CASE 1     /* non-blocking sockets via ioctlsocket() */
+/* 非阻塞 socket：走 session.c 的 _WIN32 分支用 winsock 的 ioctlsocket()。
+ * 不要定义 HAVE_IOCTLSOCKET_CASE —— 那是 Amiga 的 IoctlSocket()（大写），
+ * 会引入未解析外部符号（原手写 config 笔误，Windows 首次原生构建时修正）。 */
 #define HAVE_SELECT 1
 #define HAVE_SNPRINTF 1
 #define HAVE_STRTOLL 1

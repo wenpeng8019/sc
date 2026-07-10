@@ -29,6 +29,8 @@ add_executable(scc
     src/semantic.cpp
     src/cheaders.cpp
     src/remote.cpp
+    # 宿主平台原语跨平台封装（POSIX / Windows）：进程执行/临时文件/动态库/管道。
+    src/host_compat.cpp
     # 程序结构依赖图（proggraph 子项目）：编译期只读分析，把 AST 烘焙成结构对象依赖图，
     # 从 main/@导出 做激活分析，导出 JSON / 自包含 HTML。与 codegen 解耦。见 proggraph/。
     src/proggraph.cpp
@@ -51,6 +53,11 @@ endif()
 
 # 运行时 dlopen libclang（解析 C 头外部描述符）：链接 dl（Linux 需 -ldl，macOS 在 libSystem 内）
 target_link_libraries(scc PRIVATE ${CMAKE_DL_LIBS})
+
+# Windows：宿主封装 host_compat 用到 GetUserNameA（advapi32）；LoadLibrary/进程 API 在 kernel32（默认链）
+if(WIN32)
+    target_link_libraries(scc PRIVATE advapi32)
+endif()
 
 # ------------------------------------------------------------
 # 异步内核多路复用后端：-DSCC_WITH_UV=ON

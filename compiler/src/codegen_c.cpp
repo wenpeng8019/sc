@@ -26,6 +26,15 @@
 
 namespace {
 
+// #line 指令的源路径规范化：反斜杠→正斜杠。Windows 路径（D:\a\b）直接嵌入 C 字符串
+// 会构成非法转义序列（\a \b …，报 C4129 且路径错乱）；C 预处理接受正斜杠路径，
+// POSIX 本就是正斜杠，故统一转换无副作用。
+inline std::string lineSafePath(const std::string& p) {
+    std::string o = p;
+    for (char& c : o) if (c == '\\') c = '/';
+    return o;
+}
+
 // 自动指针 T@ 引用检查开关（--check=ref）：默认关闭，仅栈悬挂断言受其控制。
 bool g_refCheck = false;
 // 越界 canary 开关（--check=mem）：默认关闭，开启则 ref 头堆对象注入头尾哨兵，释放时校验。
@@ -7672,7 +7681,7 @@ struct CGen {
             // 经 add 内联的函数：#line 映射回被 add 的源文件（调试断点/单步落在原 .sc）
             if (!srcFile.empty() && !d->inlinedFrom.empty()) {
                 const std::string save = srcFile;
-                srcFile = d->inlinedFrom;
+                srcFile = lineSafePath(d->inlinedFrom);
                 emitFunc(*d);
                 srcFile = save;
             } else {
@@ -7886,7 +7895,7 @@ bool getTestMode() { return g_testMode; }
 
 std::string emitC(const Program& prog, const std::string& srcFile) {
     CGen g(prog);
-    g.srcFile = srcFile;
+    g.srcFile = lineSafePath(srcFile);
     return g.run();
 }
 
@@ -7894,7 +7903,7 @@ std::string emitC(const Program& prog, const std::string& srcFile,
                   const std::string& stringifyHeaderName, std::string* stringifyHeaderOut,
                   const std::string& rootPreludeHeader) {
     CGen g(prog);
-    g.srcFile = srcFile;
+    g.srcFile = lineSafePath(srcFile);
     g.sofHeaderName = stringifyHeaderName;
     g.rootPreludeHeader = rootPreludeHeader;  // 根模块导出接口头（末位 include）；空=禁用
     if (!prog.futureIds.empty()) g.typeHeaderName = "type.h";  // 文件模式：.c #include "type.h"

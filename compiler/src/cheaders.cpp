@@ -5,7 +5,7 @@
 // 加载失败时退化为头文件文本标识符匹配。详见 cheaders.h。
 // ============================================================
 #include "cheaders.h"
-#include <dlfcn.h>
+#include "host_compat.h"
 #include <cctype>
 #include <cstdio>
 #include <fstream>
@@ -128,25 +128,25 @@ struct Clang {
     fn_presumedLocation presumedLoc  = nullptr;
 
     bool load(const std::string& path) {
-        h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+        h = host::dlOpen(path.c_str());
         if (!h) return false;
-        createIndex    = (fn_createIndex)    dlsym(h, "clang_createIndex");
-        disposeIndex   = (fn_disposeIndex)   dlsym(h, "clang_disposeIndex");
-        parseTU        = (fn_parseTU)        dlsym(h, "clang_parseTranslationUnit");
-        disposeTU      = (fn_disposeTU)      dlsym(h, "clang_disposeTranslationUnit");
-        tuCursor       = (fn_tuCursor)       dlsym(h, "clang_getTranslationUnitCursor");
-        visitChildren  = (fn_visitChildren)  dlsym(h, "clang_visitChildren");
-        cursorKind     = (fn_cursorKind)     dlsym(h, "clang_getCursorKind");
-        cursorSpelling = (fn_cursorSpelling) dlsym(h, "clang_getCursorSpelling");
-        getCString     = (fn_getCString)     dlsym(h, "clang_getCString");
-        disposeString  = (fn_disposeString)  dlsym(h, "clang_disposeString");
-        cursorLocation = (fn_cursorLocation) dlsym(h, "clang_getCursorLocation");
-        presumedLoc    = (fn_presumedLocation) dlsym(h, "clang_getPresumedLocation");
+        createIndex    = (fn_createIndex)    host::dlSym(h, "clang_createIndex");
+        disposeIndex   = (fn_disposeIndex)   host::dlSym(h, "clang_disposeIndex");
+        parseTU        = (fn_parseTU)        host::dlSym(h, "clang_parseTranslationUnit");
+        disposeTU      = (fn_disposeTU)      host::dlSym(h, "clang_disposeTranslationUnit");
+        tuCursor       = (fn_tuCursor)       host::dlSym(h, "clang_getTranslationUnitCursor");
+        visitChildren  = (fn_visitChildren)  host::dlSym(h, "clang_visitChildren");
+        cursorKind     = (fn_cursorKind)     host::dlSym(h, "clang_getCursorKind");
+        cursorSpelling = (fn_cursorSpelling) host::dlSym(h, "clang_getCursorSpelling");
+        getCString     = (fn_getCString)     host::dlSym(h, "clang_getCString");
+        disposeString  = (fn_disposeString)  host::dlSym(h, "clang_disposeString");
+        cursorLocation = (fn_cursorLocation) host::dlSym(h, "clang_getCursorLocation");
+        presumedLoc    = (fn_presumedLocation) host::dlSym(h, "clang_getPresumedLocation");
         return createIndex && disposeIndex && parseTU && disposeTU && tuCursor &&
                visitChildren && cursorKind && cursorSpelling && getCString &&
                disposeString && cursorLocation && presumedLoc;
     }
-    ~Clang() { if (h) dlclose(h); }
+    ~Clang() { if (h) host::dlClose(h); }
 };
 
 struct CollectCtx {
@@ -231,9 +231,9 @@ DeclPtr makeSym(const std::string& name, int kind, const std::string& origin,
 
 bool tryLoadLibclang(const std::string& path) {
     if (path.empty()) return false;
-    void* h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    void* h = host::dlOpen(path.c_str());
     if (!h) return false;
-    dlclose(h);
+    host::dlClose(h);
     return true;
 }
 

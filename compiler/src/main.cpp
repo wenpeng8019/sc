@@ -31,6 +31,7 @@
 #include "cheaders.h"
 #include "remote.h"
 #include "proggraph.h"
+#include "host_compat.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -43,8 +44,6 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 static void usage() {
@@ -513,8 +512,6 @@ struct ModuleConfig {
     std::string ldflags;   // 链接选项（含 lib/libs 展开；交付给最终链接）
 };
 
-#include <fnmatch.h>
-
 static ModuleConfig loadModuleConfig(const std::filesystem::path& moduleDir,
                                      const ToolConfig& tc) {
     ModuleConfig mc;
@@ -560,7 +557,7 @@ static ModuleConfig loadModuleConfig(const std::filesystem::path& moduleDir,
             if (sectionMatched) { inMatched = false; continue; }  // 已命中：后续段全跳过
             inMatched = false;
             for (auto& k : keys)
-                if (fnmatch(section.c_str(), k.c_str(), 0) == 0) {
+                if (host::globMatch(section.c_str(), k.c_str())) {
                     inMatched = true;
                     sectionMatched = true;
                     break;
@@ -633,10 +630,8 @@ static int buildModuleLib(const std::filesystem::path& moduleDir,
         if (builtins.has_parent_path()) incs += " -I " + builtins.parent_path().string();
     }
 
-    char tmpl[] = "/tmp/scc_modlib_XXXXXX";
-    char* dirC = mkdtemp(tmpl);
-    if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
-    const fs::path tmpDir(dirC);
+    const fs::path tmpDir = host::makeTempDir("scc_modlib");
+    if (tmpDir.empty()) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
 
     std::vector<fs::path> objs;
     for (auto& s : srcs) {
@@ -974,7 +969,11 @@ static std::string pickCC() {
     if (it != g_profile.end() && !it->second.empty()) return it->second;
     std::string conf = readConfig("cc");
     if (!conf.empty()) return conf;
+#ifdef _WIN32
+    return "cl";                 // Windows 原生缺省：MSVC cl.exe
+#else
     return "gcc";
+#endif
 }
 
 // 选择系统 C++ 编译器（模块库构建的 .cpp/.cc/.cxx 源）：
@@ -988,8 +987,112 @@ static std::string pickCXX() {
     if (it != g_profile.end() && !it->second.empty()) return it->second;
     std::string conf = readConfig("cxx");
     if (!conf.empty()) return conf;
+#ifdef _WIN32
+    return "cl";                 // Windows 原生缺省：MSVC cl.exe（同编 C 与 C++）
+#else
     return "g++";
+#endif
 }
+
+// ============================================================
+// MSVC（cl.exe）本地命令行生成 —— 把内部积累的 gcc 风格选项翻译为 cl/link 语法。
+// ============================================================
+// scc 内部一律以 gcc 风格积累工具链片段（tc.machine/cflags/ldflags、模块段 -I/-D/-l）。
+// 当宿主 C 工具链为 MSVC（Windows 原生缺省 cl，或 SCC_CC=cl/clang-cl）时，本地
+// 「编译 .c→obj / 链接 / 归档」改用 cl 语法：cl 不读 stdin、用 /I /c /Fo /Fe、
+// -lX→X.lib、静态库用 lib.exe。此翻译层复用远端 Windows 构建（remote.cpp）已验证的规约。
+
+// C 工具链是否 MSVC 风格（cl.exe / clang-cl）：决定本地命令行语法。
+static bool ccIsMsvc(const std::string& cc) {
+    std::filesystem::path p(cc);
+    std::string b = p.stem().string();
+    for (auto& c : b) c = (char)std::tolower((unsigned char)c);
+    return b == "cl" || b == "clang-cl"
+        || (b.size() >= 3 && b.compare(b.size() - 3, 3, "-cl") == 0);
+}
+
+// 命令行参数按需加引号（含空格的路径，如 "Program Files"）。
+static std::string q(const std::string& s) {
+    if (s.empty()) return s;
+    if (s.find_first_of(" \t") == std::string::npos) return s;
+    return "\"" + s + "\"";
+}
+
+// gcc 风格选项翻译为 MSVC：编译选项（/I /D /O2…）、链接库（X.lib + 裸库文件）、库路径（/LIBPATH:）。
+struct MsvcFlags { std::string cflags, libs, libdirs; };
+static MsvcFlags translateGccFlags(const std::string& gcc) {
+    MsvcFlags r;
+    auto toks = splitBy(gcc, " ");
+    for (size_t i = 0; i < toks.size(); ++i) {
+        const std::string t = toks[i];
+        if (t.empty()) continue;
+        auto next = [&]() -> std::string {
+            return (i + 1 < toks.size()) ? toks[++i] : std::string();
+        };
+        if (t == "-I")               r.cflags  += " /I " + q(next());
+        else if (t.rfind("-I", 0) == 0) r.cflags += " /I " + q(t.substr(2));
+        else if (t == "-D")          r.cflags  += " /D" + next();
+        else if (t.rfind("-D", 0) == 0) r.cflags += " /D" + t.substr(2);
+        else if (t == "-L")          r.libdirs += " /LIBPATH:" + q(next());
+        else if (t.rfind("-L", 0) == 0) r.libdirs += " /LIBPATH:" + q(t.substr(2));
+        else if (t == "-l")          { std::string n = next(); if (!n.empty()) r.libs += " " + n + ".lib"; }
+        else if (t.rfind("-l", 0) == 0) r.libs += " " + t.substr(2) + ".lib";
+        else if (t == "-framework")  next();                 // mac 框架：Windows 丢弃
+        else if (t == "-std=c17" || t == "-std=gnu17") r.cflags += " /std:c17";
+        else if (t == "-std=c11" || t == "-std=gnu11") r.cflags += " /std:c11";
+        else if (t == "-O2" || t == "-O3") r.cflags += " /O2";
+        else if (t == "-O0" || t == "-Og") r.cflags += " /Od";
+        // -g / -fPIC / -shared / -W… / -m… / --sysroot 等 gcc 专属项：MSVC 无对应，丢弃
+        else if (!t.empty() && t[0] == '-') { }
+        else r.libs += " " + q(t);                           // 裸词：库/对象文件（.lib/.obj/.a）
+    }
+    return r;
+}
+
+// 生成「编译单个 C 源 → 目标文件」命令；msvc 时翻译为 cl。incDirs 为额外 -I 目录。
+static std::string ccCompileCmd(const std::string& cc, bool msvc,
+                                const std::string& gccFlags,
+                                const std::vector<std::filesystem::path>& incDirs,
+                                const std::filesystem::path& src,
+                                const std::filesystem::path& obj) {
+    if (msvc) {
+        MsvcFlags mf = translateGccFlags(gccFlags);
+        std::string cmd = cc + " /nologo /utf-8 /std:c17 /experimental:c11atomics"
+                        + mf.cflags;
+        for (auto& d : incDirs) cmd += " /I " + q(d.string());
+        cmd += " /c " + q(src.string()) + " /Fo" + q(obj.string());
+        return cmd;
+    }
+    std::string cmd = cc + " -g" + gccFlags;
+    for (auto& d : incDirs) cmd += " -I " + q(d.string());
+    cmd += " -c " + q(src.string()) + " -o " + q(obj.string());
+    return cmd;
+}
+
+// 生成「链接目标文件列表 → 可执行」命令；msvc 时翻译为 cl（/Fe:、X.lib、/link /LIBPATH:）。
+static std::string ccLinkExeCmd(const std::string& cc, bool msvc,
+                                const std::vector<std::filesystem::path>& objs,
+                                const std::string& out,
+                                const std::string& gccLdFlags,
+                                const std::string& machine = "") {
+    if (msvc) {
+        MsvcFlags mf = translateGccFlags(machine + gccLdFlags);
+        std::string cmd = cc + " /nologo";
+        for (auto& o : objs) cmd += " " + q(o.string());
+        cmd += mf.libs;
+        // op 异步内核 / mem 共享内存等在 Windows 用 winsock+系统 API——补基线系统库
+        //   （未引用时链接器忽略，无害）。与远端 Windows 构建（remote.cpp）保持一致。
+        cmd += " ws2_32.lib mswsock.lib advapi32.lib";
+        cmd += " /Fe:" + q(out);
+        if (!mf.libdirs.empty()) cmd += " /link" + mf.libdirs;
+        return cmd;
+    }
+    std::string cmd = cc + " -g" + machine;
+    for (auto& o : objs) cmd += " " + q(o.string());
+    cmd += " -o " + q(out) + gccLdFlags;
+    return cmd;
+}
+
 
 // ---------------- mbedTLS 后端：按目标工具链现场编译 vendor 源码（跨平台正确） ----------------
 // 与 OpenSSL（链系统动态库）不同，mbedTLS 走 vendor 源码 + 静态烘进。为真正跨平台，
@@ -1101,38 +1204,36 @@ static int buildSource(const std::string& csrc,
 
     // 裸机镜像 .bin/.hex：先链接临时 .elf，再 objcopy 转换为原始/Intel-HEX 镜像
     if (kind == OutKind::Bin || kind == OutKind::Hex) {
-        char tmpl[] = "/tmp/scc_img_XXXXXX";
-        int fd = mkstemp(tmpl);
-        if (fd < 0) { std::cerr << "错误: 无法创建临时文件\n"; return 1; }
-        close(fd);
-        const std::string elf = std::string(tmpl) + ".elf";
+        const std::filesystem::path imgStem = host::makeTempPath("scc_img");
+        if (imgStem.empty()) { std::cerr << "错误: 无法创建临时文件\n"; return 1; }
+        const std::string elf = imgStem.string() + ".elf";
         std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags
                         + " -x c - -o " + elf + tc.ldflags;
-        FILE* pipe = popen(cmd.c_str(), "w");
-        if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(tmpl); return 1; }
+        FILE* pipe = host::pipeOpen(cmd, "w");
+        if (!pipe) { std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; return 1; }
         fwrite(csrc.data(), 1, csrc.size(), pipe);
-        if (pclose(pipe) != 0) {
+        if (host::pipeClose(pipe) != 0) {
             std::cerr << "错误: C 编译失败（" << cmd << "）\n";
-            unlink(tmpl); std::filesystem::remove(elf); return 1;
+            std::filesystem::remove(elf); return 1;
         }
         const char* fmt = (kind == OutKind::Bin) ? "binary" : "ihex";
         std::string oc = tc.objcopy + " -O " + fmt + " " + elf + " " + output;
         int rc = std::system(oc.c_str()) == 0 ? 0 : 1;
         if (rc != 0) std::cerr << "错误: objcopy 转换失败（" << oc << "）\n";
-        unlink(tmpl); std::filesystem::remove(elf);
+        std::filesystem::remove(elf);
         return rc;
     }
 
     // 构建可执行文件：单命令编译+链接直达输出
     if (kind == OutKind::Exe) {
         std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags + " -x c - -o " + output + tc.ldflags;
-        FILE* pipe = popen(cmd.c_str(), "w");
+        FILE* pipe = host::pipeOpen(cmd, "w");
         if (!pipe) { 
             std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
              return 1; 
         }
         fwrite(csrc.data(), 1, csrc.size(), pipe);
-        if (pclose(pipe) != 0) { 
+        if (host::pipeClose(pipe) != 0) { 
             std::cerr << "错误: C 编译失败（" << cmd << "）\n";
             return 1; 
         }
@@ -1140,22 +1241,20 @@ static int buildSource(const std::string& csrc,
     }
 
     // 库：先编译临时 .o，再 ar / -shared 合成
-    char tmpTemplate[] = "/tmp/scc_build_XXXXXX";
-    char* dirC = mkdtemp(tmpTemplate);
-    if (!dirC) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
-    const std::filesystem::path tmpDir(dirC);
+    const std::filesystem::path tmpDir = host::makeTempDir("scc_build");
+    if (tmpDir.empty()) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
     const std::filesystem::path obj = tmpDir / "unit.o";
     std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags
                     + (kind == OutKind::SharedLib ? " -fPIC" : "")
                     + " -x c - -c -o " + obj.string();
-    FILE* pipe = popen(cmd.c_str(), "w");
+    FILE* pipe = host::pipeOpen(cmd, "w");
     if (!pipe) {
         std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
     fwrite(csrc.data(), 1, csrc.size(), pipe);
-    int rc = pclose(pipe) != 0 ? 1 : 0;
+    int rc = host::pipeClose(pipe) != 0 ? 1 : 0;
     if (rc != 0) std::cerr << "错误: C 编译失败（" << cmd << "）\n";
     if (rc == 0) rc = linkOutput(kind, {obj}, output, tc);
     std::filesystem::remove_all(tmpDir);
@@ -1168,63 +1267,50 @@ static int compileAndRunSource(const std::string& csrc,
                                const ToolConfig& tc) {
 
     // 1. 创建临时可执行文件路径
-    char bin[] = "/tmp/scc_run_XXXXXX";
-    int fd = mkstemp(bin);
-    if (fd < 0) { 
+    const std::filesystem::path binPath = host::makeTempPath("scc_run");
+    if (binPath.empty()) { 
         std::cerr << "错误: 无法创建临时文件\n";
         return 1; 
     }
-    close(fd);
+    const std::string bin = binPath.string();
 
     // 2. 通过管道把 C 源码送给编译器，不落盘中间 .c 文件
     // 添加 -g 标志生成调试符号，便于 gdb/lldb 进行源代码级调试
     // 单命令编译+链接：machine（目标机器选项）/cflags 与 ldflags 都附加
     std::string cmd = pickCC() + " -g" + tc.machine + tc.cflags + " -x c - -o " + bin + tc.ldflags;
-    FILE* pipe = popen(cmd.c_str(), "w");
+    FILE* pipe = host::pipeOpen(cmd, "w");
     if (!pipe) { 
-        std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n"; unlink(bin);
+        std::cerr << "错误: 无法启动 C 编译器: " << cmd << "\n";
         return 1; 
     }
     fwrite(csrc.data(), 1, csrc.size(), pipe);
-    int crc = pclose(pipe);
+    int crc = host::pipeClose(pipe);
     if (crc != 0) {
         std::cerr << "错误: C 编译失败（" << cmd << "）\n";
-        unlink(bin);
+        std::filesystem::remove(binPath);
         return 1;
     }
 
-    // 3. fork+exec 运行产物，透传程序参数，避免 shell 转义问题
+    // 3. 运行产物，透传程序参数（host::runProgram 不经 shell，避免转义问题）
     //    交叉目标：本机无法直接执行，须经 runner（模拟器）包装；既无 runner
     //    又是跨平台族目标则报错，引导改用 --build 或配置 run。
     if (tc.crossRun && tc.runner.empty()) {
         std::cerr << "错误: 交叉目标无法在本机直接运行；请改用 --build 生成产物，"
                      "或配置 run = <模拟器>（如 qemu-arm -L <sysroot>）\n";
-        unlink(bin);
+        std::filesystem::remove(binPath);
         return 1;
     }
-    pid_t pid = fork();
-    if (pid < 0) { std::cerr << "错误: fork 失败\n"; unlink(bin); return 1; }
-    if (pid == 0) {
-        std::vector<char*> argv;
-        // runner（如 "qemu-arm -L /sysroot"）拆成前缀 argv，再接产物与程序参数
-        std::vector<std::string> runParts = splitBy(tc.runner, " ");
-        for (auto& r : runParts) argv.push_back(const_cast<char*>(r.c_str()));
-        argv.push_back(bin);
-        for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
-        argv.push_back(nullptr);
-        if (!runParts.empty()) execvp(argv[0], argv.data());
-        else execv(bin, argv.data());
-        _exit(127);  // exec 失败
-    }
+    std::vector<std::string> argv;
+    // runner（如 "qemu-arm -L /sysroot"）拆成前缀 argv，再接产物与程序参数
+    std::vector<std::string> runParts = splitBy(tc.runner, " ");
+    for (auto& r : runParts) argv.push_back(r);
+    argv.push_back(bin);
+    for (auto& a : progArgs) argv.push_back(a);
+    int rc = host::runProgram(argv);
 
-    int st = 0;
-    waitpid(pid, &st, 0);
-    unlink(bin);                // 4. 清理临时产物
-    if (WIFSIGNALED(st)) {
-        std::cerr << "错误: 程序被信号 " << WTERMSIG(st) << " 终止\n";
-        return 128 + WTERMSIG(st);
-    }
-    return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+    std::filesystem::remove(binPath);   // 4. 清理临时产物
+    if (rc < 0) { std::cerr << "错误: 无法运行产物\n"; return 1; }
+    return rc;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2041,6 +2127,12 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                                  std::vector<UnitArtifact>* genOnlyOut = nullptr) {
     std::vector<UnitArtifact> arts;
 
+    // 宿主 C 工具链风格（MSVC cl vs gcc）：决定对象文件扩展名与命令行语法。
+    //   cl 驱动按扩展名识别对象文件（.obj），.o 会被误当源码——故 msvc 用 .obj。
+    const std::string cc = pickCC();
+    const bool msvc = ccIsMsvc(cc);
+    const std::string objExt = msvc ? ".obj" : ".o";
+
     // op.sc 统一进单元图：op.sc 为默认导入的语言运行时模块（chain/异步内核等机制）。
     //   将其作为正式单元纳入图，生成 op 单元 .c，其运行时 op_impl.c 经拼接机制并入同
     //   一 TU（见下方第一阶段），不再单独编译/链接。op 的唯一特殊性退化为「自动导入」。
@@ -2067,7 +2159,7 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
         const std::string hname = token + ".h";
         const std::filesystem::path cpath = tmpDir / (token + ".c");
         const std::filesystem::path hpath = tmpDir / hname;
-        const std::filesystem::path opath = tmpDir / (token + ".o");
+        const std::filesystem::path opath = tmpDir / (token + objExt);
 
         // stringify 关键字：按类型生成的 JSON 格式化器写入独立 <token>_stringify.h，
         // 由本单元 .c 在类型定义之后 #include（-I tmpDir 使其可见）
@@ -2287,10 +2379,11 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
     for (auto& a : arts) {
         // 添加 -g 标志生成调试符号；-I 源目录使 inc "local.h" 可被找到；
         //   a.unitCFlags 为本单元额外编译选项（如 async 拼接 libuv 实现时的 -DSCC_WITH_UV）
-        std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags + extraCFlags
-            + a.unitCFlags + " -I " + tmpDir.string();
-        if (!a.srcDir.empty()) ccCmd += " -I " + a.srcDir.string();
-        ccCmd += " -c " + a.cpath.string() + " -o " + a.opath.string();
+        std::vector<std::filesystem::path> incDirs = { tmpDir };
+        if (!a.srcDir.empty()) incDirs.push_back(a.srcDir);
+        const std::string ccCmd = ccCompileCmd(cc, msvc,
+            tc.machine + tc.cflags + extraCFlags + a.unitCFlags, incDirs,
+            a.cpath, a.opath);
         if (std::system(ccCmd.c_str()) != 0) {
             std::cerr << "错误: C 单元编译失败（" << ccCmd << "）\n";
             return 1;
@@ -2354,7 +2447,7 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     // 现场编译为 .o（序号避免不同目录同名文件冲突）
                     const std::filesystem::path obj =
                         tmpDir / ("add_" + std::to_string(addSeq++) + "_"
-                                  + resolved.stem().string() + ".o");
+                                  + resolved.stem().string() + objExt);
                     std::string langFlags;
                     if (ext == ".m")
                         langFlags = targetDarwin ? " -fobjc-arc -x objective-c"
@@ -2363,11 +2456,20 @@ static int compileUnitsToObjects(std::unordered_map<std::string, UnitInfo>& unit
                     // 作用于本模块 add 的实现源编译；srcDir 即模块目录。
                     // langFlags 在段 cflags 之前：默认 ARC 可被 -fno-objc-arc 覆盖。
                     const ModuleConfig amc = loadModuleConfig(srcDir, tc);
-                    std::string ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
-                        + extraCFlags + langFlags + amc.cflags
-                        + " -I " + srcDir.string()
-                        + " -I " + tmpDir.string()
-                        + " -c " + resolved.string() + " -o " + obj.string();
+                    std::string ccCmd;
+                    if (ccIsMsvc(pickCC())) {
+                        // MSVC：cl 按源文件扩展名自判 C/C++（.m ObjC 不支持，由平台段配置避开）
+                        std::vector<std::filesystem::path> incDirs = { srcDir, tmpDir };
+                        ccCmd = ccCompileCmd(pickCC(), true,
+                            tc.machine + tc.cflags + extraCFlags + amc.cflags,
+                            incDirs, resolved, obj);
+                    } else {
+                        ccCmd = pickCC() + " -g" + tc.machine + tc.cflags
+                            + extraCFlags + langFlags + amc.cflags
+                            + " -I " + srcDir.string()
+                            + " -I " + tmpDir.string()
+                            + " -c " + resolved.string() + " -o " + obj.string();
+                    }
                     if (std::system(ccCmd.c_str()) != 0) {
                         std::cerr << "错误: add 实现编译失败（" << ccCmd << "）\n";
                         return 1;
@@ -2463,13 +2565,11 @@ static int buildProject(const std::filesystem::path& rootPath,
     }
 
     // 2. 创建临时目录
-    char tmpTemplate[] = "/tmp/scc_units_XXXXXX";
-    char* dirC = mkdtemp(tmpTemplate);
-    if (!dirC) {
+    const std::filesystem::path tmpDir = host::makeTempDir("scc_units");
+    if (tmpDir.empty()) {
         std::cerr << "错误: 无法创建临时目录\n";
         return 1;
     }
-    const std::filesystem::path tmpDir(dirC);
 
     // 根接口头名（注入用）：仅当启用且根含 @导出 对象（否则接口头为空，注入无意义）
     std::string rootPreludeHeader;
@@ -2523,10 +2623,8 @@ static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
         && !loadUnitGraph(rootModule, units, visiting, err, {}, rootModule, &preludeSkip))
         return false;
 
-    char tmpTemplate[] = "/tmp/scc_runits_XXXXXX";
-    char* dirC = mkdtemp(tmpTemplate);
-    if (!dirC) { err = "无法创建临时目录"; return false; }
-    const std::filesystem::path tmpDir(dirC);
+    const std::filesystem::path tmpDir = host::makeTempDir("scc_runits");
+    if (tmpDir.empty()) { err = "无法创建临时目录"; return false; }
     job.unitsDir = tmpDir.string();
 
     std::string rootPreludeHeader;
@@ -2566,11 +2664,11 @@ static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
         if (!broot.empty() && !a.srcDir.empty()) {
             const std::filesystem::path sd = std::filesystem::weakly_canonical(a.srcDir, ec);
             const std::filesystem::path rel = sd.lexically_relative(broot);
-            if (!rel.empty() && rel.native().rfind("..", 0) != 0)
+            if (!rel.empty() && rel.generic_string().rfind("..", 0) != 0)
                 u.srcDir = rel == "." ? "builtins" : "builtins/" + rel.generic_string();
             else if (!proot.empty()) {
                 const std::filesystem::path prel = sd.lexically_relative(proot);
-                if (!prel.empty() && prel.native().rfind("..", 0) != 0) {
+                if (!prel.empty() && prel.generic_string().rfind("..", 0) != 0) {
                     // 项目根相对目录（手写头入包所在）；令本单元 #include "wsi.h" 经 /I 解析
                     u.srcDir = prel.generic_string();
                     if (hdrDirsDone.insert(sd.string()).second) {
@@ -2637,13 +2735,11 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     }
 
     // 2. 编译所有单元为对象文件，产物放在临时目录；成功返回 0，失败清理后退出
-    char tmpTemplate[] = "/tmp/scc_units_XXXXXX";
-    char* dirC = mkdtemp(tmpTemplate);
-    if (!dirC) {
+    const std::filesystem::path tmpDir = host::makeTempDir("scc_units");
+    if (tmpDir.empty()) {
         std::cerr << "错误: 无法创建临时目录\n";
         return 1;
     }
-    const std::filesystem::path tmpDir(dirC);
 
     // 根接口头名（注入用）：仅当启用且根含 @导出 对象
     std::string rootPreludeHeader;
@@ -2663,17 +2759,18 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     }
 
     // 3. 链接所有对象文件为临时可执行文件，添加 -g 以保留调试符号；成功返回 0，失败清理后退出
-    const std::filesystem::path bin = tmpDir / "run.out";
-    std::string linkCmd = pickCC() + " -g" + tc.machine;        // -g 保留调试符号；machine 目标机器选项
-    for (auto& o : objects) linkCmd += " " + o.string();        // 构造要链接的所有对象文件列表
-    linkCmd += " -o " + bin.string() + tc.ldflags + extraLd;
+    const std::string cc = pickCC();
+    const bool msvc = ccIsMsvc(cc);
+    const std::filesystem::path bin = tmpDir / (msvc ? "run.exe" : "run.out");
+    const std::string linkCmd = ccLinkExeCmd(cc, msvc, objects, bin.string(),
+                                             tc.ldflags + extraLd, tc.machine);
     if (std::system(linkCmd.c_str()) != 0) {
         std::cerr << "错误: 链接失败（" << linkCmd << "）\n";
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
 
-    // 4. fork+exec 运行产物，透传程序参数，避免 shell 转义问题；运行结束清理临时目录
+    // 4. 运行产物，透传程序参数（host::runProgram 不经 shell）；运行结束清理临时目录
     //    交叉目标须经 runner（模拟器）包装；跨平台族且无 runner 则报错
     if (tc.crossRun && tc.runner.empty()) {
         std::cerr << "错误: 交叉目标无法在本机直接运行；请改用 --build 生成产物，"
@@ -2681,33 +2778,17 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
         std::filesystem::remove_all(tmpDir);
         return 1;
     }
-    pid_t pid = fork();
-    if (pid < 0) {
-        std::cerr << "错误: fork 失败\n";
-        std::filesystem::remove_all(tmpDir);
-        return 1;
-    }
-    if (pid == 0) {
-        std::vector<char*> argv;
-        std::string binS = bin.string();
-        std::vector<std::string> runParts = splitBy(tc.runner, " ");
-        for (auto& r : runParts) argv.push_back(const_cast<char*>(r.c_str()));
-        argv.push_back(const_cast<char*>(binS.c_str()));
-        for (auto& a : progArgs) argv.push_back(const_cast<char*>(a.c_str()));
-        argv.push_back(nullptr);
-        if (!runParts.empty()) execvp(argv[0], argv.data());
-        else execv(binS.c_str(), argv.data());
-        _exit(127);  // exec 失败
-    }
+    std::vector<std::string> argv;
+    std::string binS = bin.string();
+    std::vector<std::string> runParts = splitBy(tc.runner, " ");
+    for (auto& r : runParts) argv.push_back(r);
+    argv.push_back(binS);
+    for (auto& a : progArgs) argv.push_back(a);
+    int rc = host::runProgram(argv);
 
-    int st = 0;
-    waitpid(pid, &st, 0);
     std::filesystem::remove_all(tmpDir);    // 5. 清理临时产物
-    if (WIFSIGNALED(st)) {
-        std::cerr << "错误: 程序被信号 " << WTERMSIG(st) << " 终止\n";
-        return 128 + WTERMSIG(st);
-    }
-    return WIFEXITED(st) ? WEXITSTATUS(st) : 1;
+    if (rc < 0) { std::cerr << "错误: 无法运行产物\n"; return 1; }
+    return rc;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

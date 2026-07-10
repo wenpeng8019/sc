@@ -1,5 +1,6 @@
 // 远程工具链构建实现：见 remote.h。
 #include "remote.h"
+#include "host_compat.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -10,26 +11,20 @@
 #include <random>
 #include <sstream>
 
-#include <pwd.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 namespace fs = std::filesystem;
 
 // ============================ 通用辅助 ============================
 
 // 当前登录用户名（user 为空时用作 SSH 用户）
 static std::string currentUser() {
-    if (const char* u = std::getenv("USER")) if (*u) return u;
-    if (struct passwd* pw = getpwuid(getuid())) return pw->pw_name;
-    return "";
+    return host::currentUser();
 }
 
 // 唯一会话名：pid + 随机，避免并发/重入碰撞
 static std::string uniqueSession() {
     std::random_device rd;
     std::ostringstream os;
-    os << "scc-build-" << getpid() << "-" << std::hex << (rd() & 0xffffff);
+    os << "scc-build-" << host::processId() << "-" << std::hex << (rd() & 0xffffff);
     return os.str();
 }
 
@@ -79,21 +74,9 @@ static std::string baseDir(const RemoteTarget& t) {
     return t.windows ? std::string("scc-remote") : std::string("/tmp/scc-remote");
 }
 
-// fork+exec 运行 argv，继承 stdio（流式输出）；返回退出码，启动失败返回 -1
+// 运行 argv（不经 shell），继承 stdio（流式输出）；返回退出码，启动失败返回 -1
 static int runArgv(const std::vector<std::string>& argv) {
-    pid_t pid = fork();
-    if (pid < 0) return -1;
-    if (pid == 0) {
-        std::vector<char*> cargv;
-        for (auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
-        cargv.push_back(nullptr);
-        execvp(cargv[0], cargv.data());
-        _exit(127);
-    }
-    int st = 0;
-    waitpid(pid, &st, 0);
-    if (WIFEXITED(st)) return WEXITSTATUS(st);
-    return 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
+    return host::runProgram(argv);
 }
 
 // ============================ 后端 A：系统 ssh/scp ============================
@@ -180,8 +163,20 @@ private:
 
 // ============================ 后端 B：内置 libssh2 ============================
 #ifdef SCC_WITH_LIBSSH2
-#include <netdb.h>
-#include <sys/socket.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+   typedef SOCKET sock_t;
+#  define SC_BAD_SOCK INVALID_SOCKET
+#  define SC_CLOSESOCK closesocket
+#else
+#  include <netdb.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+   typedef int sock_t;
+#  define SC_BAD_SOCK (-1)
+#  define SC_CLOSESOCK ::close
+#endif
 #include "../../vendor/libssh2/include/libssh2.h"
 
 class Libssh2Builder : public RemoteBuilder {
@@ -191,11 +186,18 @@ public:
     }
     ~Libssh2Builder() override {
         if (sess_) { libssh2_session_disconnect(sess_, "bye"); libssh2_session_free(sess_); }
-        if (sock_ >= 0) ::close(sock_);
+        if (sock_ != SC_BAD_SOCK) SC_CLOSESOCK(sock_);
         libssh2_exit();
+#ifdef _WIN32
+        WSACleanup();
+#endif
     }
 
     bool connect(std::string& err) override {
+#ifdef _WIN32
+        { WSADATA wsa; if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+              err = "WSAStartup 失败"; return false; } }
+#endif
         if (libssh2_init(0) != 0) { err = "libssh2_init 失败"; return false; }
         if (!tcpConnect(err)) return false;
         sess_ = libssh2_session_init();
@@ -285,7 +287,7 @@ public:
 private:
     RemoteTarget target_;
     std::string session_;
-    int sock_ = -1;
+    sock_t sock_ = SC_BAD_SOCK;
     LIBSSH2_SESSION* sess_ = nullptr;
 
     bool tcpConnect(std::string& err) {
@@ -297,13 +299,13 @@ private:
             err = "无法解析主机 " + target_.host; return false;
         }
         for (auto* p = res; p; p = p->ai_next) {
-            int s = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-            if (s < 0) continue;
-            if (::connect(s, p->ai_addr, p->ai_addrlen) == 0) { sock_ = s; break; }
-            ::close(s);
+            sock_t s = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            if (s == SC_BAD_SOCK) continue;
+            if (::connect(s, p->ai_addr, (int)p->ai_addrlen) == 0) { sock_ = s; break; }
+            SC_CLOSESOCK(s);
         }
         freeaddrinfo(res);
-        if (sock_ < 0) { err = "无法连接 " + target_.host + ":" + port; return false; }
+        if (sock_ == SC_BAD_SOCK) { err = "无法连接 " + target_.host + ":" + port; return false; }
         return true;
     }
 
@@ -463,10 +465,8 @@ static void copySiblingHeaders(const fs::path& srcDir, const fs::path& dst, std:
 static bool makeBundle(const RemoteJob& job, const fs::path& tgz,
                        BundlePlan& plan, std::string& err) {
     std::error_code ec;
-    char tmpl[] = "/tmp/scc_stage_XXXXXX";
-    char* d = mkdtemp(tmpl);
-    if (!d) { err = "无法创建打包临时目录"; return false; }
-    fs::path stage(d);
+    fs::path stage = host::makeTempDir("scc_stage");
+    if (stage.empty()) { err = "无法创建打包临时目录"; return false; }
     // 多单元模式：所有单元 .c + 共享头随 unitsDir 整目录入包到 stage/units/，
     //   单 TU main.c 不再使用。否则（stdin 回退）写单个 main.c。
     if (!job.units.empty() && !job.unitsDir.empty()) {
@@ -544,7 +544,7 @@ int runRemoteJob(const RemoteJob& job) {
     if (!rb) { std::fprintf(stderr, "错误: %s\n", err.c_str()); return 1; }
 
     fs::path tgz = fs::temp_directory_path() /
-                   ("scc_bundle_" + std::to_string(getpid()) + ".tgz");
+                   ("scc_bundle_" + std::to_string(host::processId()) + ".tgz");
     std::error_code ec;
     BundlePlan plan;
     if (!makeBundle(job, tgz, plan, err)) { std::fprintf(stderr, "错误: %s\n", err.c_str()); return 1; }
@@ -586,7 +586,7 @@ int runRemoteJob(const RemoteJob& job) {
                 btgz = job.builtinsTgz;          // 发行版：内嵌预压包，零现场打包
             } else {
                 btgz = fs::temp_directory_path() /
-                       ("scc_builtins_" + std::to_string(getpid()) + ".tgz");
+                       ("scc_builtins_" + std::to_string(host::processId()) + ".tgz");
                 const std::string cmd = "tar czf " + shq(btgz.string()) +
                                         " -C " + shq(job.builtinsDir) + " .";
                 if (std::system(cmd.c_str()) != 0) {
