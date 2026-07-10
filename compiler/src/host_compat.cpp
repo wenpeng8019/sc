@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
 #include <random>
 
 #ifdef _WIN32
@@ -69,8 +70,16 @@ int host::runProgram(const std::vector<std::string>& argv) {
     cargv.reserve(argv.size() + 1);
     for (auto& a : argv) cargv.push_back(a.c_str());
     cargv.push_back(nullptr);
+    errno = 0;
     const intptr_t rc = _spawnvp(_P_WAIT, cargv[0], cargv.data());
-    return rc < 0 ? -1 : static_cast<int>(rc);
+    // _spawnvp 返回子进程退出码；失败返回 -1 且置 errno。崩溃（未处理异常）时退出码为
+    //   异常码（如 0xC0000005 访问违规），经 (int) 截断为负值——那是真实退出状态，非启动失败。
+    if (rc == -1 && errno != 0) {
+        std::fprintf(stderr, "error: cannot start %s (errno=%d)\n",
+                     argv[0].c_str(), errno);
+        return -1;
+    }
+    return static_cast<int>(rc);
 #else
     pid_t pid = fork();
     if (pid < 0) return -1;

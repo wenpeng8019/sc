@@ -1803,6 +1803,22 @@ struct CGen {
                 if (e.a) planInl(*e.a, live, list, sub);
                 if (e.b) planInl(*e.b, live, list, sub);
                 break;
+            case Expr::Sync:
+                // 带队列阻塞 sync<q>：内含局部 struct 装填 + 调用，原以 GNU 语句表达式
+                //   ({...}) 发射（MSVC 不支持）——提升为语句前临时（与 inl 同框架）。
+                //   仅对合法 rpc 调用形式提升；否则留待 emitExpr 报原错误。
+                if (e.b && e.a && e.a->kind == Expr::Call && e.a->a &&
+                    e.a->a->kind == Expr::Ident && rpcs.count(e.a->a->text)) {
+                    if (!live)
+                        throw CompileError{"sync<q> 不能出现在条件求值位置（&&/|| 右侧、三元 ?: 分支）；"
+                                           "请先用中间变量保存其值", e.line};
+                    std::string nm = "_syncq" + std::to_string(inlTmpSeq++);
+                    list.push_back({ &e, nm });
+                    sub[&e] = nm;
+                    return;
+                }
+                if (e.a) planInl(*e.a, live, list, sub);
+                break;
             default: break;
         }
     }
@@ -1819,13 +1835,16 @@ struct CGen {
         inlSubPrev.push_back(curInlSub);
         curInlSub = &inlSubStack.back();                  // 展开各 inl 时，其嵌套 inl 实参可被替换
         for (auto& h : list) {
-            const Stmt* def = asInlineCall(h.e);
-            std::string ct = inlRetCType(*def);
-            indent();
-            out << ct;
-            if (!ct.empty() && ct.back() != '*') out << ' ';
-            out << h.name << ";\n";                        // 先声明临时（值 inl 必有返回类型）
-            emitInlineExpand(*def, h.e->args, h.e->a->text, h.name);
+            if (const Stmt* def = asInlineCall(h.e)) {
+                std::string ct = inlRetCType(*def);
+                indent();
+                out << ct;
+                if (!ct.empty() && ct.back() != '*') out << ' ';
+                out << h.name << ";\n";                    // 先声明临时（值 inl 必有返回类型）
+                emitInlineExpand(*def, h.e->args, h.e->a->text, h.name);
+            } else {
+                emitSyncHoist(*h.e, h.name);               // 带队列 sync<q>：语句块发射，结果存 h.name
+            }
         }
         return true;
     }
@@ -1833,6 +1852,56 @@ struct CGen {
         curInlSub = inlSubPrev.back();
         inlSubPrev.pop_back();
         inlSubStack.pop_back();
+    }
+
+    // 带队列阻塞 sync<q> 的语句级发射（替代 GNU 语句表达式 ({...})，MSVC 兼容）：
+    //   把「struct 装填 + q->sync 调用」发为独立语句块，返回槽存入临时 name。
+    //   随后 emitExpr 遇该 sync 节点经 curInlSub 替换为 name（见 planInl / emitExpr 2051）。
+    void emitSyncHoist(const Expr& e, const std::string& name) {
+        const Decl* r = rpcs.at(e.a->a->text);       // planInl 已保证 e.a 为已知 rpc 调用
+        const Expr& call = *e.a;
+        if (r->hasAwait)
+            throw CompileError{"sync 不能驱动异步 rpc '" + e.a->a->text +
+                               "'（含 await，请用 async）", e.line};
+        if (r->structCommon.variadic)
+            throw CompileError{"sync<q> 暂不支持可变参数 rpc：" + r->name, e.line};
+        if (call.args.size() > r->structCommon.fields.size())
+            throw CompileError{"rpc 实参数量超出：" + r->name, e.line};
+        VType qvt;
+        if (!exprVType(*e.b, qvt) || qvt.name != "queue" || !aggrOf("queue"))
+            throw CompileError{"sync<q> 的目标须为 queue 端点", e.line};
+        checkRpcOptKeys(e, true);                    // <prio:N, delay:ms, timeout:ms>
+        const bool isPtr = qvt.ptr >= 1;
+        const bool hasRet = rpcHasRet(*r);
+        if (hasRet) { indent(); emitRetType(*r); out << " " << name << ";\n"; }
+        indent(); out << "{ struct " << scPfx(r->name) << " _rp = {0}; ";
+        for (size_t i = 0; i < call.args.size(); i++) {
+            const Field& f = r->structCommon.fields[i];
+            out << "_rp." << f.name << " = ";
+            emitExpr(*call.args[i], true); out << "; ";
+            if (!f.type.arrayDims.empty()) {         // 数组实参：额外装填 size（字节数）
+                out << "_rp." << rpcArraySizeName(f) << " = ";
+                emitRpcArraySizeof(f); out << "; ";
+            }
+        }
+        // 可选状态出参 &st（i4 左值地址）：仅在带 timeout 时有意义，接收 sync 返回码
+        if (e.c) {
+            if (e.c->kind != Expr::Unary || e.c->op != "&" || !e.c->a)
+                throw CompileError{"sync 状态出参须为变量地址形式 &var（i4）", e.line};
+            if (!hasOpt(e.syncOpts, "timeout"))
+                throw CompileError{"sync 状态出参仅在带 <timeout:ms> 时有效", e.line};
+            emitExpr(*e.c->a, true); out << " = ";    // st = q->sync(...)
+        }
+        emitComBasePtr(*e.b, isPtr);
+        out << "->sync(";
+        emitComBasePtr(*e.b, isPtr);
+        out << ", (void (*)(void *))" << scPfx(r->name) << "_rpc, &_rp, sizeof(_rp), ";
+        emitOptOr0(e.syncOpts, "prio", "int32_t"); out << ", ";
+        emitOptOr0(e.syncOpts, "delay", "int64_t"); out << ", ";
+        emitOptOr0(e.syncOpts, "timeout", "int64_t");
+        out << "); ";
+        if (hasRet) out << name << " = _rp._; ";      // 返回槽（消费者已回填；超时为 0）
+        out << "}\n";
     }
 
     // 决定语句 s 的哪些「无条件求值」表达式须做 inl 值提升，并发射临时。
@@ -4101,18 +4170,6 @@ struct CGen {
                 advExpr(); out << "; }\n";
             }
             indent(); out << "long " << FC << " = 0; (void)" << FC << ";\n";
-            indent(); out << "for (; " << FI << " != (void *)0";
-            if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
-            out << "; ";
-            if (s.forStepE) {
-                out << "({ long _fk" << n << " = "; emitOpt(s.forStepE, "1");
-                out << "; while (_fk" << n << "-- > 0 && " << FI << " != (void *)0) " << FI << " = ";
-                advExpr(); out << "; })";
-            } else {
-                out << FI << " = "; advExpr();
-            }
-            out << ", " << FC << "++) {\n";
-            depth++;
             // 循环变量：默认取 first 返回类型（chain=void&，容器=I&）；显式注解则下转
             std::string declTy;
             if (cast) declTy = cTypeOf(vBase, vPtr);
@@ -4123,10 +4180,34 @@ struct CGen {
                 declTy = cTypeOf(rb, rp);
                 vBase = rb; vPtr = rp;
             }
-            indent(); out << declTy << " " << s.forVar << " = (" << declTy << ")" << FI << ";\n";
-            emitIdx(FC);                        // 链/容器（仅 next 迭代）→ 递增计数 0,1,2...
-            emitForInBody(s, vBase, vPtr);
-            depth--; indent(); out << "}\n";
+            if (s.forStepE) {
+                // step 多步前进含内层循环，不能置于 for-increment（那须 GNU 语句表达式，
+                //   MSVC 不支持）——改写为 while：前进置于「下一轮迭代前」（首轮标志跳过），
+                //   与 for 完全等价，保持 break/continue 语义（continue→循环顶→前进，break→退出）。
+                indent(); out << "int _ff" << n << " = 1;\n";
+                indent(); out << "while (1) {\n";
+                depth++;
+                indent(); out << "if (!_ff" << n << ") { long _fk" << n << " = "; emitOpt(s.forStepE, "1");
+                out << "; while (_fk" << n << "-- > 0 && " << FI << " != (void *)0) " << FI << " = ";
+                advExpr(); out << "; " << FC << "++; }\n";
+                indent(); out << "_ff" << n << " = 0;\n";
+                indent(); out << "if (!(" << FI << " != (void *)0";
+                if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+                out << ")) break;\n";
+                indent(); out << declTy << " " << s.forVar << " = (" << declTy << ")" << FI << ";\n";
+                emitIdx(FC);
+                emitForInBody(s, vBase, vPtr);
+                depth--; indent(); out << "}\n";
+            } else {
+                indent(); out << "for (; " << FI << " != (void *)0";
+                if (hasNum) { out << " && " << FC << " < "; emitOpt(s.forNumE, "0"); }
+                out << "; " << FI << " = "; advExpr(); out << ", " << FC << "++) {\n";
+                depth++;
+                indent(); out << declTy << " " << s.forVar << " = (" << declTy << ")" << FI << ";\n";
+                emitIdx(FC);                        // 链/容器（仅 next 迭代）→ 递增计数 0,1,2...
+                emitForInBody(s, vBase, vPtr);
+                depth--; indent(); out << "}\n";
+            }
         }
         depth--; indent(); out << "}\n";
     }

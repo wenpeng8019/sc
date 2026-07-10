@@ -1309,8 +1309,7 @@ static int compileAndRunSource(const std::string& csrc,
     int rc = host::runProgram(argv);
 
     std::filesystem::remove(binPath);   // 4. 清理临时产物
-    if (rc < 0) { std::cerr << "错误: 无法运行产物\n"; return 1; }
-    return rc;
+    return rc;   // rc<0：启动失败(-1，runProgram 已诊断)或崩溃异常码；否则程序退出码
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2787,8 +2786,7 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     int rc = host::runProgram(argv);
 
     std::filesystem::remove_all(tmpDir);    // 5. 清理临时产物
-    if (rc < 0) { std::cerr << "错误: 无法运行产物\n"; return 1; }
-    return rc;
+    return rc;   // rc<0：启动失败(-1，runProgram 已诊断)或崩溃异常码；否则程序退出码
 }
 
 ///////////////////////////////////////////////////////////////////////////////

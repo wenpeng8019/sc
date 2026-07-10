@@ -48,7 +48,7 @@ rpc async_read: ret, rc: com&
     return 0
 
 fnc main: i4
-    var path: char& = "/tmp/sc_feature22.bin"
+    var path: char& = "sc_feature22.bin"
     ::printf("== 同步往返 ==\n")
     if sync_roundtrip(path) != 0
         return 1

@@ -1203,6 +1203,7 @@ static void que_drop(sc_queue *_this) {
  *     线程池（post 自动转交池消费，用 pool->join() 作屏障，无需 pull）
  *   - 返回 &q->base（失败 NULL）；用完调 q->drop() 解绑排空回收（池宿主须另行 drop 池）*/
 struct sc_queue *sc_default_queue(struct sc_pool *host) {
+    mt_ensure();             /* 确保 g_mutex 等全局同步原语已初始化（que_drop 等直接用 g_mutex）*/
     que_state *q = (que_state *)malloc(sizeof(que_state));
     if (!q) return NULL;
     memset(q, 0, sizeof(*q));

@@ -46,8 +46,8 @@ fnc main: i4
     ::printf("meshgrid ok=%d gx5=%g gy5=%g\n", (ok: i4), gx->at(5), gy->at(5))
 
     # 5) save/load（NumPy .npy）
-    var svok: bool = x2->save("/tmp/ts_end2end.npy")
-    var xl: tensor@1 = ts_load("/tmp/ts_end2end.npy")
+    var svok: bool = x2->save("ts_end2end.npy")
+    var xl: tensor@1 = ts_load("ts_end2end.npy")
     ::printf("io save_ok=%d same=%d\n", (svok: i4), (x2->allclose(xl, 0.000000000001, 0.000000000001): i4))
 
     return 0

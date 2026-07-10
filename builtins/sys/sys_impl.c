@@ -120,7 +120,9 @@ int sc_ARGS_parse(int argc, char** argv, ...) {
 
     int show_help = (argc == 1);
     g_pos_count = 0;
-    char* pos_args[argc];  // 临时存储位置参数
+    // 位置参数临时缓冲：最多 argc 个。原为 VLA（char* pos_args[argc]），MSVC 不支持
+    //   变长数组，改 malloc/free（末尾复制回 argv 后即释放；exit 路径进程终止无需释放）。
+    char** pos_args = (char**)malloc((size_t)(argc > 0 ? argc : 1) * sizeof(char*));
     int w = 1;             // 写入位置（选项及其值前移到这里）
 
     for (int i = 1; i < argc; i++) { char* arg = argv[i];
@@ -263,6 +265,8 @@ int sc_ARGS_parse(int argc, char** argv, ...) {
     for (int i = 0; i < g_pos_count; i++) {
         argv[w + i] = pos_args[i];
     }
+    free(pos_args);
+    pos_args = NULL;
 
     // 检查必选参数是否都已提供
     if (req_count > 0 && !show_help) {
