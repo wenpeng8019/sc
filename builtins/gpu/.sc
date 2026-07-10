@@ -14,11 +14,12 @@ ldflags = -lGLESv2 -lEGL -lgbm
 
 [windows]
 # WGL 桌面 GL：GL 函数 = opengl32；ChoosePixelFormat/SetPixelFormat/SwapBuffers = gdi32；
-# GetDC/ReleaseDC = user32。Vulkan：vulkan-1（导入库），头/库经 %INCLUDE%/%LIB% 提供
-# （Vulkan SDK 的 Include/Lib，避免在此写死版本号路径；同 GL 的 gl.h 走 Windows SDK）。
+# GetDC/ReleaseDC = user32。Vulkan：自包含——头文件 vendor 至 khr/（inc）、运行时
+# 动态加载 vulkan-1.dll（vk_loader.c），无需 -lvulkan-1 与 Vulkan SDK。
 # GL 零拷贝导出（WGL_NV_DX_interop2）：d3d11 + dxgi + dxguid（共享 NT 句柄）。
-# D3D 后端尚未启用，其余导入库待适配时再补。
-ldflags = -lopengl32 -lgdi32 -luser32 -lvulkan-1 -ld3d11 -ldxgi -ldxguid
+inc     = khr
+ldflags = -lopengl32 -lgdi32 -luser32 -ld3d11 -ldxgi -ldxguid
 
 [linux]
-ldflags = -lGL -lEGL -lgbm -lvulkan -lX11
+inc     = khr
+ldflags = -lGL -lEGL -lgbm -lX11

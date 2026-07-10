@@ -18,7 +18,7 @@
 #ifndef SC_GPU_VK_H
 #define SC_GPU_VK_H
 
-#include <vulkan/vulkan.h>
+#include "vk_loader.h"   /* 自包含 Vulkan：VK_NO_PROTOTYPES + vendored 头 + 动态加载（免 SDK/链接） */
 
 #ifdef __cplusplus
 extern "C" {

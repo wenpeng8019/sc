@@ -201,6 +201,13 @@ static bool vkInit(const sc_gpu_desc* desc) {
     (void)desc;
     memset(&g_vk, 0, sizeof(g_vk));
 
+    /* 自包含：动态加载 Vulkan 运行时（vulkan-1.dll / libvulkan.so.1）+ 全局函数。
+     * 无运行时（无驱动/未装）则优雅失败，pickBackend 回退其他后端。 */
+    if (!sc_vk_load_global()) {
+        gpu_log("vulkan: 无 Vulkan 运行时（vulkan-1.dll / libvulkan 缺失或过旧）");
+        return false;
+    }
+
     /* --- 实例扩展 --- */
     uint32_t nExt = 0;
     vkEnumerateInstanceExtensionProperties(NULL, &nExt, NULL);
@@ -262,6 +269,9 @@ static bool vkInit(const sc_gpu_desc* desc) {
         gpu_log("vulkan: vkCreateInstance 失败");
         return false;
     }
+
+    /* 实例已建：装载其余（实例/设备级）函数指针 */
+    sc_vk_load_instance(g_vk.dev.instance);
 
     /* --- 物理设备（优先独显，退化取首个） --- */
     uint32_t nPhys = 0;
