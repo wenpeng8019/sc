@@ -17,7 +17,11 @@
  *   host-visible staging 拷贝回读），全平台通用。零拷贝导出已实现——vkMemimgExport
  *   经外部内存扩展导出句柄（Linux dma-buf fd via VK_KHR_external_memory_fd /
  *   Windows NT 句柄 via win32；设备支持则启用，可导出内存=专用分配）。
- *   Windows NT 句柄路径已实测；导入（vkMemimgImport）与 Linux dma-buf 实机验证待补。
+ *   零拷贝导入（vkMemimgImport）已实现——按导出侧同参重建 VkImage，经
+ *   VkImportMemoryWin32HandleInfoKHR / VkImportMemoryFdInfoKHR 别名同一设备内存
+ *   （OPAQUE 句柄内存类型由导出侧决定，不查 props；不做 UNDEFINED 布局转换以免
+ *   丢弃别名内容，map 直接按导出侧 TRANSFER_SRC_OPTIMAL 布局回读）。
+ *   Windows NT 句柄导出+导入往返已实测（校验零错误、逐字节一致）；Linux dma-buf 实机验证待补。
  *
  * 平台守卫：整文件经 SC_GPU_VULKAN 空化（Windows/Linux 启用，macOS 用 Metal）。
  * ============================================================ */
@@ -100,8 +104,10 @@ typedef struct {
     bool             hasExtMem;            /* 外部内存导出扩展可用（dma-buf/win32 NT 句柄） */
 #if P_WIN
     PFN_vkGetMemoryWin32HandleKHR getMemWin32;
+    PFN_vkGetMemoryWin32HandlePropertiesKHR getMemWin32Props;
 #else
     PFN_vkGetMemoryFdKHR          getMemFd;
+    PFN_vkGetMemoryFdPropertiesKHR getMemFdProps;
 #endif
 } VkEnv;
 
@@ -379,10 +385,14 @@ static bool vkInit(const sc_gpu_desc* desc) {
         g_vk.getMemWin32 = (PFN_vkGetMemoryWin32HandleKHR)
             vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryWin32HandleKHR");
         if (!g_vk.getMemWin32) g_vk.hasExtMem = false;
+        g_vk.getMemWin32Props = (PFN_vkGetMemoryWin32HandlePropertiesKHR)
+            vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryWin32HandlePropertiesKHR");
 #else
         g_vk.getMemFd = (PFN_vkGetMemoryFdKHR)
             vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryFdKHR");
         if (!g_vk.getMemFd) g_vk.hasExtMem = false;
+        g_vk.getMemFdProps = (PFN_vkGetMemoryFdPropertiesKHR)
+            vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryFdPropertiesKHR");
 #endif
         if (g_vk.hasExtMem) gpu_log("vulkan: memimg 零拷贝导出可用（外部内存扩展）");
     }
@@ -672,9 +682,86 @@ static bool vkMemimgAlloc(gpu_memimg_t* img) {
 }
 
 static bool vkMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
-    (void)img; (void)src;
-    gpu_log("vulkan: memimg import 暂不支持（需外部内存导入路径）");
-    return false;
+    /* 导入外部内存句柄（本后端导出的 OPAQUE_WIN32 / dma-buf）→ 新 VkImage 别名同底层内存。
+     * 图像参数须与导出侧（vkMemimgAlloc）一致，否则 OPAQUE_WIN32 内存不兼容。
+     * 句柄借用：不关闭（归导出方）；仅释放本地 image/mem/view。 */
+    if (!g_vk.hasExtMem) { gpu_log("vulkan: 无外部内存扩展，无法 import"); return false; }
+    VkDevice dev = g_vk.dev.device;
+#if P_WIN
+    if (!src || !src->native) { gpu_log("vulkan: import 需 native=共享 NT 句柄"); return false; }
+#else
+    if (!src || src->fd[0] < 0) { gpu_log("vulkan: import 需 fd[0]=dma-buf fd"); return false; }
+#endif
+    VkMemimg* m = (VkMemimg*)calloc(1, sizeof(VkMemimg));
+    if (!m) return false;
+    m->exportFd = -1;
+    m->w = src->width; m->h = src->height;
+    m->format = VK_FORMAT_B8G8R8A8_UNORM;   /* 与导出侧 memimg 一致 */
+
+    VkImageCreateInfo ic = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    ic.imageType = VK_IMAGE_TYPE_2D;
+    ic.format = m->format;
+    ic.extent.width = (uint32_t)(m->w > 0 ? m->w : 1);
+    ic.extent.height = (uint32_t)(m->h > 0 ? m->h : 1);
+    ic.extent.depth = 1;
+    ic.mipLevels = 1;
+    ic.arrayLayers = 1;
+    ic.samples = VK_SAMPLE_COUNT_1_BIT;
+    ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_SAMPLED_BIT;
+    ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkExternalMemoryImageCreateInfo extImg = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
+    extImg.handleTypes = SC_VK_EXTMEM_HANDLE_TYPE;
+    ic.pNext = &extImg;
+    if (vkCreateImage(dev, &ic, NULL, &m->image) != VK_SUCCESS) { free(m); return false; }
+
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(dev, m->image, &mr);
+
+    /* OPAQUE_WIN32/OPAQUE_FD 句柄：内存类型由导出时的分配决定，不可(且规范禁止)用
+     * vkGetMemory*PropertiesKHR 查询(那是给 D3D11/dma-buf 等非 opaque 类型的)。
+     * 同设备 + 同 image 参数 → mr.memoryTypeBits 与导出侧一致,直接取 DEVICE_LOCAL。 */
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryDedicatedAllocateInfo dedic = { .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+    dedic.image = m->image;
+#if P_WIN
+    VkImportMemoryWin32HandleInfoKHR imp = { .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR };
+    imp.handleType = SC_VK_EXTMEM_HANDLE_TYPE;
+    imp.handle = (HANDLE)src->native;
+    imp.pNext = &dedic;
+    mai.pNext = &imp;
+#else
+    VkImportMemoryFdInfoKHR imp = { .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR };
+    imp.handleType = SC_VK_EXTMEM_HANDLE_TYPE;
+    imp.fd = src->fd[0];   /* 导入消耗 fd（Vulkan 接管）；与借用契约不冲突（导出方不再用） */
+    imp.pNext = &dedic;
+    mai.pNext = &imp;
+#endif
+    if (vkAllocateMemory(dev, &mai, NULL, &m->mem) != VK_SUCCESS) {
+        gpu_log("vulkan: import 分配外部内存失败");
+        vkDestroyImage(dev, m->image, NULL); free(m); return false;
+    }
+    vkBindImageMemory(dev, m->image, m->mem, 0);
+
+    VkImageViewCreateInfo iv = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    iv.image = m->image;
+    iv.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    iv.format = m->format;
+    iv.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    iv.subresourceRange.levelCount = 1;
+    iv.subresourceRange.layerCount = 1;
+    vkCreateImageView(dev, &iv, NULL, &m->view);
+
+    /* 不做布局转换：导入图像别名的内存已是导出方留下的 TRANSFER_SRC_OPTIMAL
+     * 布局（同参数 OPTIMAL 平铺一致）；map 的 CopyImageToBuffer 按该布局读即可。
+     * 若从 UNDEFINED 转换会丢弃别名内容（AMD 实测），故略去。 */
+    img->backend = m;
+    return true;
 }
 
 /* 懒导出外部内存句柄（缓存；借用语义，memimg_free 时关闭）。
