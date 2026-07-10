@@ -102,10 +102,12 @@ enum Decoration : uint32_t {
     DecLocation = 30, DecBinding = 33, DecDescriptorSet = 34, DecOffset = 35,
 };
 enum BuiltInId : uint32_t {
-    BiPosition = 0, BiPointSize = 1, BiFragCoord = 15, BiFragDepth = 22,
+    BiPosition = 0, BiPointSize = 1, BiClipDistance = 3,
+    BiFragCoord = 15, BiFrontFacing = 17, BiFragDepth = 22,
     BiVertexIndex = 42, BiInstanceIndex = 43,
-    BiNumWorkgroups = 24, BiWorkgroupId = 26, BiLocalInvocationId = 27,
-    BiGlobalInvocationId = 28, BiLocalInvocationIndex = 29,
+    BiNumWorkgroups = 24, BiWorkgroupId = 26,
+    BiLocalInvocationId = 27, BiGlobalInvocationId = 28,
+    BiLocalInvocationIndex = 29, BiSampleId = 18, BiSamplePosition = 19,
 };
 
 // ---- 类型描述（发射期的语义视图，typeId 之外携带足够的选指令信息）--------
@@ -387,10 +389,50 @@ struct StageEmitter {
     [[noreturn]] void err(const std::string& m, int line) const { throw CompileError(m, line); }
 
     // sc 类型引用 → SPIR-V 值类型 id（标量/向量/矩阵/一维数组）
+    // 用户结构体类型 id（包含完整成员类型体系）
+    std::unordered_map<std::string, uint32_t> structTypeCache;
+    uint32_t structTypeId(const std::string& name, int line) {
+        auto it = structTypeCache.find(name);
+        if (it != structTypeCache.end()) return it->second;
+        auto sit = structs.find(name);
+        if (sit == structs.end())
+            err("shader 未定义类型 `" + name + "`", line);
+        const Decl& sd = *sit->second;
+        // 先注册占位（递归保护）
+        uint32_t r = b.id();
+        structTypeCache[name] = r;
+        b.name(r, name);
+        std::vector<uint32_t> mts;
+        for (size_t i = 0; i < sd.structCommon.fields.size(); i++) {
+            const auto& f = sd.structCommon.fields[i];
+            if (f.synthetic) continue;
+            uint32_t mt = typeIdOf(f.type, f.line);
+            b.memberName(r, (uint32_t)mts.size(), f.name);
+            mts.push_back(mt);
+        }
+        std::vector<uint32_t> ops = {r};
+        ops.insert(ops.end(), mts.begin(), mts.end());
+        putV(b.secTypes, OpTypeStruct, ops);
+        TI ti; ti.k = TI::Struct; ti.structName = name; ti.id = r;
+        b.tiById[r] = ti;
+        return r;
+    }
+
     uint32_t typeIdOf(const TypeRef& t, int line) {
         ScType st;
-        if (!scTypeOf(t.name, st))
-            err("shader 后端暂不支持类型 `" + t.name + "`（SPIR-V 直发子集）", line);
+        if (!scTypeOf(t.name, st)) {
+            // 用户结构体（非内建标量/向量/矩阵）
+            if (!t.arrayDims.empty()) {
+                uint32_t sbase = structTypeId(t.name, line);
+                if (t.arrayDims.size() == 1) {
+                    int n = std::atoi(t.arrayDims[0].c_str());
+                    if (n <= 0) err("shader 数组维度须为正整数常量", line);
+                    return b.tArray(sbase, b.constI(n), n);
+                }
+                err("shader 暂不支持多维结构体数组（见 syntax-s §16 P0）", line);
+            }
+            return structTypeId(t.name, line);
+        }
         uint32_t base;
         switch (st.k) {
             case TI::F32:  base = b.tF32(); break;
@@ -408,8 +450,17 @@ struct StageEmitter {
             default: err("内部错误：未知标量类别", line);
         }
         if (!t.arrayDims.empty()) {
-            if (t.arrayDims.size() > 1)
-                err("shader 暂不支持多维数组（见 syntax-s §16 P0）", line);
+            if (t.arrayDims.size() > 1) {
+                // 多维数组：逐级嵌套（外层最后）
+                base = b.tArray(base, b.constI(std::atoi(t.arrayDims.back().c_str())),
+                                       std::atoi(t.arrayDims.back().c_str()));
+                for (int i = (int)t.arrayDims.size() - 2; i >= 0; i--) {
+                    int n = std::atoi(t.arrayDims[(size_t)i].c_str());
+                    if (n <= 0) err("shader 数组维度须为正整数常量", line);
+                    base = b.tArray(base, b.constI(n), n);
+                }
+                return base;
+            }
             int n = std::atoi(t.arrayDims[0].c_str());
             if (n <= 0) err("shader 数组维度须为正整数常量", line);
             base = b.tArray(base, b.constI(n), n);
@@ -454,6 +505,44 @@ struct StageEmitter {
             const bool push   = a->res == ShaderDeclAttr::Push;
 
             // 成员类型 + Offset 装饰（布局与反射清单同一算法）
+            // resBlockOffsetOf：嵌套结构体按字段递归算 std140 尺寸
+            std::function<int(const std::string&, bool)> structSize = [&](const std::string& name, bool s430) -> int {
+                auto sit = structs.find(name);
+                if (sit == structs.end()) return 4;
+                int off2 = 0;
+                for (const auto& mf : sit->second->structCommon.fields) {
+                    if (mf.synthetic) continue;
+                    Lay l = layOf(mf.type.name, mf.type.arrayDims, s430);
+                    ScType dummy; bool isSc = scTypeOf(mf.type.name, dummy);
+                    if (l.size == 0 && !isSc) {
+                        // 嵌套结构体
+                        l.align = 16; l.size = rup(structSize(mf.type.name, s430), 16);
+                    }
+                    off2 = rup(off2, l.align) + l.size;
+                }
+                return off2;
+            };
+            // 递归给 UBO 内嵌套结构体类型加 Block 级 Offset 装饰
+            std::function<void(uint32_t, const std::string&, bool)> decorateStructMembers =
+                [&](uint32_t tid, const std::string& name, bool s430) {
+                    auto sit = structs.find(name);
+                    if (sit == structs.end()) return;
+                    int off2 = 0;
+                    size_t midx = 0;
+                    for (const auto& mf : sit->second->structCommon.fields) {
+                        if (mf.synthetic) continue;
+                        Lay l = layOf(mf.type.name, mf.type.arrayDims, s430);
+                        if (l.size == 0) {
+                            l.align = 16;
+                            l.size = rup(structSize(mf.type.name, s430), 16);
+                        }
+                        off2 = rup(off2, l.align);
+                        put(b.secDeco, OpMemberDecorate, {tid, (uint32_t)midx, DecOffset, (uint32_t)off2});
+                        off2 += l.size;
+                        midx++;
+                    }
+                };
+            (void)decorateStructMembers;   // suppress unused if no nested structs
             std::vector<uint32_t> memberTypes;
             uint32_t structT = b.id();
             ResBlock rb;
@@ -475,8 +564,14 @@ struct StageEmitter {
                                          (uint32_t)(std430 ? el.size : rup(el.size, 16)));
                 } else {
                     mt = typeIdOf(f.type, f.line);
+                    // 嵌套用户结构体：给其类型加 Offset 装饰，Block decoration 已由外层加
+                    ScType sct2;
+                    if (!scTypeOf(f.type.name, sct2) && structs.count(f.type.name)) {
+                        decorateStructMembers(mt, f.type.name, std430);
+                    }
                 }
                 Lay lay = layOf(f.type.name, f.type.arrayDims, std430);
+                if (lay.size == 0) { lay.align = 16; lay.size = rup(structSize(f.type.name, std430), 16); }
                 off = rup(off, lay.align);
                 put(b.secDeco, OpMemberDecorate, {structT, (uint32_t)i, DecOffset, (uint32_t)off});
                 ScType sct;
@@ -537,6 +632,9 @@ struct StageEmitter {
                                     type = b.tVec(b.tF32(), 4); return true; }
         if (sem == "frag_coord")  { bi = BiFragCoord; type = b.tVec(b.tF32(), 4); return true; }
         if (sem == "frag_depth")  { bi = BiFragDepth; type = b.tF32(); return true; }
+        if (sem == "front_facing") { bi = BiFrontFacing; type = b.tBool(); return true; }
+        if (sem == "sample_id")    { bi = BiSampleId; type = b.tI32(); return true; }
+        if (sem == "point_size")   { bi = BiPointSize; type = b.tF32(); return true; }
         if (sem == "vertex_id")   { bi = BiVertexIndex;   type = b.tI32(); return true; }
         if (sem == "instance_id") { bi = BiInstanceIndex; type = b.tI32(); return true; }
         if (sem == "global_invocation_id" || sem == "local_invocation_id" ||
@@ -687,16 +785,41 @@ struct StageEmitter {
                         return {r, mt, sc};
                     }
                 }
-                // 单分量 swizzle 左值：v.x = ...
+                // 单分量 swizzle 左值：v.x = ...（先于结构体成员，避免 rgba 与字段名冲突）
                 if (isSwz(e->text) && e->text.size() == 1) {
+                    // 只当基类型是向量时才走 swizzle
+                    Ptr tryBase = lvalue(e->a.get());
+                    const TI& tbi = b.info(tryBase.type);
+                    if (tbi.k == TI::Vec) {
+                        uint32_t ptrT = b.tPtr(tryBase.sc, tbi.elem);
+                        uint32_t r = ins(OpAccessChain, ptrT, {tryBase.id, b.constU(swzIdx(e->text[0]))});
+                        return {r, tbi.elem, tryBase.sc};
+                    }
+                    // 基类型不是向量 → 可能是结构体字段同名，继续走下面的结构体路径
+                }
+                // 用户结构体成员 lvalue（任意嵌套深度）
+                {
                     Ptr base = lvalue(e->a.get());
                     const TI& bi = b.info(base.type);
-                    if (bi.k != TI::Vec) err("`." + e->text + "` 作用于非向量", e->line);
-                    uint32_t ptrT = b.tPtr(base.sc, bi.elem);
-                    uint32_t r = ins(OpAccessChain, ptrT, {base.id, b.constU(swzIdx(e->text[0]))});
-                    return {r, bi.elem, base.sc};
+                    if (bi.k == TI::Struct) {
+                        auto sit = structs.find(bi.structName);
+                        if (sit != structs.end()) {
+                            int idx = 0;
+                            for (const auto& f : sit->second->structCommon.fields) {
+                                if (f.synthetic) continue;
+                                if (f.name == e->text) {
+                                    uint32_t mt = typeIdOf(f.type, f.line);
+                                    uint32_t ptrT = b.tPtr(base.sc, mt);
+                                    uint32_t r = ins(OpAccessChain, ptrT, {base.id, b.constI(idx)});
+                                    return {r, mt, base.sc};
+                                }
+                                idx++;
+                            }
+                            err("结构体 `" + bi.structName + "` 无成员 `" + e->text + "`", e->line);
+                        }
+                    }
                 }
-                err("shader 暂不支持该成员左值（多分量 swizzle 写/嵌套结构见 syntax-s §16 P0）", e->line);
+                err("shader 暂不支持该成员左值", e->line);
             }
             case Expr::Index: {
                 // 资源块运行时数组 YBuf.y[i] / 局部数组 pos[i] / 向量分量 v[i]
@@ -749,19 +872,22 @@ struct StageEmitter {
                     auto rb = resBlocks.find(e->a->text);
                     if (rb != resBlocks.end()) return load(lvalue(e));
                 }
-                // swizzle 读
+                // swizzle 读（仅当基类型为向量时生效，否则走结构体成员路径）
                 if (isSwz(e->text)) {
-                    Val base = rvalue(e->a.get());
-                    const TI& bi = b.info(base.type);
-                    if (bi.k != TI::Vec) err("`." + e->text + "` 作用于非向量", e->line);
-                    if (e->text.size() == 1)
-                        return {ins(OpCompositeExtract, bi.elem, {base.id, (uint32_t)swzIdx(e->text[0])}), bi.elem};
-                    uint32_t vt = b.tVec(bi.elem, (int)e->text.size());
-                    std::vector<uint32_t> ops = {base.id, base.id};
-                    for (char c : e->text) ops.push_back((uint32_t)swzIdx(c));
-                    return {ins(OpVectorShuffle, vt, ops), vt};
+                    // 先求基类型，再判断
+                    Val baseV = rvalue(e->a.get());
+                    const TI& bi = b.info(baseV.type);
+                    if (bi.k == TI::Vec) {
+                        if (e->text.size() == 1)
+                            return {ins(OpCompositeExtract, bi.elem, {baseV.id, (uint32_t)swzIdx(e->text[0])}), bi.elem};
+                        uint32_t vt = b.tVec(bi.elem, (int)e->text.size());
+                        std::vector<uint32_t> ops = {baseV.id, baseV.id};
+                        for (char c : e->text) ops.push_back((uint32_t)swzIdx(c));
+                        return {ins(OpVectorShuffle, vt, ops), vt};
+                    }
                 }
-                err("shader 暂不支持该成员访问（嵌套结构见 syntax-s §16 P0）", e->line);
+                // 用户结构体成员读（通用 lvalue + load）
+                return load(lvalue(e));
             }
             case Expr::Index:
                 return load(lvalue(e));
@@ -1004,11 +1130,38 @@ struct StageEmitter {
             if (total != st.n) err("`" + fn + "` 构造分量数不符", e->line);
             return {ins(OpCompositeConstruct, vt, ops), vt};
         }
+        // 用户结构体构造 T(field0, field1, ...)
+        if (!scTypeOf(fn, st) && structs.count(fn)) {
+            uint32_t stype = structTypeId(fn, e->line);
+            const Decl& sd = *structs.at(fn);
+            std::vector<uint32_t> ops;
+            size_t fi = 0;
+            for (const auto& f : sd.structCommon.fields) {
+                if (f.synthetic) continue;
+                if (fi >= args.size()) err("`" + fn + "` 构造缺少字段值", e->line);
+                uint32_t mt = typeIdOf(f.type, f.line);
+                ops.push_back(coerce(args[fi++], mt, e->line).id);
+            }
+            return {ins(OpCompositeConstruct, stype, ops), stype};
+        }
         // 标量转换 float(x)/int(x)/uint(x)
         if (scTypeOf(fn, st) && st.k != TI::Vec && st.k != TI::Mat && args.size() == 1) {
             uint32_t want = st.k == TI::F32 ? b.tF32() : st.k == TI::U32 ? b.tU32()
                           : st.k == TI::Bool ? b.tBool() : b.tI32();
             return coerce(args[0], want, e->line);
+        }
+        // 矩阵构造 matN(列0, 列1, ...)
+        if (scTypeOf(fn, st) && st.k == TI::Mat) {
+            uint32_t vt = b.tMat(st.n);
+            std::vector<uint32_t> cols;
+            uint32_t colt = b.tVec(b.tF32(), st.n);
+            for (auto& a : args) {
+                const TI& ti = b.info(a.type);
+                if (ti.k == TI::Vec && ti.n == st.n) cols.push_back(a.id);
+                else cols.push_back(coerce(a, colt, e->line).id);
+            }
+            if ((int)cols.size() != st.n) err("`" + fn + "` 矩阵列数不符", e->line);
+            return {ins(OpCompositeConstruct, vt, cols), vt};
         }
         // 纹理采样 texture(sampler, uv)
         if (fn == "texture" && args.size() == 2) {
@@ -1018,6 +1171,20 @@ struct StageEmitter {
             // 非 frag 无隐式导数：显式 Lod 0（ImageOperands Lod = 0x2）
             return {ins(OpImageSampleExplicitLod, v4,
                         {args[0].id, args[1].id, 0x2, b.constF(0.0f)}), v4};
+        }
+        // derivative：dFdx/dFdy/fwidth（frag 阶段门控）
+        if ((fn == "dFdx" || fn == "dFdy" || fn == "fwidth") && args.size() == 1) {
+            if (stage.shaderStage != ShaderStage::Frag)
+                err(fn + " 仅在 frag 阶段有效", e->line);
+            uint16_t code = fn == "dFdx" ? (uint16_t)207 : fn == "dFdy" ? (uint16_t)208 : (uint16_t)209;
+            // OpDPdx=207 OpDPdy=208 OpFwidth=209
+            return {ins(code, args[0].type, {args[0].id}), args[0].type};
+        }
+        // 矩阵运算（补全）：transpose/inverse/determinant
+        if (fn == "transpose" && args.size() == 1) {
+            const TI& ti = b.info(args[0].type);
+            if (ti.k != TI::Mat) err("transpose 须矩阵参数", e->line);
+            return {ins((uint16_t)84 /*OpTranspose*/, args[0].type, {args[0].id}), args[0].type};
         }
         // OpFunctionCall(内建函数均处理不到这里)
         if (fn == "dot" && args.size() == 2)
@@ -1461,13 +1628,27 @@ struct StageEmitter {
         setupResources();
         setupIO();
         if (scalarOutVar) {
-            // 记录标量输出值类型（absorbedTop 用）
             scalarOutType = typeIdOf(*stage.structCommon.type, stage.line);
         }
 
-        // 辅助函数（prog 里 shaderStage==None的 FuncD）在主入口之前发射
-        // （惰性解局：首次 call 时可能不知道哪些辅助函数会被用到，
-        //  为简单起见把全部辅助函数都发射）
+        // 全局 let 常量（编译期可折叠的顶层 let x = ...）作为 Function 变量，
+        // 在 setupIO 之后、辅助函数之前注入，全阶段可见
+        for (const auto& d : prog.decls) {
+            if (!d || d->kind != Decl::LetD) continue;
+            for (const auto& f : d->structCommon.fields) {
+                if (!f.init) continue;
+                uint32_t cid = constExpr(f.init.get());
+                if (!cid) continue;
+                uint32_t typeId = f.type.name.empty()
+                    ? (b.info(cid).k == TI::F32 ? b.tF32() : b.tI32())
+                    : typeIdOf(f.type, f.line);
+                uint32_t ptrT = b.tPtr(ScFunction, typeId);
+                uint32_t v = b.id();
+                put(funcVars, OpVariable, {ptrT, v, ScFunction, cid});
+                b.name(v, f.name);
+                vars[f.name] = {v, typeId, ScFunction};
+            }
+        }
         for (const auto& d : prog.decls)
             if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None)
                 emitHelper(*d);
