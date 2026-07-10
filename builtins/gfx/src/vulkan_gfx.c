@@ -47,6 +47,7 @@ typedef struct {
     VkImageView    view;
     VkFormat       format;
     int            width, height;
+    bool           borrowed;   /* memimg 绑定：image/mem 借自 gpu env，仅 own view */
 } GvkImage;
 
 typedef struct {
@@ -81,6 +82,10 @@ typedef struct {
     VkFormat           swapColor;
     VkFormat           swapDepth;
     bool               swapHasDepth;
+
+    /* 离屏渲染通道缓存（memimg 目标：finalLayout=TRANSFER_SRC 供回读） */
+    struct { VkRenderPass rp; VkFormat color; bool hasDepth; } offCache[8];
+    int                offCount;
 
     /* framebuffer 缓存（按颜色 view 键） */
     struct { VkImageView key; VkFramebuffer fb; VkImageView depthKey; } fbCache[16];
@@ -327,6 +332,8 @@ static void gvkShutdown(void) {
     for (int i = 0; i < g.fbCount; i++)
         if (g.fbCache[i].fb) vkDestroyFramebuffer(d, g.fbCache[i].fb, NULL);
     if (g.swapPass) vkDestroyRenderPass(d, g.swapPass, NULL);
+    for (int i = 0; i < g.offCount; i++)
+        if (g.offCache[i].rp) vkDestroyRenderPass(d, g.offCache[i].rp, NULL);
     for (int i = 0; i < GVK_INFLIGHT; i++) gvk_free_buffer(&g.ubo[i]);
     if (g.descPool) vkDestroyDescriptorPool(d, g.descPool, NULL);
     if (g.cmdPool)  vkDestroyCommandPool(d, g.cmdPool, NULL);
@@ -403,7 +410,7 @@ static VkRenderPass ensure_swap_pass(void) {
     return g.swapPass;
 }
 
-static VkFramebuffer ensure_framebuffer(VkImageView colorView, VkImageView depthView, VkExtent2D ext) {
+static VkFramebuffer ensure_framebuffer(VkRenderPass rp, VkImageView colorView, VkImageView depthView, VkExtent2D ext) {
     for (int i = 0; i < g.fbCount; i++)
         if (g.fbCache[i].key == colorView && g.fbCache[i].depthKey == depthView)
             return g.fbCache[i].fb;
@@ -411,10 +418,10 @@ static VkFramebuffer ensure_framebuffer(VkImageView colorView, VkImageView depth
     VkImageView atts[2];
     uint32_t n = 0;
     atts[n++] = colorView;
-    if (g.swapHasDepth && depthView) atts[n++] = depthView;
+    if (depthView) atts[n++] = depthView;
 
     VkFramebufferCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-    fci.renderPass = ensure_swap_pass();
+    fci.renderPass = rp;
     fci.attachmentCount = n;
     fci.pAttachments = atts;
     fci.width = ext.width;
@@ -429,6 +436,83 @@ static VkFramebuffer ensure_framebuffer(VkImageView colorView, VkImageView depth
         g.fbCount++;
     }
     return fb;
+}
+
+/* 离屏渲染通道（memimg 目标）：finalLayout=TRANSFER_SRC_OPTIMAL 供 map 拷贝回读。
+ * 兼容性只需附件格式/采样匹配——与交换链通道同格式的管线可跨用（Mode A）。 */
+static VkRenderPass ensure_offscreen_pass(VkFormat color, bool hasDepth) {
+    for (int i = 0; i < g.offCount; i++)
+        if (g.offCache[i].color == color && g.offCache[i].hasDepth == hasDepth)
+            return g.offCache[i].rp;
+
+    VkAttachmentDescription att[2];
+    memset(att, 0, sizeof(att));
+    att[0].format = color;
+    att[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    att[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    att[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    att[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    att[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    att[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    att[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    VkAttachmentReference colorRef = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkAttachmentReference depthRef = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDescription sub = { 0 };
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments = &colorRef;
+
+    uint32_t nAtt = 1;
+    if (hasDepth) {
+        att[1].format = sc_gpu_vk_depth_format();
+        if (att[1].format == VK_FORMAT_UNDEFINED) att[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        att[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        att[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        att[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        att[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        att[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        att[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        att[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        sub.pDepthStencilAttachment = &depthRef;
+        nAtt = 2;
+    }
+
+    /* 结束时颜色写完 → 供后续 transfer（memimg image→buffer 拷贝）读取 */
+    VkSubpassDependency dep[2];
+    memset(dep, 0, sizeof(dep));
+    dep[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dep[0].dstSubpass = 0;
+    dep[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                          VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                          VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep[0].srcAccessMask = 0;
+    dep[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                           VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dep[1].srcSubpass = 0;
+    dep[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dep[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dep[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    dep[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dep[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+    VkRenderPassCreateInfo rpci = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    rpci.attachmentCount = nAtt;
+    rpci.pAttachments = att;
+    rpci.subpassCount = 1;
+    rpci.pSubpasses = &sub;
+    rpci.dependencyCount = 2;
+    rpci.pDependencies = dep;
+    VkRenderPass rp = VK_NULL_HANDLE;
+    GVKCK(vkCreateRenderPass(g.dev->device, &rpci, NULL, &rp));
+    if (g.offCount < 8) {
+        g.offCache[g.offCount].rp = rp;
+        g.offCache[g.offCount].color = color;
+        g.offCache[g.offCount].hasDepth = hasDepth;
+        g.offCount++;
+    }
+    return rp;
 }
 
 /* 交换链尺寸变化时缓存的 framebuffer 失效（image view 被销毁） */
@@ -483,6 +567,26 @@ static bool gvkImageCreate(gfx_image_t* img) {
     im->height = img->desc.height;
     im->format = gvk_pixfmt(img->desc.format ? img->desc.format : SC_GPU_PIXELFORMAT_RGBA8);
 
+    /* Mode B：绑定 gpu env 的 memimg VkImage，仅建自有 view（不 own image/mem） */
+    if (img->desc.memimg) {
+        im->image = (VkImage)(uintptr_t)sc_gpu_memimg_native(img->desc.memimg);
+        if (!im->image) {
+            gfx_log("vulkan-gfx: memimg %u 无效", img->desc.memimg);
+            free(im); return false;
+        }
+        im->borrowed = true;
+        VkImageViewCreateInfo iv = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        iv.image = im->image;
+        iv.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        iv.format = im->format;
+        iv.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        iv.subresourceRange.levelCount = 1;
+        iv.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(d, &iv, NULL, &im->view) != VK_SUCCESS) { free(im); return false; }
+        img->backend = im;
+        return true;
+    }
+
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if (img->desc.render_target) usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
@@ -527,8 +631,10 @@ static void gvkImageDestroy(gfx_image_t* img) {
     if (!im) return;
     VkDevice d = g.dev->device;
     if (im->view)  vkDestroyImageView(d, im->view, NULL);
-    if (im->image) vkDestroyImage(d, im->image, NULL);
-    if (im->mem)   vkFreeMemory(d, im->mem, NULL);
+    if (!im->borrowed) {
+        if (im->image) vkDestroyImage(d, im->image, NULL);
+        if (im->mem)   vkFreeMemory(d, im->mem, NULL);
+    }
     free(im);
     img->backend = NULL;
 }
@@ -707,7 +813,17 @@ static bool gvkPipelineCreate(gfx_pipeline_t* pip) {
     }
 
     /* --- 图形管线 --- */
-    VkRenderPass rp = ensure_swap_pass();
+    /* renderpass 选择：无深度（depth.format=NONE，Mode B 离屏）→ 纯颜色离屏通道；
+     * 当前 MEMORY surface（Mode A）→ 与 begin_pass 同一离屏通道（保证 renderpass 一致）；
+     * 否则窗口 → 交换链呈现通道。 */
+    bool pipeHasDepth = (pip->desc.depth.format != SC_GPU_PIXELFORMAT_NONE);
+    VkRenderPass rp;
+    if (!pipeHasDepth)
+        rp = ensure_offscreen_pass(gvk_pixfmt(pip->desc.colors[0].format), false);
+    else if (sc_gpu_vk_current_is_memory())
+        rp = ensure_offscreen_pass(sc_gpu_vk_color_format(), true);
+    else
+        rp = ensure_swap_pass();
 
     VkPipelineShaderStageCreateInfo stages[2];
     memset(stages, 0, sizeof(stages));
@@ -862,29 +978,56 @@ static void gvkPipelineDestroy(gfx_pipeline_t* pip) {
 
 static void gvkBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[], int color_count,
                          gfx_image_t* resolve[], gfx_image_t* depth) {
-    (void)resolve; (void)depth;
-    if (color_count != 0 || pass->compute) {
-        gfx_log("vulkan-gfx: 离屏/计算 pass 暂不支持（仅交换链 pass）");
+    (void)resolve;
+    if (pass->compute) {
+        gfx_log("vulkan-gfx: 计算 pass 暂不支持");
         return;
     }
 
-    sc_gpu_frame frame;
-    if (!sc_gpu_frame_acquire(&frame)) {
-        gfx_log("vulkan-gfx: frame_acquire 失败");
-        return;
-    }
-    sc_gpu_vk_current_sync(&g.waitSem, &g.signalSem, &g.inFlight);
+    VkImageView colorView, depthView;
+    VkFormat colorFmt;
+    bool hasDepth;
+    bool present;   /* true=交换链呈现（信号量 + PRESENT_SRC）；false=离屏（TRANSFER_SRC 供回读） */
 
-    VkImageView colorView = (VkImageView)(uintptr_t)frame.color;
-    VkImageView depthView = (VkImageView)(uintptr_t)frame.depth;
-    g.curExtent.width = (uint32_t)frame.width;
-    g.curExtent.height = (uint32_t)frame.height;
-
-    /* 尺寸变化：作废旧 framebuffer 缓存（image view 已在 env 重建时销毁） */
-    if (g.fbCount > 0 && g.fbCache[0].fb) {
-        /* 校验缓存里的 view 是否仍有效：简单策略——首次不匹配即整体作废 */
+    if (color_count > 0) {
+        /* Mode B：显式离屏 color 附件（memimg 绑定的 gfx image） */
+        GvkImage* ci = (GvkImage*)colors[0]->backend;
+        if (!ci) { gfx_log("vulkan-gfx: 离屏 color 无效"); return; }
+        GvkImage* di = depth ? (GvkImage*)depth->backend : NULL;
+        colorView = ci->view;
+        colorFmt  = ci->format;
+        depthView = di ? di->view : VK_NULL_HANDLE;
+        hasDepth  = (depthView != VK_NULL_HANDLE);
+        g.curExtent.width  = (uint32_t)ci->width;
+        g.curExtent.height = (uint32_t)ci->height;
+        present = false;
+        sc_gpu_vk_current_sync(&g.waitSem, &g.signalSem, &g.inFlight);
+        /* 离屏无 frame_acquire 代劳栅栏——此处等/重置以复用命令缓冲 */
+        if (g.inFlight) {
+            vkWaitForFences(g.dev->device, 1, &g.inFlight, VK_TRUE, UINT64_MAX);
+            vkResetFences(g.dev->device, 1, &g.inFlight);
+        }
+    } else {
+        /* Mode A / 窗口：交换链风格 pass，从 env 取当前帧 view */
+        sc_gpu_frame frame;
+        if (!sc_gpu_frame_acquire(&frame)) {
+            gfx_log("vulkan-gfx: frame_acquire 失败");
+            return;
+        }
+        sc_gpu_vk_current_sync(&g.waitSem, &g.signalSem, &g.inFlight);
+        colorView = (VkImageView)(uintptr_t)frame.color;
+        depthView = (VkImageView)(uintptr_t)frame.depth;
+        colorFmt  = sc_gpu_vk_color_format();
+        if (colorFmt == VK_FORMAT_UNDEFINED) colorFmt = VK_FORMAT_B8G8R8A8_UNORM;
+        hasDepth  = (depthView != VK_NULL_HANDLE);
+        g.curExtent.width  = (uint32_t)frame.width;
+        g.curExtent.height = (uint32_t)frame.height;
+        present = !sc_gpu_vk_current_is_memory();   /* MEMORY surface → 离屏，不呈现 */
     }
-    VkFramebuffer fb = ensure_framebuffer(colorView, depthView, g.curExtent);
+
+    VkRenderPass rp = present ? ensure_swap_pass()
+                              : ensure_offscreen_pass(colorFmt, hasDepth);
+    VkFramebuffer fb = ensure_framebuffer(rp, colorView, depthView, g.curExtent);
 
     VkCommandBuffer cmd = g.cmd[g.frameIndex];
     g.curCmd = cmd;
@@ -900,7 +1043,7 @@ static void gvkBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[], int col
     clears[0].color.float32[2] = pass->action.colors[0].clear[2];
     clears[0].color.float32[3] = pass->action.colors[0].clear[3];
     uint32_t nClear = 1;
-    if (g.swapHasDepth) {
+    if (hasDepth) {
         float cd = pass->action.depth.clear_depth;
         clears[1].depthStencil.depth = (cd == 0.0f) ? 1.0f : cd;
         clears[1].depthStencil.stencil = pass->action.depth.clear_stencil;
@@ -908,7 +1051,7 @@ static void gvkBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[], int col
     }
 
     VkRenderPassBeginInfo rbi = { .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-    rbi.renderPass = ensure_swap_pass();
+    rbi.renderPass = rp;
     rbi.framebuffer = fb;
     rbi.renderArea.extent = g.curExtent;
     rbi.clearValueCount = nClear;
@@ -922,7 +1065,7 @@ static void gvkBeginPass(const sc_gfx_pass* pass, gfx_image_t* colors[], int col
     vkCmdSetScissor(cmd, 0, 1, &sc);
 
     g.inPass = true;
-    g.inSwapPass = true;
+    g.inSwapPass = present;
     g.curPipe = NULL;
     g.uboOffset = 0;
     memset(g.uboSet, 0, sizeof(g.uboSet));
@@ -1084,7 +1227,7 @@ static void gvkDispatch(int gx, int gy, int gz) {
 
 static void gvkEndPass(void) {
     if (!g.inPass) return;
-    if (g.inSwapPass) vkCmdEndRenderPass(g.curCmd);
+    vkCmdEndRenderPass(g.curCmd);   /* 交换链与离屏 pass 均开了 renderpass */
     g.inPass = false;
 }
 

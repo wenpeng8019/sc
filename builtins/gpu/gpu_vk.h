@@ -47,6 +47,10 @@ VkFormat sc_gpu_vk_color_format(void);
 /* 当前 surface 交换链的深度格式（无深度则 VK_FORMAT_UNDEFINED）。 */
 VkFormat sc_gpu_vk_depth_format(void);
 
+/* 当前 surface 是否 MEMORY（无表面/离屏）：gfx 据此选离屏渲染通道（finalLayout
+ * = TRANSFER_SRC 供 memimg 回读）而非交换链呈现通道，且提交不带交换链信号量。 */
+int sc_gpu_vk_current_is_memory(void);
+
 #ifdef __cplusplus
 }
 #endif

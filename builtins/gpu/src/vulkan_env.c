@@ -73,6 +73,7 @@ typedef struct VkSurfaceCtx {
     uint32_t         frameIndex;    /* 0..VK_INFLIGHT-1（在飞帧槽） */
     uint32_t         imageIndex;    /* 本帧 acquire 到的交换链镜像下标 */
     bool             acquired;
+    bool             memory;        /* MEMORY surface（无表面/离屏，memimg 环） */
 } VkSurfaceCtx;
 
 /* ---- 全局 env 状态 ---------------------------------------- */
@@ -83,9 +84,22 @@ typedef struct {
     bool             hasWayland;
     bool             hasWin32;
     VkSurfaceCtx*    cur;                  /* 当前 surface（sync 访问器用） */
+    VkCommandPool    utilPool;             /* 一次性命令（memimg 布局转换/回读拷贝） */
 } VkEnv;
 
 static VkEnv g_vk;
+
+/* ---- memimg 私有：离屏渲染目标 VkImage + 回读 staging ------- */
+typedef struct VkMemimg {
+    VkImage        image;
+    VkDeviceMemory mem;
+    VkImageView    view;      /* env 自有 view（gfx Mode B 另建借用 view） */
+    VkFormat       format;
+    int            w, h;
+    VkBuffer       staging;   /* 回读用 host-visible 缓冲（懒建） */
+    VkDeviceMemory stagingMem;
+    void*          mapped;    /* staging 持久映射 */
+} VkMemimg;
 
 /* ============================================================
  * 工具
@@ -300,6 +314,13 @@ static bool vkInit(const sc_gpu_desc* desc) {
     }
     vkGetDeviceQueue(g_vk.dev.device, g_vk.dev.queue_family, 0, &g_vk.dev.queue);
 
+    /* 一次性命令池（memimg 布局转换 / 回读拷贝用；瞬时缓冲，可复位） */
+    VkCommandPoolCreateInfo upci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    upci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT |
+                 VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    upci.queueFamilyIndex = g_vk.dev.queue_family;
+    vkCreateCommandPool(g_vk.dev.device, &upci, NULL, &g_vk.utilPool);
+
     g_vk.valid = true;
     return true;
 }
@@ -307,6 +328,7 @@ static bool vkInit(const sc_gpu_desc* desc) {
 static void vkShutdown(void) {
     if (!g_vk.valid) return;
     if (g_vk.dev.device) vkDeviceWaitIdle(g_vk.dev.device);
+    if (g_vk.utilPool) vkDestroyCommandPool(g_vk.dev.device, g_vk.utilPool, NULL);
     if (g_vk.dev.device) vkDestroyDevice(g_vk.dev.device, NULL);
     if (g_vk.dev.instance) vkDestroyInstance(g_vk.dev.instance, NULL);
     memset(&g_vk, 0, sizeof(g_vk));
@@ -464,14 +486,261 @@ static bool create_swapchain(VkSurfaceCtx* c, int w, int h, sc_gpu_pixel_format 
 }
 
 /* ============================================================
+ * memimg（离屏内存图像：VkImage + 回读 staging）
+ * ============================================================ */
+
+/* 一次性命令：utilPool 分配 → 录制 → 提交 → 等空闲 → 释放。 */
+static VkCommandBuffer vk_oneshot_begin(void) {
+    VkCommandBufferAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    ai.commandPool = g_vk.utilPool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(g_vk.dev.device, &ai, &cmd);
+    VkCommandBufferBeginInfo bi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &bi);
+    return cmd;
+}
+
+static void vk_oneshot_end(VkCommandBuffer cmd) {
+    vkEndCommandBuffer(cmd);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    vkQueueSubmit(g_vk.dev.queue, 1, &si, VK_NULL_HANDLE);
+    vkQueueWaitIdle(g_vk.dev.queue);
+    vkFreeCommandBuffers(g_vk.dev.device, g_vk.utilPool, 1, &cmd);
+}
+
+static bool vkMemimgAlloc(gpu_memimg_t* img) {
+    const sc_gpu_memimg_desc* d = &img->desc;
+    VkMemimg* m = (VkMemimg*)calloc(1, sizeof(VkMemimg));
+    if (!m) return false;
+    VkDevice dev = g_vk.dev.device;
+    m->w = d->width; m->h = d->height;
+    m->format = vk_color_format(d->format);
+
+    VkImageCreateInfo ic = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    ic.imageType = VK_IMAGE_TYPE_2D;
+    ic.format = m->format;
+    ic.extent.width = (uint32_t)(m->w > 0 ? m->w : 1);
+    ic.extent.height = (uint32_t)(m->h > 0 ? m->h : 1);
+    ic.extent.depth = 1;
+    ic.mipLevels = 1;
+    ic.arrayLayers = 1;
+    ic.samples = VK_SAMPLE_COUNT_1_BIT;
+    ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ic.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_SAMPLED_BIT;
+    ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(dev, &ic, NULL, &m->image) != VK_SUCCESS) { free(m); return false; }
+
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(dev, m->image, &mr);
+    VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(dev, &mai, NULL, &m->mem) != VK_SUCCESS) {
+        vkDestroyImage(dev, m->image, NULL); free(m); return false;
+    }
+    vkBindImageMemory(dev, m->image, m->mem, 0);
+
+    VkImageViewCreateInfo iv = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    iv.image = m->image;
+    iv.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    iv.format = m->format;
+    iv.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    iv.subresourceRange.levelCount = 1;
+    iv.subresourceRange.layerCount = 1;
+    vkCreateImageView(dev, &iv, NULL, &m->view);
+
+    /* UNDEFINED → TRANSFER_SRC_OPTIMAL：离屏 renderpass 与 map 拷贝统一以此为基态，
+     * map 前无需再 barrier（离屏 pass finalLayout 亦为 TRANSFER_SRC）。 */
+    VkCommandBuffer cmd = vk_oneshot_begin();
+    VkImageMemoryBarrier b = { .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = m->image;
+    b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b.subresourceRange.levelCount = 1;
+    b.subresourceRange.layerCount = 1;
+    b.srcAccessMask = 0;
+    b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &b);
+    vk_oneshot_end(cmd);
+
+    img->backend = m;
+    return true;
+}
+
+static bool vkMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
+    (void)img; (void)src;
+    gpu_log("vulkan: memimg import 暂不支持（需 VK_KHR_external_memory）");
+    return false;
+}
+
+static bool vkMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
+    VkMemimg* m = (VkMemimg*)img->backend;
+    if (!m) return false;
+    if (with_fence) vkDeviceWaitIdle(g_vk.dev.device);   /* 无导出 fence → CPU 同步 */
+    out->planes = 1;
+    out->fd[0] = -1;
+    out->stride[0] = (uint32_t)(m->w * 4);
+    out->offset[0] = 0;
+    out->fourcc = img->desc.fourcc;
+    out->width = m->w;
+    out->height = m->h;
+    out->sync_fd = -1;
+    out->native = NULL;   /* 无零拷贝原生句柄（需 external_memory_win32/fd，待补） */
+    return true;
+}
+
+static void* vkMemimgNative(gpu_memimg_t* img) {
+    VkMemimg* m = (VkMemimg*)img->backend;
+    return m ? (void*)(uintptr_t)m->image : NULL;   /* gfx Mode B 借此 VkImage 建 view */
+}
+
+static void* vkMemimgMap(gpu_memimg_t* img, int plane, uint32_t* out_stride) {
+    (void)plane;
+    VkMemimg* m = (VkMemimg*)img->backend;
+    if (!m) return NULL;
+    VkDevice dev = g_vk.dev.device;
+    size_t sz = (size_t)m->w * (size_t)m->h * 4;
+    if (!m->staging) {
+        VkBufferCreateInfo bi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bi.size = sz ? sz : 1;
+        bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(dev, &bi, NULL, &m->staging) != VK_SUCCESS) return NULL;
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(dev, m->staging, &mr);
+        VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (vkAllocateMemory(dev, &mai, NULL, &m->stagingMem) != VK_SUCCESS) {
+            vkDestroyBuffer(dev, m->staging, NULL); m->staging = VK_NULL_HANDLE; return NULL;
+        }
+        vkBindBufferMemory(dev, m->staging, m->stagingMem, 0);
+        vkMapMemory(dev, m->stagingMem, 0, VK_WHOLE_SIZE, 0, &m->mapped);
+    }
+    /* image(TRANSFER_SRC_OPTIMAL) → staging buffer 拷贝，紧密排布 */
+    VkCommandBuffer cmd = vk_oneshot_begin();
+    VkBufferImageCopy region;
+    memset(&region, 0, sizeof(region));
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width = (uint32_t)m->w;
+    region.imageExtent.height = (uint32_t)m->h;
+    region.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(cmd, m->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           m->staging, 1, &region);
+    vk_oneshot_end(cmd);
+    if (out_stride) *out_stride = (uint32_t)(m->w * 4);
+    return m->mapped;
+}
+
+static void vkMemimgUnmap(gpu_memimg_t* img, int plane) {
+    (void)img; (void)plane;   /* staging 随 memimg 生命期，unmap 空操作 */
+}
+
+static void vkMemimgFree(gpu_memimg_t* img) {
+    VkMemimg* m = (VkMemimg*)img->backend;
+    if (!m) return;
+    VkDevice dev = g_vk.dev.device;
+    if (m->mapped)     vkUnmapMemory(dev, m->stagingMem);
+    if (m->staging)    vkDestroyBuffer(dev, m->staging, NULL);
+    if (m->stagingMem) vkFreeMemory(dev, m->stagingMem, NULL);
+    if (m->view)       vkDestroyImageView(dev, m->view, NULL);
+    if (m->image)      vkDestroyImage(dev, m->image, NULL);
+    if (m->mem)        vkFreeMemory(dev, m->mem, NULL);
+    free(m);
+    img->backend = NULL;
+}
+
+/* MEMORY surface：无交换链/表面/信号量，仅共享深度 + 在飞栅栏；
+ * memimg 环由公共层预分配（surf->ring_imgs），本函数按需建深度与同步。 */
+static bool vkMemorySurfaceCreate(gpu_surface_t* surf) {
+    VkDevice d = g_vk.dev.device;
+    VkSurfaceCtx* c = (VkSurfaceCtx*)calloc(1, sizeof(VkSurfaceCtx));
+    if (!c) return false;
+    c->memory = true;
+    c->extent.width  = (uint32_t)surf->desc.width;
+    c->extent.height = (uint32_t)surf->desc.height;
+    c->colorFormat = vk_color_format(surf->desc.color_format);
+    c->imageCount = (uint32_t)surf->desc.image_count;
+
+    c->depthFormat = pick_depth_format(surf->desc.depth_format);
+    c->hasDepth = (c->depthFormat != VK_FORMAT_UNDEFINED);
+    if (c->hasDepth) {
+        VkImageCreateInfo ic = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ic.imageType = VK_IMAGE_TYPE_2D;
+        ic.format = c->depthFormat;
+        ic.extent.width = c->extent.width;
+        ic.extent.height = c->extent.height;
+        ic.extent.depth = 1;
+        ic.mipLevels = 1;
+        ic.arrayLayers = 1;
+        ic.samples = VK_SAMPLE_COUNT_1_BIT;
+        ic.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ic.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VKCK(vkCreateImage(d, &ic, NULL, &c->depthImage));
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(d, c->depthImage, &mr);
+        VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VKCK(vkAllocateMemory(d, &mai, NULL, &c->depthMem));
+        VKCK(vkBindImageMemory(d, c->depthImage, c->depthMem, 0));
+        bool stencil = (c->depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+                        c->depthFormat == VK_FORMAT_D24_UNORM_S8_UINT);
+        VkImageViewCreateInfo dv = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        dv.image = c->depthImage;
+        dv.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        dv.format = c->depthFormat;
+        dv.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT |
+            (stencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+        dv.subresourceRange.levelCount = 1;
+        dv.subresourceRange.layerCount = 1;
+        VKCK(vkCreateImageView(d, &dv, NULL, &c->depthView));
+    }
+
+    /* 在飞栅栏（SIGNALED：首次 wait 直接通过） */
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    for (int i = 0; i < VK_INFLIGHT; i++)
+        VKCK(vkCreateFence(d, &fci, NULL, &c->inFlight[i]));
+    c->frameIndex = 0;
+    c->acquired = false;
+
+    surf->backend = c;
+    if (!g_vk.cur) g_vk.cur = c;
+    gpu_log("vulkan: MEMORY surface 就绪 (%ux%u, %u 镜像环)",
+            c->extent.width, c->extent.height, c->imageCount);
+    return true;
+}
+
+static bool vkSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
+    gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[slot]);
+    if (!img) return false;
+    return vkMemimgExport(img, out, false);   /* commit 后 demo 已 gfx_finish */
+}
+
+/* ============================================================
  * surface 生命周期
  * ============================================================ */
 
 static bool vkSurfaceCreate(gpu_surface_t* surf) {
-    if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-        gpu_log("vulkan: MEMORY surface（memimg 环）暂不支持");
-        return false;
-    }
+    if (surf->desc.kind == SC_GPU_SURFACE_MEMORY)
+        return vkMemorySurfaceCreate(surf);
     if (!surf->desc.native_window) {
         gpu_log("vulkan: WINDOW surface 缺 native_window");
         return false;
@@ -612,9 +881,30 @@ static void vkSurfaceResize(gpu_surface_t* surf, int w, int h) {
 
 static bool vkFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* out) {
     VkSurfaceCtx* c = (VkSurfaceCtx*)surf->backend;
-    if (!c || !c->swapchain) return false;
+    if (!c) return false;
     g_vk.cur = c;
     VkDevice d = g_vk.dev.device;
+
+    if (c->memory) {
+        if (surf->ring_cur < 0) return false;
+        uint32_t mfi = c->frameIndex;
+        vkWaitForFences(d, 1, &c->inFlight[mfi], VK_TRUE, UINT64_MAX);
+        vkResetFences(d, 1, &c->inFlight[mfi]);
+        gpu_memimg_t* mi = gpu_lookup_memimg(surf->ring_imgs[surf->ring_cur]);
+        VkMemimg* m = mi ? (VkMemimg*)mi->backend : NULL;
+        if (!m) return false;
+        memset(out, 0, sizeof(*out));
+        out->color = (void*)(uintptr_t)m->view;
+        out->depth = c->hasDepth ? (void*)(uintptr_t)c->depthView : NULL;
+        out->width = m->w;
+        out->height = m->h;
+        out->sample_count = 1;
+        out->color_format = surf->desc.color_format;
+        out->depth_format = c->hasDepth ? surf->desc.depth_format : SC_GPU_PIXELFORMAT_NONE;
+        c->acquired = true;
+        return true;
+    }
+    if (!c->swapchain) return false;
 
     uint32_t fi = c->frameIndex;
     vkWaitForFences(d, 1, &c->inFlight[fi], VK_TRUE, UINT64_MAX);
@@ -647,6 +937,13 @@ static bool vkFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* out) {
 static void vkFrameEnd(void) {
     VkSurfaceCtx* c = g_vk.cur;
     if (!c || !c->acquired) return;
+
+    if (c->memory) {
+        /* 无表面：无 present，仅推进在飞帧槽（环推进由公共层负责） */
+        c->frameIndex = (c->frameIndex + 1) % VK_INFLIGHT;
+        c->acquired = false;
+        return;
+    }
     uint32_t fi = c->frameIndex;
 
     VkPresentInfoKHR pi = { .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
@@ -679,7 +976,12 @@ static void vkFrameEnd(void) {
 
 void sc_gpu_vk_current_sync(VkSemaphore* out_wait, VkSemaphore* out_signal, VkFence* out_fence) {
     VkSurfaceCtx* c = g_vk.cur;
-    if (c) {
+    if (c && c->memory) {
+        /* 无表面：不带交换链信号量，仅在飞栅栏供 gfx 提交与回读同步 */
+        if (out_wait)   *out_wait   = VK_NULL_HANDLE;
+        if (out_signal) *out_signal = VK_NULL_HANDLE;
+        if (out_fence)  *out_fence  = c->inFlight[c->frameIndex];
+    } else if (c) {
         uint32_t fi = c->frameIndex;
         if (out_wait)   *out_wait   = c->imgAvail[fi];
         if (out_signal) *out_signal = c->renderDone[c->imageIndex];
@@ -699,6 +1001,10 @@ VkFormat sc_gpu_vk_depth_format(void) {
     return (g_vk.cur && g_vk.cur->hasDepth) ? g_vk.cur->depthFormat : VK_FORMAT_UNDEFINED;
 }
 
+int sc_gpu_vk_current_is_memory(void) {
+    return (g_vk.cur && g_vk.cur->memory) ? 1 : 0;
+}
+
 /* ============================================================
  * vtable
  * ============================================================ */
@@ -715,7 +1021,14 @@ static const gpu_env_api vulkanApi = {
     .surface_resize = vkSurfaceResize,
     .frame_acquire = vkFrameAcquire,
     .frame_end = vkFrameEnd,
-    /* memimg / MEMORY surface 暂不支持：全 NULL */
+    .memimg_alloc = vkMemimgAlloc,
+    .memimg_import = vkMemimgImport,
+    .memimg_export = vkMemimgExport,
+    .memimg_native = vkMemimgNative,
+    .memimg_map = vkMemimgMap,
+    .memimg_unmap = vkMemimgUnmap,
+    .memimg_free = vkMemimgFree,
+    .surface_dequeue = vkSurfaceDequeue,
 };
 
 const gpu_env_api* gpu_env_vulkan(void) { return &vulkanApi; }
