@@ -14,6 +14,7 @@
 #ifdef SC_GPU_D3D11
 
 #include "../gpu_d3d.h"     /* COBJMACROS + d3d11.h + dxgi1_2.h */
+#include <d3d11_1.h>        /* ID3D11Device1::OpenSharedResource1（memimg import） */
 #include <stdlib.h>
 #include <string.h>
 
@@ -194,9 +195,34 @@ static bool d3dMemimgAlloc(gpu_memimg_t* img) {
 }
 
 static bool d3dMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
-    (void)img; (void)src;
-    gpu_log("d3d11: memimg import 暂不支持（需 OpenSharedResource1 路径）");
-    return false;
+    /* 导入外部共享 NT 句柄（另一进程/后端导出的 D3D 纹理）→ 别名同一底层内存。
+     * 句柄借用语义：不 CloseHandle（归导出方）；仅释放本地 OpenSharedResource1 的引用。 */
+    if (!src || !src->native) {
+        gpu_log("d3d11: memimg import 需 native=共享 NT 句柄");
+        return false;
+    }
+    ID3D11Device1* dev1 = NULL;
+    if (FAILED(ID3D11Device_QueryInterface(g_d3d.dev.device, &IID_ID3D11Device1, (void**)&dev1)) || !dev1) {
+        gpu_log("d3d11: 取 ID3D11Device1 失败（import 需 D3D11.1）");
+        return false;
+    }
+    ID3D11Texture2D* tex = NULL;
+    HRESULT hr = ID3D11Device1_OpenSharedResource1(dev1, (HANDLE)src->native,
+                                                   &IID_ID3D11Texture2D, (void**)&tex);
+    ID3D11Device1_Release(dev1);
+    if (FAILED(hr) || !tex) {
+        gpu_log("d3d11: OpenSharedResource1 失败 (hr=0x%08lX)", (unsigned long)hr);
+        return false;
+    }
+    D3dMemimg* m = (D3dMemimg*)calloc(1, sizeof(D3dMemimg));
+    if (!m) { ID3D11Texture2D_Release(tex); return false; }
+    m->tex = tex;   /* exportable=false、shared=NULL：free 只 Release 纹理、不 CloseHandle */
+    D3D11_TEXTURE2D_DESC td; ID3D11Texture2D_GetDesc(tex, &td);
+    m->w = (int)td.Width; m->h = (int)td.Height;
+    if (td.BindFlags & D3D11_BIND_RENDER_TARGET)
+        ID3D11Device_CreateRenderTargetView(g_d3d.dev.device, (ID3D11Resource*)m->tex, NULL, &m->rtv);
+    img->backend = m;
+    return true;
 }
 
 static bool d3dMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {

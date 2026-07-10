@@ -220,6 +220,22 @@ fnc main: i4
     save_ppm("sc_headless_b.ppm", pix2, stride)
     gpu_memimg_unmap(mimg, 0)
 
+    # ---- Mode C：import 往返（把 Mode B 导出的句柄再导入成新 memimg，验证零拷贝别名同内存）----
+    if frm2.native != nil
+        var imp: u4 = gpu_memimg_import(&frm2)
+        if imp != 0
+            var strideC: u4 = 0
+            var pixC: char& = (gpu_memimg_map(imp, 0, &strideC): char&)
+            if pixC != nil
+                save_ppm("sc_headless_c.ppm", pixC, strideC)
+                gpu_memimg_unmap(imp, 0)
+                print "Mode C import 往返: 导入句柄映射成功 → sc_headless_c.ppm\n"
+            gpu_memimg_free(imp)
+        else
+            print "Mode C import: 本后端不支持导入（跳过）\n"
+    else
+        print "Mode C import: 无原生句柄可导入（跳过）\n"
+
     # ---- 清理（先 gfx 后 gpu） ----
     gfx_destroy_image(tgt)
     gfx_destroy_pipeline(pip2)
