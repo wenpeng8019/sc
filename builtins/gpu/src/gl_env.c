@@ -21,6 +21,7 @@
 #include "internal.h"   /* 先引入：后端宏按目标平台自推导（见 internal.h） */
 #ifdef SC_GPU_GL
 
+#define COBJMACROS       /* D3D11/DXGI 的 C 风格接口宏（ID3D11Device_XXX，WGL_NV_DX_interop2 用） */
 #include "gl_ctx.h"
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,21 @@
   typedef void (*PFN_scEGLImageTargetTexture2DOES)(GLenum target, void* image);
 #elif P_WIN
   #include "gl_win.h"                 /* 桌面 GL：windows.h + GL/gl.h + GL 1.2+ 加载器 */
+  #include <d3d11.h>                  /* WGL_NV_DX_interop2 零拷贝导出：D3D11 共享纹理 */
+  #include <dxgi1_2.h>                /* IDXGIResource1::CreateSharedHandle（NT 句柄） */
+  /* WGL_NV_DX_interop2 常量 + 入口点（经 wglGetProcAddress 装载） */
+  #ifndef WGL_ACCESS_READ_WRITE_NV
+  #define WGL_ACCESS_READ_ONLY_NV     0x00000000
+  #define WGL_ACCESS_READ_WRITE_NV    0x00000001
+  #define WGL_ACCESS_WRITE_DISCARD_NV 0x00000002
+  #endif
+  typedef HANDLE (WINAPI *PFN_wglDXOpenDeviceNV)(void* dxDevice);
+  typedef BOOL   (WINAPI *PFN_wglDXCloseDeviceNV)(HANDLE hDevice);
+  typedef HANDLE (WINAPI *PFN_wglDXRegisterObjectNV)(HANDLE hDevice, void* dxObject,
+                                                     GLuint name, GLenum type, GLenum access);
+  typedef BOOL   (WINAPI *PFN_wglDXUnregisterObjectNV)(HANDLE hDevice, HANDLE hObject);
+  typedef BOOL   (WINAPI *PFN_wglDXLockObjectsNV)(HANDLE hDevice, GLint count, HANDLE* hObjects);
+  typedef BOOL   (WINAPI *PFN_wglDXUnlockObjectsNV)(HANDLE hDevice, GLint count, HANDLE* hObjects);
 #endif
 
 #define GL_MAX_ACQUIRED 16
@@ -86,6 +102,19 @@ static struct {
 #if P_LINUX
     PFN_scEGLImageTargetTexture2DOES pImageTarget;
 #endif
+#if P_WIN
+    /* WGL_NV_DX_interop2 零拷贝导出：D3D11 设备 + 互操作设备 + 入口点（懒初始化） */
+    ID3D11Device*        d3dDev;
+    ID3D11DeviceContext* d3dCtx;
+    HANDLE               interopDev;
+    bool                 interopTried;
+    PFN_wglDXOpenDeviceNV       pDXOpen;
+    PFN_wglDXCloseDeviceNV      pDXClose;
+    PFN_wglDXRegisterObjectNV   pDXReg;
+    PFN_wglDXUnregisterObjectNV pDXUnreg;
+    PFN_wglDXLockObjectsNV      pDXLock;
+    PFN_wglDXUnlockObjectsNV    pDXUnlock;
+#endif
 } env;
 
 /* ---- init/shutdown ----------------------------------------- */
@@ -99,6 +128,14 @@ static bool glInit(const sc_gpu_desc* desc) {
 static void glShutdown(void) {
 #if P_LINUX
     gl_egl_shutdown();
+#endif
+#if P_WIN
+    if (env.interopDev && env.pDXClose) {
+        if (env.headlessCtx) gl_ctx_make_current(env.headlessCtx);
+        env.pDXClose(env.interopDev);
+    }
+    if (env.d3dCtx) ID3D11DeviceContext_Release(env.d3dCtx);
+    if (env.d3dDev) ID3D11Device_Release(env.d3dDev);
 #endif
 #if P_DARWIN || P_WIN
     if (env.headlessCtx) {
@@ -272,6 +309,11 @@ typedef struct GlWinMemimg {
     GLuint roFbo;    /* 回读用 FBO（懒建） */
     int    w, h;
     void*  cpu;      /* 回读缓冲（w*h*4，BGRA） */
+    /* WGL_NV_DX_interop2 零拷贝导出（互操作可用时；否则全 NULL，退化 CPU 回读） */
+    ID3D11Texture2D* d3dTex;   /* 共享 D3D11 纹理（与 tex 互操作，GL 渲染即写入） */
+    HANDLE           interop;  /* wglDXRegisterObjectNV 句柄 */
+    HANDLE           shared;   /* 导出的共享 NT 句柄（借用；free 时 CloseHandle） */
+    bool             locked;   /* 当前是否 lock 给 GL（渲染/回读需 locked，导出需 unlocked） */
 } GlWinMemimg;
 
 /* headless 上下文（首次需要时创建：隐藏窗口 WGL）+ make current */
@@ -288,6 +330,47 @@ static bool winHeadlessCurrent(void) {
     gl_ctx_make_current(env.headlessCtx);
     glBindVertexArray(env.headlessVao);
     return true;
+}
+
+/* WGL_NV_DX_interop2 懒初始化：D3D11 设备 + 互操作设备 + 入口点装载。
+ * 首次 memimg alloc 时调用；不可用则退化为普通 GL 纹理（仅 CPU 回读，native=NULL）。 */
+static bool winInteropEnsure(void) {
+    if (env.interopTried) return env.interopDev != NULL;
+    env.interopTried = true;
+    env.pDXOpen   = (PFN_wglDXOpenDeviceNV)wglGetProcAddress("wglDXOpenDeviceNV");
+    env.pDXClose  = (PFN_wglDXCloseDeviceNV)wglGetProcAddress("wglDXCloseDeviceNV");
+    env.pDXReg    = (PFN_wglDXRegisterObjectNV)wglGetProcAddress("wglDXRegisterObjectNV");
+    env.pDXUnreg  = (PFN_wglDXUnregisterObjectNV)wglGetProcAddress("wglDXUnregisterObjectNV");
+    env.pDXLock   = (PFN_wglDXLockObjectsNV)wglGetProcAddress("wglDXLockObjectsNV");
+    env.pDXUnlock = (PFN_wglDXUnlockObjectsNV)wglGetProcAddress("wglDXUnlockObjectsNV");
+    if (!env.pDXOpen || !env.pDXReg || !env.pDXUnreg || !env.pDXLock || !env.pDXUnlock) {
+        gpu_log("gl: WGL_NV_DX_interop2 不可用，memimg 退化为 CPU 回读（无零拷贝导出）");
+        return false;
+    }
+    D3D_FEATURE_LEVEL fl;
+    HRESULT hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL,
+                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT, NULL, 0,
+                                   D3D11_SDK_VERSION, &env.d3dDev, &fl, &env.d3dCtx);
+    if (FAILED(hr) || !env.d3dDev) { gpu_log("gl: D3D11CreateDevice 失败"); return false; }
+    env.interopDev = env.pDXOpen(env.d3dDev);
+    if (!env.interopDev) { gpu_log("gl: wglDXOpenDeviceNV 失败"); return false; }
+    gpu_log("gl: memimg 零拷贝导出可用（WGL_NV_DX_interop2 + D3D11 共享句柄）");
+    return true;
+}
+
+/* interop 对象锁：GL 渲染/回读需 locked；导出给消费者前 unlock（flush GL→D3D 一致）。 */
+static void winMemimgLock(GlWinMemimg* m) {
+    if (m && m->interop && !m->locked) {
+        env.pDXLock(env.interopDev, 1, &m->interop);
+        m->locked = true;
+    }
+}
+static void winMemimgUnlock(GlWinMemimg* m) {
+    if (m && m->interop && m->locked) {
+        glFlush();
+        env.pDXUnlock(env.interopDev, 1, &m->interop);
+        m->locked = false;
+    }
 }
 
 /* MEMORY surface（win）：headless 上下文 + 每槽 memimg tex+FBO（+ 共享深度 rbo） */
@@ -464,6 +547,12 @@ static bool glFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
 #if P_LINUX || P_DARWIN || P_WIN
         if (surf->ring_cur < 0) return false;
         f->gl_fbo = s->ringFbo[surf->ring_cur];
+#if P_WIN
+        {   /* interop 环槽：渲染前锁给 GL（可能被上帧 export 解锁） */
+            gpu_memimg_t* mi = gpu_lookup_memimg(surf->ring_imgs[surf->ring_cur]);
+            if (mi) winMemimgLock((GlWinMemimg*)mi->backend);
+        }
+#endif
         f->width = surf->desc.width;
         f->height = surf->desc.height;
         f->sample_count = 1;
@@ -684,6 +773,42 @@ static bool glMemimgAlloc(gpu_memimg_t* img) {
     GlWinMemimg* m = (GlWinMemimg*)calloc(1, sizeof(GlWinMemimg));
     if (!m) return false;
     m->w = d->width; m->h = d->height;
+
+    /* 零拷贝路径：D3D11 共享纹理 ↔ GL 纹理（WGL_NV_DX_interop2）。
+     * GL 纹理存储来自 D3D（不调 glTexImage2D）；register 后锁给 GL 供首次渲染。 */
+    if (winInteropEnsure()) {
+        D3D11_TEXTURE2D_DESC td;
+        memset(&td, 0, sizeof(td));
+        td.Width = (UINT)m->w; td.Height = (UINT)m->h;
+        td.MipLevels = 1; td.ArraySize = 1;
+        td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        td.SampleDesc.Count = 1;
+        td.Usage = D3D11_USAGE_DEFAULT;
+        td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED;
+        if (SUCCEEDED(ID3D11Device_CreateTexture2D(env.d3dDev, &td, NULL, &m->d3dTex)) && m->d3dTex) {
+            glGenTextures(1, &m->tex);
+            m->interop = env.pDXReg(env.interopDev, m->d3dTex, m->tex,
+                                    GL_TEXTURE_2D, WGL_ACCESS_READ_WRITE_NV);
+            if (m->interop) {
+                IDXGIResource1* res = NULL;
+                if (SUCCEEDED(ID3D11Texture2D_QueryInterface(m->d3dTex, &IID_IDXGIResource1,
+                                                             (void**)&res)) && res) {
+                    IDXGIResource1_CreateSharedHandle(res, NULL,
+                        DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, NULL, &m->shared);
+                    IDXGIResource1_Release(res);
+                }
+                winMemimgLock(m);   /* 锁给 GL：首次渲染即可用 */
+                img->backend = m;
+                return true;
+            }
+            gpu_log("gl: wglDXRegisterObjectNV 失败，退化普通纹理");
+            if (m->tex) { glDeleteTextures(1, &m->tex); m->tex = 0; }
+            ID3D11Texture2D_Release(m->d3dTex); m->d3dTex = NULL;
+        }
+    }
+
+    /* 退化：普通 GL 纹理（仅 CPU 回读，native=NULL） */
     glGenTextures(1, &m->tex);
     glBindTexture(GL_TEXTURE_2D, m->tex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m->w, m->h, 0,
@@ -704,6 +829,7 @@ static bool glMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool wit
     GlWinMemimg* m = (GlWinMemimg*)img->backend;
     if (!m) return false;
     if (with_fence) glFinish();   /* 无导出 fence → CPU 同步 */
+    winMemimgUnlock(m);           /* flush GL→D3D 并解锁：共享句柄内容一致供消费者 */
     out->planes = 1;
     out->fd[0] = -1;
     out->stride[0] = (uint32_t)(m->w * 4);
@@ -712,7 +838,9 @@ static bool glMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool wit
     out->width = m->w;
     out->height = m->h;
     out->sync_fd = -1;
-    out->native = NULL;   /* 无零拷贝原生句柄（Windows 需 D3D 互操作，待补） */
+    out->native = m->shared;   /* 共享 NT 句柄（可导入 D3D / 送编码器）；无互操作则 NULL */
+    if (m->shared)
+        gpu_log("gl: memimg 导出共享 NT 句柄 %p (%dx%d 零拷贝)", m->shared, m->w, m->h);
     return true;
 }
 
@@ -727,6 +855,7 @@ static void* glMemimgMap(gpu_memimg_t* img, int plane, uint32_t* out_stride) {
     if (!m) return NULL;
     if (!m->cpu) m->cpu = malloc((size_t)m->w * (size_t)m->h * 4);
     if (!m->cpu) return NULL;
+    winMemimgLock(m);   /* glReadPixels 需 GL 拥有（可能被 export 解锁过） */
     if (!m->roFbo) glGenFramebuffers(1, &m->roFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, m->roFbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m->tex, 0);
@@ -745,6 +874,12 @@ static void glMemimgUnmap(gpu_memimg_t* img, int plane) {
 static void glMemimgFree(gpu_memimg_t* img) {
     GlWinMemimg* m = (GlWinMemimg*)img->backend;
     if (!m) return;
+    if (m->interop) {
+        if (m->locked) env.pDXUnlock(env.interopDev, 1, &m->interop);
+        env.pDXUnreg(env.interopDev, m->interop);
+    }
+    if (m->shared) CloseHandle(m->shared);
+    if (m->d3dTex) ID3D11Texture2D_Release(m->d3dTex);
     if (m->roFbo) glDeleteFramebuffers(1, &m->roFbo);
     if (m->tex) glDeleteTextures(1, &m->tex);
     free(m->cpu);
