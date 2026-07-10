@@ -76,5 +76,36 @@ if ($probe -match 'linux') {
     Write-Host "wayland protocol headers generated -> $WlProtoDir"
 }
 
+# host build (no --target/-o) emits a bare lib<name>.a. Rename it to the triple-tagged
+# delivery variant lib<name>.<triple>.a (committable), then make lib<name>.a an alias so a
+# host demo build (which resolves `add lib<name>.a` to the bare name) still finds it --
+# effectively producing the host platform's target variant. Cross/explicit -o builds are
+# already named by scc, so skip. Triple: $SCC_TARGET_SUFFIX > $SCC_TARGET_TRIPLE > derived.
+# Windows has no unprivileged symlinks, so the alias is a file copy (lib<name>.a is gitignored).
+$name  = Split-Path -Leaf $ScriptDir
+$plain = "lib$name.a"
+$cross = ($args -contains '--target') -or ($args -contains '-o')
+if (-not $cross -and (Test-Path $plain)) { Remove-Item -Force $plain }  # drop stale alias -> scc emits a real file
+
 & $Scc . --build @args
-exit $LASTEXITCODE
+$rc = $LASTEXITCODE
+if ($rc -ne 0) { exit $rc }
+
+if (-not $cross -and (Test-Path $plain)) {
+    $triple = $env:SCC_TARGET_SUFFIX
+    if (-not $triple) { $triple = $env:SCC_TARGET_TRIPLE }
+    if (-not $triple) {
+        $arch = switch ($env:VSCMD_ARG_TGT_ARCH) {
+            'x64'   { 'x86_64' }
+            'arm64' { 'aarch64' }
+            'x86'   { 'i686' }
+            default { if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' } }
+        }
+        $triple = "$arch-pc-windows-msvc"   # matches templates/targets/windows-x64.target
+    }
+    $variant = "lib$name.$triple.a"
+    Move-Item -Force $plain $variant
+    Copy-Item -Force $variant $plain
+    Write-Host "  -> $variant (+ alias $plain)"
+}
+exit $rc
