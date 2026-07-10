@@ -82,11 +82,12 @@ function findScc() {
     const cfg = vscode.workspace.getConfiguration('sc').get('sccPath') ||
                 vscode.workspace.getConfiguration('scAst').get('sccPath');
     if (cfg) return cfg;
+    const exe = process.platform === 'win32' ? 'scc.exe' : 'scc';
     for (const f of vscode.workspace.workspaceFolders || []) {
-        const p = path.join(f.uri.fsPath, 'compiler', 'build', 'scc');
+        const p = path.join(f.uri.fsPath, 'compiler', 'build', exe);
         if (fs.existsSync(p)) return p;
     }
-    return 'scc';
+    return exe;
 }
 
 function runScc(args, input) {
