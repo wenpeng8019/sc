@@ -21,6 +21,7 @@ add src/null_gfx.c
 add src/gl_gfx.c
 add src/metal_gfx.m
 add src/vulkan_gfx.c
+add src/d3d11_gfx.c
 
 # === 生命周期 ===
 @fnc gfx_init:: i4, desc: const ::sc_gfx_desc&

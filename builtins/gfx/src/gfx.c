@@ -219,6 +219,12 @@ static const gfx_backend_api* pickBackend(void) {
 #else
             return NULL;
 #endif
+        case SC_GPU_BACKEND_D3D11:
+#ifdef SC_GPU_D3D11
+            return gfx_backend_d3d11();
+#else
+            return NULL;
+#endif
         case SC_GPU_BACKEND_NULL:
         default:
             return gfx_backend_null();

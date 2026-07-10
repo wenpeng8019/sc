@@ -196,6 +196,9 @@ const gfx_backend_api* gfx_backend_gl(void);
 #ifdef SC_GPU_VULKAN
 const gfx_backend_api* gfx_backend_vulkan(void);
 #endif
+#ifdef SC_GPU_D3D11
+const gfx_backend_api* gfx_backend_d3d11(void);
+#endif
 const gfx_backend_api* gfx_backend_null(void);
 
 /* ---- 全局状态 --------------------------------------------- */

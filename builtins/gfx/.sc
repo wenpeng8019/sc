@@ -12,8 +12,9 @@ ldflags = -lGLESv2 -lEGL -lgbm
 [windows]
 # WGL 桌面 GL：GL 函数 = opengl32（与 gpu 同链一套，重复自去重）。
 # Vulkan 头自包含（inc 指向 gpu/khr），运行时动态加载，无 -lvulkan-1。
+# D3D11 后端：d3d11 + dxgi（设备/交换链）+ d3dcompiler（HLSL→DXBC 运行时编译）。
 inc     = ../gpu/khr
-ldflags = -lopengl32
+ldflags = -lopengl32 -ld3d11 -ldxgi -ld3dcompiler
 
 [linux]
 inc     = ../gpu/khr

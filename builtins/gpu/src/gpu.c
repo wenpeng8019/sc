@@ -124,6 +124,12 @@ static const gpu_env_api* pickBackend(sc_gpu_backend want) {
 #else
             return NULL;
 #endif
+        case SC_GPU_BACKEND_D3D11:
+#ifdef SC_GPU_D3D11
+            return gpu_env_d3d11();
+#else
+            return NULL;
+#endif
         case SC_GPU_BACKEND_NULL:
             return gpu_env_null();
         case SC_GPU_BACKEND_DEFAULT:
