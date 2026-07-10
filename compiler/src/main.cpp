@@ -588,6 +588,18 @@ static std::string pickCC();
 static std::string pickCXX();
 static std::filesystem::path findBuiltinsDir(const std::filesystem::path& start);
 
+// MSVC 本地命令行生成辅助：结构体在此定义、函数前向声明（供 buildModuleLib 提前使用；
+//   完整定义在 pickCXX 之后的「MSVC 命令行生成」区）。
+struct MsvcFlags { std::string cflags, libs, libdirs; };
+static bool ccIsMsvc(const std::string& cc);
+static std::string q(const std::string& s);
+static MsvcFlags translateGccFlags(const std::string& gcc);
+static std::string ccCompileCmd(const std::string& cc, bool msvc,
+                                const std::string& gccFlags,
+                                const std::vector<std::filesystem::path>& incDirs,
+                                const std::filesystem::path& src,
+                                const std::filesystem::path& obj);
+
 static int buildModuleLib(const std::filesystem::path& moduleDir,
                           std::string output, const ToolConfig& tc) {
     namespace fs = std::filesystem;
@@ -633,18 +645,31 @@ static int buildModuleLib(const std::filesystem::path& moduleDir,
     const fs::path tmpDir = host::makeTempDir("scc_modlib");
     if (tmpDir.empty()) { std::cerr << "错误: 无法创建临时目录\n"; return 1; }
 
+    // 工具链风格：MSVC（cl+lib.exe）vs gcc（cc/ar）。对象扩展名随之。
+    const std::string ccModC = pickCC();
+    const std::string ccModCxx = pickCXX();
+    const bool msvc = ccIsMsvc(ccModC);
+    const std::string objExt = msvc ? ".obj" : ".o";
+
     std::vector<fs::path> objs;
     for (auto& s : srcs) {
-        const fs::path o = tmpDir / (s.stem().string() + ".o");
+        const fs::path o = tmpDir / (s.stem().string() + objExt);
         const std::string ext = s.extension().string();
         const bool isCxx = (ext == ".cpp" || ext == ".cc" || ext == ".cxx");
-        std::string lang;
-        if (ext == ".m")
-            lang = targetDarwin ? " -fobjc-arc -x objective-c" : " -x c";
-        // lang 在模块段 cflags 之前：默认 ARC 可被段配置 -fno-objc-arc 覆盖（MRC 源）
-        std::string cmd = (isCxx ? pickCXX() : pickCC()) + " -O2 -g" + tc.machine
-            + tc.cflags + lang + mc.cflags + (shared ? " -fPIC" : "") + incs
-            + " -c " + s.string() + " -o " + o.string();
+        std::string cmd;
+        if (msvc) {
+            // MSVC：cl 按扩展名自判 C/C++（.m ObjC 不支持，由平台段配置避开）；incs 经翻译层转 /I
+            cmd = ccCompileCmd(isCxx ? ccModCxx : ccModC, true,
+                tc.cflags + mc.cflags + tc.machine + incs, {}, s, o);
+        } else {
+            std::string lang;
+            if (ext == ".m")
+                lang = targetDarwin ? " -fobjc-arc -x objective-c" : " -x c";
+            // lang 在模块段 cflags 之前：默认 ARC 可被段配置 -fno-objc-arc 覆盖（MRC 源）
+            cmd = (isCxx ? ccModCxx : ccModC) + " -O2 -g" + tc.machine
+                + tc.cflags + lang + mc.cflags + (shared ? " -fPIC" : "") + incs
+                + " -c " + s.string() + " -o " + o.string();
+        }
         std::cerr << "  " << (isCxx ? "CXX " : "CC  ") << s.filename().string() << "\n";
         if (std::system(cmd.c_str()) != 0) {
             std::cerr << "错误: 模块源编译失败（" << cmd << "）\n";
@@ -656,15 +681,30 @@ static int buildModuleLib(const std::filesystem::path& moduleDir,
     int rc;
     if (shared) {
         // 动态库：模块段 ldflags 参与链接；含 C++ 源用 CXX 驱动（带 C++ 运行时）
-        std::string cmd = (anyCxx ? pickCXX() : pickCC()) + " -g" + tc.machine
-            + " -shared";
-        for (auto& o : objs) cmd += " " + o.string();
-        cmd += " -o " + output + tc.ldflags + mc.ldflags;
+        std::string cmd;
+        if (msvc) {
+            MsvcFlags mf = translateGccFlags(tc.machine + tc.ldflags + mc.ldflags);
+            cmd = (anyCxx ? ccModCxx : ccModC) + " /nologo /LD";
+            for (auto& o : objs) cmd += " " + q(o.string());
+            cmd += mf.libs + " ws2_32.lib mswsock.lib advapi32.lib bcrypt.lib";
+            cmd += " /Fe:" + q(output);
+            if (!mf.libdirs.empty()) cmd += " /link" + mf.libdirs;
+        } else {
+            cmd = (anyCxx ? ccModCxx : ccModC) + " -g" + tc.machine + " -shared";
+            for (auto& o : objs) cmd += " " + o.string();
+            cmd += " -o " + output + tc.ldflags + mc.ldflags;
+        }
         rc = std::system(cmd.c_str()) == 0 ? 0 : 1;
         if (rc != 0) std::cerr << "错误: 动态库链接失败（" << cmd << "）\n";
     } else {
-        std::string arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + output;
-        for (auto& o : objs) arCmd += " " + o.string();
+        std::string arCmd;
+        if (msvc) {
+            arCmd = "lib /nologo /OUT:" + q(output);
+            for (auto& o : objs) arCmd += " " + q(o.string());
+        } else {
+            arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + output;
+            for (auto& o : objs) arCmd += " " + o.string();
+        }
         rc = std::system(arCmd.c_str()) == 0 ? 0 : 1;
         if (rc != 0) std::cerr << "错误: 归档失败（" << arCmd << "）\n";
     }
@@ -1019,7 +1059,7 @@ static std::string q(const std::string& s) {
 }
 
 // gcc 风格选项翻译为 MSVC：编译选项（/I /D /O2…）、链接库（X.lib + 裸库文件）、库路径（/LIBPATH:）。
-struct MsvcFlags { std::string cflags, libs, libdirs; };
+// （MsvcFlags 结构体已前移到 buildModuleLib 前的前向声明区。）
 static MsvcFlags translateGccFlags(const std::string& gcc) {
     MsvcFlags r;
     auto toks = splitBy(gcc, " ");
@@ -1082,7 +1122,7 @@ static std::string ccLinkExeCmd(const std::string& cc, bool msvc,
         cmd += mf.libs;
         // op 异步内核 / mem 共享内存等在 Windows 用 winsock+系统 API——补基线系统库
         //   （未引用时链接器忽略，无害）。与远端 Windows 构建（remote.cpp）保持一致。
-        cmd += " ws2_32.lib mswsock.lib advapi32.lib";
+        cmd += " ws2_32.lib mswsock.lib advapi32.lib bcrypt.lib";
         cmd += " /Fe:" + q(out);
         if (!mf.libdirs.empty()) cmd += " /link" + mf.libdirs;
         return cmd;
@@ -1119,7 +1159,11 @@ static std::filesystem::path mbedtlsLibForTarget(const std::filesystem::path& re
     if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".cache" / "scc";
     else base = fs::temp_directory_path(ec) / "scc-cache";
     const fs::path cacheDir = base / ("mbedtls-" + std::string(hb));
-    const fs::path outA = cacheDir / "libmbedtls_all.a";
+    // MSVC 与 gcc 工具链的对象/归档形态不同：cl→.obj + lib.exe→.lib；gcc→.o + ar→.a
+    const std::string cc = pickCC();
+    const bool msvc = ccIsMsvc(cc);
+    const std::string objExt = msvc ? ".obj" : ".o";
+    const fs::path outA = cacheDir / (msvc ? "mbedtls_all.lib" : "libmbedtls_all.a");
     if (fs::is_regular_file(outA, ec)) return outA;          // 命中缓存
 
     fs::create_directories(cacheDir, ec);
@@ -1131,20 +1175,29 @@ static std::filesystem::path mbedtlsLibForTarget(const std::filesystem::path& re
               << " 个源文件 → " << cacheDir.string() << "），稍候…\n";
     std::vector<fs::path> objs;
     for (auto& c : srcs) {
-        const fs::path o = cacheDir / (c.stem().string() + ".o");
-        const std::string cmd = pickCC() + " -O2" + tc.machine
-            + " -I " + inc.string() + " -I " + lib.string()
-            + " -c " + c.string() + " -o " + o.string();
+        const fs::path o = cacheDir / (c.stem().string() + objExt);
+        const std::string cmd = ccCompileCmd(cc, msvc,
+            std::string(" -O2") + tc.machine, { inc, lib }, c, o);
         if (std::system(cmd.c_str()) != 0) {
             std::cerr << "错误: 编译 mbedtls 源失败（" << c.filename().string() << "）\n";
             return {};
         }
         objs.push_back(o);
     }
-    std::string arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + outA.string();
-    for (auto& o : objs) arCmd += " " + o.string();
+    std::string arCmd;
+    if (msvc) {
+        // lib.exe：108 个对象的完整路径远超 cmd.exe 8191 字符命令行上限——用响应文件 @file
+        const fs::path rsp = cacheDir / "objs.rsp";
+        std::ofstream rf(rsp, std::ios::binary);
+        for (auto& o : objs) rf << "\"" << o.string() << "\"\n";
+        rf.close();
+        arCmd = "lib /nologo /OUT:" + q(outA.string()) + " @" + q(rsp.string());
+    } else {
+        arCmd = (tc.ar.empty() ? "ar" : tc.ar) + " rcs " + outA.string();
+        for (auto& o : objs) arCmd += " " + o.string();
+    }
     if (std::system(arCmd.c_str()) != 0) {
-        std::cerr << "错误: 归档 libmbedtls_all.a 失败\n";
+        std::cerr << "错误: 归档 mbedtls 静态库失败（" << outA.string() << "）\n";
         fs::remove(outA, ec);
         return {};
     }
@@ -1173,15 +1226,34 @@ static int linkOutput(OutKind kind,
         std::filesystem::remove(elf);
         return rc;
     }
+    const std::string cc = pickCC();
+    const bool msvc = ccIsMsvc(cc);
     std::string cmd;
     if (kind == OutKind::StaticLib) {
-        cmd = tc.ar + " rcs " + output;
-        for (auto& o : objects) cmd += " " + o.string();
-    } else {
-        cmd = pickCC() + " -g" + tc.machine;
-        if (kind == OutKind::SharedLib) cmd += " -shared";
-        for (auto& o : objects) cmd += " " + o.string();
-        cmd += " -o " + output + tc.ldflags;
+        if (msvc) {
+            // MSVC 静态库用 lib.exe（ar 不适用）；/OUT: 指定输出
+            cmd = "lib /nologo /OUT:" + q(output);
+            for (auto& o : objects) cmd += " " + q(o.string());
+        } else {
+            cmd = tc.ar + " rcs " + output;
+            for (auto& o : objects) cmd += " " + o.string();
+        }
+    } else if (kind == OutKind::SharedLib) {
+        if (msvc) {
+            // MSVC 动态库：cl /LD → DLL；补 winsock/系统库（op 异步内核等，未引用则忽略）
+            MsvcFlags mf = translateGccFlags(tc.machine + tc.ldflags);
+            cmd = cc + " /nologo /LD";
+            for (auto& o : objects) cmd += " " + q(o.string());
+            cmd += mf.libs + " ws2_32.lib mswsock.lib advapi32.lib bcrypt.lib";
+            cmd += " /Fe:" + q(output);
+            if (!mf.libdirs.empty()) cmd += " /link" + mf.libdirs;
+        } else {
+            cmd = cc + " -g" + tc.machine + " -shared";
+            for (auto& o : objects) cmd += " " + o.string();
+            cmd += " -o " + output + tc.ldflags;
+        }
+    } else {  // 可执行：复用 MSVC 感知的链接命令生成（含 /Fe: 与 winsock 系统库）
+        cmd = ccLinkExeCmd(cc, msvc, objects, output, tc.ldflags, tc.machine);
     }
     if (std::system(cmd.c_str()) != 0) {
         std::cerr << "错误: 构建产物失败（" << cmd << "）\n";

@@ -900,7 +900,7 @@ static int32_t sc_ssl_com_close(sc_com *_this) {
     return r;
 }
 
-struct sc_com *ssl_com(struct sc_com *transport, char *host, int32_t verify) {
+struct sc_com *sc_ssl_com(struct sc_com *transport, char *host, int32_t verify) {
     if (!transport || !transport->read || !transport->write) return NULL;
     void *s = sc_ssl_client_new(host, verify);
     if (!s) return NULL;                       /* none 后端或建连失败 */
