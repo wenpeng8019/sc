@@ -62,8 +62,9 @@ typedef struct GlSurface {
 #endif
     GLuint      vao;      /* core profile / ES3 惯用的全局 VAO */
     /* MEMORY：环槽 memimg 包装纹理 + FBO；共享深度 rbo
-     * linux = EGLImage→GL_TEXTURE_2D；mac = IOSurface→GL_TEXTURE_RECTANGLE */
-#if P_LINUX || P_DARWIN
+     * linux = EGLImage→GL_TEXTURE_2D；mac = IOSurface→GL_TEXTURE_RECTANGLE；
+     * win  = memimg 自身 GL_TEXTURE_2D（借用，不由 surface 释放） */
+#if P_LINUX || P_DARWIN || P_WIN
     GLuint ringTex[SC_GPU_MAX_MEMORY_IMAGES];
     GLuint ringFbo[SC_GPU_MAX_MEMORY_IMAGES];
     GLuint depthRbo;
@@ -76,11 +77,11 @@ typedef struct GlSurface {
 static struct {
     gpu_surface_t* acquired[GL_MAX_ACQUIRED];
     int acquiredCount;
-#if P_LINUX || P_DARWIN
+#if P_LINUX || P_DARWIN || P_WIN
     GLuint headlessVao;   /* headless 上下文的全局 VAO */
 #endif
-#if P_DARWIN
-    gl_ctx* headlessCtx;  /* 无屏 NSGL 上下文（view=NULL） */
+#if P_DARWIN || P_WIN
+    gl_ctx* headlessCtx;  /* 无屏上下文（mac NSGL view=NULL / win 隐藏窗口） */
 #endif
 #if P_LINUX
     PFN_scEGLImageTargetTexture2DOES pImageTarget;
@@ -99,7 +100,7 @@ static void glShutdown(void) {
 #if P_LINUX
     gl_egl_shutdown();
 #endif
-#if P_DARWIN
+#if P_DARWIN || P_WIN
     if (env.headlessCtx) {
         gl_ctx_make_current(env.headlessCtx);
         if (env.headlessVao) glDeleteVertexArrays(1, &env.headlessVao);
@@ -264,12 +265,70 @@ static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
 }
 #endif /* P_DARWIN */
 
+/* ---- MEMORY surface / memimg（win：headless WGL + GL_TEXTURE_2D 回读） ---- */
+#if P_WIN
+typedef struct GlWinMemimg {
+    GLuint tex;      /* GL_TEXTURE_2D，BGRA8 渲染目标 */
+    GLuint roFbo;    /* 回读用 FBO（懒建） */
+    int    w, h;
+    void*  cpu;      /* 回读缓冲（w*h*4，BGRA） */
+} GlWinMemimg;
+
+/* headless 上下文（首次需要时创建：隐藏窗口 WGL）+ make current */
+static bool winHeadlessCurrent(void) {
+    if (!env.headlessCtx) {
+        env.headlessCtx = gl_ctx_create(NULL, NULL, 4, 1, 0);
+        if (!env.headlessCtx) {
+            gpu_log("gl: 无屏 WGL 上下文创建失败");
+            return false;
+        }
+        scgl_win_load();   /* 上下文已 current（gl_ctx_create 末尾 make current）：装载 GL 1.2+ 指针 */
+        glGenVertexArrays(1, &env.headlessVao);
+    }
+    gl_ctx_make_current(env.headlessCtx);
+    glBindVertexArray(env.headlessVao);
+    return true;
+}
+
+/* MEMORY surface（win）：headless 上下文 + 每槽 memimg tex+FBO（+ 共享深度 rbo） */
+static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
+    if (!winHeadlessCurrent()) return false;
+    if (surf->desc.sample_count > 1)
+        gpu_log("gl: MEMORY surface MSAA 暂不支持（忽略）");
+    if (surf->desc.depth_format != SC_GPU_PIXELFORMAT_NONE) {
+        glGenRenderbuffers(1, &s->depthRbo);
+        glBindRenderbuffer(GL_RENDERBUFFER, s->depthRbo);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+                              surf->desc.width, surf->desc.height);
+    }
+    for (int i = 0; i < surf->desc.image_count; i++) {
+        gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[i]);
+        GlWinMemimg* m = img ? (GlWinMemimg*)img->backend : NULL;
+        if (!m || !m->tex) return false;
+        s->ringTex[i] = m->tex;   /* 借用 memimg 纹理（surface_destroy 不删） */
+        glGenFramebuffers(1, &s->ringFbo[i]);
+        glBindFramebuffer(GL_FRAMEBUFFER, s->ringFbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D, m->tex, 0);
+        if (s->depthRbo)
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                      GL_RENDERBUFFER, s->depthRbo);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            gpu_log("gl: MEMORY 环槽 %d FBO 不完整", i);
+            return false;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return true;
+}
+#endif /* P_WIN */
+
 static bool glSurfaceCreate(gpu_surface_t* surf) {
     GlSurface* s = (GlSurface*)calloc(1, sizeof(GlSurface));
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX || P_DARWIN
+#if P_LINUX || P_DARWIN || P_WIN
         if (!glMemorySurfaceCreate(surf, s)) {
             /* 失败清理由 surface_destroy 兼顾 */
             surf->backend = s;
@@ -317,7 +376,7 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
             break;
         }
     }
-#if P_LINUX || P_DARWIN
+#if P_LINUX || P_DARWIN || P_WIN
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
 #if P_LINUX
         gl_egl_make_current();
@@ -326,7 +385,9 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
 #endif
         for (int i = 0; i < surf->desc.image_count; i++) {
             if (s->ringFbo[i]) glDeleteFramebuffers(1, &s->ringFbo[i]);
-            if (s->ringTex[i]) glDeleteTextures(1, &s->ringTex[i]);
+#if !P_WIN
+            if (s->ringTex[i]) glDeleteTextures(1, &s->ringTex[i]);   /* win：借用 memimg 纹理，不删 */
+#endif
 #if P_LINUX
             if (s->ringFence[i] >= 0) close(s->ringFence[i]);
 #endif
@@ -363,6 +424,8 @@ static void glSurfaceActivate(gpu_surface_t* surf) {
             glBindVertexArray(env.headlessVao);
 #elif P_DARWIN
             macHeadlessCurrent();
+#elif P_WIN
+            winHeadlessCurrent();
 #endif
             return;
         }
@@ -398,7 +461,7 @@ static bool glFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX || P_DARWIN
+#if P_LINUX || P_DARWIN || P_WIN
         if (surf->ring_cur < 0) return false;
         f->gl_fbo = s->ringFbo[surf->ring_cur];
         f->width = surf->desc.width;
@@ -444,6 +507,8 @@ static void glFrameEnd(void) {
             }
 #elif P_DARWIN
             glFinish();   /* NSGL 无导出 fence：CPU 同步，dequeue 即可消费 */
+#elif P_WIN
+            glFinish();   /* WGL 无导出 fence：CPU 同步，dequeue 即可消费 */
 #endif
         } else {
 #if defined(SC_GPU_GLES)
@@ -604,6 +669,97 @@ static bool glSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame*
 
 #endif /* P_DARWIN */
 
+/* ---- memimg（win：GL_TEXTURE_2D 分配 + glReadPixels 回读） --- */
+
+#if P_WIN
+
+static bool glMemimgAlloc(gpu_memimg_t* img) {
+    const sc_gpu_memimg_desc* d = &img->desc;
+    if (d->format != SC_GPU_PIXELFORMAT_BGRA8 &&
+        d->format != SC_GPU_PIXELFORMAT_DEFAULT) {
+        gpu_log("gl: win memimg 暂仅支持 BGRA8");
+        return false;
+    }
+    if (!winHeadlessCurrent()) return false;
+    GlWinMemimg* m = (GlWinMemimg*)calloc(1, sizeof(GlWinMemimg));
+    if (!m) return false;
+    m->w = d->width; m->h = d->height;
+    glGenTextures(1, &m->tex);
+    glBindTexture(GL_TEXTURE_2D, m->tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m->w, m->h, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    img->backend = m;
+    return true;
+}
+
+static bool glMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
+    (void)img; (void)src;
+    gpu_log("gl: win memimg import 暂不支持（需 D3D 互操作）");
+    return false;
+}
+
+static bool glMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
+    GlWinMemimg* m = (GlWinMemimg*)img->backend;
+    if (!m) return false;
+    if (with_fence) glFinish();   /* 无导出 fence → CPU 同步 */
+    out->planes = 1;
+    out->fd[0] = -1;
+    out->stride[0] = (uint32_t)(m->w * 4);
+    out->offset[0] = 0;
+    out->fourcc = img->desc.fourcc;
+    out->width = m->w;
+    out->height = m->h;
+    out->sync_fd = -1;
+    out->native = NULL;   /* 无零拷贝原生句柄（Windows 需 D3D 互操作，待补） */
+    return true;
+}
+
+static void* glMemimgNative(gpu_memimg_t* img) {
+    GlWinMemimg* m = (GlWinMemimg*)img->backend;
+    return m ? (void*)(uintptr_t)m->tex : NULL;   /* gfx Mode B 直接绑定此 GL 纹理 */
+}
+
+static void* glMemimgMap(gpu_memimg_t* img, int plane, uint32_t* out_stride) {
+    (void)plane;
+    GlWinMemimg* m = (GlWinMemimg*)img->backend;
+    if (!m) return NULL;
+    if (!m->cpu) m->cpu = malloc((size_t)m->w * (size_t)m->h * 4);
+    if (!m->cpu) return NULL;
+    if (!m->roFbo) glGenFramebuffers(1, &m->roFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m->roFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m->tex, 0);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, m->w, m->h, GL_BGRA, GL_UNSIGNED_BYTE, m->cpu);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (out_stride) *out_stride = (uint32_t)(m->w * 4);
+    return m->cpu;
+}
+
+static void glMemimgUnmap(gpu_memimg_t* img, int plane) {
+    (void)img; (void)plane;   /* CPU 缓冲随 memimg 生命期，unmap 空操作 */
+}
+
+static void glMemimgFree(gpu_memimg_t* img) {
+    GlWinMemimg* m = (GlWinMemimg*)img->backend;
+    if (!m) return;
+    if (m->roFbo) glDeleteFramebuffers(1, &m->roFbo);
+    if (m->tex) glDeleteTextures(1, &m->tex);
+    free(m->cpu);
+    free(m);
+    img->backend = NULL;
+}
+
+static bool glSurfaceDequeue(gpu_surface_t* surf, int slot, sc_gpu_memory_frame* out) {
+    gpu_memimg_t* img = gpu_lookup_memimg(surf->ring_imgs[slot]);
+    if (!img) return false;
+    return glMemimgExport(img, out, false);   /* frame_end 已 glFinish，sync_fd=-1 */
+}
+
+#endif /* P_WIN */
+
 /* ---- vtable ------------------------------------------------ */
 
 static const gpu_env_api glApi = {
@@ -618,7 +774,7 @@ static const gpu_env_api glApi = {
     .surface_resize = glSurfaceResize,
     .frame_acquire = glFrameAcquire,
     .frame_end = glFrameEnd,
-#if P_LINUX || P_DARWIN
+#if P_LINUX || P_DARWIN || P_WIN
     .memimg_alloc = glMemimgAlloc,
     .memimg_import = glMemimgImport,
     .memimg_export = glMemimgExport,

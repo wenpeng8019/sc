@@ -12,7 +12,7 @@
 # 用法（macOS，从仓库根目录运行；默认 Metal，GPU_BACKEND=gl 切 NSGL 无屏；
 #      平台框架链接由编译器自动注入，零 SCC_LDFLAGS）：
 #   ./compiler/build/scc templates/demo/gpu_headless_demo.sc
-#   产出 /tmp/sc_headless_a.ppm（Mode A，深蓝底）/ sc_headless_b.ppm（Mode B，深绿底）
+#   产出 sc_headless_a.ppm（Mode A，深蓝底）/ sc_headless_b.ppm（Mode B，深绿底），写当前目录
 
 inc io.sc
 inc gpu.sc
@@ -151,7 +151,7 @@ fnc main: i4
     if pix == nil
         print "memimg_map 失败\n"
         return 1
-    save_ppm("/tmp/sc_headless_a.ppm", pix, stride)
+    save_ppm("sc_headless_a.ppm", pix, stride)
     gpu_memimg_unmap(frm.img, 0)
     gpu_memory_enqueue(surf, slot)
 
@@ -209,7 +209,7 @@ fnc main: i4
     if pix2 == nil
         print "memimg_map(B) 失败\n"
         return 1
-    save_ppm("/tmp/sc_headless_b.ppm", pix2, stride)
+    save_ppm("sc_headless_b.ppm", pix2, stride)
     gpu_memimg_unmap(mimg, 0)
 
     # ---- 清理（先 gfx 后 gpu） ----

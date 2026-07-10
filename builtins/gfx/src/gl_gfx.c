@@ -76,6 +76,7 @@ typedef struct GlBuffer {
 typedef struct GlImage {
     GLuint tex;
     GLenum target;        /* GL_TEXTURE_2D / CUBE_MAP / 3D / 2D_ARRAY */
+    bool   borrowed;      /* win memimg：纹理借自 gpu env，销毁时不删 */
 } GlImage;
 
 typedef struct GlSampler {
@@ -431,6 +432,19 @@ static bool glImageCreate(gfx_image_t* img) {
         }
         img->backend = m;
         return true;
+#elif P_WIN
+        /* win：memimg 本身即 GL_TEXTURE_2D（gpu env 创建），直接借用（不 own） */
+        GLuint wtex = (GLuint)(uintptr_t)sc_gpu_memimg_native(d->memimg);
+        if (!wtex) {
+            gfx_log("gl: memimg %u 无效", d->memimg);
+            free(m);
+            return false;
+        }
+        m->target = GL_TEXTURE_2D;
+        m->tex = wtex;
+        m->borrowed = true;
+        img->backend = m;
+        return true;
 #else
         gfx_log("gl: 本平台 memimg 绑定未支持");
         free(m);
@@ -471,7 +485,7 @@ static bool glImageCreate(gfx_image_t* img) {
 static void glImageDestroy(gfx_image_t* img) {
     GlImage* m = (GlImage*)img->backend;
     if (!m) return;
-    glDeleteTextures(1, &m->tex);
+    if (!m->borrowed) glDeleteTextures(1, &m->tex);
     free(m);
     img->backend = NULL;
 }

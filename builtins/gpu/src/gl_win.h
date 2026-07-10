@@ -241,6 +241,15 @@ typedef ptrdiff_t GLintptr;
 #ifndef GL_INVALID_INDEX
 #define GL_INVALID_INDEX 0xFFFFFFFFu
 #endif
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
+#ifndef GL_RENDERBUFFER
+#define GL_RENDERBUFFER 0x8D41
+#endif
+#ifndef GL_DEPTH24_STENCIL8
+#define GL_DEPTH24_STENCIL8 0x88F0
+#endif
 
 /* --- GL 1.2+ 函数清单（X-macro：返回类型, 名字, 参数列表） --- */
 #define SCGL_WIN_FUNCS(X) \
@@ -285,6 +294,11 @@ typedef ptrdiff_t GLintptr;
     X(void,   glFramebufferTexture2D,   (GLenum, GLenum, GLenum, GLuint, GLint)) \
     X(void,   glFramebufferTextureLayer,(GLenum, GLenum, GLuint, GLint, GLint)) \
     X(GLenum, glCheckFramebufferStatus, (GLenum)) \
+    X(void,   glGenRenderbuffers,       (GLsizei, GLuint*)) \
+    X(void,   glBindRenderbuffer,       (GLenum, GLuint)) \
+    X(void,   glRenderbufferStorage,    (GLenum, GLenum, GLsizei, GLsizei)) \
+    X(void,   glFramebufferRenderbuffer,(GLenum, GLenum, GLenum, GLuint)) \
+    X(void,   glDeleteRenderbuffers,    (GLsizei, const GLuint*)) \
     X(void,   glDrawBuffers,            (GLsizei, const GLenum*)) \
     X(void,   glBlitFramebuffer,        (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum)) \
     X(void,   glClearBufferfv,          (GLenum, GLint, const GLfloat*)) \

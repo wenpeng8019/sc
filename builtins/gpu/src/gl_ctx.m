@@ -131,6 +131,7 @@ struct gl_ctx {
     HGLRC rc;
     HDC   dc;
     HWND  hwnd;
+    BOOL  ownHwnd;   /* headless：本 ctx 自建的隐藏窗口，销毁时 DestroyWindow */
     HMODULE gl;
     BOOL (WINAPI* wmc)(HDC, HGLRC);
     BOOL (WINAPI* wdc)(HGLRC);
@@ -146,7 +147,20 @@ gl_ctx* gl_ctx_create(void* native_window, void* native_display,
     gl_ctx* c = (gl_ctx*)calloc(1, sizeof(gl_ctx));
     if (!c) return NULL;
     c->hwnd = (HWND)native_window;
-    if (!c->hwnd) { free(c); return NULL; }
+    if (!c->hwnd) {
+        /* headless（无 native_window）：建一个隐藏窗口承载 WGL 上下文 + FBO 离屏渲染。
+         * WGL 无 NSGL 那种无 view 上下文，故以隐藏窗口替代（不 show，仅取 DC）。 */
+        static const char* kCls = "scGLHidden";
+        WNDCLASSA wc; memset(&wc, 0, sizeof(wc));
+        wc.lpfnWndProc = DefWindowProcA;
+        wc.hInstance = GetModuleHandleA(NULL);
+        wc.lpszClassName = kCls;
+        RegisterClassA(&wc);   /* 已注册返 0，无害 */
+        c->hwnd = CreateWindowExA(0, kCls, "", WS_POPUP, 0, 0, 1, 1,
+                                  NULL, NULL, wc.hInstance, NULL);
+        if (!c->hwnd) { free(c); return NULL; }
+        c->ownHwnd = TRUE;
+    }
     c->gl = LoadLibraryA("opengl32.dll");
     if (!c->gl) { free(c); return NULL; }
 #define L(f, n) c->f = (void*)GetProcAddress(c->gl, n)
@@ -188,6 +202,7 @@ void gl_ctx_destroy(gl_ctx* c) {
     if (!c) return;
     if (c->rc) { c->wmc(NULL, NULL); c->wdc(c->rc); }
     if (c->dc) ReleaseDC(c->hwnd, c->dc);
+    if (c->ownHwnd && c->hwnd) DestroyWindow(c->hwnd);
     if (c->gl) FreeLibrary(c->gl);
     free(c);
 }
