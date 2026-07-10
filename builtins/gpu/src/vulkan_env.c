@@ -14,9 +14,10 @@
  *   wsi 选中同一平台，native_window/native_display 语义一致对接。
  *
  * MEMORY surface / memimg（无屏）：已实现，纯核心 Vulkan（离屏渲染到 VkImage +
- *   host-visible staging 拷贝回读），全平台通用。**尚未实现**零拷贝互操作——
- *   vkMemimgExport 的 native/fd 置 NULL、vkMemimgImport 不支持（Linux dma-buf /
- *   Windows NT 句柄需 VK_KHR_external_memory_fd/win32，待补）。
+ *   host-visible staging 拷贝回读），全平台通用。零拷贝导出已实现——vkMemimgExport
+ *   经外部内存扩展导出句柄（Linux dma-buf fd via VK_KHR_external_memory_fd /
+ *   Windows NT 句柄 via win32；设备支持则启用，可导出内存=专用分配）。
+ *   Windows NT 句柄路径已实测；导入（vkMemimgImport）与 Linux dma-buf 实机验证待补。
  *
  * 平台守卫：整文件经 SC_GPU_VULKAN 空化（Windows/Linux 启用，macOS 用 Metal）。
  * ============================================================ */
@@ -32,6 +33,7 @@
 #else
   #define VK_USE_PLATFORM_XLIB_KHR
   #define VK_USE_PLATFORM_WAYLAND_KHR
+  #include <unistd.h>                 /* close()（dma-buf 导出 fd 释放） */
 #endif
 #include "../gpu_vk.h"
 
@@ -40,6 +42,14 @@
 
 #define VK_INFLIGHT       2     /* CPU/GPU 并行帧数（与 gfx SC_GFX_MAX_INFLIGHT_FRAMES 一致） */
 #define VK_MAX_SWAP_IMAGES 8
+
+/* memimg 零拷贝导出的外部内存句柄类型（平台对偶）：
+ * Linux = dma-buf（可导 GL/v4l2/编码器）；Windows = 不透明 NT 句柄（D3D/编码器互操作）。 */
+#if P_WIN
+  #define SC_VK_EXTMEM_HANDLE_TYPE VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+#else
+  #define SC_VK_EXTMEM_HANDLE_TYPE VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT
+#endif
 
 #define VKCK(expr) do { \
     VkResult vk__r = (expr); \
@@ -87,6 +97,12 @@ typedef struct {
     bool             hasWin32;
     VkSurfaceCtx*    cur;                  /* 当前 surface（sync 访问器用） */
     VkCommandPool    utilPool;             /* 一次性命令（memimg 布局转换/回读拷贝） */
+    bool             hasExtMem;            /* 外部内存导出扩展可用（dma-buf/win32 NT 句柄） */
+#if P_WIN
+    PFN_vkGetMemoryWin32HandleKHR getMemWin32;
+#else
+    PFN_vkGetMemoryFdKHR          getMemFd;
+#endif
 } VkEnv;
 
 static VkEnv g_vk;
@@ -101,6 +117,9 @@ typedef struct VkMemimg {
     VkBuffer       staging;   /* 回读用 host-visible 缓冲（懒建） */
     VkDeviceMemory stagingMem;
     void*          mapped;    /* staging 持久映射 */
+    bool           exportable; /* 分配为可导出（external memory + dedicated） */
+    int            exportFd;   /* linux: 缓存的 dma-buf fd（借用，free 时 close）；-1=无 */
+    void*          exportHandle; /* windows: 缓存的 NT 句柄（借用，free 时 CloseHandle）；NULL=无 */
 } VkMemimg;
 
 /* ============================================================
@@ -301,11 +320,39 @@ static bool vkInit(const sc_gpu_desc* desc) {
     dqci.queueCount = 1;
     dqci.pQueuePriorities = &prio;
 
-    const char* devExts[1] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const char* devExts[8];
+    uint32_t nDE = 0;
+    devExts[nDE++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+
+    /* 设备扩展：（可用则）启用外部内存导出——Linux dma-buf / Windows NT 句柄 */
+    uint32_t nDevExt = 0;
+    vkEnumerateDeviceExtensionProperties(g_vk.dev.phys, NULL, &nDevExt, NULL);
+    VkExtensionProperties* devExtList =
+        (VkExtensionProperties*)calloc(nDevExt ? nDevExt : 1, sizeof(*devExtList));
+    vkEnumerateDeviceExtensionProperties(g_vk.dev.phys, NULL, &nDevExt, devExtList);
+    bool haveExtMem = ext_present(devExtList, nDevExt, VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+#if P_WIN
+    if (haveExtMem && ext_present(devExtList, nDevExt, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME)) {
+        devExts[nDE++] = VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME;
+        devExts[nDE++] = VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME;
+        g_vk.hasExtMem = true;
+    }
+#else
+    if (haveExtMem &&
+        ext_present(devExtList, nDevExt, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) &&
+        ext_present(devExtList, nDevExt, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME)) {
+        devExts[nDE++] = VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME;
+        devExts[nDE++] = VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME;
+        devExts[nDE++] = VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME;
+        g_vk.hasExtMem = true;
+    }
+#endif
+    free(devExtList);
+
     VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &dqci;
-    dci.enabledExtensionCount = 1;
+    dci.enabledExtensionCount = nDE;
     dci.ppEnabledExtensionNames = devExts;
 
     if (vkCreateDevice(g_vk.dev.phys, &dci, NULL, &g_vk.dev.device) != VK_SUCCESS) {
@@ -315,6 +362,20 @@ static bool vkInit(const sc_gpu_desc* desc) {
         return false;
     }
     vkGetDeviceQueue(g_vk.dev.device, g_vk.dev.queue_family, 0, &g_vk.dev.queue);
+
+    /* 加载外部内存导出函数指针（扩展函数，经 vkGetDeviceProcAddr） */
+    if (g_vk.hasExtMem) {
+#if P_WIN
+        g_vk.getMemWin32 = (PFN_vkGetMemoryWin32HandleKHR)
+            vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryWin32HandleKHR");
+        if (!g_vk.getMemWin32) g_vk.hasExtMem = false;
+#else
+        g_vk.getMemFd = (PFN_vkGetMemoryFdKHR)
+            vkGetDeviceProcAddr(g_vk.dev.device, "vkGetMemoryFdKHR");
+        if (!g_vk.getMemFd) g_vk.hasExtMem = false;
+#endif
+        if (g_vk.hasExtMem) gpu_log("vulkan: memimg 零拷贝导出可用（外部内存扩展）");
+    }
 
     /* 一次性命令池（memimg 布局转换 / 回读拷贝用；瞬时缓冲，可复位） */
     VkCommandPoolCreateInfo upci = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -522,6 +583,7 @@ static bool vkMemimgAlloc(gpu_memimg_t* img) {
     VkDevice dev = g_vk.dev.device;
     m->w = d->width; m->h = d->height;
     m->format = vk_color_format(d->format);
+    m->exportFd = -1;
 
     VkImageCreateInfo ic = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ic.imageType = VK_IMAGE_TYPE_2D;
@@ -538,6 +600,14 @@ static bool vkMemimgAlloc(gpu_memimg_t* img) {
                VK_IMAGE_USAGE_SAMPLED_BIT;
     ic.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ic.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    /* 可导出：声明外部内存句柄类型（dma-buf / win32 NT 句柄） */
+    VkExternalMemoryImageCreateInfo extImg = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
+    if (g_vk.hasExtMem) {
+        extImg.handleTypes = SC_VK_EXTMEM_HANDLE_TYPE;
+        ic.pNext = &extImg;
+        m->exportable = true;
+    }
     if (vkCreateImage(dev, &ic, NULL, &m->image) != VK_SUCCESS) { free(m); return false; }
 
     VkMemoryRequirements mr;
@@ -545,6 +615,16 @@ static bool vkMemimgAlloc(gpu_memimg_t* img) {
     VkMemoryAllocateInfo mai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = find_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    /* 可导出内存：外部句柄要求专用分配（VkMemoryDedicatedAllocateInfo）+ 导出信息。 */
+    VkMemoryDedicatedAllocateInfo dedic = { .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+    VkExportMemoryAllocateInfo expo = { .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+    if (m->exportable) {
+        dedic.image = m->image;
+        expo.handleTypes = SC_VK_EXTMEM_HANDLE_TYPE;
+        expo.pNext = &dedic;
+        mai.pNext = &expo;
+    }
     if (vkAllocateMemory(dev, &mai, NULL, &m->mem) != VK_SUCCESS) {
         vkDestroyImage(dev, m->image, NULL); free(m); return false;
     }
@@ -583,23 +663,60 @@ static bool vkMemimgAlloc(gpu_memimg_t* img) {
 
 static bool vkMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
     (void)img; (void)src;
-    gpu_log("vulkan: memimg import 暂不支持（需 VK_KHR_external_memory）");
+    gpu_log("vulkan: memimg import 暂不支持（需外部内存导入路径）");
     return false;
+}
+
+/* 懒导出外部内存句柄（缓存；借用语义，memimg_free 时关闭）。
+ * Linux → dma-buf fd（VK_KHR_external_memory_fd）；Windows → NT 句柄（win32）。 */
+static void memimg_ensure_export(VkMemimg* m) {
+    if (!m->exportable || !g_vk.hasExtMem) return;
+#if P_WIN
+    if (m->exportHandle) return;
+    VkMemoryGetWin32HandleInfoKHR gi = { .sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
+    gi.memory = m->mem;
+    gi.handleType = SC_VK_EXTMEM_HANDLE_TYPE;
+    HANDLE h = NULL;
+    if (g_vk.getMemWin32(g_vk.dev.device, &gi, &h) == VK_SUCCESS) {
+        m->exportHandle = (void*)h;
+        gpu_log("vulkan: memimg 导出 NT 句柄 %p (%dx%d 零拷贝)", h, m->w, m->h);
+    } else {
+        gpu_log("vulkan: vkGetMemoryWin32HandleKHR 失败");
+    }
+#else
+    if (m->exportFd >= 0) return;
+    VkMemoryGetFdInfoKHR gi = { .sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR };
+    gi.memory = m->mem;
+    gi.handleType = SC_VK_EXTMEM_HANDLE_TYPE;
+    int fd = -1;
+    if (g_vk.getMemFd(g_vk.dev.device, &gi, &fd) == VK_SUCCESS) {
+        m->exportFd = fd;
+        gpu_log("vulkan: memimg 导出 dma-buf fd %d (%dx%d 零拷贝)", fd, m->w, m->h);
+    } else {
+        gpu_log("vulkan: vkGetMemoryFdKHR 失败");
+    }
+#endif
 }
 
 static bool vkMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
     VkMemimg* m = (VkMemimg*)img->backend;
     if (!m) return false;
     if (with_fence) vkDeviceWaitIdle(g_vk.dev.device);   /* 无导出 fence → CPU 同步 */
+    memimg_ensure_export(m);
     out->planes = 1;
-    out->fd[0] = -1;
     out->stride[0] = (uint32_t)(m->w * 4);
     out->offset[0] = 0;
     out->fourcc = img->desc.fourcc;
     out->width = m->w;
     out->height = m->h;
     out->sync_fd = -1;
-    out->native = NULL;   /* 无零拷贝原生句柄（需 external_memory_win32/fd，待补） */
+#if P_WIN
+    out->fd[0] = -1;
+    out->native = m->exportHandle;   /* NT 句柄（可导入 D3D / 送编码器）；无扩展则 NULL */
+#else
+    out->fd[0] = m->exportFd;         /* dma-buf fd（可导入 GL/v4l2）；无扩展则 -1 */
+    out->native = NULL;
+#endif
     return true;
 }
 
@@ -656,6 +773,11 @@ static void vkMemimgFree(gpu_memimg_t* img) {
     VkMemimg* m = (VkMemimg*)img->backend;
     if (!m) return;
     VkDevice dev = g_vk.dev.device;
+#if P_WIN
+    if (m->exportHandle) CloseHandle((HANDLE)m->exportHandle);
+#else
+    if (m->exportFd >= 0) close(m->exportFd);
+#endif
     if (m->mapped)     vkUnmapMemory(dev, m->stagingMem);
     if (m->staging)    vkDestroyBuffer(dev, m->staging, NULL);
     if (m->stagingMem) vkFreeMemory(dev, m->stagingMem, NULL);
