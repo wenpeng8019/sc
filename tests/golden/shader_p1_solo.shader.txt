@@ -1,0 +1,21 @@
+ss: fs_p1_tex.spv（2752 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p1_solo.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_p1_tex",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_p1_tex.frag",
+      "inputs": [{"name": "uv2", "type": "vec2", "location": 0}, {"name": "uv3", "type": "vec3", "location": 1}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "tex2d", "kind": "sampler", "type": "sampler2D", "set": 0, "binding": 0},
+    {"name": "tex3d", "kind": "sampler", "type": "sampler3D", "set": 0, "binding": 1},
+    {"name": "texcube", "kind": "sampler", "type": "samplerCube", "set": 0, "binding": 2},
+    {"name": "texarr", "kind": "sampler", "type": "sampler2DArray", "set": 0, "binding": 3}
+  ]
+}

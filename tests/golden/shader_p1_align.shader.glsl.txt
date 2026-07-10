@@ -1,0 +1,57 @@
+// ===== shader_p1_align.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_p1_align",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_p1_align.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}, {"name": "ref", "type": "float", "location": 1}, {"name": "uv3", "type": "vec3", "location": 2}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex2d", "type": "sampler2D", "offset": 0, "size": 4}, {"name": "tex3d", "type": "sampler3D", "offset": 4, "size": 4}, {"name": "shd2d", "type": "sampler2DShadow", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_p1_align.frag =====
+#version 450
+// generated from fs_p1_align (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform TexBlock_blk {
+    sampler2D tex2d;
+    sampler3D tex3d;
+    sampler2DShadow shd2d;
+} TexBlock;
+
+layout(location=0) in vec2 v_uv;
+layout(location=1) in float v_ref;
+layout(location=2) in vec3 v_uv3;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const vec4 c_bias = texture(TexBlock.tex2d, v_uv, 0.5);
+    const vec4 proj4 = vec4((v_uv * 2.0), (v_ref * 2.0), 2.0);
+    const float d_proj = textureProj(TexBlock.shd2d, proj4);
+    const float d_projlod = textureProjLod(TexBlock.shd2d, proj4, 0.0);
+    const vec2 dx2 = dFdx(v_uv);
+    const vec2 dy2 = dFdy(v_uv);
+    const float d_projgrad = textureProjGrad(TexBlock.shd2d, proj4, dx2, dy2);
+    const vec4 g_r = textureGather(TexBlock.tex2d, v_uv, 0);
+    const vec4 g_g = textureGather(TexBlock.tex2d, v_uv, 1);
+    const vec4 g_shd = textureGather(TexBlock.shd2d, v_uv, v_ref);
+    const vec4 c_off = textureOffset(TexBlock.tex2d, v_uv, ivec2(1, 0));
+    const vec4 c_lodoff = textureLodOffset(TexBlock.tex2d, v_uv, 0.0, ivec2(0, 1));
+    const vec3 proj3 = vec3(v_uv, 2.0);
+    const vec4 c_projoff = textureProjOffset(TexBlock.tex2d, proj3, ivec2(1, 1));
+    const vec4 c_gradoff = textureGradOffset(TexBlock.tex2d, v_uv, dx2, dy2, ivec2(-1, 0));
+    const vec2 qlod = textureQueryLod(TexBlock.tex2d, v_uv);
+    const int qlevels = textureQueryLevels(TexBlock.tex2d);
+    const float shadow_sum = ((d_proj + d_projlod) + d_projgrad);
+    const vec4 color_sum = (((((((c_bias + c_off) + c_lodoff) + c_projoff) + c_gradoff) + g_r) + g_g) + g_shd);
+    f_color = (color_sum + vec4(((shadow_sum + qlod.x) + float(qlevels)), 0.0, 0.0, 0.0));
+    return;
+}

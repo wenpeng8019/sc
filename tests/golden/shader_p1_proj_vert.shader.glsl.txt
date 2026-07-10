@@ -1,0 +1,35 @@
+// ===== shader_p1_proj_vert.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_tex_proj",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_tex_proj.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex", "type": "sampler2D", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_tex_proj.comp =====
+#version 450
+// generated from cs_tex_proj (comp) target vulkan450
+
+layout(set=0, binding=0, std140) uniform TexBlock_blk {
+    sampler2D tex;
+} TexBlock;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    const vec3 p = vec3(0.5, 0.5, 1.0);
+    const vec4 c = textureProj(TexBlock.tex, p);
+    const vec4 d = (c * 0.5);
+}

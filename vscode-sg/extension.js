@@ -25,6 +25,8 @@ const KEYWORDS = [
     ['let', '定义常量（含常量数组，如 let a[3]: vec2 = {..}）'],
     ['inc', '引入依赖'],
     ['tar', '声明转义目标与版本（tar vulkan@450，可逗号分隔多个）'],
+    ['spec', '编译期特化维度（无体：spec NAME in [值,...]；有体：spec NAME: + 分支标签块）'],
+    ['use', 'spec 实例白名单（use 维度序 + 缩进数据行，未列维度取全集）'],
     ['return', '从阶段/函数返回'],
     ['if', '条件分支'], ['else', '否则分支'],
     ['while', 'while 循环'], ['do', 'do-while 循环'], ['for', 'for 循环'],
@@ -64,7 +66,9 @@ const TYPES = [
     ['bvec2', 'bool 向量'], ['bvec3', 'bool 向量'], ['bvec4', 'bool 向量'],
     ['mat2', '2x2 矩阵'], ['mat3', '3x3 矩阵'], ['mat4', '4x4 矩阵'],
     ['sampler2D', '2D 采样器'], ['sampler3D', '3D 采样器'], ['samplerCube', '立方体采样器'],
-    ['sampler2DArray', '2D 数组采样器'],
+    ['sampler2DArray', '2D 数组采样器'], ['samplerCubeArray', '立方体数组采样器'],
+    ['sampler2DShadow', '2D 阴影采样器'], ['samplerCubeShadow', '立方体阴影采样器'],
+    ['sampler2DArrayShadow', '2D 数组阴影采样器'], ['samplerCubeArrayShadow', '立方体数组阴影采样器'],
 ];
 
 const TARGETS = [
@@ -73,10 +77,16 @@ const TARGETS = [
     ['gl', 'glcore 别名'],
     ['gles', 'OpenGL ES（precision + gl_VertexID）'],
     ['webgl', 'WebGL（GLSL ES 子集）'],
+    ['metal', 'Metal（通过 SPIRV-Cross 转 MSL）'],
 ];
 
 const BUILTIN_FNS = [
-    'texture', 'textureLod', 'texelFetch', 'textureSize',
+    'texture', 'textureLod', 'textureProj', 'textureProjLod',
+    'textureGrad', 'textureProjGrad',
+    'textureGather', 'textureGatherOffset',
+    'textureOffset', 'textureLodOffset', 'textureProjOffset', 'textureGradOffset',
+    'textureQueryLod', 'textureQueryLevels',
+    'texelFetch', 'textureSize',
     'normalize', 'length', 'distance', 'dot', 'cross', 'reflect', 'refract',
     'pow', 'exp', 'log', 'sqrt', 'inversesqrt', 'abs', 'sign', 'floor', 'ceil',
     'fract', 'mod', 'min', 'max', 'clamp', 'mix', 'step', 'smoothstep',
@@ -133,8 +143,8 @@ function provideCompletions(doc, pos) {
     const line = doc.lineAt(pos.line).text;
     const prefix = line.slice(0, pos.character);
 
-    // tar 目标上下文（tar / , 之后）：只给转义目标 API 名
-    if (/^\s*tar\b[^@]*$/.test(prefix)) {
+    // tar 目标上下文（行首 tar，或逗号后追加目标）：只给转义目标 API 名
+    if (/^\s*tar\b/.test(prefix) && /(^\s*tar\b\s*[^,]*)|(,\s*[A-Za-z_]*)$/.test(prefix)) {
         return TARGETS.map(([n, d]) => makeItem(n, K.EnumMember, d, '0' + n));
     }
 
@@ -191,7 +201,8 @@ function runDiagnostics(doc) {
         return;
     }
     const dir = path.dirname(doc.uri.fsPath);
-    const tmp = path.join(dir, `.sg_check_${process.pid}_${++seq}.tmp.sg`);
+    // 关键：后缀必须是 .ss，scc 才会进入 shaderMode 解析（支持顶层 tar/vert/frag/comp）。
+    const tmp = path.join(dir, `.sg_check_${process.pid}_${++seq}.tmp.ss`);
     let text = doc.getText();
     try {
         fs.writeFileSync(tmp, text);

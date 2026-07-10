@@ -3,6 +3,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "shader_sema.h"
+#include "shader_spec.h"
 #include "shader_msl.h"
 #include "error.h"
 
@@ -456,13 +457,27 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
 
     // 输入/输出限定词：现代 GLSL 用 layout(location=N) in/out；
     // legacy ES 用 attribute（vert 入）/ varying（vert 出 + frag 入）。
-    auto inQual = [&](int loc) {
-        if (legacy) return std::string(isVert ? "attribute " : "varying ");
-        return "layout(location=" + std::to_string(loc) + ") in ";
+    auto interpPrefix = [&](const ShaderFieldAttr* attr, const std::string& typeName) -> std::string {
+        if (!legacy) {
+            if (attr && attr->interp == ShaderFieldAttr::Flat)          return "flat ";
+            if (attr && attr->interp == ShaderFieldAttr::NoPerspective) return "noperspective ";
+            if (attr && attr->interp == ShaderFieldAttr::Centroid)      return "centroid ";
+            // 整数/无符号 varying 自动补 flat（GLSL 要求）
+            if (!attr || attr->interp == ShaderFieldAttr::Default) {
+                if (typeName == "int" || typeName == "uint"
+                    || typeName.substr(0, 4) == "ivec" || typeName.substr(0, 4) == "uvec")
+                    return "flat ";
+            }
+        }
+        return "";
     };
-    auto outQual = [&](int loc) {
+    auto inQual = [&](int loc, const ShaderFieldAttr* attr = nullptr, const std::string& tp = "") {
+        if (legacy) return std::string(isVert ? "attribute " : "varying ");
+        return interpPrefix(attr, tp) + "layout(location=" + std::to_string(loc) + ") in ";
+    };
+    auto outQual = [&](int loc, const ShaderFieldAttr* attr = nullptr, const std::string& tp = "") {
         if (legacy) return std::string("varying ");
-        return "layout(location=" + std::to_string(loc) + ") out ";
+        return interpPrefix(attr, tp) + "layout(location=" + std::to_string(loc) + ") out ";
     };
 
     // comp：工作组尺寸（暂无 .ss 语法，固定 64×1×1；反射清单同步携带，
@@ -492,7 +507,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
             int loc = (f.shaderAttr && f.shaderAttr->loc >= 0) ? f.shaderAttr->loc : autoInLoc++;
             std::string g = isVert ? f.name : ("v_" + f.name);
             memberMap[p.name + "." + f.name] = g;
-            ioDecls += inQual(loc) + mapType(f.type.name) + " " + g + ";\n";
+            ioDecls += inQual(loc, f.shaderAttr.get(), mapType(f.type.name)) + mapType(f.type.name) + " " + g + ";\n";
         }
     }
 
@@ -525,7 +540,7 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
                                            : "gl_FragColor";
                 } else {
                     std::string g = isVert ? ("v_" + f.name) : ("f_" + f.name);
-                    ioDecls += outQual(loc) + mapType(f.type.name) + " " + g + ";\n";
+                    ioDecls += outQual(loc, f.shaderAttr.get(), mapType(f.type.name)) + mapType(f.type.name) + " " + g + ";\n";
                     target = g;
                 }
             }
@@ -609,7 +624,8 @@ std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target) {
     return units;
 }
 
-std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
+std::string emitReflectionJson(const Program& prog, const GlslTarget& target,
+                               const ShaderSpecCombo* spec) {
     Model m = buildModel(prog);
     const bool useSet = target.useSetQualifier();
     const bool explicitBind = capSupported(Cap::ExplicitBinding, target);
@@ -619,6 +635,16 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target) {
       << ", \"version\": " << target.version
       << ", \"explicitBinding\": " << (explicitBind ? "true" : "false")
       << ", \"flattenUniforms\": " << (legacyES(target) ? "true" : "false") << "},\n";
+    if (spec && !spec->empty()) {           // spec 实例维度取值（spec.md §5）
+        j << "  \"spec\": {";
+        bool firstDim = true;
+        for (const auto& kv : *spec) {
+            if (!firstDim) j << ", ";
+            firstDim = false;
+            j << jstr(kv.first) << ": " << jstr(kv.second);
+        }
+        j << "},\n";
+    }
     j << "  \"stages\": [\n";
 
     bool firstStage = true;
@@ -723,12 +749,22 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         bool emitGlslText, bool emitSpvFiles,
                         bool filesMode, const std::string& outPath) {
     try {
-        Program prog = parse(lex(src), /*shaderMode*/ true);
+        // spec 特化维度（spec.md）：词法层单态化 —— lex 一次，提取并移除顶层
+        // spec/use 行，按实例组合替换标识符/回插分支体后独立走 parse→sema→发射。
+        std::vector<Token> baseToks = lex(src);
+        ShaderSpecSet specSet = extractShaderSpecs(baseToks);
+        std::vector<ShaderSpecCombo> combos = shaderSpecCombos(specSet);
+        if (!specSet.hasUse && combos.size() > 32) {
+            std::fprintf(stderr, "ss: %s spec 组合数 %zu 超过阈值 32（用 use 白名单收敛有效组合，见 spec.md §4）\n",
+                         srcPath.c_str(), combos.size());
+            return 1;
+        }
 
         // 外部设备能力档案（tar "file.caps"）加载，在能力门控前完成 ——
         // 使门控与发射都看到完整的 api/版本/扩展集。搜索顺序：
         //   绝对路径 → 相对 .ss 源文件目录 → builtins/gpu/caps/（标准档案库，
         //   随 --builtins 目标适配目录整体替换）
+        auto loadCaps = [&](Program& prog) -> int {
         for (auto& t : prog.shaderTargets) {
             if (t.profile.empty()) continue;
             std::filesystem::path pp(t.profile);
@@ -768,17 +804,11 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                 return 1;
             }
         }
-
-        shaderSemaCheck(prog);                  // 子集强制 + 基础结构检查 + 能力门控（syntax-s §9/§13.1）
-
-        if (prog.shaderTargets.empty()) {       // GLSL 生成必须声明目标（无 CLI 默认）
-            std::fprintf(stderr, "ss: %s 未声明转义目标（需顶部 `tar`，如 `tar vulkan@450`）\n",
-                         srcPath.c_str());
-            return 1;
-        }
+        return 0;
+        };
 
         std::string stem = std::filesystem::path(srcPath).stem().string();
-        const bool multi = prog.shaderTargets.size() > 1;
+        bool multi = false;                     // 目标数在各实例解析后回填（各实例一致）
 
         std::error_code ec;
         if (!outDir.empty()) std::filesystem::create_directories(outDir, ec);
@@ -800,58 +830,78 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         // 调试/对照通道蕴含散文件形态
         const bool files = filesMode || emitGlslText || emitSpvFiles || outDir.empty();
 
-        for (const auto& target : prog.shaderTargets) {
-            // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
-            std::string tag = multi ? ("." + glTargetTag(target)) : "";
-            std::string ttag = glTargetTag(target);
-            arts.push_back({stem, "", ttag, "reflect.json",
-                            emitReflectionJson(prog, target), false});
+        for (const auto& combo : combos) {
+            // 实例标签（产物命名后缀）：无 spec = ""；有 = ".取值1.取值2"（spec.md §5）
+            const std::string label = shaderSpecLabel(combo);
+            const std::string suffix = label.empty() ? "" : "." + label;
+            Program prog = parse(applyShaderSpec(baseToks, specSet, combo), /*shaderMode*/ true);
+            if (loadCaps(prog)) return 1;
+            try {
+                shaderSemaCheck(prog);          // 子集强制 + 基础结构检查 + 能力门控（syntax-s §9/§13.1）
+            } catch (CompileError& e) {
+                if (!label.empty()) e.msg += "（spec 实例 " + label + "）";
+                throw;
+            }
+            if (prog.shaderTargets.empty()) {   // GLSL 生成必须声明目标（无 CLI 默认）
+                std::fprintf(stderr, "ss: %s 未声明转义目标（需顶部 `tar`，如 `tar vulkan@450`）\n",
+                             srcPath.c_str());
+                return 1;
+            }
+            multi = prog.shaderTargets.size() > 1;
 
-            // ---- --emit-glsl：自研 codegen_glsl 文本发射（对照 / 兜底通道）----
-            // gl/gles 产该目标方言；vulkan 产 Vulkan-GLSL；metal 产其内部
-            // Vulkan-GLSL(450) 中间语形态。产物 <entry><tag>.<stage ext>。
-            if (emitGlslText) {
-                GlslTarget gt = target;
-                if (target.isMetal()) { gt.api = GlApi::Vulkan; gt.version = 450; }
-                auto units = emitGlsl(prog, gt);
-                if (units.empty()) {
+            for (const auto& target : prog.shaderTargets) {
+                // 单目标沿用简洁命名；多目标插入目标标签（entry.gles300.frag、stem.metal20000.reflect.json）。
+                std::string ttag = glTargetTag(target);
+                arts.push_back({stem + suffix, "", ttag, "reflect.json",
+                                emitReflectionJson(prog, target,
+                                                   combo.empty() ? nullptr : &combo), false});
+
+                // ---- --emit-glsl：自研 codegen_glsl 文本发射（对照 / 兜底通道）----
+                // gl/gles 产该目标方言；vulkan 产 Vulkan-GLSL；metal 产其内部
+                // Vulkan-GLSL(450) 中间语形态。产物 <entry><tag>.<stage ext>。
+                if (emitGlslText) {
+                    GlslTarget gt = target;
+                    if (target.isMetal()) { gt.api = GlApi::Vulkan; gt.version = 450; }
+                    auto units = emitGlsl(prog, gt);
+                    if (units.empty()) {
+                        std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
+                        return 1;
+                    }
+                    for (const auto& u : units)
+                        arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, u.ext, u.text, false});
+                    continue;
+                }
+
+                // ---- 默认产物链：全目标统一 SPIR-V 中枢（codegen_spirv 直发）----
+                //   vulkan  → 直落 .spv
+                //   metal   → SPIRV-Cross → MSL
+                //   gl/gles → SPIRV-Cross 反译 GLSL（ES100 走 legacy 形态）
+                // --emit-spv：非 vulkan 目标也额外落盘 .spv 中间文件。
+                auto sunits = emitSpirv(prog, target);
+                if (sunits.empty()) {
                     std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
                     return 1;
                 }
-                for (const auto& u : units)
-                    arts.push_back({u.entry, stageExt(u.stage), ttag, u.ext, u.text, false});
-                continue;
-            }
-
-            // ---- 默认产物链：全目标统一 SPIR-V 中枢（codegen_spirv 直发）----
-            //   vulkan  → 直落 .spv
-            //   metal   → SPIRV-Cross → MSL
-            //   gl/gles → SPIRV-Cross 反译 GLSL（ES100 走 legacy 形态）
-            // --emit-spv：非 vulkan 目标也额外落盘 .spv 中间文件。
-            auto sunits = emitSpirv(prog, target);
-            if (sunits.empty()) {
-                std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
-                return 1;
-            }
-            for (const auto& u : sunits) {
-                if (target.isVulkan() || emitSpvFiles) {
-                    std::string bin((const char*)u.words.data(), u.words.size() * 4);
-                    arts.push_back({u.entry, stageExt(u.stage), ttag, "spv", bin, true});
+                for (const auto& u : sunits) {
+                    if (target.isVulkan() || emitSpvFiles) {
+                        std::string bin((const char*)u.words.data(), u.words.size() * 4);
+                        arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, "spv", bin, true});
+                    }
+                    if (target.isVulkan()) continue;
+                    if (target.isMetal()) {
+                        scc_shader::MslOptions mo;
+                        mo.mslVersion = (uint32_t)target.version;
+                        mo.renameEntry = u.entry;        // 多阶段链入同一 metallib 时避免 main0 冲突
+                        arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, "metal",
+                                        scc_shader::spirvToMsl(u.words, mo), false});
+                        continue;
+                    }
+                    scc_shader::GlslOptions go;
+                    go.version = (uint32_t)target.version;
+                    go.es = target.isES();
+                    arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, stageExt(u.stage),
+                                    scc_shader::spirvToGlsl(u.words, go), false});
                 }
-                if (target.isVulkan()) continue;
-                if (target.isMetal()) {
-                    scc_shader::MslOptions mo;
-                    mo.mslVersion = (uint32_t)target.version;
-                    mo.renameEntry = u.entry;        // 多阶段链入同一 metallib 时避免 main0 冲突
-                    arts.push_back({u.entry, stageExt(u.stage), ttag, "metal",
-                                    scc_shader::spirvToMsl(u.words, mo), false});
-                    continue;
-                }
-                scc_shader::GlslOptions go;
-                go.version = (uint32_t)target.version;
-                go.es = target.isES();
-                arts.push_back({u.entry, stageExt(u.stage), ttag, stageExt(u.stage),
-                                scc_shader::spirvToGlsl(u.words, go), false});
             }
         }
 

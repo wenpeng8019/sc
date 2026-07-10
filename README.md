@@ -1,7 +1,7 @@
 # sc 语言
 
 基于 C 的结构化语言。核心理念：程序即结构，由 `def`/`fnc`/`var`/`let` 四类程序结构对象构成树（另有 `rpc` 作为 `fnc` 的伪形参变体、以及 `tls` 作为 `var` 的线程模式变体）。
-语言定义见 [syntax](syntax)，GPU/着色器扩展（设计与路线，规划中）见 [syntax-s.md](syntax-s.md)，编译器参考手册见 [compiler.md](compiler.md)（含交叉编译、远程构建、builtins 集成与编译器默认行为），VS Code 调试配置见 [debugging.md](debugging.md)，交叉/远程构建踩坑与解法见 [troubleshooting.md](troubleshooting.md)。
+语言定义见 [syntax](syntax)，GPU 空间计算方言（`.ss`）语法参考见 [syntax-s.md](syntax-s.md)（设计与路线见 [syntax-s-design.md](syntax-s-design.md)），编译器参考手册见 [compiler.md](compiler.md)（含交叉编译、远程构建、builtins 集成与编译器默认行为），VS Code 调试配置见 [debugging.md](debugging.md)，交叉/远程构建踩坑与解法见 [troubleshooting.md](troubleshooting.md)。
 
 ## 定位：与 C 共生，而非取代
 

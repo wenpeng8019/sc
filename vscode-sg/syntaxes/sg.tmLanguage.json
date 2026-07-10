@@ -6,6 +6,8 @@
         { "include": "#comment" },
         { "include": "#inc-decl" },
         { "include": "#tar-decl" },
+        { "include": "#spec-decl" },
+        { "include": "#use-decl" },
         { "include": "#export-prefix" },
         { "include": "#stage-decl" },
         { "include": "#def-decl" },
@@ -40,6 +42,21 @@
                 "2": { "name": "string.unquoted.include.ss" }
             }
         },
+        "spec-decl": {
+            "match": "^\\s*(spec)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:(in)\\b|(:))",
+            "captures": {
+                "1": { "name": "keyword.control.spec.ss" },
+                "2": { "name": "entity.name.type.spec-dim.ss" },
+                "3": { "name": "keyword.control.spec.ss" }
+            }
+        },
+        "use-decl": {
+            "match": "^\\s*(use)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\s*,\\s*[A-Za-z_][A-Za-z0-9_]*)*)",
+            "captures": {
+                "1": { "name": "keyword.control.use.ss" },
+                "2": { "name": "entity.name.type.spec-dim.ss" }
+            }
+        },
         "tar-decl": {
             "begin": "^\\s*(tar)\\b",
             "beginCaptures": {
@@ -50,7 +67,7 @@
                 { "include": "#comment" },
                 {
                     "name": "support.constant.target.api.ss",
-                    "match": "\\b(vulkan|glcore|gl|gles|webgl)\\b"
+                    "match": "\\b(vulkan|glcore|gl|gles|webgl|metal)\\b"
                 },
                 {
                     "name": "keyword.operator.target.version.ss",
@@ -161,7 +178,7 @@
         },
         "shader-builtins": {
             "name": "support.function.builtin.ss",
-            "match": "\\b(texture|textureLod|textureProj|textureGrad|texelFetch|textureSize|normalize|length|distance|dot|cross|reflect|refract|faceforward|pow|exp|log|exp2|log2|sqrt|inversesqrt|abs|sign|floor|ceil|round|trunc|fract|mod|modf|min|max|clamp|mix|step|smoothstep|isnan|isinf|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|radians|degrees|transpose|inverse|determinant|outerProduct|matrixCompMult|dFdx|dFdy|fwidth|all|any|not|lessThan|greaterThan|equal|notEqual|packHalf2x16|unpackHalf2x16)\\b(?=\\s*\\()"
+            "match": "\\b(texture|textureLod|textureProj|textureProjLod|textureGrad|textureProjGrad|textureGather|textureGatherOffset|textureOffset|textureLodOffset|textureProjOffset|textureGradOffset|textureQueryLod|textureQueryLevels|texelFetch|textureSize|normalize|length|distance|dot|cross|reflect|refract|faceforward|pow|exp|log|exp2|log2|sqrt|inversesqrt|abs|sign|floor|ceil|round|trunc|fract|mod|modf|min|max|clamp|mix|step|smoothstep|isnan|isinf|sin|cos|tan|asin|acos|atan|sinh|cosh|tanh|radians|degrees|transpose|inverse|determinant|outerProduct|matrixCompMult|dFdx|dFdy|fwidth|all|any|not|lessThan|greaterThan|equal|notEqual|packHalf2x16|unpackHalf2x16)\\b(?=\\s*\\()"
         },
         "shader-vars": {
             "patterns": [
@@ -193,7 +210,7 @@
         },
         "shader-types": {
             "name": "storage.type.primitive.ss",
-            "match": "\\b(vec[234]|[iub]vec[234]|dvec[234]|mat[234](x[234])?|dmat[234]|sampler[123]D|samplerCube|sampler2DArray|sampler2DShadow|samplerCubeShadow|isampler[123]D|usampler[123]D|isamplerCube|usamplerCube|image[123]D|imageCube|texture[123]D|atomic_uint)\\b"
+            "match": "\\b(vec[234]|[iub]vec[234]|dvec[234]|mat[234](x[234])?|dmat[234]|sampler[123]D|samplerCube|sampler2DArray|samplerCubeArray|sampler2DShadow|samplerCubeShadow|sampler2DArrayShadow|samplerCubeArrayShadow|isampler[123]D|usampler[123]D|isamplerCube|usamplerCube|image[123]D|imageCube|texture[123]D|atomic_uint)\\b"
         },
         "types": {
             "patterns": [

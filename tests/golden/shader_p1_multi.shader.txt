@@ -1,0 +1,19 @@
+ss: fs_tex_multi.spv（1644 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p1_multi.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_tex_multi",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_tex_multi.frag",
+      "inputs": [{"name": "uv2", "type": "vec2", "location": 0}, {"name": "uv3", "type": "vec3", "location": 1}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex2d", "type": "sampler2D", "offset": 0, "size": 4}, {"name": "tex3d", "type": "sampler3D", "offset": 4, "size": 4}, {"name": "texcube", "type": "samplerCube", "offset": 8, "size": 4}], "size": 16}
+  ]
+}

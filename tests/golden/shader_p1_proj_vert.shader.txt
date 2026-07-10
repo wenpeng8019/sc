@@ -1,0 +1,20 @@
+ss: cs_tex_proj.spv（936 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p1_proj_vert.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_tex_proj",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_tex_proj.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex", "type": "sampler2D", "offset": 0, "size": 4}], "size": 16}
+  ]
+}

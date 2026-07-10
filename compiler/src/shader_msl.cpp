@@ -47,6 +47,10 @@ std::string spirvToGlsl(const std::vector<uint32_t>& spirv, const GlslOptions& o
         o.version = opt.version;
         o.es = opt.es;
         o.enable_420pack_extension = false;   // GL4.1 无 GL_ARB_shading_language_420pack
+        // force_temporary：禁止 spirv-cross 把函数调用结果内联进变量声明。
+        // 消除 macOS libc++ 哈希随机化导致的「float a = f(x)」vs「float _N = f(x); float a = _N;」
+        // 非确定性，使 golden 测试在跨进程运行时稳定。
+        o.force_temporary = true;
         glsl.set_common_options(o);
         return glsl.compile();
     } catch (const std::exception& e) {

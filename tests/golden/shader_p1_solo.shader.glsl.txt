@@ -1,0 +1,47 @@
+// ===== shader_p1_solo.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_p1_tex",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_p1_tex.frag",
+      "inputs": [{"name": "uv2", "type": "vec2", "location": 0}, {"name": "uv3", "type": "vec3", "location": 1}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "tex2d", "kind": "sampler", "type": "sampler2D", "set": 0, "binding": 0},
+    {"name": "tex3d", "kind": "sampler", "type": "sampler3D", "set": 0, "binding": 1},
+    {"name": "texcube", "kind": "sampler", "type": "samplerCube", "set": 0, "binding": 2},
+    {"name": "texarr", "kind": "sampler", "type": "sampler2DArray", "set": 0, "binding": 3}
+  ]
+}
+
+// ===== fs_p1_tex.frag =====
+#version 450
+// generated from fs_p1_tex (frag) target vulkan450
+
+layout(set=0, binding=0) uniform sampler2D tex2d;
+layout(set=0, binding=1) uniform sampler3D tex3d;
+layout(set=0, binding=2) uniform samplerCube texcube;
+layout(set=0, binding=3) uniform sampler2DArray texarr;
+
+layout(location=0) in vec2 v_uv2;
+layout(location=1) in vec3 v_uv3;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const vec4 c2d = texture(tex2d, v_uv2);
+    const vec4 c2d_lod = textureLod(tex2d, v_uv2, 0.0);
+    const vec4 c3d = texture(tex3d, v_uv3);
+    const vec4 c3d_lod = textureLod(tex3d, v_uv3, 1.0);
+    const vec4 ccube = texture(texcube, v_uv3);
+    const vec4 ccube_lod = textureLod(texcube, v_uv3, 1.5);
+    const vec4 carr = texture(texarr, v_uv3);
+    const vec4 carr_lod = textureLod(texarr, v_uv3, 0.5);
+    const vec4 cpix = texelFetch(tex2d, ivec2((v_uv2 * 512.0)), 0);
+    f_color = (((((((((c2d + c2d_lod) + c3d) + c3d_lod) + ccube) + ccube_lod) + carr) + carr_lod) + cpix) * 0.11);
+    return;
+}

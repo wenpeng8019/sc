@@ -1,0 +1,19 @@
+ss: fs_grad.spv（2948 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p1_grad.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_grad",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_grad.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}, {"name": "ref", "type": "float", "location": 1}, {"name": "uv3", "type": "vec3", "location": 2}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexGradBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex2d", "type": "sampler2D", "offset": 0, "size": 4}, {"name": "tex3d", "type": "sampler3D", "offset": 4, "size": 4}, {"name": "texcube", "type": "samplerCube", "offset": 8, "size": 4}, {"name": "shd2d", "type": "sampler2DShadow", "offset": 12, "size": 4}], "size": 16}
+  ]
+}

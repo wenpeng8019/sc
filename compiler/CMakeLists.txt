@@ -24,6 +24,8 @@ add_executable(scc
     # GPU/着色器扩展中枢 IR：GLSL → SPIR-V（glslang 封装）。未集成时为安全失败桩。
     # GPU/着色器扩展：shader 方言子集强制与类型/绑定检查。独立于 semantic.cpp。
     src/shader_sema.cpp
+    # GPU/着色器扩展：编译期特化维度（spec，词法层单态化）。见 spec.md。
+    src/shader_spec.cpp
     src/semantic.cpp
     src/cheaders.cpp
     src/remote.cpp

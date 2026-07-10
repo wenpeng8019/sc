@@ -1,0 +1,40 @@
+// ===== shader_p1_multi.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_tex_multi",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_tex_multi.frag",
+      "inputs": [{"name": "uv2", "type": "vec2", "location": 0}, {"name": "uv3", "type": "vec3", "location": 1}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex2d", "type": "sampler2D", "offset": 0, "size": 4}, {"name": "tex3d", "type": "sampler3D", "offset": 4, "size": 4}, {"name": "texcube", "type": "samplerCube", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_tex_multi.frag =====
+#version 450
+// generated from fs_tex_multi (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform TexBlock_blk {
+    sampler2D tex2d;
+    sampler3D tex3d;
+    samplerCube texcube;
+} TexBlock;
+
+layout(location=0) in vec2 v_uv2;
+layout(location=1) in vec3 v_uv3;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const vec4 c2d = texture(TexBlock.tex2d, v_uv2);
+    const vec4 c3d = texture(TexBlock.tex3d, v_uv3);
+    const vec4 ccube = texture(TexBlock.texcube, v_uv3);
+    f_color = (((c2d * 0.33) + (c3d * 0.33)) + (ccube * 0.34));
+    return;
+}

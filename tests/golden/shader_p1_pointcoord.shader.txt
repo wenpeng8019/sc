@@ -1,0 +1,19 @@
+ss: fs_point.spv（884 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p1_pointcoord.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_point",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_point.frag",
+      "inputs": [],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex", "type": "sampler2D", "offset": 0, "size": 4}], "size": 16}
+  ]
+}

@@ -30,6 +30,8 @@ enum class ShaderStage {
 struct ShaderFieldAttr {
     int         loc = -1;       // loc N（-1 = 未指定，由 codegen 按字段序自动分配）
     std::string builtin;        // builtin X（内建语义名，如 position/frag_coord），空 = 无
+    // 插值限定词（varying 修饰；整数类型自动补 flat）
+    enum Interp { Default = 0, Flat, NoPerspective, Centroid } interp = Default;
 };
 
 // 结构体级资源绑定（syntax-s §6）：附着于 @def 结构体（仅 .ss 有意义）。

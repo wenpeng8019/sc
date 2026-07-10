@@ -1927,16 +1927,24 @@ struct Parser {
     // GPU/着色器扩展（syntax-s §5）：字段级后缀属性（仅 shader 模式，且属性词出现时才消费）。
     //   loc N        → 顶点属性 / varying 位置
     //   builtin X    → 内建变量语义（position/frag_coord/...）
+    //   flat / noperspective / centroid → varying 插值限定词
     void parseShaderFieldAttrs(Field& f) {
-        while (at(Tok::Ident) && (cur().text == "loc" || cur().text == "builtin")) {
+        while (at(Tok::Ident) && (cur().text == "loc" || cur().text == "builtin" ||
+               cur().text == "flat" || cur().text == "noperspective" || cur().text == "centroid")) {
             std::string kw = advance().text;
             if (!f.shaderAttr) f.shaderAttr = std::make_shared<ShaderFieldAttr>();
             if (kw == "loc") {
                 if (!at(Tok::Int)) err("loc 后期望位置整数");
                 f.shaderAttr->loc = std::stoi(advance().text);
-            } else {
+            } else if (kw == "builtin") {
                 if (!at(Tok::Ident)) err("builtin 后期望内建语义名");
                 f.shaderAttr->builtin = advance().text;
+            } else if (kw == "flat") {
+                f.shaderAttr->interp = ShaderFieldAttr::Flat;
+            } else if (kw == "noperspective") {
+                f.shaderAttr->interp = ShaderFieldAttr::NoPerspective;
+            } else if (kw == "centroid") {
+                f.shaderAttr->interp = ShaderFieldAttr::Centroid;
             }
         }
     }
@@ -2792,12 +2800,24 @@ struct Parser {
                     d->exported = exported;
                     advance();
                     // GPU/着色器扩展：.ss 顶层 var 作为全局着色资源（sampler/image 等）：
-                    //   var albedo: sampler2D set 0 binding 1 —— 单项 + 可选 set/binding。
+                    //   var albedo: sampler2D uniform set 0 binding 1
+                    //   var albedo: sampler2D set 0 binding 1
+                    //   —— 单项 + 可选资源词 + 可选 set/binding。
                     if (shaderMode && d->kind == Decl::VarD) {
                         d->structCommon.fields.push_back(parseVarItem());
-                        if (at(Tok::Ident) && (cur().text == "set" || cur().text == "binding")) {
+                        if (at(Tok::Ident) &&
+                            (cur().text == "uniform" || cur().text == "storage" || cur().text == "push" ||
+                             cur().text == "set" || cur().text == "binding")) {
                             auto a = std::make_shared<ShaderDeclAttr>();
-                            a->res = ShaderDeclAttr::Uniform;   // 采样器等按 uniform 资源发射
+                            // 默认 uniform；若显式给出资源词则按词覆盖。
+                            a->res = ShaderDeclAttr::Uniform;
+                            if (at(Tok::Ident) &&
+                                (cur().text == "uniform" || cur().text == "storage" || cur().text == "push")) {
+                                const std::string kw = advance().text;
+                                a->res = kw == "uniform" ? ShaderDeclAttr::Uniform
+                                       : kw == "storage" ? ShaderDeclAttr::Storage
+                                                          : ShaderDeclAttr::Push;
+                            }
                             parseShaderSetBinding(*a);
                             d->shaderAttr = std::move(a);
                         }

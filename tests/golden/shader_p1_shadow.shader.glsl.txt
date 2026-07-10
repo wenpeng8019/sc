@@ -1,0 +1,43 @@
+// ===== shader_p1_shadow.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_shadow",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_shadow.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}, {"name": "depth_ref", "type": "float", "location": 1}, {"name": "uv3", "type": "vec3", "location": 2}],
+      "outputs": [{"name": "f_color", "type": "float", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "ShadowBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "shd2d", "type": "sampler2DShadow", "offset": 0, "size": 4}, {"name": "shdcube", "type": "samplerCubeShadow", "offset": 4, "size": 4}, {"name": "shdarr", "type": "sampler2DArrayShadow", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_shadow.frag =====
+#version 450
+// generated from fs_shadow (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform ShadowBlock_blk {
+    sampler2DShadow shd2d;
+    samplerCubeShadow shdcube;
+    sampler2DArrayShadow shdarr;
+} ShadowBlock;
+
+layout(location=0) in vec2 v_uv;
+layout(location=1) in float v_depth_ref;
+layout(location=2) in vec3 v_uv3;
+layout(location=0) out float f_color;
+
+void main() {
+    const float d0 = texture(ShadowBlock.shd2d, vec3(v_uv, v_depth_ref));
+    const float d1 = textureLod(ShadowBlock.shd2d, vec3(v_uv, v_depth_ref), 0.0);
+    const float d2 = texture(ShadowBlock.shdcube, vec4(v_uv3, v_depth_ref));
+    const float d3 = textureLod(ShadowBlock.shdcube, vec4(v_uv3, v_depth_ref), 0.0);
+    const float d4 = texture(ShadowBlock.shdarr, vec4(v_uv, 0.0, v_depth_ref));
+    f_color = (((((d0 + d1) + d2) + d3) + d4) * 0.2);
+    return;
+}

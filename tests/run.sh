@@ -213,6 +213,22 @@ GRAPH_UNIT=(
 # 纯文本比对，无 spirv-val/glslangValidator 外部工具依赖。
 SHADER_EMIT=(
     tests/cases/shader_p0.ss
+    tests/cases/shader_p1.ss
+    tests/cases/shader_p1_solo.ss
+    tests/cases/shader_p1_size.ss
+    tests/cases/shader_p1_projlod.ss
+    tests/cases/shader_p1_proj_vert.ss
+    tests/cases/shader_p1_shadow.ss
+    tests/cases/shader_p1_grad.ss
+    tests/cases/shader_p1_align.ss
+    tests/cases/shader_p1_gaps.ss
+    tests/cases/shader_p1_pointcoord.ss
+    tests/cases/shader_p1_basic.ss
+    tests/cases/shader_p1_multi.ss
+    tests/cases/shader_p1_array.ss
+    tests/cases/shader_p1_proj.ss
+    tests/cases/shader_spec.ss
+    tests/cases/shader_spec_use.ss
 )
 
 pass=0 fail=0 upd=0

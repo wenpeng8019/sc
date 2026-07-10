@@ -1,0 +1,50 @@
+// ===== shader_p1_grad.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_grad",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_grad.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}, {"name": "ref", "type": "float", "location": 1}, {"name": "uv3", "type": "vec3", "location": 2}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexGradBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex2d", "type": "sampler2D", "offset": 0, "size": 4}, {"name": "tex3d", "type": "sampler3D", "offset": 4, "size": 4}, {"name": "texcube", "type": "samplerCube", "offset": 8, "size": 4}, {"name": "shd2d", "type": "sampler2DShadow", "offset": 12, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_grad.frag =====
+#version 450
+// generated from fs_grad (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform TexGradBlock_blk {
+    sampler2D tex2d;
+    sampler3D tex3d;
+    samplerCube texcube;
+    sampler2DShadow shd2d;
+} TexGradBlock;
+
+layout(location=0) in vec2 v_uv;
+layout(location=1) in float v_ref;
+layout(location=2) in vec3 v_uv3;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const vec2 dx2 = dFdx(v_uv);
+    const vec2 dy2 = dFdy(v_uv);
+    const vec3 dx3 = dFdx(v_uv3);
+    const vec3 dy3 = dFdy(v_uv3);
+    const vec4 c0 = textureGrad(TexGradBlock.tex2d, v_uv, dx2, dy2);
+    const vec4 c1 = textureGrad(TexGradBlock.tex3d, v_uv3, dx3, dy3);
+    const vec4 c2 = textureGrad(TexGradBlock.texcube, v_uv3, dx3, dy3);
+    const vec3 shadow_coord = vec3(v_uv, v_ref);
+    const float d0 = textureGrad(TexGradBlock.shd2d, shadow_coord, dx2, dy2);
+    const vec3 proj = vec3(v_uv, 1.0);
+    const vec4 c3 = textureProjGrad(TexGradBlock.tex2d, proj, dx2, dy2);
+    f_color = ((((c0 + c1) + c2) + vec4(d0)) + c3);
+    return;
+}

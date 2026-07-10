@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "ast.h"
+#include "shader_spec.h"
 
 // ============================================================
 // codegen_glsl —— GPU/着色器扩展（syntax-s）一期后端
@@ -29,7 +30,9 @@ std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target);
 // 生成反射清单 JSON（syntax-s §10）：目标（api/version）、阶段、入口、顶点属性
 // location、varying 配对、uniform/storage/sampler 的 set/binding 与 std140/std430
 // 字段偏移。低版本目标（无显式 binding）resources 项保留 name 供运行时按名绑定。
-std::string emitReflectionJson(const Program& prog, const GlslTarget& target);
+// spec 非空时附加 "spec": {维度: 取值, ...} 字段（spec.md §5，供运行时选实例）。
+std::string emitReflectionJson(const Program& prog, const GlslTarget& target,
+                               const ShaderSpecCombo* spec = nullptr);
 
 // .ss 源到产物的端到端驱动：lex → parse(shaderMode=true) → shader_sema → 发射。
 // 默认产物链全目标统一 SPIR-V 中枢（codegen_spirv 直发）：vulkan 直落 .spv，

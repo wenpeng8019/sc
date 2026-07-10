@@ -1,0 +1,35 @@
+// ===== shader_p1_proj.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_tex_proj",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_tex_proj.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "TexBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "tex", "type": "sampler2D", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_tex_proj.frag =====
+#version 450
+// generated from fs_tex_proj (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform TexBlock_blk {
+    sampler2D tex;
+} TexBlock;
+
+layout(location=0) in vec2 v_uv;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const vec4 c1 = textureProj(TexBlock.tex, vec4(v_uv, 1.0, 1.0));
+    f_color = c1;
+    return;
+}

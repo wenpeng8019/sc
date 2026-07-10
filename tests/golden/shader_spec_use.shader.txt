@@ -1,0 +1,61 @@
+ss: vs_main.sampler2D.tm_a.ADD.spv（2148 字节）需 -o 输出目录（二进制不入 stdout）
+ss: fs_main.sampler2D.tm_a.ADD.spv（2216 字节）需 -o 输出目录（二进制不入 stdout）
+ss: vs_main.sampler2D.tm_b.MUL.spv（2148 字节）需 -o 输出目录（二进制不入 stdout）
+ss: fs_main.sampler2D.tm_b.MUL.spv（2216 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_spec_use.sampler2D.tm_a.ADD.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "spec": {"TEX_KIND": "sampler2D", "TONE": "tm_a", "BLEND": "ADD"},
+  "stages": [
+    {
+      "name": "vs_main",
+      "stage": "vert",
+      "entry": "main",
+      "file": "vs_main.vert",
+      "inputs": [{"name": "pos", "type": "vec3", "location": 0}, {"name": "uv", "type": "vec2", "location": 1}],
+      "outputs": [{"name": "clip", "builtin": "position"}, {"name": "uv", "type": "vec2", "location": 0}]
+    },
+    {
+      "name": "fs_main",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_main.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "tex", "kind": "sampler", "type": "sampler2D", "set": 0, "binding": 1},
+    {"name": "Camera", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "mvp", "type": "mat4", "offset": 0, "size": 64}], "size": 64}
+  ]
+}
+
+// ===== shader_spec_use.sampler2D.tm_b.MUL.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "spec": {"TEX_KIND": "sampler2D", "TONE": "tm_b", "BLEND": "MUL"},
+  "stages": [
+    {
+      "name": "vs_main",
+      "stage": "vert",
+      "entry": "main",
+      "file": "vs_main.vert",
+      "inputs": [{"name": "pos", "type": "vec3", "location": 0}, {"name": "uv", "type": "vec2", "location": 1}],
+      "outputs": [{"name": "clip", "builtin": "position"}, {"name": "uv", "type": "vec2", "location": 0}]
+    },
+    {
+      "name": "fs_main",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_main.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "tex", "kind": "sampler", "type": "sampler2D", "set": 0, "binding": 1},
+    {"name": "Camera", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "mvp", "type": "mat4", "offset": 0, "size": 64}], "size": 64}
+  ]
+}

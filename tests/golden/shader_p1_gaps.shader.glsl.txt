@@ -1,0 +1,47 @@
+// ===== shader_p1_gaps.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "fs_gap",
+      "stage": "frag",
+      "entry": "main",
+      "file": "fs_gap.frag",
+      "inputs": [{"name": "uv", "type": "vec2", "location": 0}, {"name": "primID", "type": "int", "location": 1}, {"name": "edge", "type": "vec3", "location": 2}, {"name": "uvC", "type": "vec2", "location": 3}],
+      "outputs": [{"name": "f_color", "type": "vec4", "location": 0}]
+    }
+  ],
+  "resources": [
+    {"name": "IntBlock", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "itex", "type": "isampler2D", "offset": 0, "size": 4}, {"name": "utex", "type": "usampler2D", "offset": 4, "size": 4}, {"name": "i3d", "type": "isampler3D", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== fs_gap.frag =====
+#version 450
+// generated from fs_gap (frag) target vulkan450
+
+layout(set=0, binding=0, std140) uniform IntBlock_blk {
+    isampler2D itex;
+    usampler2D utex;
+    isampler3D i3d;
+} IntBlock;
+
+layout(location=0) in vec2 v_uv;
+flat layout(location=1) in int v_primID;
+noperspective layout(location=2) in vec3 v_edge;
+centroid layout(location=3) in vec2 v_uvC;
+layout(location=0) out vec4 f_color;
+
+void main() {
+    const ivec4 iv = texture(IntBlock.itex, v_uv);
+    const ivec4 iv_lod = textureLod(IntBlock.itex, v_uv, 0.0);
+    const ivec4 iv_fetch = texelFetch(IntBlock.itex, ivec2((v_uv * 256.0)), 0);
+    const uvec4 uv = texture(IntBlock.utex, v_uv);
+    const uvec4 uv_g = textureGather(IntBlock.utex, v_uv, 0);
+    const int flat_val = v_primID;
+    const vec3 edgeW = v_edge;
+    const vec2 uvC = v_uvC;
+    f_color = (vec4(((((float(iv.x) + float(uv.x)) + float(flat_val)) + edgeW.x) + uvC.x)) * 0.0001);
+    return;
+}

@@ -49,6 +49,16 @@ enum Op : uint16_t {
     OpDecorate = 71, OpMemberDecorate = 72,
     OpVectorShuffle = 79, OpCompositeConstruct = 80, OpCompositeExtract = 81,
     OpImageSampleImplicitLod = 87, OpImageSampleExplicitLod = 88,
+    OpImageSampleDrefImplicitLod = 89, OpImageSampleDrefExplicitLod = 90,
+    OpImageSampleProjImplicitLod = 91, OpImageSampleProjExplicitLod = 92,
+    OpImageSampleProjDrefImplicitLod = 93, OpImageSampleProjDrefExplicitLod = 94,
+    OpImageFetch = 95,
+    OpImageGather = 96,
+    OpImageDrefGather = 97,
+    OpImage = 100,
+    OpImageQuerySizeLod = 103,
+    OpImageQueryLod = 105,
+    OpImageQueryLevels = 106,
     OpConvertFToU = 109, OpConvertFToS = 110, OpConvertSToF = 111, OpConvertUToF = 112,
     OpBitcast = 124,
     OpSNegate = 126, OpFNegate = 127,
@@ -98,11 +108,14 @@ enum StorageClass : uint32_t {
 };
 enum Decoration : uint32_t {
     DecBlock = 2, DecBufferBlock = 3, DecColMajor = 5, DecArrayStride = 6,
-    DecMatrixStride = 7, DecBuiltIn = 11, DecNonWritable = 24,
+    DecMatrixStride = 7, DecBuiltIn = 11,
+    DecNoPerspective = 13, DecFlat = 14, DecCentroid = 16,
+    DecNonWritable = 24,
     DecLocation = 30, DecBinding = 33, DecDescriptorSet = 34, DecOffset = 35,
 };
 enum BuiltInId : uint32_t {
     BiPosition = 0, BiPointSize = 1, BiClipDistance = 3,
+    BiPointCoord = 16,
     BiFragCoord = 15, BiFrontFacing = 17, BiFragDepth = 22,
     BiVertexIndex = 42, BiInstanceIndex = 43,
     BiNumWorkgroups = 24, BiWorkgroupId = 26,
@@ -114,10 +127,17 @@ enum BuiltInId : uint32_t {
 struct TI {                       // TypeInfo
     enum K { Void, Bool, F32, I32, U32, Vec, Mat, Array, RArray, Struct,
              Image, SampledImage } k = Void;
+    TI() = default;
+    TI(K kk) : k(kk) {}
     uint32_t id = 0;              // SPIR-V 类型 id
     K   comp = F32;               // Vec/Mat/Array 的组件标量类别
     int n = 0;                    // Vec: 分量数；Mat: 列数（方阵）；Array: 元素数
     uint32_t elem = 0;            // Array/RArray/Vec/Mat 的元素类型 id
+    uint32_t dim = 0;             // Image: SpvDim（0=1D,1=2D,2=3D,3=Cube...）
+    bool arrayed = false;         // Image: 是否数组纹理
+    bool depth = false;           // Image: 是否深度比较（shadow sampler）
+    bool ms = false;              // Image: 是否多重采样（sampler2DMS）
+    // comp 对于 Image 类型复用：存储采样标量类型（F32/I32/U32）——决定 texture() 等函数返回类型
     std::string structName;       // Struct: 源类型名
     bool isFloat() const { return k == F32 || ((k == Vec || k == Mat) && comp == F32); }
     bool isSigned() const { return k == I32 || (k == Vec && comp == I32); }
@@ -158,6 +178,39 @@ struct Builder {
     std::unordered_map<uint32_t, TI>          tiById;      // typeId → TI
 
     uint32_t id() { return next++; }
+
+    // ---- 预热：把 glsl450 与全部基础类型固定在 id 1-21 ----
+    // 目的：消除 macOS libc++ unordered_map 每进程哈希种子随机化导致的
+    //       类型分配顺序漂移，使 SPIR-V id 跨进程恒定，spirv-cross
+    //       产生的临时变量名（_76 等）不再因加新特性而改变。
+    // 布局：1=glsl450  2=void  3=bool  4=f32  5=i32  6=u32
+    //       7..9=vec2..4   10..12=ivec2..4   13..15=uvec2..4
+    //       16..18=bvec2..4   19=mat2  20=mat3  21=mat4
+    //       22+ = shader 特定内容（采样器/UBO/IO/指令）
+    Builder() {
+        glsl450 = id();       // id 1 (OpExtInstImport 在 finish() 里发射)
+        tVoid();              // id 2
+        tBool();              // id 3
+        tF32();               // id 4
+        tI32();               // id 5
+        tU32();               // id 6
+        tVec(tF32(), 2);     // id 7  vec2
+        tVec(tF32(), 3);     // id 8  vec3
+        tVec(tF32(), 4);     // id 9  vec4
+        tVec(tI32(), 2);     // id 10 ivec2
+        tVec(tI32(), 3);     // id 11 ivec3
+        tVec(tI32(), 4);     // id 12 ivec4
+        tVec(tU32(), 2);     // id 13 uvec2
+        tVec(tU32(), 3);     // id 14 uvec3
+        tVec(tU32(), 4);     // id 15 uvec4
+        tVec(tBool(), 2);    // id 16 bvec2
+        tVec(tBool(), 3);    // id 17 bvec3
+        tVec(tBool(), 4);    // id 18 bvec4
+        tMat(2);             // id 19 mat2
+        tMat(3);             // id 20 mat3
+        tMat(4);             // id 21 mat4
+        // 此后 next==22，shader 特定内容从这里开始
+    }
 
     // 类型去重发射：key 唯一标识构造，miss 时发射并登记
     uint32_t type(const std::string& key, std::function<uint32_t()> emit, TI ti = {}) {
@@ -283,6 +336,7 @@ struct Builder {
         out.push_back(next);                 // id bound
         out.push_back(0);                    // schema
         put(out, OpCapability, {1});         // Capability Shader
+        put(out, OpCapability, {50});        // Capability ImageQuery（textureSize）
         {   std::vector<uint32_t> ops = {glsl450};
             packStr(ops, "GLSL.std.450");
             putV(out, OpExtInstImport, ops); }
@@ -418,7 +472,57 @@ struct StageEmitter {
         return r;
     }
 
+    static bool isSamplerTypeName(const std::string& tname) {
+        // float 采样器（标准 sampler*）
+        if (tname == "sampler2D" || tname == "sampler3D" || tname == "samplerCube"
+         || tname == "sampler2DArray" || tname == "samplerCubeArray"
+         || tname == "sampler2DShadow" || tname == "samplerCubeShadow"
+         || tname == "sampler2DArrayShadow" || tname == "samplerCubeArrayShadow") return true;
+        // 整数采样器（isampler*）
+        if (tname == "isampler2D" || tname == "isampler3D" || tname == "isamplerCube"
+         || tname == "isampler2DArray" || tname == "isamplerCubeArray") return true;
+        // 无符号采样器（usampler*）
+        if (tname == "usampler2D" || tname == "usampler3D" || tname == "usamplerCube"
+         || tname == "usampler2DArray" || tname == "usamplerCubeArray") return true;
+        // 多重采样纹理（sampler2DMS）
+        if (tname == "sampler2DMS" || tname == "sampler2DMSArray") return true;
+        return false;
+    }
+
     uint32_t typeIdOf(const TypeRef& t, int line) {
+        // 资源类型（采样器） — 单独处理（使用缓存避免重复）
+        if (isSamplerTypeName(t.name)) {
+            // 采样器标量类型：i* → I32, u* → U32, 其他 → F32
+            TI::K sampK = (t.name[0] == 'i') ? TI::I32
+                        : (t.name[0] == 'u') ? TI::U32 : TI::F32;
+            const std::string base = (sampK != TI::F32) ? t.name.substr(1) : t.name;
+            uint32_t dim = 0, arrayed = 0, depth = 0, ms = 0;
+            if (base == "sampler2D") { dim = 1; }
+            else if (base == "sampler3D") { dim = 2; }
+            else if (base == "samplerCube") { dim = 3; }
+            else if (base == "sampler2DArray") { dim = 1; arrayed = 1; }
+            else if (base == "samplerCubeArray") { dim = 3; arrayed = 1; }
+            else if (base == "sampler2DShadow") { dim = 1; depth = 1; }
+            else if (base == "samplerCubeShadow") { dim = 3; depth = 1; }
+            else if (base == "sampler2DArrayShadow") { dim = 1; arrayed = 1; depth = 1; }
+            else if (base == "samplerCubeArrayShadow") { dim = 3; arrayed = 1; depth = 1; }
+            else if (base == "sampler2DMS") { dim = 1; ms = 1; }
+            else if (base == "sampler2DMSArray") { dim = 1; arrayed = 1; ms = 1; }
+            uint32_t sampScalar = sampK == TI::I32 ? b.tI32() : sampK == TI::U32 ? b.tU32() : b.tF32();
+            TI iti; iti.k = TI::Image; iti.dim = dim; iti.arrayed = arrayed != 0;
+            iti.depth = depth != 0; iti.ms = ms != 0; iti.comp = sampK;
+            uint32_t tImg = b.type("img_" + t.name, [&]{
+                uint32_t r = b.id();
+                put(b.secTypes, OpTypeImage, {r, sampScalar, dim, depth, arrayed, ms, 1, 0});
+                return r;
+            }, iti);
+            TI sti; sti.k = TI::SampledImage; sti.elem = tImg;
+            return b.type("simg_" + t.name, [&]{
+                uint32_t r = b.id();
+                put(b.secTypes, OpTypeSampledImage, {r, tImg});
+                return r;
+            }, sti);
+        }
         ScType st;
         if (!scTypeOf(t.name, st)) {
             // 用户结构体（非内建标量/向量/矩阵）
@@ -472,29 +576,53 @@ struct StageEmitter {
     void setupResources() {
         for (const auto& d : prog.decls) {
             if (!d) continue;
-            if (d->kind == Decl::VarD && d->shaderAttr) {         // sampler2D 全局
-                const Field& f = d->structCommon.fields.front();
-                if (f.type.name != "sampler2D")
-                    err("shader 暂不支持资源类型 `" + f.type.name + "`（见 syntax-s §16 P1）", d->line);
-                uint32_t tImg = b.type("img2d", [&]{
-                    uint32_t r = b.id();
-                    // OpTypeImage %f32 2D depth=0 arrayed=0 ms=0 sampled=1 format=Unknown
-                    put(b.secTypes, OpTypeImage, {r, b.tF32(), 1, 0, 0, 0, 1, 0});
-                    return r;
-                }, {TI::Image});
-                uint32_t tSi = b.type("simg2d", [&]{
-                    uint32_t r = b.id();
-                    put(b.secTypes, OpTypeSampledImage, {r, tImg});
-                    return r;
-                }, {TI::SampledImage});
-                uint32_t ptrT = b.tPtr(ScUniformConstant, tSi);
-                uint32_t v = b.id();
-                put(b.secTypes, OpVariable, {ptrT, v, ScUniformConstant});
-                b.name(v, f.name);
-                auto* a = d->shaderAttr.get();
-                if (a->set >= 0)     put(b.secDeco, OpDecorate, {v, DecDescriptorSet, (uint32_t)a->set});
-                if (a->binding >= 0) put(b.secDeco, OpDecorate, {v, DecBinding, (uint32_t)a->binding});
-                samplers[f.name] = {v, tSi, ScUniformConstant};
+            if (d->kind == Decl::VarD && d->shaderAttr) {         // sampler* 全局（可单或多个纹理）
+                for (const auto& f : d->structCommon.fields) {
+                    const std::string& tname = f.type.name;
+                    // 纹理类型 → OpTypeImage 维度参数
+                    // OpTypeImage(result, sample_type, dimension, depth, arrayed, ms, sampled, format)
+                    // dimension: 1=1D, 2=2D, 3=3D, 4=Cube, 5=Rect, 6=Buffer, 7=SubpassData
+                    TI::K sampK = (tname[0] == 'i') ? TI::I32
+                                : (tname[0] == 'u') ? TI::U32 : TI::F32;
+                    const std::string base = (sampK != TI::F32) ? tname.substr(1) : tname;
+                    uint32_t dim = 0; uint32_t arrayed = 0; uint32_t depth = 0; uint32_t ms = 0;
+                    if (base == "sampler2D") { dim = 1; }
+                    else if (base == "sampler3D") { dim = 2; }
+                    else if (base == "samplerCube") { dim = 3; }
+                    else if (base == "sampler2DArray") { dim = 1; arrayed = 1; }
+                    else if (base == "samplerCubeArray") { dim = 3; arrayed = 1; }
+                    else if (base == "sampler2DShadow") { dim = 1; depth = 1; }
+                    else if (base == "samplerCubeShadow") { dim = 3; depth = 1; }
+                    else if (base == "sampler2DArrayShadow") { dim = 1; arrayed = 1; depth = 1; }
+                    else if (base == "samplerCubeArrayShadow") { dim = 3; arrayed = 1; depth = 1; }
+                    else if (base == "sampler2DMS") { dim = 1; ms = 1; }
+                    else if (base == "sampler2DMSArray") { dim = 1; arrayed = 1; ms = 1; }
+                    else {
+                        err("shader 暂不支持资源类型 `" + tname + "`（见 syntax-s §16 P1）", f.line);
+                    }
+                    uint32_t sampScalar = sampK == TI::I32 ? b.tI32() : sampK == TI::U32 ? b.tU32() : b.tF32();
+                    TI iti; iti.k = TI::Image; iti.dim = dim; iti.arrayed = arrayed != 0;
+                    iti.depth = depth != 0; iti.ms = ms != 0; iti.comp = sampK;
+                    uint32_t tImg = b.type("img_" + tname, [&]{
+                        uint32_t r = b.id();
+                        put(b.secTypes, OpTypeImage, {r, sampScalar, dim, depth, arrayed, ms, 1, 0});
+                        return r;
+                    }, iti);
+                    TI sti; sti.k = TI::SampledImage; sti.elem = tImg;
+                    uint32_t tSi = b.type("simg_" + tname, [&]{
+                        uint32_t r = b.id();
+                        put(b.secTypes, OpTypeSampledImage, {r, tImg});
+                        return r;
+                    }, sti);
+                    uint32_t ptrT = b.tPtr(ScUniformConstant, tSi);
+                    uint32_t v = b.id();
+                    put(b.secTypes, OpVariable, {ptrT, v, ScUniformConstant});
+                    b.name(v, f.name);
+                    auto* a = d->shaderAttr.get();
+                    if (a->set >= 0)     put(b.secDeco, OpDecorate, {v, DecDescriptorSet, (uint32_t)a->set});
+                    if (a->binding >= 0) put(b.secDeco, OpDecorate, {v, DecBinding, (uint32_t)a->binding});
+                    samplers[f.name] = {v, tSi, ScUniformConstant};
+                }
                 continue;
             }
             if (d->kind != Decl::StructD || !d->shaderAttr ||
@@ -503,6 +631,33 @@ struct StageEmitter {
             auto* a = d->shaderAttr.get();
             const bool std430 = a->res == ShaderDeclAttr::Storage;
             const bool push   = a->res == ShaderDeclAttr::Push;
+
+            // sampler 资源块：opaque 类型不能进 UBO/SSBO 结构体；拆成独立 UniformConstant 变量。
+            bool hasSamplerMember = false;
+            bool hasNonSamplerMember = false;
+            for (const auto& f : d->structCommon.fields) {
+                if (f.synthetic) continue;
+                if (isSamplerTypeName(f.type.name)) hasSamplerMember = true;
+                else hasNonSamplerMember = true;
+            }
+            if (hasSamplerMember) {
+                if (hasNonSamplerMember)
+                    err("资源块 `" + d->name + "` 不能混合 sampler 与非 sampler 成员", d->line);
+                int bi = 0;
+                for (const auto& f : d->structCommon.fields) {
+                    if (f.synthetic) continue;
+                    uint32_t tSi = typeIdOf(f.type, f.line);
+                    uint32_t ptrT = b.tPtr(ScUniformConstant, tSi);
+                    uint32_t v = b.id();
+                    put(b.secTypes, OpVariable, {ptrT, v, ScUniformConstant});
+                    b.name(v, d->name + "_" + f.name);
+                    if (a->set >= 0) put(b.secDeco, OpDecorate, {v, DecDescriptorSet, (uint32_t)a->set});
+                    if (a->binding >= 0) put(b.secDeco, OpDecorate, {v, DecBinding, (uint32_t)(a->binding + bi)});
+                    samplers[d->name + "." + f.name] = {v, tSi, ScUniformConstant};
+                    bi++;
+                }
+                continue;
+            }
 
             // 成员类型 + Offset 装饰（布局与反射清单同一算法）
             // resBlockOffsetOf：嵌套结构体按字段递归算 std140 尺寸
@@ -552,12 +707,16 @@ struct StageEmitter {
                 uint32_t mt;
                 if (!f.type.arrayDims.empty() && f.type.arrayDims[0].empty()) {
                     // 运行时数组 x[]: T（仅 storage 块末成员）
-                    uint32_t elem = typeIdOf(TypeRef{f.type.name}, f.line);
+                    TypeRef elemRef;
+                    elemRef.name = f.type.name;
+                    uint32_t elem = typeIdOf(elemRef, f.line);
                     Lay el = layOf(f.type.name, {}, std430);
                     mt = b.tRArrayStrided(elem, (uint32_t)(std430 ? el.size : rup(el.size, 16)));
                 } else if (!f.type.arrayDims.empty()) {
                     // 定长数组成员：带 stride 的独立类型（与 Function 数组不同源）
-                    uint32_t elem = typeIdOf(TypeRef{f.type.name}, f.line);
+                    TypeRef elemRef;
+                    elemRef.name = f.type.name;
+                    uint32_t elem = typeIdOf(elemRef, f.line);
                     int n = std::atoi(f.type.arrayDims[0].c_str());
                     Lay el = layOf(f.type.name, {}, std430);
                     mt = b.tArrayStrided(elem, b.constI(n), n,
@@ -635,6 +794,7 @@ struct StageEmitter {
         if (sem == "front_facing") { bi = BiFrontFacing; type = b.tBool(); return true; }
         if (sem == "sample_id")    { bi = BiSampleId; type = b.tI32(); return true; }
         if (sem == "point_size")   { bi = BiPointSize; type = b.tF32(); return true; }
+        if (sem == "point_coord")   { bi = BiPointCoord; type = b.tVec(b.tF32(), 2); return true; }
         if (sem == "vertex_id")   { bi = BiVertexIndex;   type = b.tI32(); return true; }
         if (sem == "instance_id") { bi = BiInstanceIndex; type = b.tI32(); return true; }
         if (sem == "global_invocation_id" || sem == "local_invocation_id" ||
@@ -679,6 +839,19 @@ struct StageEmitter {
                 uint32_t t = typeIdOf(f.type, f.line);
                 uint32_t v = mkIoVar(t, ScInput, isVert ? f.name : ("v_" + f.name));
                 decoLoc(v, loc);
+                // 插值限定词 / 整数类型自动 flat
+                if (f.shaderAttr && f.shaderAttr->interp != ShaderFieldAttr::Default) {
+                    switch (f.shaderAttr->interp) {
+                        case ShaderFieldAttr::Flat:          put(b.secDeco, OpDecorate, {v, (uint32_t)DecFlat}); break;
+                        case ShaderFieldAttr::NoPerspective: put(b.secDeco, OpDecorate, {v, (uint32_t)DecNoPerspective}); break;
+                        case ShaderFieldAttr::Centroid:      put(b.secDeco, OpDecorate, {v, (uint32_t)DecCentroid}); break;
+                        default: break;
+                    }
+                } else {
+                    const TI& ti = b.info(t);
+                    if (ti.isSigned() || ti.isUnsigned())
+                        put(b.secDeco, OpDecorate, {v, (uint32_t)DecFlat});
+                }
                 ioMap[p.name + "." + f.name] = {v, t, ScInput, false};
             }
         }
@@ -705,6 +878,19 @@ struct StageEmitter {
                     t = typeIdOf(f.type, f.line);
                     v = mkIoVar(t, ScOutput, isVert ? ("v_" + f.name) : ("f_" + f.name));
                     decoLoc(v, loc);
+                    // 插值限定词 / 整数类型自动 flat
+                    if (f.shaderAttr && f.shaderAttr->interp != ShaderFieldAttr::Default) {
+                        switch (f.shaderAttr->interp) {
+                            case ShaderFieldAttr::Flat:          put(b.secDeco, OpDecorate, {v, (uint32_t)DecFlat}); break;
+                            case ShaderFieldAttr::NoPerspective: put(b.secDeco, OpDecorate, {v, (uint32_t)DecNoPerspective}); break;
+                            case ShaderFieldAttr::Centroid:      put(b.secDeco, OpDecorate, {v, (uint32_t)DecCentroid}); break;
+                            default: break;
+                        }
+                    } else {
+                        const TI& ti = b.info(t);
+                        if (ti.isSigned() || ti.isUnsigned())
+                            put(b.secDeco, OpDecorate, {v, (uint32_t)DecFlat});
+                    }
                 }
                 for (const auto& av : outAggVars)
                     ioMap[av + "." + f.name] = {v, t, ScOutput, false};
@@ -745,6 +931,20 @@ struct StageEmitter {
         if (v.type == wantType) return v;
         const TI& from = b.info(v.type);
         const TI& to = b.info(wantType);
+        if (from.k == TI::Vec && to.k == TI::Vec && from.n == to.n) {
+            if (from.comp == TI::I32 && to.comp == TI::U32)
+                return {ins(OpBitcast, wantType, {v.id}), wantType};
+            if (from.comp == TI::U32 && to.comp == TI::I32)
+                return {ins(OpBitcast, wantType, {v.id}), wantType};
+            if (from.comp == TI::I32 && to.comp == TI::F32)
+                return {ins(OpConvertSToF, wantType, {v.id}), wantType};
+            if (from.comp == TI::U32 && to.comp == TI::F32)
+                return {ins(OpConvertUToF, wantType, {v.id}), wantType};
+            if (from.comp == TI::F32 && to.comp == TI::I32)
+                return {ins(OpConvertFToS, wantType, {v.id}), wantType};
+            if (from.comp == TI::F32 && to.comp == TI::U32)
+                return {ins(OpConvertFToU, wantType, {v.id}), wantType};
+        }
         if (from.k == TI::I32 && to.k == TI::U32) return {ins(OpBitcast, wantType, {v.id}), wantType};
         if (from.k == TI::U32 && to.k == TI::I32) return {ins(OpBitcast, wantType, {v.id}), wantType};
         if (from.k == TI::I32 && to.k == TI::F32) return {ins(OpConvertSToF, wantType, {v.id}), wantType};
@@ -760,6 +960,8 @@ struct StageEmitter {
             case Expr::Ident: {
                 auto it = vars.find(e->text);
                 if (it != vars.end()) return it->second;
+                auto smp = samplers.find(e->text);
+                if (smp != samplers.end()) return smp->second;
                 auto io = ioMap.find(e->text);          // 裸名输入（标量入参）
                 if (io != ioMap.end()) return {io->second.var, io->second.type, io->second.sc};
                 err("shader 未定义变量 `" + e->text + "`", e->line);
@@ -773,6 +975,8 @@ struct StageEmitter {
                             err("comp 标量内建不可写", e->line);
                         return {io->second.var, io->second.type, io->second.sc};
                     }
+                    auto smp = samplers.find(key);      // sampler 资源成员
+                    if (smp != samplers.end()) return smp->second;
                     auto rb = resBlocks.find(e->a->text);   // 资源块成员
                     if (rb != resBlocks.end()) {
                         auto mi = rb->second.memberIdx.find(e->text);
@@ -1119,8 +1323,17 @@ struct StageEmitter {
             int total = 0;
             for (auto& a : args) {
                 const TI& ti = b.info(a.type);
-                if (ti.k == TI::Vec) { ops.push_back(a.id); total += ti.n; }
-                else { ops.push_back(coerce(a, comp, e->line).id); total += 1; }
+                if (ti.k == TI::Vec) {
+                    // OpCompositeConstruct 向量构造要求标量 constituent，向量参数需拆分分量。
+                    for (int i = 0; i < ti.n; i++) {
+                        Val c = {ins(OpCompositeExtract, ti.elem, {a.id, (uint32_t)i}), ti.elem};
+                        ops.push_back(coerce(c, comp, e->line).id);
+                    }
+                    total += ti.n;
+                } else {
+                    ops.push_back(coerce(a, comp, e->line).id);
+                    total += 1;
+                }
             }
             if (args.size() == 1 && total == 1 && st.n > 1) {   // splat: vec3(1.0)
                 Val s = {ops[0], comp};
@@ -1163,14 +1376,281 @@ struct StageEmitter {
             if ((int)cols.size() != st.n) err("`" + fn + "` 矩阵列数不符", e->line);
             return {ins(OpCompositeConstruct, vt, cols), vt};
         }
-        // 纹理采样 texture(sampler, uv)
+        // 纹理采样族
+        // shadow sampler 辅助：把「含 dref 最后分量的 coord vec」拆成 (reducedCoord, dref)
+        auto splitDref = [&](Val coord) -> std::pair<uint32_t, uint32_t> {
+            const TI& ct = b.info(coord.type);
+            int n = (ct.k == TI::Vec) ? ct.n : 1;
+            uint32_t dref = ins(OpCompositeExtract, b.tF32(), {coord.id, (uint32_t)(n - 1)});
+            uint32_t reduced;
+            if (n - 1 == 1) {
+                reduced = ins(OpCompositeExtract, b.tF32(), {coord.id, 0u});
+            } else {
+                uint32_t rt = b.tVec(b.tF32(), n - 1);
+                std::vector<uint32_t> ops = {coord.id, coord.id};
+                for (int i = 0; i < n - 1; i++) ops.push_back((uint32_t)i);
+                reduced = ins(OpVectorShuffle, rt, ops);
+            }
+            return {reduced, dref};
+        };
+        // 判断 sampler 是否为 shadow（depth=1）
+        auto isShadowSampler = [&](const Val& smp) -> bool {
+            const TI& si = b.info(smp.type);
+            if (si.k != TI::SampledImage || si.elem == 0) return false;
+            return b.info(si.elem).depth;
+        };
+        // 采样器返回类型：float 采样器 → vec4；isampler* → ivec4；usampler* → uvec4
+        auto imgRetType = [&](const Val& smp) -> uint32_t {
+            const TI& si = b.info(smp.type);
+            if (si.k == TI::SampledImage && si.elem) {
+                const TI& ii = b.info(si.elem);
+                if (ii.k == TI::Image) {
+                    if (ii.comp == TI::I32) return b.tVec(b.tI32(), 4);
+                    if (ii.comp == TI::U32) return b.tVec(b.tU32(), 4);
+                }
+            }
+            return b.tVec(b.tF32(), 4);
+        };
+        // 投影 shadow 辅助：从 projCoord（最后一分量为投影除数）中提取 dref
+        // GLSL textureProj(sampler2DShadow, vec4 P): P = (s*w, t*w, ref*w, w)
+        //   → dref = P[n-2] / P[n-1] = ref
+        //   → coord = P 原样（SPIR-V ProjDref 指令用 coord.w 做除数）
+        auto splitDrefProj = [&](Val coord) -> std::pair<uint32_t, uint32_t> {
+            const TI& ct = b.info(coord.type);
+            int n = (ct.k == TI::Vec) ? ct.n : 1;
+            uint32_t num = ins(OpCompositeExtract, b.tF32(), {coord.id, (uint32_t)(n - 2)});
+            uint32_t den = ins(OpCompositeExtract, b.tF32(), {coord.id, (uint32_t)(n - 1)});
+            uint32_t dref = ins(OpFDiv, b.tF32(), {num, den});
+            return {coord.id, dref};  // coord 原样，dref 分离
+        };
+        // texture(sampler, uv) — 隐式（frag）或 lod=0（非 frag）
         if (fn == "texture" && args.size() == 2) {
-            uint32_t v4 = b.tVec(b.tF32(), 4);
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                if (stage.shaderStage == ShaderStage::Frag)
+                    return {ins(OpImageSampleDrefImplicitLod, retT, {args[0].id, rc, dref}), retT};
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0x2, b.constF(0.0f)}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
             if (stage.shaderStage == ShaderStage::Frag)
                 return {ins(OpImageSampleImplicitLod, v4, {args[0].id, args[1].id}), v4};
             // 非 frag 无隐式导数：显式 Lod 0（ImageOperands Lod = 0x2）
             return {ins(OpImageSampleExplicitLod, v4,
                         {args[0].id, args[1].id, 0x2, b.constF(0.0f)}), v4};
+        }
+        // textureLod(sampler, uv, lod) — 显式 lod 采样
+        if (fn == "textureLod" && args.size() == 3) {
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                auto lod = coerce(args[2], b.tF32(), e->line);
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0x2, lod.id}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            auto lod = coerce(args[2], b.tF32(), e->line);
+            return {ins(OpImageSampleExplicitLod, v4,
+                        {args[0].id, args[1].id, 0x2 /*ImageOperands Lod*/, lod.id}), v4};
+        }
+        // textureProj(sampler, proj_uv) — 投影采样 vec4(uv.xy, unused, w) → uv/w
+        if (fn == "textureProj" && args.size() == 2) {
+            if (isShadowSampler(args[0])) {
+                auto [coord, dref] = splitDrefProj(args[1]);
+                uint32_t retT = b.tF32();
+                if (stage.shaderStage == ShaderStage::Frag)
+                    return {ins(OpImageSampleProjDrefImplicitLod, retT, {args[0].id, coord, dref}), retT};
+                return {ins(OpImageSampleProjDrefExplicitLod, retT,
+                            {args[0].id, coord, dref, 0x2, b.constF(0.0f)}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            if (stage.shaderStage == ShaderStage::Frag)
+                return {ins(OpImageSampleProjImplicitLod, v4, {args[0].id, args[1].id}), v4};
+            // 非 frag 无隐式导数：显式 Lod 0
+            return {ins(OpImageSampleProjExplicitLod, v4,
+                        {args[0].id, args[1].id, 0x2 /*ImageOperands Lod*/, b.constF(0.0f)}), v4};
+        }
+        // textureProjLod(sampler, proj_uv, lod) — 投影采样 + 显式 lod
+        if (fn == "textureProjLod" && args.size() == 3) {
+            if (isShadowSampler(args[0])) {
+                auto [coord, dref] = splitDrefProj(args[1]);
+                uint32_t retT = b.tF32();
+                auto lod = coerce(args[2], b.tF32(), e->line);
+                return {ins(OpImageSampleProjDrefExplicitLod, retT,
+                            {args[0].id, coord, dref, 0x2, lod.id}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            auto lod = coerce(args[2], b.tF32(), e->line);
+            return {ins(OpImageSampleProjExplicitLod, v4,
+                        {args[0].id, args[1].id, 0x2 /*ImageOperands Lod*/, lod.id}), v4};
+        }
+        // texture(sampler, coord, bias) — 带偏置的隐式 lod（仅 frag 阶段）
+        // ImageOperands::Bias = 0x1
+        if (fn == "texture" && args.size() == 3) {
+            if (stage.shaderStage != ShaderStage::Frag)
+                err("texture(sampler, coord, bias) 仅在 frag 阶段有效", e->line);
+            auto bias = coerce(args[2], b.tF32(), e->line);
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                return {ins(OpImageSampleDrefImplicitLod, retT,
+                            {args[0].id, rc, dref, 0x1 /*Bias*/, bias.id}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            return {ins(OpImageSampleImplicitLod, v4,
+                        {args[0].id, args[1].id, 0x1 /*Bias*/, bias.id}), v4};
+        }
+        // textureGather(sampler, coord, comp_or_ref)
+        //   普通采样器: comp = int(0-3 = rgba 分量)      → OpImageGather
+        //   shadow 采样器: comp = float 深度参考值        → OpImageDrefGather
+        if (fn == "textureGather" && args.size() == 3) {
+            uint32_t v4 = imgRetType(args[0]);
+            if (isShadowSampler(args[0])) {
+                auto ref = coerce(args[2], b.tF32(), e->line);
+                return {ins(OpImageDrefGather, v4, {args[0].id, args[1].id, ref.id}), v4};
+            }
+            auto comp = coerce(args[2], b.tI32(), e->line);
+            return {ins(OpImageGather, v4, {args[0].id, args[1].id, comp.id}), v4};
+        }
+        // Offset 系列：ConstOffset = 0x8。偏移须为编译期常量（如 ivec2(1,0)）；
+        //   若传入运行时值，SPIR-V 校验器将报错。
+        //   此处对 offset 参数特殊处理：先尝试 constExpr 折叠为常量，失败则原样传入。
+        // textureOffset(sampler, coord, ivec_offset)
+        if (fn == "textureOffset" && args.size() == 3) {
+            uint32_t offId = (e->args.size() >= 3) ? constExpr(e->args[2].get()) : 0;
+            if (!offId) offId = args[2].id;
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                if (stage.shaderStage == ShaderStage::Frag)
+                    return {ins(OpImageSampleDrefImplicitLod, retT,
+                                {args[0].id, rc, dref, 0x8 /*ConstOffset*/, offId}), retT};
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0xA /*Lod|ConstOffset*/, b.constF(0.0f), offId}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            if (stage.shaderStage == ShaderStage::Frag)
+                return {ins(OpImageSampleImplicitLod, v4,
+                            {args[0].id, args[1].id, 0x8 /*ConstOffset*/, offId}), v4};
+            return {ins(OpImageSampleExplicitLod, v4,
+                        {args[0].id, args[1].id, 0xA /*Lod|ConstOffset*/, b.constF(0.0f), offId}), v4};
+        }
+        // textureLodOffset(sampler, coord, lod, ivec_offset)
+        if (fn == "textureLodOffset" && args.size() == 4) {
+            uint32_t offId = (e->args.size() >= 4) ? constExpr(e->args[3].get()) : 0;
+            if (!offId) offId = args[3].id;
+            auto lod = coerce(args[2], b.tF32(), e->line);
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0xA /*Lod|ConstOffset*/, lod.id, offId}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            return {ins(OpImageSampleExplicitLod, v4,
+                        {args[0].id, args[1].id, 0xA /*Lod|ConstOffset*/, lod.id, offId}), v4};
+        }
+        // textureProjOffset(sampler, projCoord, ivec_offset)
+        if (fn == "textureProjOffset" && args.size() == 3) {
+            uint32_t offId = (e->args.size() >= 3) ? constExpr(e->args[2].get()) : 0;
+            if (!offId) offId = args[2].id;
+            uint32_t v4 = imgRetType(args[0]);
+            if (stage.shaderStage == ShaderStage::Frag)
+                return {ins(OpImageSampleProjImplicitLod, v4,
+                            {args[0].id, args[1].id, 0x8 /*ConstOffset*/, offId}), v4};
+            return {ins(OpImageSampleProjExplicitLod, v4,
+                        {args[0].id, args[1].id, 0xA /*Lod|ConstOffset*/, b.constF(0.0f), offId}), v4};
+        }
+        // textureGradOffset(sampler, coord, dPdx, dPdy, ivec_offset)
+        if (fn == "textureGradOffset" && args.size() == 5) {
+            uint32_t offId = (e->args.size() >= 5) ? constExpr(e->args[4].get()) : 0;
+            if (!offId) offId = args[4].id;
+            if (isShadowSampler(args[0])) {
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0xC /*Grad|ConstOffset*/, args[2].id, args[3].id, offId}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            return {ins(OpImageSampleExplicitLod, v4,
+                        {args[0].id, args[1].id, 0xC /*Grad|ConstOffset*/, args[2].id, args[3].id, offId}), v4};
+        }
+        // textureQueryLod(sampler, coord) → vec2(computed_lod, clamped_lod)（需 ImageQuery 能力）
+        if (fn == "textureQueryLod" && args.size() == 2) {
+            uint32_t v2f = b.tVec(b.tF32(), 2);
+            return {ins(OpImageQueryLod, v2f, {args[0].id, args[1].id}), v2f};
+        }
+        // textureQueryLevels(sampler) → int（mipmap 层数，需 ImageQuery 能力）
+        if (fn == "textureQueryLevels" && args.size() == 1) {
+            const TI& si = b.info(args[0].type);
+            if (si.k != TI::SampledImage || si.elem == 0)
+                err("textureQueryLevels 须为 sampler 纹理", e->line);
+            uint32_t img = ins(OpImage, si.elem, {args[0].id});
+            return {ins(OpImageQueryLevels, b.tI32(), {img}), b.tI32()};
+        }
+        // textureGrad(sampler, coord, dPdx, dPdy) — 显式梯度采样
+        // ImageOperands::Grad = 0x4（后跟 dPdx / dPdy 两组梯度向量）
+        if (fn == "textureGrad" && args.size() == 4) {
+            if (isShadowSampler(args[0])) {
+                // shadow + grad：拆分坐标（coord 末分量为 dref），Dref 变体 + Grad
+                auto [rc, dref] = splitDref(args[1]);
+                uint32_t retT = b.tF32();
+                return {ins(OpImageSampleDrefExplicitLod, retT,
+                            {args[0].id, rc, dref, 0x4 /*Grad*/, args[2].id, args[3].id}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            return {ins(OpImageSampleExplicitLod, v4,
+                        {args[0].id, args[1].id, 0x4 /*Grad*/, args[2].id, args[3].id}), v4};
+        }
+        // textureProjGrad(sampler, projCoord, dPdx, dPdy) — 投影 + 显式梯度
+        if (fn == "textureProjGrad" && args.size() == 4) {
+            if (isShadowSampler(args[0])) {
+                auto [coord, dref] = splitDrefProj(args[1]);
+                uint32_t retT = b.tF32();
+                return {ins(OpImageSampleProjDrefExplicitLod, retT,
+                            {args[0].id, coord, dref, 0x4 /*Grad*/, args[2].id, args[3].id}), retT};
+            }
+            uint32_t v4 = imgRetType(args[0]);
+            return {ins(OpImageSampleProjExplicitLod, v4,
+                        {args[0].id, args[1].id, 0x4 /*Grad*/, args[2].id, args[3].id}), v4};
+        }
+        // texelFetch(sampler, ivec_coords, lod_or_sample) — 无采样直接读
+        // MS 纹理（sampler2DMS）：第3参数为 sample 索引，用 Sample=0x40 操作数
+        // 普通纹理：第3参数为 lod，用 Lod=0x2 操作数
+        if (fn == "texelFetch" && args.size() == 3) {
+            const TI& si = b.info(args[0].type);
+            if (si.k != TI::SampledImage || si.elem == 0)
+                err("texelFetch 首参须为 sampler 纹理", e->line);
+            uint32_t retT = imgRetType(args[0]);
+            uint32_t img = ins(OpImage, si.elem, {args[0].id});
+            const TI& ii = b.info(si.elem);
+            if (ii.ms) {
+                auto sample = coerce(args[2], b.tI32(), e->line);
+                return {ins(OpImageFetch, retT, {img, args[1].id, 0x40 /*Sample*/, sample.id}), retT};
+            }
+            auto lod = coerce(args[2], b.tI32(), e->line);
+            return {ins(OpImageFetch, retT, {img, args[1].id, 0x2 /*Lod*/, lod.id}), retT};
+        }
+        // textureSize(sampler, lod) → ivec2/ivec3（与纹理维度对应）
+        if (fn == "textureSize" && args.size() == 2) {
+            auto lod = coerce(args[1], b.tI32(), e->line);
+            const TI& si = b.info(args[0].type);
+            if (si.k != TI::SampledImage || si.elem == 0)
+                err("textureSize 首参须为 sampler 纹理", e->line);
+            const TI& ii = b.info(si.elem);
+            if (ii.k != TI::Image)
+                err("textureSize 内部错误：image 类型无效", e->line);
+            int comps = 0;
+            if (ii.dim == 0) comps = 1;          // 1D
+            else if (ii.dim == 1) comps = 2;     // 2D
+            else if (ii.dim == 2) comps = 3;     // 3D
+            else if (ii.dim == 3) comps = 2;     // Cube
+            else err("textureSize 暂不支持该纹理维度", e->line);
+            if (ii.arrayed) comps += 1;
+            uint32_t rt = comps == 1 ? b.tI32() : b.tVec(b.tI32(), comps);
+            uint32_t img = ins(OpImage, si.elem, {args[0].id});
+            return {ins(OpImageQuerySizeLod, rt, {img, lod.id}), rt};
         }
         // derivative：dFdx/dFdy/fwidth（frag 阶段门控）
         if ((fn == "dFdx" || fn == "dFdy" || fn == "fwidth") && args.size() == 1) {
@@ -1534,8 +2014,10 @@ struct StageEmitter {
         std::vector<uint32_t> paramTypes;
         for (const auto& f : d.structCommon.fields)
             paramTypes.push_back(typeIdOf(f.type, f.line));
-        // OpTypeFunction(retT, params...)
-        std::string ftKey = "hfn_" + d.name;
+        // OpTypeFunction(retT, params...) —— 按签名（返回+参数类型 id）键控去重：
+        // 同签名多函数只允许一个 OpTypeFunction（spirv-val 禁止重复非聚合类型）。
+        std::string ftKey = "hfn_" + std::to_string(retT);
+        for (uint32_t p : paramTypes) ftKey += "_" + std::to_string(p);
         uint32_t fnT = b.type(ftKey, [&]{
             uint32_t r = b.id();
             std::vector<uint32_t> ops = {r, retT};
@@ -1624,7 +2106,7 @@ struct StageEmitter {
 
     // ---- 函数装配与入口 ----
     void emit() {
-        b.glsl450 = b.id();
+        // b.glsl450 已在 Builder() 构造时预分配为 id 1，无需再次分配
         setupResources();
         setupIO();
         if (scalarOutVar) {

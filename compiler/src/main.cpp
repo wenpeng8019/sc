@@ -2858,7 +2858,12 @@ int main(int argc, char** argv) {
         const bool isSs = endsWith(ssPath, ".ss");
         if (isSs && (mode == "ast" || mode == "sc")) {
             try {
-                Program sgprog = parse(lex(src), /*shaderMode*/ true);
+                // spec 特化维度（spec.md）：AST/再生源视图以首实例呈现
+                std::vector<Token> sgToks = lex(src);
+                ShaderSpecSet sgSet = extractShaderSpecs(sgToks);
+                auto sgCombos = shaderSpecCombos(sgSet);
+                Program sgprog = parse(applyShaderSpec(sgToks, sgSet, sgCombos.front()),
+                                       /*shaderMode*/ true);
                 std::string out = (mode == "ast") ? emitAstJson(sgprog) : emitSc(sgprog);
                 if (output.empty()) std::cout << out;
                 else if (!writeTextFile(output, out)) return 1;
