@@ -51,6 +51,7 @@
 #elif P_WIN
   #include "gl_win.h"                 /* 桌面 GL：windows.h + GL/gl.h + GL 1.2+ 加载器 */
   #include <d3d11.h>                  /* WGL_NV_DX_interop2 零拷贝导出：D3D11 共享纹理 */
+  #include <d3d11_1.h>                /* ID3D11Device1::OpenSharedResource1（导入 NT 句柄） */
   #include <dxgi1_2.h>                /* IDXGIResource1::CreateSharedHandle（NT 句柄） */
   /* WGL_NV_DX_interop2 常量 + 入口点（经 wglGetProcAddress 装载） */
   #ifndef WGL_ACCESS_READ_WRITE_NV
@@ -820,9 +821,57 @@ static bool glMemimgAlloc(gpu_memimg_t* img) {
 }
 
 static bool glMemimgImport(gpu_memimg_t* img, const sc_gpu_memory_frame* src) {
-    (void)img; (void)src;
-    gpu_log("gl: win memimg import 暂不支持（需 D3D 互操作）");
-    return false;
+    if (!src->native) {
+        gpu_log("gl: win memimg import 无原生共享句柄");
+        return false;
+    }
+    if (!winHeadlessCurrent()) return false;
+    if (!winInteropEnsure()) {
+        gpu_log("gl: win memimg import 需 WGL_NV_DX_interop2（不可用）");
+        return false;
+    }
+
+    /* 外部共享 NT 句柄 → D3D11 纹理（OpenSharedResource1 需 ID3D11Device1）。
+     * 借用语义：不 CloseHandle（OpenSharedResource1 对底层共享资源独立持引用，
+     * 原句柄可先释放）；d3dTex 归本 memimg 所有，free 时 Release。 */
+    ID3D11Device1* dev1 = NULL;
+    if (FAILED(ID3D11Device_QueryInterface(env.d3dDev, &IID_ID3D11Device1, (void**)&dev1)) || !dev1) {
+        gpu_log("gl: 取 ID3D11Device1 失败（导入需 D3D11.1）");
+        return false;
+    }
+    ID3D11Texture2D* tex = NULL;
+    HRESULT hr = ID3D11Device1_OpenSharedResource1(dev1, (HANDLE)src->native,
+                                                   &IID_ID3D11Texture2D, (void**)&tex);
+    ID3D11Device1_Release(dev1);
+    if (FAILED(hr) || !tex) {
+        gpu_log("gl: OpenSharedResource1 失败 (hr=0x%08lx)", (unsigned long)hr);
+        return false;
+    }
+    D3D11_TEXTURE2D_DESC td;
+    ID3D11Texture2D_GetDesc(tex, &td);
+
+    GlWinMemimg* m = (GlWinMemimg*)calloc(1, sizeof(GlWinMemimg));
+    if (!m) { ID3D11Texture2D_Release(tex); return false; }
+    m->w = (int)td.Width; m->h = (int)td.Height;
+    m->d3dTex = tex;      /* 拥有：free 时 Release（保活底层共享资源） */
+    m->shared = NULL;     /* 借用外部句柄，free 不 CloseHandle */
+
+    /* D3D 纹理 ↔ GL 纹理互操作注册 + 锁给 GL（map 的 glReadPixels 可读其内容） */
+    glGenTextures(1, &m->tex);
+    m->interop = env.pDXReg(env.interopDev, m->d3dTex, m->tex,
+                            GL_TEXTURE_2D, WGL_ACCESS_READ_WRITE_NV);
+    if (!m->interop) {
+        gpu_log("gl: 导入纹理 wglDXRegisterObjectNV 失败");
+        glDeleteTextures(1, &m->tex);
+        ID3D11Texture2D_Release(m->d3dTex);
+        free(m);
+        return false;
+    }
+    winMemimgLock(m);
+    img->desc.width = m->w;
+    img->desc.height = m->h;
+    img->backend = m;
+    return true;
 }
 
 static bool glMemimgExport(gpu_memimg_t* img, sc_gpu_memory_frame* out, bool with_fence) {
