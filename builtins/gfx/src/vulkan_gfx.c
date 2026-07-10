@@ -11,9 +11,10 @@
  *     再 sc_gpu_frame_end() 呈现
  *   · 渲染通道格式取自 sc_gpu_vk_color_format()/depth_format()
  *
- * 覆盖范围：交换链图形 pass（三角形闭环）、顶点/索引缓冲、uniform 块
- *   与纹理采样（描述符集，反射 set/binding 直映）。离屏 pass 与计算
- *   dispatch 为最小实现/占位。非 Linux 目标经 SC_GPU_VULKAN 守卫空化。
+ * 覆盖范围：交换链图形 pass（三角形闭环）、离屏 pass（MEMORY surface 环 +
+ *   memimg 绑定，finalLayout=TRANSFER_SRC 供回读）、顶点/索引缓冲、uniform 块
+ *   与纹理采样（描述符集，反射 set/binding 直映）。计算 dispatch 为最小实现/占位。
+ *   非 Vulkan 目标经 SC_GPU_VULKAN 守卫空化（Windows/Linux 启用）。
  * ============================================================ */
 
 #include "internal.h"

@@ -2,7 +2,7 @@
  * vulkan_env.c —— Vulkan 运行环境后端（env 层）
  * ============================================================
  * 定位：gpu_env_api 的 Vulkan 实现——实例/物理设备/逻辑设备+队列、
- *   窗口 VkSurfaceKHR（Xlib / Wayland，句柄来自 gpu.h 平台标准）、
+ *   窗口 VkSurfaceKHR（Win32 / Xlib / Wayland，句柄来自 gpu.h 平台标准）、
  *   交换链、每帧镜像获取（frame_acquire）与呈现（frame_end）。
  *
  * 与 gfx 的契约见 gpu_vk.h：
@@ -13,10 +13,12 @@
  * 平台选择（gpu 不依赖 wsi）：复刻 wsi 的 XDG/环境变量判定，令 env 与
  *   wsi 选中同一平台，native_window/native_display 语义一致对接。
  *
- * MEMORY surface / memimg（dma-buf 导出）：本后端暂不支持（置 NULL），
- *   仅实现 WINDOW 交换链路径。
+ * MEMORY surface / memimg（无屏）：已实现，纯核心 Vulkan（离屏渲染到 VkImage +
+ *   host-visible staging 拷贝回读），全平台通用。**尚未实现**零拷贝互操作——
+ *   vkMemimgExport 的 native/fd 置 NULL、vkMemimgImport 不支持（Linux dma-buf /
+ *   Windows NT 句柄需 VK_KHR_external_memory_fd/win32，待补）。
  *
- * 非 Linux 目标：整文件经 SC_GPU_VULKAN 守卫空化。
+ * 平台守卫：整文件经 SC_GPU_VULKAN 空化（Windows/Linux 启用，macOS 用 Metal）。
  * ============================================================ */
 
 #include "internal.h"
