@@ -356,7 +356,14 @@ struct Lexer {
 
 // 对外接口：创建 Lexer 实例并执行扫描
 std::vector<Token> lex(const std::string& src) {
-    Lexer lx(src);
+    // 行尾规范化：剥离 CR（CRLF / 裸 CR → LF），使缩进敏感的词法对 Windows 换行健壮、平台无关。
+    //   scc 缩进敏感，CRLF 文件的 \r 残留会破坏空行/缩进判定（handleIndent 把 "\r\n" 空行误判为
+    //   顶层行发出错误 Dedent）。Windows 文本模式 ifstream 会剥离 \r 掩盖此问题，Linux/二进制读取
+    //   则暴露——在此统一规范化，不依赖平台的换行翻译。
+    std::string norm;
+    norm.reserve(src.size());
+    for (char c : src) if (c != '\r') norm += c;
+    Lexer lx(norm);
     lx.run();
     return std::move(lx.out);
 }

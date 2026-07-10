@@ -2096,7 +2096,11 @@ static std::string spliceImpl(const std::string& csrc,
         if (isOwn) stripped << '\n';            // 空行占位，维持后续行号对齐
         else stripped << line << '\n';
     }
-    return csrc + "\n#line 1 \"" + implPath.string() + "\"\n" + stripped.str();
+    // #line 路径反斜杠→正斜杠：Windows 路径直嵌 C 字符串会构成非法转义（\m \a … → C4129
+    //   且路径错乱）；C 预处理接受正斜杠，POSIX 本就是正斜杠，统一转换无副作用。
+    std::string implFwd = implPath.string();
+    for (char& c : implFwd) if (c == '\\') c = '/';
+    return csrc + "\n#line 1 \"" + implFwd + "\"\n" + stripped.str();
 }
 
 // 把模块图中所有单元生成 .c/.h 并编译为 .o

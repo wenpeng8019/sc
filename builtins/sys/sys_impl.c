@@ -39,7 +39,7 @@ static char* normalize_dir_path(char* path) {
     char* result = path;
 
     // 处理 ~ 开头的路径（需要分配新内存）
-    if (path[0] == '~' && (path[1] == '/' || path[1] == '\0')) {
+    if (path[0] == '~' && (P_IS_SEP(path[1]) || path[1] == '\0')) {
         const char* home = getenv("HOME");
         if (!home) home = "/tmp";  // fallback
         result = (char*)malloc(strlen(home) + strlen(path));  // len 已包含 ~，足够
@@ -47,12 +47,12 @@ static char* normalize_dir_path(char* path) {
         if (path[1] != '\0') strcat(result, path + 1);
     }
 
-    // 合并连续的 // 和处理 /./
+    // 合并连续分隔符与处理 /./（跨平台：Windows 同时认 / 和 \，用 platform.h 的 P_IS_SEP）
     char *q = result, *p = result;
     while (*p) {
-        if (*p == '/') {
-            if (p[1] == '/') { ++p; continue; }                 // 跳过连续的 /
-            if (p[1] == '.' && (p[2] == '/' || p[2] == '\0')) { // 跳过 /.
+        if (P_IS_SEP(*p)) {
+            if (P_IS_SEP(p[1])) { ++p; continue; }                    // 跳过连续分隔符
+            if (p[1] == '.' && (P_IS_SEP(p[2]) || p[2] == '\0')) {    // 跳过 /.
                 p += 2; if (*p == '\0') break; continue;
             }
         }
@@ -60,9 +60,9 @@ static char* normalize_dir_path(char* path) {
     }
     *q = '\0';
 
-    // 移除末尾的 / (根目录除外)
+    // 移除末尾分隔符（根目录除外）
     size_t len = q - result;
-    while (len > 1 && result[--len] == '/') result[len] = '\0';
+    while (len > 1 && P_IS_SEP(result[len - 1])) result[--len] = '\0';
 
     return result;
 }

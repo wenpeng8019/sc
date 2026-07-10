@@ -555,27 +555,29 @@ static pthread_key_t g_port_key;
 static void mt_port_dtor(void *p) { if (p) port_release((sc_port *)p); }
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((constructor)) static void mt_init(void) {
+/* mt 全局同步原语（g_mutex）与 TLS port 析构键的一次性初始化。
+ * 用 platform.h 的 SC_CONSTRUCTOR 跨平台启动构造（GCC/Clang=__attribute__((constructor))、
+ * MSVC=.CRT$XCU 段），进入 main 前自动执行——取代原先按编译器手写的 constructor + 惰性回退。
+ * mt_ensure 保留为幂等兜底：仅在 platform.h 对「未知编译器」退化为非自动函数时，由首个
+ * mt 入口（sc_default_queue / que_post 等直接用 g_mutex 者）惰性补一次（启动期单线程，安全）。 */
+static int g_mt_inited = 0;
+
+static void mt_do_init(void) {
     P_mutex_init(&g_mutex);
 #if P_WIN
     g_port_fls = FlsAlloc(mt_port_dtor);
 #else
     pthread_key_create(&g_port_key, mt_port_dtor);
 #endif
+    g_mt_inited = 1;
 }
-static inline void mt_ensure(void) {}
-#else
-/* MSVC 回退：启动期单线程惰性 init（首个 queue 在主线程创建于派生消费线程之前）。 */
-static int g_mt_inited = 0;
+
+SC_CONSTRUCTOR(mt_init) { mt_do_init(); }   /* 进入 main 前自动执行（跨平台，见 platform.h） */
+
 static inline void mt_ensure(void) {
-    if (!g_mt_inited) {
-        P_mutex_init(&g_mutex);
-        g_port_fls = FlsAlloc(mt_port_dtor);
-        g_mt_inited = 1;
-    }
+    if (!g_mt_inited) mt_do_init();          /* 兜底：未知编译器无自动 ctor 时，首用惰性补 */
 }
-#endif
+
 
 /* 取本线程 port（惰性堆分配并登记 TLS 析构器）。无需持 g_mutex（仅本线程 TLS）。 */
 static sc_port *port_self(void) {
