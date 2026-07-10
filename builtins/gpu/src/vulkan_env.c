@@ -68,7 +68,7 @@ typedef struct VkSurfaceCtx {
     VkImageView      depthView;
 
     VkSemaphore      imgAvail[VK_INFLIGHT];
-    VkSemaphore      renderDone[VK_INFLIGHT];
+    VkSemaphore      renderDone[VK_MAX_SWAP_IMAGES]; /* 按交换链镜像索引（present 等待） */
     VkFence          inFlight[VK_INFLIGHT];
     uint32_t         frameIndex;    /* 0..VK_INFLIGHT-1（在飞帧槽） */
     uint32_t         imageIndex;    /* 本帧 acquire 到的交换链镜像下标 */
@@ -540,14 +540,19 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
     }
 
     /* 同步原语 */
+    /* 同步原语：imgAvail/inFlight 按在飞帧槽；renderDone（present 等待）按
+     * 交换链镜像索引——避免信号量在呈现操作仍挂起时被复用而复被 signal
+     * (VUID-vkQueueSubmit-pSignalSemaphores-00067)。预建满 VK_MAX_SWAP_IMAGES
+     * 个，交换链重建即使镜像数变化也不缺。 */
     VkSemaphoreCreateInfo semci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     for (int i = 0; i < VK_INFLIGHT; i++) {
         VKCK(vkCreateSemaphore(g_vk.dev.device, &semci, NULL, &c->imgAvail[i]));
-        VKCK(vkCreateSemaphore(g_vk.dev.device, &semci, NULL, &c->renderDone[i]));
         VKCK(vkCreateFence(g_vk.dev.device, &fci, NULL, &c->inFlight[i]));
     }
+    for (int i = 0; i < VK_MAX_SWAP_IMAGES; i++)
+        VKCK(vkCreateSemaphore(g_vk.dev.device, &semci, NULL, &c->renderDone[i]));
     c->frameIndex = 0;
     c->acquired = false;
 
@@ -555,7 +560,12 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
     /* 首个/默认 surface 即当前 */
     if (!g_vk.cur) g_vk.cur = c;
     gpu_log("vulkan: surface 就绪 (%s, %ux%u, %u 镜像)",
-            c->wayland ? "wayland" : "x11", c->extent.width, c->extent.height, c->imageCount);
+#if P_WIN
+            "win32",
+#else
+            c->wayland ? "wayland" : "x11",
+#endif
+            c->extent.width, c->extent.height, c->imageCount);
     return true;
 }
 
@@ -567,9 +577,10 @@ static void vkSurfaceDestroy(gpu_surface_t* surf) {
     destroy_swapchain_res(c);
     for (int i = 0; i < VK_INFLIGHT; i++) {
         if (c->imgAvail[i])   vkDestroySemaphore(d, c->imgAvail[i], NULL);
-        if (c->renderDone[i]) vkDestroySemaphore(d, c->renderDone[i], NULL);
         if (c->inFlight[i])   vkDestroyFence(d, c->inFlight[i], NULL);
     }
+    for (int i = 0; i < VK_MAX_SWAP_IMAGES; i++)
+        if (c->renderDone[i]) vkDestroySemaphore(d, c->renderDone[i], NULL);
     if (c->surface) vkDestroySurfaceKHR(g_vk.dev.instance, c->surface, NULL);
     if (g_vk.cur == c) g_vk.cur = NULL;
     free(c);
@@ -640,7 +651,7 @@ static void vkFrameEnd(void) {
 
     VkPresentInfoKHR pi = { .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &c->renderDone[fi];
+    pi.pWaitSemaphores = &c->renderDone[c->imageIndex];
     pi.swapchainCount = 1;
     pi.pSwapchains = &c->swapchain;
     pi.pImageIndices = &c->imageIndex;
@@ -671,7 +682,7 @@ void sc_gpu_vk_current_sync(VkSemaphore* out_wait, VkSemaphore* out_signal, VkFe
     if (c) {
         uint32_t fi = c->frameIndex;
         if (out_wait)   *out_wait   = c->imgAvail[fi];
-        if (out_signal) *out_signal = c->renderDone[fi];
+        if (out_signal) *out_signal = c->renderDone[c->imageIndex];
         if (out_fence)  *out_fence  = c->inFlight[fi];
     } else {
         if (out_wait)   *out_wait   = VK_NULL_HANDLE;
