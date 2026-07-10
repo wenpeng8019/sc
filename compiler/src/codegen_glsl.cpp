@@ -861,7 +861,7 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                 // Vulkan-GLSL(450) 中间语形态。产物 <entry><tag>.<stage ext>。
                 if (emitGlslText) {
                     GlslTarget gt = target;
-                    if (target.isMetal()) { gt.api = GlApi::Vulkan; gt.version = 450; }
+                    if (target.isMetal() || target.isD3D()) { gt.api = GlApi::Vulkan; gt.version = 450; }
                     auto units = emitGlsl(prog, gt);
                     if (units.empty()) {
                         std::fprintf(stderr, "ss: %s 中未找到着色阶段入口（vert/frag/comp）\n", srcPath.c_str());
@@ -894,6 +894,13 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                         mo.renameEntry = u.entry;        // 多阶段链入同一 metallib 时避免 main0 冲突
                         arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, "metal",
                                         scc_shader::spirvToMsl(u.words, mo), false});
+                        continue;
+                    }
+                    if (target.isD3D()) {
+                        scc_shader::HlslOptions ho;
+                        ho.shaderModel = (uint32_t)target.version;   // 50 = SM5.0
+                        arts.push_back({u.entry + suffix, stageExt(u.stage), ttag, "hlsl",
+                                        scc_shader::spirvToHlsl(u.words, ho), false});
                         continue;
                     }
                     scc_shader::GlslOptions go;

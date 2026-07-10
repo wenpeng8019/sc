@@ -33,4 +33,13 @@ struct GlslOptions {
 // ES100 走 legacy 形态（attribute/varying/gl_FragData/struct uniform）。
 std::string spirvToGlsl(const std::vector<uint32_t>& spirv, const GlslOptions& opt);
 
+struct HlslOptions {
+    uint32_t shaderModel = 50;   // D3D 着色模型整数：40/41/50/51/60...（SM5.0=50）
+};
+
+// 把 SPIR-V 转译为 HLSL 源文本（D3D11 后端运行时再 D3DCompile→DXBC）。
+// 顶点输入按 location 映射为 TEXCOORD<loc> 语义（与 d3d11_gfx 输入布局契约）；
+// 片段输出 location 0 → SV_Target；入口恒为 main。
+std::string spirvToHlsl(const std::vector<uint32_t>& spirv, const HlslOptions& opt);
+
 } // namespace scc_shader

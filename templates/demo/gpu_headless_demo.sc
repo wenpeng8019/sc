@@ -66,11 +66,13 @@ fnc main: i4
         gd.backend = 2                              # SC_GPU_BACKEND_GL
     if envb != nil && envb[0] == (118: char)        # 'v'
         gd.backend = 3                              # SC_GPU_BACKEND_VULKAN
+    if envb != nil && envb[0] == (100: char)        # 'd'
+        gd.backend = 4                              # SC_GPU_BACKEND_D3D11
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n"
         return 1
     var bk: i4 = gpu_query_backend()
-    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=Null，headless)\n"
+    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=D3D11 5=Null，headless)\n"
 
     # ---- Mode A：MEMORY surface（内存交换链，gpu 驱动环） ----
     var sdc: ::sc_gpu_surface_desc
@@ -98,6 +100,8 @@ fnc main: i4
         base = 3                                 # glcore410
     if bk == 3
         base = 6                                 # vulkan450（SPIR-V 二进制）
+    if bk == 4
+        base = 9                                 # d3d50（HLSL 文本）
     var brj: shader_blob& = shader_gpu_tri_get(base)
     var bvs: shader_blob& = shader_gpu_tri_get(base + 1)
     var bfs: shader_blob& = shader_gpu_tri_get(base + 2)

@@ -9,6 +9,7 @@
 tar metal@2.0
 tar glcore@410
 tar vulkan@450
+tar d3d@50
 
 @def VsIn: {
     vid: i4 builtin vertex_id

@@ -10,6 +10,7 @@
 #ifdef SCC_WITH_SPIRV_CROSS
 #include "spirv_msl.hpp"
 #include "spirv_glsl.hpp"
+#include "spirv_hlsl.hpp"
 #include <exception>
 
 namespace scc_shader {
@@ -58,6 +59,25 @@ std::string spirvToGlsl(const std::vector<uint32_t>& spirv, const GlslOptions& o
     }
 }
 
+std::string spirvToHlsl(const std::vector<uint32_t>& spirv, const HlslOptions& opt) {
+    if (spirv.empty())
+        throw CompileError("SPIR-V 输入为空（非法或截断的 .spv）", 0);
+    try {
+        spirv_cross::CompilerHLSL hlsl(spirv);
+        spirv_cross::CompilerHLSL::Options o = hlsl.get_hlsl_options();
+        o.shader_model = opt.shaderModel;   // 50 = SM5.0
+        hlsl.set_hlsl_options(o);
+        // Vulkan(Y-down NDC) 的 SPIR-V → D3D(Y-up NDC)：翻转顶点 Y，使三角形与
+        // Vulkan/GL/Metal 朝向一致（否则上下颠倒）。
+        spirv_cross::CompilerGLSL::Options common = hlsl.get_common_options();
+        common.vertex.flip_vert_y = true;
+        hlsl.set_common_options(common);
+        return hlsl.compile();
+    } catch (const std::exception& e) {
+        throw CompileError(std::string("SPIRV-Cross 转译 HLSL 失败：") + e.what(), 0);
+    }
+}
+
 } // namespace scc_shader
 
 #else // !SCC_WITH_SPIRV_CROSS
@@ -69,6 +89,10 @@ std::string spirvToMsl(const std::vector<uint32_t>&, const MslOptions&) {
 }
 
 std::string spirvToGlsl(const std::vector<uint32_t>&, const GlslOptions&) {
+    throw CompileError("此 scc 构建未集成 SPIRV-Cross（需 -DSCC_WITH_SPIRV_CROSS=ON 且 vendor/spirv-cross 存在）", 0);
+}
+
+std::string spirvToHlsl(const std::vector<uint32_t>&, const HlslOptions&) {
     throw CompileError("此 scc 构建未集成 SPIRV-Cross（需 -DSCC_WITH_SPIRV_CROSS=ON 且 vendor/spirv-cross 存在）", 0);
 }
 

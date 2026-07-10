@@ -63,18 +63,20 @@ fnc main: i4
     gd.surface.native_display = wsi_win_get_native_display(win)
     gd.surface.width  = fbw
     gd.surface.height = fbh
-    # GPU_BACKEND=gl 切 OpenGL；=vulkan 切 Vulkan（默认平台首选：mac=Metal linux=GL）
+    # GPU_BACKEND=gl 切 OpenGL；=vulkan 切 Vulkan；=d3d 切 Direct3D 11（默认平台首选）
     var envb: char& = (::getenv("GPU_BACKEND"): char&)
     if envb != nil && envb[0] == (103: char)        # 'g'
         gd.backend = 2                              # SC_GPU_BACKEND_GL
     if envb != nil && envb[0] == (118: char)        # 'v'
         gd.backend = 3                              # SC_GPU_BACKEND_VULKAN
+    if envb != nil && envb[0] == (100: char)        # 'd'
+        gd.backend = 4                              # SC_GPU_BACKEND_D3D11
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n"
         wsi_terminate()
         return 1
     var bk: i4 = gpu_query_backend()
-    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=Null)\n"
+    print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=D3D11 5=Null)\n"
 
     # ---- gfx 渲染层（后端种类跟随 gpu） ----
     var fd: ::sc_gfx_desc
@@ -91,6 +93,8 @@ fnc main: i4
         base = 3                                 # glcore410
     if bk == 3
         base = 6                                 # vulkan450（SPIR-V 二进制）
+    if bk == 4
+        base = 9                                 # d3d50（HLSL 文本）
     var brj: shader_blob& = shader_gpu_tri_get(base)
     var bvs: shader_blob& = shader_gpu_tri_get(base + 1)
     var bfs: shader_blob& = shader_gpu_tri_get(base + 2)

@@ -41,6 +41,9 @@
   #ifndef SC_GPU_VULKAN
   #define SC_GPU_VULKAN 1
   #endif
+  #ifndef SC_GPU_D3D11
+  #define SC_GPU_D3D11 1
+  #endif
 #endif
 
 void gfx_log(const char* fmt, ...);

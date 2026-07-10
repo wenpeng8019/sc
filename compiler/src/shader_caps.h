@@ -32,7 +32,7 @@
 
 // 目标 API 族。Metal 非 GLSL 方言，而是 SPIR-V 转译出的发行后端（MSL）；
 // 其内部 GLSL 中间产物按 Vulkan 语义生成（见 glslIsVulkanFlavor）。
-enum class GlApi { Vulkan, GLCore, GLES, WebGL, Metal };
+enum class GlApi { Vulkan, GLCore, GLES, WebGL, Metal, D3D };
 
 // 一个转义目标：API 族 + 精确版本号 + 扩展集（来自 caps profile）。
 //   GL 家族：GLSL #version 整数（如 450 / 330 / 300 / 100）。
@@ -47,8 +47,9 @@ struct GlslTarget {
     bool isES()     const { return api == GlApi::GLES || api == GlApi::WebGL; }
     bool isVulkan() const { return api == GlApi::Vulkan; }
     bool isMetal()  const { return api == GlApi::Metal; }
-    // 内部 GLSL 中间产物是否用 Vulkan 语义（Vulkan 目标本身 + Metal 经 SPIR-V 转译）。
-    bool glslIsVulkanFlavor() const { return isVulkan() || isMetal(); }
+    bool isD3D()    const { return api == GlApi::D3D; }
+    // 内部 GLSL 中间产物是否用 Vulkan 语义（Vulkan 目标本身 + Metal/D3D 经 SPIR-V 转译）。
+    bool glslIsVulkanFlavor() const { return isVulkan() || isMetal() || isD3D(); }
 
     // `#version N <profile>` 里的 profile 词：Vulkan 无、桌面 core、ES/WebGL es。
     // 注：GLSL ES 100 无 profile 词（`#version 100` 单独成立）。
@@ -109,6 +110,10 @@ inline bool validShaderVersion(GlApi api, int v, std::string& hint) {
             if (v >= 10000 && v < 50000) return true;
             hint = "metal 版本如 2.0（MSL 1.0–4.x）";
             return false;
+        case GlApi::D3D:
+            if (in({40, 41, 50, 51})) return true;
+            hint = "d3d 有效着色模型：40/41/50/51（SM4.0–5.1）";
+            return false;
     }
     hint = "未知 API";
     return false;
@@ -122,6 +127,7 @@ inline const char* glApiName(GlApi a) {
         case GlApi::GLES:   return "gles";
         case GlApi::WebGL:  return "webgl";
         case GlApi::Metal:  return "metal";
+        case GlApi::D3D:    return "d3d";
     }
     return "?";
 }
@@ -133,6 +139,7 @@ inline bool parseGlApi(const std::string& s, GlApi& out) {
     if (s == "gles")                 { out = GlApi::GLES;   return true; }
     if (s == "webgl")                { out = GlApi::WebGL;  return true; }
     if (s == "metal" || s == "msl")  { out = GlApi::Metal;  return true; }
+    if (s == "d3d" || s == "hlsl" || s == "d3d11") { out = GlApi::D3D; return true; }
     return false;
 }
 
@@ -340,6 +347,7 @@ inline const CapReq& capReq(Cap c, GlApi a) {
         case GlApi::GLES:   return r.gles;
         case GlApi::WebGL:  return r.webgl;
         case GlApi::Metal:  return r.metal;
+        case GlApi::D3D:    return r.vulkan;   // HLSL 经 SPIRV-Cross 吃 Vulkan 语义，SM5 能力等同
     }
     return r.vulkan;
 }
@@ -357,6 +365,15 @@ enum class CapVia {
 // 目标 t 对能力 c 的满足途径；经扩展满足时 outExt 给出扩展名（可 NULL）。
 inline CapVia capResolve(Cap c, const GlslTarget& t, const char** outExt = nullptr) {
     if (outExt) *outExt = nullptr;
+    // D3D（HLSL/SM）版本是着色模型整数（50=SM5.0），与 GLSL #version 尺度不同，
+    // 不能借 vulkan 列的版本阈值比对。D3D11 SM5.0 支持本能力集全部：
+    //   storage/compute/double 需 SM5.0（50）；其余（binding/uint/vertex_id/
+    //   frag_depth/MRT/多描述符集经 register space）SM4.0（40）即可。
+    if (t.isD3D()) {
+        int need = (c == Cap::StorageBuffer || c == Cap::ComputeStage ||
+                    c == Cap::DoubleType) ? 50 : 40;
+        return (t.version >= need) ? CapVia::Core : CapVia::No;
+    }
     const CapReq& q = capReq(c, t.api);
     if (q.core >= 0 && t.version >= q.core) return CapVia::Core;
     if (q.ext && t.version >= q.extFrom && t.hasExtension(q.ext)) {
