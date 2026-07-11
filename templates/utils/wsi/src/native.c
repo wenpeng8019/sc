@@ -50,6 +50,11 @@ WSI_API void* sc_wsi_win_get_native_display(sc_window* handle)
         case SC_PLATFORM_IOS:
             return NULL;
 #endif
+#if defined(WSI_ANDROID)
+        // EGL 用 EGL_DEFAULT_DISPLAY；无独立原生显示句柄
+        case SC_PLATFORM_ANDROID:
+            return NULL;
+#endif
         default:
             impl_on_error(SC_WSI_ERR_PLATFORM_UNAVAILABLE,
                           "No native display for active platform");
@@ -86,6 +91,11 @@ WSI_API void* sc_wsi_win_get_native_window(sc_window* handle)
         // 返回 UIView*（其 layerClass 为 CAMetalLayer）；gpu 侧取 view.layer 建 Metal surface
         case SC_PLATFORM_IOS:
             return window->ios.view;
+#endif
+#if defined(WSI_ANDROID)
+        // 返回 ANativeWindow*；gpu 侧据此建 EGL/Vulkan surface
+        case SC_PLATFORM_ANDROID:
+            return window->android.window;
 #endif
 #if defined(WSI_X11)
         case SC_PLATFORM_X11:
@@ -180,8 +190,7 @@ WSI_API sc_window* sc_wsi_app_main_window(void)
 #if defined(WSI_IOS)
     return (sc_window*) g_wsi.ios.window;
 #elif defined(WSI_ANDROID)
-    // TODO(android 后端)：返回 g_wsi.android.window（android_platform.c 待实现）。
-    return NULL;
+    return (sc_window*) g_wsi.android.window;
 #else
     return NULL;
 #endif

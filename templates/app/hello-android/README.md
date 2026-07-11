@@ -4,14 +4,14 @@
 与 [hello-ios](../hello-ios/) 几乎同构——同一份 app 逻辑（`after_startup`/`main_window_created`/`on_frame`/`before_cleanup`），
 只换驱动入口。
 
-> **状态：设计草图。** wsi 的 Android C 后端尚未实现，现在无法构建。本目录用于呈现
-> 「实际使用形态」，供理解设计与二创。骨架文件齐全，wsi 后端就绪后即可端到端跑通。
+> **状态：可用。** wsi 的 Android C 后端已实现并端到端跑通（NDK 交叉编译 → APK →
+> 模拟器/真机；实测 Pixel_Tablet_API_31 arm64）。
 
 ## 目录内容
 
 - [app.sc](app.sc) — app 逻辑（四回调 + `app_main` 入口，**无 main**）
 - [AndroidManifest.xml](AndroidManifest.xml) — NativeActivity + 自定义 Application(`ScApplication`) + `lib_name` 绑定，`hasCode=true`
-- [build.sh](build.sh) — NDK 交叉编译 → `libhello.so`；javac→d8→`classes.dex`；→ APK → adb 安装启动（设计草图）
+- [build.sh](build.sh) — NDK 交叉编译 → `libhello.so`；javac→d8→`classes.dex`；→ APK → adb 安装启动
 - wsi 侧垫片（可复用基础设施，不在本目录）：
   [ScApplication.java](../../utils/wsi/java/com/sc/wsi/ScApplication.java) — 进程级 Application 子类；
   [android_jni.c](../../utils/wsi/src/android_jni.c) — Application ⇄ wsi 的 JNI 桥

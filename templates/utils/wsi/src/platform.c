@@ -72,6 +72,9 @@ static const struct
 #if defined(WSI_IOS)
     { SC_PLATFORM_IOS, uikit_connect },
 #endif
+#if defined(WSI_ANDROID)
+    { SC_PLATFORM_ANDROID, android_connect },
+#endif
 #if defined(WSI_WAYLAND)
     { SC_PLATFORM_WAYLAND, wayland_connect },
 #endif
@@ -94,6 +97,7 @@ bool wsi_select_platform(int desiredID, platform_st* platform)
         desiredID != SC_PLATFORM_WIN32 &&
         desiredID != SC_PLATFORM_COCOA &&
         desiredID != SC_PLATFORM_IOS &&
+        desiredID != SC_PLATFORM_ANDROID &&
         desiredID != SC_PLATFORM_WAYLAND &&
         desiredID != SC_PLATFORM_X11 &&
         desiredID != SC_PLATFORM_NULL)

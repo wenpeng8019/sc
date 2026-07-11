@@ -20,11 +20,10 @@
 # Android = 注册 ANativeWindow/AChoreographer 后进渲染线程循环（event）。四回调
 # 与 hello-ios 完全一致——「同一份 app 逻辑，仅换驱动入口」。
 #
-# 状态：设计草图。wsi 的 Android C 后端（android_platform.c：ANativeActivity_onCreate
-# + 渲染线程 + ALooper + ANativeWindow/AInputQueue/AChoreographer）尚未实现，
-# 现在无法构建（见 build.sh / README.md）。
+# 状态：可用。wsi 的 Android C 后端（android_platform.c：ANativeActivity_onCreate
+# + 渲染线程 + ALooper + ANativeWindow/AInputQueue/AChoreographer）已实现并跑通。
 #
-# 用法（wsi 后端就绪后）：
+# 用法：
 #   ANDROID_NDK_HOME=... ANDROID_HOME=... ./templates/app/hello-android/build.sh
 
 inc io.sc
@@ -67,6 +66,8 @@ fnc on_before_cleanup:
 # ANativeActivity_onCreate 在渲染线程上按固定符号调用。表面调用形式与 iOS 的
 # main 一致（均为 wsi_app_run(4 回调)）；只是 iOS 入口名 main（scc 锤定模块 init/drop），
 # Android 入口名 app_main（无 main，由框架经 wsi 回调）。进入 wsi 循环，不返回。
-fnc app_main: i4
+# @ 导出：令其成为外部链接的 C 符号 sc_app_main（wsi 后端 extern 引用，跨 TU 可见）；
+# 无 @ 则默认 static（内部链接），dlopen 时 wsi 找不到该符号会 UnsatisfiedLinkError。
+@fnc app_main: i4
     print "hello-android: 进入 wsi 事件循环（wsi_app_run）\n"
     return wsi_app_run(on_after_startup, on_main_window_created, on_frame, on_before_cleanup)

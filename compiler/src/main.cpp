@@ -312,6 +312,7 @@ static std::string platformFamily(const std::string& triple) {
     // 先判宿主 OS（注意 arm-linux-gnueabihf 含 "eabi" 却是托管 Linux，须先于裸机判定）
     if (has("darwin") || has("apple")) return "darwin";
     if (has("mingw") || has("windows") || has("win32") || has("msvc")) return "windows";
+    if (has("android")) return "android";   // Bionic：pthread/rt 内置 libc，无 -lpthread/-lrt（须先于 linux，Android 三元组含 "linux"）
     if (has("linux")) return "linux";
     if (has("none") || has("eabi") || has("elf")) return "bare";  // 裸机 *-none-eabi/*-elf
     return "unknown";
@@ -323,6 +324,7 @@ static PlatProps builtinPlatform(const std::string& triple) {
     if (fam == "darwin")  return {"", "dsymutil", true};
     if (fam == "windows") return {"", "none", true};
     if (fam == "bare")    return {"", "none", true};   // 裸机：无托管线程/调试打包
+    if (fam == "android") return {"", "none", true};   // Bionic：pthread/rt 在 libc，无需额外线程库
     if (fam == "linux")   return {"-lpthread", "none", true};
     return {"", "none", false};                         // 未知：交由外置表/显式声明
 }

@@ -27,8 +27,13 @@ SCC="${SCC:-${SCRIPT_DIR}/../../../compiler/build/scc}"
 
 # ---- Wayland 协议头生成（仅 Linux 目标需要）----
 # 目标族判定：SCC_TARGET_TRIPLE / 参数串 / 宿主 uname，含 linux 即生成
+# 注：android 三元组（aarch64-linux-android）含 "linux" 但走 NativeActivity，不需 wayland，先排除。
 NEED_WAYLAND=0
-case "${SCC_TARGET_TRIPLE:-}$*$(uname -s)" in *[Ll]inux*) NEED_WAYLAND=1 ;; esac
+_wsi_target_probe="${SCC_TARGET_TRIPLE:-}$*$(uname -s)"
+case "$_wsi_target_probe" in
+    *[Aa]ndroid*) NEED_WAYLAND=0 ;;
+    *[Ll]inux*)   NEED_WAYLAND=1 ;;
+esac
 
 if [[ $NEED_WAYLAND -eq 1 ]]; then
     if ! command -v wayland-scanner &>/dev/null; then

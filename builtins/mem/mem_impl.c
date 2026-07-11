@@ -617,7 +617,17 @@ void sc_arena_drop(sc_arena *_this) {
  * POSIX  ：shm_open(O_CREAT|O_RDWR) + ftruncate + mmap(MAP_SHARED)
  * Windows：OpenFileMappingA / CreateFileMappingA(INVALID_HANDLE_VALUE) + MapViewOfFile
  * h 指向 malloc 的 shm_priv（映射地址 + 容量 + 平台句柄）。容量向上取整到页。
+ *
+ * Android：Bionic 不提供 POSIX 命名共享内存——无 /dev/shm，shm_open/shm_unlink 仅
+ *   API>=26 才声明且运行期失败；Android 的共享内存原语是 ASharedMemory/memfd（匿名，
+ *   经 binder 传 fd，非按名跨进程）。故 android 上 shm 报「不支持」，其余 mem 功能不受影响。
  */
+#if !P_WIN && !defined(__ANDROID__)
+#  define MEM_HAVE_POSIX_SHM 1
+#else
+#  define MEM_HAVE_POSIX_SHM 0
+#endif
+
 typedef struct shm_priv {
     void  *addr;             /* 本进程映射首地址 */
     size_t size;             /* 映射字节数（页对齐容量） */
@@ -639,7 +649,7 @@ static size_t shm_pagesize(void) {
 #endif
 }
 
-#if !P_WIN
+#if MEM_HAVE_POSIX_SHM
 /* POSIX 名字规范化：加前导 '/'，丢弃内嵌 '/'；截断到安全长度 */
 static void shm_posix_name(const char *in, char *out, size_t cap) {
     size_t j = 0;
@@ -690,7 +700,7 @@ bool sc_shm_make(sc_shm *self, const char *name, uint64_t size, uint32_t flags) 
     pv->handle = h;
     self->h = pv;
     return 1;
-#else
+#elif MEM_HAVE_POSIX_SHM
     char nm[256];
     shm_posix_name(name, nm, sizeof(nm));
 
@@ -746,6 +756,10 @@ bool sc_shm_make(sc_shm *self, const char *name, uint64_t size, uint32_t flags) 
     pv->fd = fd;                                       /* 保留 fd 至 drop（映射不依赖它，仅对称关闭） */
     self->h = pv;
     return 1;
+#else
+    /* Android：POSIX 命名共享内存不可用 */
+    (void)rdonly; (void)excl; (void)want; (void)usable;
+    return 0;
 #endif
 }
 
@@ -778,9 +792,12 @@ bool sc_shm_remove(const char *name) {
 #if P_WIN
     (void)name;                                        /* 内核对象随最后句柄关闭自动销毁 */
     return 1;
-#else
+#elif MEM_HAVE_POSIX_SHM
     char nm[256];
     shm_posix_name(name, nm, sizeof(nm));
     return shm_unlink(nm) == 0 ? 1 : 0;
+#else
+    (void)name;                                        /* Android：命名 shm 不可用 */
+    return 0;
 #endif
 }

@@ -1,10 +1,9 @@
 #!/bin/bash
 # ============================================================
-# hello-android 构建并运行 —— wsi Android 后端形态（设计草图）
+# hello-android 构建并运行 —— wsi Android 后端形态
 #
-# ⚠ 状态：设计草图。wsi 的 Android C 后端（android_platform.c）尚未实现，现在
-#   运行会在「构建 libwsi(android)」处失败。保留本脚本是为呈现「实际使用形态」，
-#   供理解设计与二创。就绪后即可端到端跑通。
+# 状态：可用。wsi 的 Android C 后端（android_platform.c）已实现，端到端跑通
+#   （NDK 交叉编译 → libhello.so → APK → 模拟器/真机；实测 Pixel_Tablet_API_31 arm64）。
 #
 # 为什么没有 main / 不能 scc run（对照 hello-ios）：
 #   Android app 无 native main——APK 由框架的 Java 类 android.app.NativeActivity
@@ -13,7 +12,7 @@
 #   sc_app_main），再连同 AndroidManifest 打成 APK，经 adb 装到设备/模拟器
 #   由框架加载。M 芯片 Mac 上可用 Android 模拟器（arm64 系统镜像）或真机(adb)。
 #
-# 前置（就绪后）：Android NDK + SDK build-tools + platform-tools(adb)；
+# 前置：Android NDK + SDK build-tools + platform-tools(adb)；
 #   环境变量 ANDROID_NDK_HOME（NDK 根）、ANDROID_HOME（SDK 根）。
 #
 # 打包工具链（不用 gradle，直接调 SDK 底层命令行工具手工拼 APK）：
@@ -100,7 +99,7 @@ export SCC_TARGET_TRIPLE="$TRIPLE"
 export SCC_TARGET_SUFFIX="$TRIPLE"
 
 # ---- 1. 为 Android 构建 wsi 库（待 android 后端实现：android_platform.c + .sc [*android*] 段）----
-echo "==> 构建 libwsi（android/$ABI）  [wsi android 后端待补，此步现会失败]"
+echo "==> 构建 libwsi（android/$ABI）"
 "$WSI/build.sh"
 
 # ---- 2. 交叉编译 app → 共享库 libhello.so ----
@@ -108,7 +107,7 @@ echo "==> 构建 libwsi（android/$ABI）  [wsi android 后端待补，此步现
 # 注：scc 需支持共享库输出（此处经 SCC_LDFLAGS 传 -shared；若 scc 尚无 --shared 模式，
 #     此为二创接入点之一）。
 echo "==> 编译 app.sc → lib$LIB.so"
-SCC_LDFLAGS="-shared -u ANativeActivity_onCreate -landroid -llog" \
+SCC_LDFLAGS="-shared -u ANativeActivity_onCreate -u JNI_OnLoad -landroid -llog -lm" \
   "$SCC" app.sc --build -o "$BUILD/lib$LIB.so"
 
 # ---- SDK 组件定位（dex 与打包共用）----

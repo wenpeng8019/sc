@@ -11,7 +11,7 @@
 //   nativeOnLowMemory → 同上（旧 API 路径）
 //   nativeOnTerminate → 仅模拟器触发，真机不可依赖 → sc_wsi_app_cleanup（对称补全）
 // 窗口/帧级（tier B/C：ANativeWindow/AChoreographer/AInputQueue）不在此文件，
-// 属 android 后端（android_platform.c，待实现）。
+// 属 android 后端（android_platform.c）。
 //
 // 状态：Application ⇄ JNI 桥完整可用；桥到的 wsi 内部钩子（on_suspend/save）在
 // android 后端就绪前为契约占位（见 TODO）。整文件由 WSI_ANDROID 守卫，非 android
@@ -44,7 +44,7 @@ static void wsi_android_process_create(void) {
     if (sc_wsi_app_startup()) {
         WSI_LOGI("wsi 进程级 init 完成（Application.onCreate → sc_wsi_app_startup）");
     } else {
-        WSI_LOGW("sc_wsi_app_startup 失败（android 平台后端待实现：android_platform.c）");
+        WSI_LOGW("sc_wsi_app_startup 失败");
     }
 }
 
@@ -94,8 +94,9 @@ static const JNINativeMethod kScApplicationMethods[] = {
 // 早于 NativeActivity）。持有 JavaVM 并用 RegisterNatives 显式绑定，避免依赖符号
 // 名字修饰（Java_com_sc_wsi_ScApplication_...）。
 //
-// TODO(android 后端)：若 android_platform.c 亦定义 JNI_OnLoad，需合并为一处注册
-//   （一个 .so 只能有一个 JNI_OnLoad）。
+// 注：android_platform.c（tier B/C 后端）刻意「不」定义 JNI_OnLoad（NDK 的
+//   ANativeActivity/ALooper/AInputQueue/AChoreographer 均为纯 C API，无需 JNI），
+//   故本文件独占 .so 唯一的 JNI_OnLoad。构建须 -u JNI_OnLoad 强制从静态库拉入本 TU。
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     (void)reserved;
     g_android_vm = vm;
