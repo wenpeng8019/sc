@@ -312,12 +312,12 @@ typedef void (* PFN_XShapeCombineMask)(Display*,Window,int,int,int,Pixmap,int);
 #define XShapeCombineRegion g_wsi.x11.xshape.ShapeCombineRegion
 #define XShapeCombineMask g_wsi.x11.xshape.ShapeCombineMask
 
-#define GLFW_X11_WINDOW_STATE           x11_window_t x11;
-#define GLFW_X11_LIBRARY_WINDOW_STATE   x11_library_t x11;
-#define GLFW_X11_MONITOR_STATE          x11_monitor_t x11;
-#define GLFW_X11_CURSOR_STATE           x11_cursor_t x11;
+#define WSI_X11_WINDOW_STATE           x11_window_t x11;
+#define WSI_X11_LIBRARY_WINDOW_STATE   x11_library_t x11;
+#define WSI_X11_MONITOR_STATE          x11_monitor_t x11;
+#define WSI_X11_CURSOR_STATE           x11_cursor_t x11;
 
-#define GLFW_INVALID_CODEPOINT 0xffffffffu
+#define WSI_INVALID_CODEPOINT 0xffffffffu
 
 // X11-specific per-window data
 typedef struct x11_window_t
@@ -340,7 +340,7 @@ typedef struct x11_window_t
 
     // The last received cursor position, regardless of source
     int                 lastCursorPosX, lastCursorPosY;
-    // The last position the cursor was warped to by GLFW
+    // The last position the cursor was warped to by WSI
     int                 warpCursorPosX, warpCursorPosY;
 
     // The time of the last KeyPress event per keycode, for discarding
@@ -375,9 +375,9 @@ typedef struct x11_library_t
     char*               clipboardString;
     // Key name string
     char                keynames[SC_KEY_LAST + 1][5];
-    // X11 keycode to GLFW key LUT
+    // X11 keycode to WSI key LUT
     short int           keycodes[256];
-    // GLFW key to X11 keycode LUT
+    // WSI key to X11 keycode LUT
     short int           scancodes[SC_KEY_LAST + 1];
     // Where to place the cursor when re-enabled
     double              restoreCursorPosX, restoreCursorPosY;
@@ -439,7 +439,7 @@ typedef struct x11_library_t
     Atom                UTF8_STRING;
     Atom                COMPOUND_STRING;
     Atom                ATOM_PAIR;
-    Atom                GLFW_SELECTION;
+    Atom                WSI_SELECTION;
 
     struct {
         void*       handle;

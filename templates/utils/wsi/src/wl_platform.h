@@ -109,10 +109,10 @@ struct wl_output;
 #define wl_surface_interface _glfw_wl_surface_interface
 #define wp_fractional_scale_v1_interface _glfw_wp_fractional_scale_v1_interface
 
-#define GLFW_WAYLAND_WINDOW_STATE         wl_window_t  wl;
-#define GLFW_WAYLAND_LIBRARY_WINDOW_STATE wl_ibrary_t wl;
-#define GLFW_WAYLAND_MONITOR_STATE        wl_monitor_t wl;
-#define GLFW_WAYLAND_CURSOR_STATE         wl_cursor_t  wl;
+#define WSI_WAYLAND_WINDOW_STATE         wl_window_t  wl;
+#define WSI_WAYLAND_LIBRARY_WINDOW_STATE wl_ibrary_t wl;
+#define WSI_WAYLAND_MONITOR_STATE        wl_monitor_t wl;
+#define WSI_WAYLAND_CURSOR_STATE         wl_cursor_t  wl;
 
 struct wl_cursor_image
 {

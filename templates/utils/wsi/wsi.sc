@@ -28,7 +28,7 @@ inc wsi.h
 add libwsi.a
 
 # 指针约定：不透明句柄与结构体指针引用 wsi.h 内的 C 域类型（::sc_window /
-#   ::sc_monitor / ::sc_cursor / ::GLFWvidmode / ::GLFWgammaramp / ::GLFWimage），
+#   ::sc_monitor / ::sc_cursor / ::sc_wsi_video_mode / ::sc_wsi_gamma_ramp / ::wsi_img），
 #   令生成的 extern 原型与手写头逐字对齐（本单元为头支撑单元，
 #   .c 已 #include wsi.h，消费单元 inc wsi.sc 亦直接见 wsi.h）。回调函数指针 typedef
 #   同样以 ::sc_error_cb / ::sc_monitor_cb 引用。void* 用户数据映射裸指针 &；
@@ -61,11 +61,11 @@ add libwsi.a
 @fnc wsi_monitor_get_user_data:: &, monitor: ::sc_monitor&
 @fnc wsi_monitor_set_user_data:: monitor: ::sc_monitor&, pointer: &
 @fnc wsi_monitor_set_callback:: ::sc_monitor_cb, callback: ::sc_monitor_cb   # 返回旧回调
-@fnc wsi_monitor_get_video_modes:: const ::GLFWvidmode&, monitor: ::sc_monitor&, count: i4&
-@fnc wsi_monitor_get_video_mode:: const ::GLFWvidmode&, monitor: ::sc_monitor&
+@fnc wsi_monitor_get_video_modes:: const ::sc_wsi_video_mode&, monitor: ::sc_monitor&, count: i4&
+@fnc wsi_monitor_get_video_mode:: const ::sc_wsi_video_mode&, monitor: ::sc_monitor&
 @fnc wsi_monitor_get_gamma:: monitor: ::sc_monitor&, gamma: f4
-@fnc wsi_monitor_get_gamma_ramp:: const ::GLFWgammaramp&, monitor: ::sc_monitor&
-@fnc wsi_monitor_set_gamma_ramp:: monitor: ::sc_monitor&, ramp: const ::GLFWgammaramp&
+@fnc wsi_monitor_get_gamma_ramp:: const ::sc_wsi_gamma_ramp&, monitor: ::sc_monitor&
+@fnc wsi_monitor_set_gamma_ramp:: monitor: ::sc_monitor&, ramp: const ::sc_wsi_gamma_ramp&
 
 # ---------------- 窗口 hint ----------------
 @fnc wsi_default_window_hints::
@@ -79,7 +79,7 @@ add libwsi.a
 @fnc wsi_win_set_should_close:: window: ::sc_window&, value: i4
 @fnc wsi_win_get_title:: const char&, window: ::sc_window&
 @fnc wsi_win_set_title:: window: ::sc_window&, title: const char&
-@fnc wsi_win_set_icon:: window: ::sc_window&, count: i4, images: const ::GLFWimage&
+@fnc wsi_win_set_icon:: window: ::sc_window&, count: i4, images: const ::sc_wsi_img&
 @fnc wsi_win_get_pos:: window: ::sc_window&, xpos: i4&, ypos: i4&
 @fnc wsi_win_set_pos:: window: ::sc_window&, xpos: i4, ypos: i4
 @fnc wsi_win_get_size:: window: ::sc_window&, width: i4&, height: i4&
@@ -120,7 +120,7 @@ add libwsi.a
 @fnc wsi_mouse_button:: i4, window: ::sc_window&, button: i4
 @fnc wsi_get_cursor_pos:: window: ::sc_window&, xpos: f8&, ypos: f8&
 @fnc wsi_set_cursor_pos:: window: ::sc_window&, xpos: f8, ypos: f8
-@fnc wsi_create_cursor:: ::sc_cursor&, image: const ::GLFWimage&, xhot: i4, yhot: i4
+@fnc wsi_create_cursor:: ::sc_cursor&, image: const ::sc_wsi_img&, xhot: i4, yhot: i4
 @fnc wsi_create_standard_cursor:: ::sc_cursor&, shape: i4
 @fnc wsi_destroy_cursor:: cursor: ::sc_cursor&
 @fnc wsi_cursor_set:: window: ::sc_window&, cursor: ::sc_cursor&

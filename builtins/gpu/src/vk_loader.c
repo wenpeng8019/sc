@@ -4,15 +4,13 @@
  * 运行时动态加载 vulkan-1.dll（Windows）/ libvulkan.so.1（Linux），
  * 经 vkGetInstanceProcAddr 解析所有入口点——免链接 vulkan-1.lib、免 SDK。
  * ============================================================ */
-#include "../platform.h"
+#include "../platform.h"   /* 动态库加载：P_dl_load/P_dl_get_proc（跨平台） */
 #if P_WIN || P_LINUX   /* Vulkan 仅 Windows/Linux 启用；mac 用 Metal，本 TU 空化 */
 #if P_WIN
-  #define VK_USE_PLATFORM_WIN32_KHR
-  #include <windows.h>
+  #define VK_USE_PLATFORM_WIN32_KHR   /* vkCreateWin32SurfaceKHR 需 <windows.h>（platform.h 已带入） */
 #else
   #define VK_USE_PLATFORM_XLIB_KHR
   #define VK_USE_PLATFORM_WAYLAND_KHR
-  #include <dlfcn.h>
 #endif
 #include "../vk_loader.h"
 
@@ -37,20 +35,15 @@ static void* g_vklib = NULL;
 int sc_vk_load_global(void) {
     if (!g_vklib) {
 #if P_WIN
-        g_vklib = (void*)LoadLibraryA("vulkan-1.dll");
+        g_vklib = P_dl_load("vulkan-1.dll");
 #else
-        g_vklib = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-        if (!g_vklib) g_vklib = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
+        g_vklib = P_dl_load("libvulkan.so.1");
+        if (!g_vklib) g_vklib = P_dl_load("libvulkan.so");
 #endif
         if (!g_vklib) return 0;
     }
-#if P_WIN
     vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)
-        GetProcAddress((HMODULE)g_vklib, "vkGetInstanceProcAddr");
-#else
-    vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)
-        dlsym(g_vklib, "vkGetInstanceProcAddr");
-#endif
+        P_dl_get_proc(g_vklib, "vkGetInstanceProcAddr");
     if (!vkGetInstanceProcAddr) return 0;
 #define SC_VK_LOADG(n) n = (PFN_##n)vkGetInstanceProcAddr(NULL, #n);
     SC_VK_GLOBAL_FUNCS(SC_VK_LOADG)

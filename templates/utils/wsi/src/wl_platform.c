@@ -35,52 +35,52 @@
 #include "idle-inhibit-unstable-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
 
-#define types _glfw_wayland_types
+#define types _wsi_wayland_types
 #include "wayland-client-protocol-code.h"
 #undef types
 
-#define types _glfw_xdg_shell_types
+#define types _wsi_xdg_shell_types
 #include "xdg-shell-client-protocol-code.h"
 #undef types
 
-#define types _glfw_xdg_decoration_types
+#define types _wsi_xdg_decoration_types
 #include "xdg-decoration-unstable-v1-client-protocol-code.h"
 #undef types
 
-#define types _glfw_viewporter_types
+#define types _wsi_viewporter_types
 #include "viewporter-client-protocol-code.h"
 #undef types
 
-#define types _glfw_relative_pointer_types
+#define types _wsi_relative_pointer_types
 #include "relative-pointer-unstable-v1-client-protocol-code.h"
 #undef types
 
-#define types _glfw_pointer_constraints_types
+#define types _wsi_pointer_constraints_types
 #include "pointer-constraints-unstable-v1-client-protocol-code.h"
 #undef types
 
-#define types _glfw_fractional_scale_types
+#define types _wsi_fractional_scale_types
 #include "fractional-scale-v1-client-protocol-code.h"
 #undef types
 
-#define types _glfw_xdg_activation_types
+#define types _wsi_xdg_activation_types
 #include "xdg-activation-v1-client-protocol-code.h"
 #undef types
 
-#define types _glfw_idle_inhibit_types
+#define types _wsi_idle_inhibit_types
 #include "idle-inhibit-unstable-v1-client-protocol-code.h"
 #undef types
 
 #include <limits.h>
 
-#define GLFW_BORDER_SIZE    4
-#define GLFW_CAPTION_HEIGHT 24
+#define WSI_BORDER_SIZE    4
+#define WSI_CAPTION_HEIGHT 24
 
-#define GLFW_PENDING_SURFACE    1
-#define GLFW_PENDING_BUTTON     2
-#define GLFW_PENDING_MOTION     4
-#define GLFW_PENDING_SCROLL     8
-#define GLFW_PENDING_DISCRETE   16
+#define WSI_PENDING_SURFACE    1
+#define WSI_PENDING_BUTTON     2
+#define WSI_PENDING_MOTION     4
+#define WSI_PENDING_SCROLL     8
+#define WSI_PENDING_DISCRETE   16
 
 ///////////////////////////////////////////////////////////////////////////////
 // platform utils
@@ -174,7 +174,7 @@ static int createAnonymousFile(off_t size)
     return fd;
 }
 
-static struct wl_buffer* createShmBuffer(const GLFWimage* image)
+static struct wl_buffer* createShmBuffer(const sc_wsi_img* image)
 {
     const int stride = image->width * 4;
     const int length = image->width * image->height * 4;
@@ -246,7 +246,7 @@ static void setIdleInhibitor(window_st* window, bool enable)
 
 //-----------------------------------------------------------------------------
 
-/* 回退装饰（fallback CSD）的边框 buffer 策略——不要改回上游 GLFW 的
+/* 回退装饰（fallback CSD）的边框 buffer 策略——不要改回上游 WSI 的
  * 1×1 buffer + wp_viewport 放大方案！
  *
  * 上游做法：所有边共享一个 1×1 灰色 wl_shm buffer，靠
@@ -276,7 +276,7 @@ static struct wl_buffer* createFallbackEdgeBuffer(int width, int height)
         pixels[i * 4 + 3] = 255;
     }
 
-    const GLFWimage image = { width, height, pixels };
+    const sc_wsi_img image = { width, height, pixels };
     struct wl_buffer* buffer = createShmBuffer(&image);
     free(pixels);
     return buffer;
@@ -328,17 +328,17 @@ static void createFallbackEdge(window_st* window,
 static void createFallbackDecorations(window_st* window)
 {
     createFallbackEdge(window, &window->wl.fallback.top, window->wl.surface,
-                       0, -GLFW_CAPTION_HEIGHT,
-                       window->wl.width, GLFW_CAPTION_HEIGHT);
+                       0, -WSI_CAPTION_HEIGHT,
+                       window->wl.width, WSI_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.left, window->wl.surface,
-                       -GLFW_BORDER_SIZE, -GLFW_CAPTION_HEIGHT,
-                       GLFW_BORDER_SIZE, window->wl.height + GLFW_CAPTION_HEIGHT);
+                       -WSI_BORDER_SIZE, -WSI_CAPTION_HEIGHT,
+                       WSI_BORDER_SIZE, window->wl.height + WSI_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.right, window->wl.surface,
-                       window->wl.width, -GLFW_CAPTION_HEIGHT,
-                       GLFW_BORDER_SIZE, window->wl.height + GLFW_CAPTION_HEIGHT);
+                       window->wl.width, -WSI_CAPTION_HEIGHT,
+                       WSI_BORDER_SIZE, window->wl.height + WSI_CAPTION_HEIGHT);
     createFallbackEdge(window, &window->wl.fallback.bottom, window->wl.surface,
-                       -GLFW_BORDER_SIZE, window->wl.height,
-                       window->wl.width + GLFW_BORDER_SIZE * 2, GLFW_BORDER_SIZE);
+                       -WSI_BORDER_SIZE, window->wl.height,
+                       window->wl.width + WSI_BORDER_SIZE * 2, WSI_BORDER_SIZE);
 
     window->wl.fallback.decorations = true;
 }
@@ -381,28 +381,28 @@ static void updateFallbackDecorationCursor(window_st* window, double xpos, doubl
     {
         if (g_wsi.wl.pointerSurface == window->wl.fallback.top.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 cursorName = "n-resize";
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.left.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 cursorName = "nw-resize";
             else
                 cursorName = "w-resize";
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.right.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 cursorName = "ne-resize";
             else
                 cursorName = "e-resize";
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.bottom.surface)
         {
-            if (xpos < GLFW_BORDER_SIZE)
+            if (xpos < WSI_BORDER_SIZE)
                 cursorName = "sw-resize";
-            else if (xpos > window->wl.width + GLFW_BORDER_SIZE)
+            else if (xpos > window->wl.width + WSI_BORDER_SIZE)
                 cursorName = "se-resize";
             else
                 cursorName = "s-resize";
@@ -464,30 +464,30 @@ static void handleFallbackDecorationButton(window_st* window, int button, int ac
 
         if (g_wsi.wl.pointerSurface == window->wl.fallback.top.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_TOP;
             else
                 xdg_toplevel_move(window->wl.xdg.toplevel, g_wsi.wl.seat, serial);
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.left.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
             else
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.right.surface)
         {
-            if (ypos < GLFW_BORDER_SIZE)
+            if (ypos < WSI_BORDER_SIZE)
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
             else
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
         }
         else if (g_wsi.wl.pointerSurface == window->wl.fallback.bottom.surface)
         {
-            if (xpos < GLFW_BORDER_SIZE)
+            if (xpos < WSI_BORDER_SIZE)
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
-            else if (xpos > window->wl.width + GLFW_BORDER_SIZE)
+            else if (xpos > window->wl.width + WSI_BORDER_SIZE)
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
             else
                 edges = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
@@ -504,11 +504,11 @@ static void handleFallbackDecorationButton(window_st* window, int button, int ac
         if (g_wsi.wl.pointerSurface != window->wl.fallback.top.surface)
             return;
 
-        if (ypos < GLFW_BORDER_SIZE)
+        if (ypos < WSI_BORDER_SIZE)
             return;
 
         xdg_toplevel_show_window_menu(window->wl.xdg.toplevel, g_wsi.wl.seat, serial,
-                                      xpos, ypos - GLFW_CAPTION_HEIGHT - GLFW_BORDER_SIZE);
+                                      xpos, ypos - WSI_CAPTION_HEIGHT - WSI_BORDER_SIZE);
     }
 }
 
@@ -570,20 +570,20 @@ static bool resizeWindow(window_st* window, int width, int height)
     if (window->wl.fallback.decorations)
     {
         resizeFallbackEdge(&window->wl.fallback.top,
-                           0, -GLFW_CAPTION_HEIGHT,
-                           window->wl.width, GLFW_CAPTION_HEIGHT);
+                           0, -WSI_CAPTION_HEIGHT,
+                           window->wl.width, WSI_CAPTION_HEIGHT);
         resizeFallbackEdge(&window->wl.fallback.left,
-                           -GLFW_BORDER_SIZE, -GLFW_CAPTION_HEIGHT,
-                           GLFW_BORDER_SIZE,
-                           window->wl.height + GLFW_CAPTION_HEIGHT);
+                           -WSI_BORDER_SIZE, -WSI_CAPTION_HEIGHT,
+                           WSI_BORDER_SIZE,
+                           window->wl.height + WSI_CAPTION_HEIGHT);
         resizeFallbackEdge(&window->wl.fallback.right,
-                           window->wl.width, -GLFW_CAPTION_HEIGHT,
-                           GLFW_BORDER_SIZE,
-                           window->wl.height + GLFW_CAPTION_HEIGHT);
+                           window->wl.width, -WSI_CAPTION_HEIGHT,
+                           WSI_BORDER_SIZE,
+                           window->wl.height + WSI_CAPTION_HEIGHT);
         resizeFallbackEdge(&window->wl.fallback.bottom,
-                           -GLFW_BORDER_SIZE, window->wl.height,
-                           window->wl.width + GLFW_BORDER_SIZE * 2,
-                           GLFW_BORDER_SIZE);
+                           -WSI_BORDER_SIZE, window->wl.height,
+                           window->wl.width + WSI_BORDER_SIZE * 2,
+                           WSI_BORDER_SIZE);
     }
 
     return true;
@@ -902,26 +902,26 @@ static void wayland_get_monitor_work_area(monitor_st* monitor,
         *height = monitor->modes[monitor->wl.currentMode].height;
 }
 
-static GLFWvidmode* wayland_get_video_modes(monitor_st* monitor, int* found)
+static sc_wsi_video_mode* wayland_get_video_modes(monitor_st* monitor, int* found)
 {
     *found = monitor->modeCount;
     return monitor->modes;
 }
 
-static bool wayland_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
+static bool wayland_get_video_mode(monitor_st* monitor, sc_wsi_video_mode* mode)
 {
     *mode = monitor->modes[monitor->wl.currentMode];
     return true;
 }
 
-static bool wayland_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
+static bool wayland_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: Gamma ramp access is not available");
     return false;
 }
 
-static void wayland_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
+static void wayland_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: Gamma ramp access is not available");
@@ -1311,7 +1311,7 @@ static void outputHandleMode(void* userData,
                              int32_t refresh)
 {
     monitor_st* monitor = userData;
-    GLFWvidmode mode;
+    sc_wsi_video_mode mode;
 
     mode.width = width;
     mode.height = height;
@@ -1319,7 +1319,7 @@ static void outputHandleMode(void* userData,
 
     monitor->modeCount++;
     monitor->modes =
-        wsi_realloc(monitor->modes, monitor->modeCount * sizeof(GLFWvidmode));
+        wsi_realloc(monitor->modes, monitor->modeCount * sizeof(sc_wsi_video_mode));
     monitor->modes[monitor->modeCount - 1] = mode;
 
     if (flags & WL_OUTPUT_MODE_CURRENT)
@@ -1333,7 +1333,7 @@ static void outputHandleDone(void* userData, struct wl_output* output)
     if (monitor->widthMM <= 0 || monitor->heightMM <= 0)
     {
         // If Wayland does not provide a physical size, assume the default 96 DPI
-        const GLFWvidmode* mode = &monitor->modes[monitor->wl.currentMode];
+        const sc_wsi_video_mode* mode = &monitor->modes[monitor->wl.currentMode];
         monitor->widthMM  = (int) (mode->width * 25.4f / 96.f);
         monitor->heightMM = (int) (mode->height * 25.4f / 96.f);
     }
@@ -1520,7 +1520,7 @@ static void pointerHandleEnter(void* userData,
 
     if (wl_pointer_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION)
     {
-        g_wsi.wl.pending.events |= (GLFW_PENDING_SURFACE | GLFW_PENDING_MOTION);
+        g_wsi.wl.pending.events |= (WSI_PENDING_SURFACE | WSI_PENDING_MOTION);
         g_wsi.wl.pending.pointerSurface = surface;
         g_wsi.wl.pending.pointerX = xpos;
         g_wsi.wl.pending.pointerY = ypos;
@@ -1547,7 +1547,7 @@ static void pointerHandleLeave(void* userData,
 
     if (wl_pointer_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION)
     {
-        g_wsi.wl.pending.events |= GLFW_PENDING_SURFACE;
+        g_wsi.wl.pending.events |= WSI_PENDING_SURFACE;
         g_wsi.wl.pending.pointerSurface = NULL;
     }
     else
@@ -1568,7 +1568,7 @@ static void pointerHandleMotion(void* userData,
 
     if (wl_pointer_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION)
     {
-        g_wsi.wl.pending.events |= GLFW_PENDING_MOTION;
+        g_wsi.wl.pending.events |= WSI_PENDING_MOTION;
         g_wsi.wl.pending.pointerX = xpos;
         g_wsi.wl.pending.pointerY = ypos;
     }
@@ -1600,7 +1600,7 @@ static void pointerHandleButton(void* userData,
 
     if (wl_pointer_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION)
     {
-        g_wsi.wl.pending.events |= GLFW_PENDING_BUTTON;
+        g_wsi.wl.pending.events |= WSI_PENDING_BUTTON;
         g_wsi.wl.pending.button = button;
         g_wsi.wl.pending.action = action;
     }
@@ -1619,7 +1619,7 @@ static void pointerHandleAxis(void* userData,
 
     if (wl_pointer_get_version(pointer) >= WL_POINTER_FRAME_SINCE_VERSION)
     {
-        g_wsi.wl.pending.events |= GLFW_PENDING_SCROLL;
+        g_wsi.wl.pending.events |= WSI_PENDING_SCROLL;
         if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
             g_wsi.wl.pending.scrollX = -wl_fixed_to_double(value) / 10.0;
         else if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
@@ -1637,7 +1637,7 @@ static void pointerHandleAxis(void* userData,
 
 static void pointerHandleFrame(void* userData, struct wl_pointer* pointer)
 {
-    if (g_wsi.wl.pending.events & GLFW_PENDING_SURFACE)
+    if (g_wsi.wl.pending.events & WSI_PENDING_SURFACE)
     {
         if (g_wsi.wl.pointerSurface)
             processPointerLeaveSurface(g_wsi.wl.pointerSurface);
@@ -1649,15 +1649,15 @@ static void pointerHandleFrame(void* userData, struct wl_pointer* pointer)
     if (!g_wsi.wl.pointerSurface)
         return;
 
-    if (g_wsi.wl.pending.events & GLFW_PENDING_MOTION)
+    if (g_wsi.wl.pending.events & WSI_PENDING_MOTION)
         processPointerMotion(g_wsi.wl.pending.pointerX, g_wsi.wl.pending.pointerY);
 
-    if (g_wsi.wl.pending.events & GLFW_PENDING_BUTTON)
+    if (g_wsi.wl.pending.events & WSI_PENDING_BUTTON)
         processPointerButton(g_wsi.wl.pending.button, g_wsi.wl.pending.action);
 
-    if (g_wsi.wl.pending.events & GLFW_PENDING_DISCRETE)
+    if (g_wsi.wl.pending.events & WSI_PENDING_DISCRETE)
         processPointerScroll(g_wsi.wl.pending.discreteX, g_wsi.wl.pending.discreteY);
-    else if (g_wsi.wl.pending.events & GLFW_PENDING_SCROLL)
+    else if (g_wsi.wl.pending.events & WSI_PENDING_SCROLL)
         processPointerScroll(g_wsi.wl.pending.scrollX, g_wsi.wl.pending.scrollY);
 
     memset(&g_wsi.wl.pending, 0, sizeof(g_wsi.wl.pending));
@@ -1691,7 +1691,7 @@ static void pointerHandleAxisValue120(void* data,
     if (!g_wsi.wl.pointerSurface)
         return;
 
-    g_wsi.wl.pending.events |= GLFW_PENDING_DISCRETE;
+    g_wsi.wl.pending.events |= WSI_PENDING_DISCRETE;
     if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL)
         g_wsi.wl.pending.discreteX = -(value120 / 120.0);
     else if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
@@ -2523,57 +2523,57 @@ static int wayland_init(void)
     g_wsi.wl.tag = sc_wsi_get_version_string();
 
     g_wsi.wl.client.display_flush = (PFN_wl_display_flush)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_flush");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_flush");
     g_wsi.wl.client.display_cancel_read = (PFN_wl_display_cancel_read)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_cancel_read");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_cancel_read");
     g_wsi.wl.client.display_dispatch_pending = (PFN_wl_display_dispatch_pending)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_dispatch_pending");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_dispatch_pending");
     g_wsi.wl.client.display_read_events = (PFN_wl_display_read_events)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_read_events");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_read_events");
     g_wsi.wl.client.display_disconnect = (PFN_wl_display_disconnect)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_disconnect");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_disconnect");
     g_wsi.wl.client.display_roundtrip = (PFN_wl_display_roundtrip)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_roundtrip");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_roundtrip");
     g_wsi.wl.client.display_get_fd = (PFN_wl_display_get_fd)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_get_fd");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_get_fd");
     g_wsi.wl.client.display_prepare_read = (PFN_wl_display_prepare_read)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_prepare_read");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_prepare_read");
     g_wsi.wl.client.display_create_queue = (PFN_wl_display_create_queue)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_create_queue");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_create_queue");
     g_wsi.wl.client.display_prepare_read_queue = (PFN_wl_display_prepare_read_queue)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_prepare_read_queue");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_prepare_read_queue");
     g_wsi.wl.client.display_dispatch_queue_pending = (PFN_wl_display_dispatch_queue_pending)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_display_dispatch_queue_pending");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_display_dispatch_queue_pending");
     g_wsi.wl.client.event_queue_destroy = (PFN_wl_event_queue_destroy)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_event_queue_destroy");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_event_queue_destroy");
     g_wsi.wl.client.proxy_marshal = (PFN_wl_proxy_marshal)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_marshal");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_marshal");
     g_wsi.wl.client.proxy_add_listener = (PFN_wl_proxy_add_listener)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_add_listener");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_add_listener");
     g_wsi.wl.client.proxy_destroy = (PFN_wl_proxy_destroy)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_destroy");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_destroy");
     g_wsi.wl.client.proxy_marshal_constructor = (PFN_wl_proxy_marshal_constructor)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_marshal_constructor");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_marshal_constructor");
     g_wsi.wl.client.proxy_marshal_constructor_versioned = (PFN_wl_proxy_marshal_constructor_versioned)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_marshal_constructor_versioned");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_marshal_constructor_versioned");
     g_wsi.wl.client.proxy_get_user_data = (PFN_wl_proxy_get_user_data)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_get_user_data");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_get_user_data");
     g_wsi.wl.client.proxy_set_user_data = (PFN_wl_proxy_set_user_data)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_set_user_data");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_set_user_data");
     g_wsi.wl.client.proxy_get_tag = (PFN_wl_proxy_get_tag)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_get_tag");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_get_tag");
     g_wsi.wl.client.proxy_set_tag = (PFN_wl_proxy_set_tag)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_set_tag");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_set_tag");
     g_wsi.wl.client.proxy_get_version = (PFN_wl_proxy_get_version)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_get_version");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_get_version");
     g_wsi.wl.client.proxy_marshal_flags = (PFN_wl_proxy_marshal_flags)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_marshal_flags");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_marshal_flags");
     g_wsi.wl.client.proxy_create_wrapper = (PFN_wl_proxy_create_wrapper)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_create_wrapper");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_create_wrapper");
     g_wsi.wl.client.proxy_wrapper_destroy = (PFN_wl_proxy_wrapper_destroy)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_wrapper_destroy");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_wrapper_destroy");
     g_wsi.wl.client.proxy_set_queue = (PFN_wl_proxy_set_queue)
-        impl_platform_get_module_symbol(g_wsi.wl.client.handle, "wl_proxy_set_queue");
+        P_dl_get_proc(g_wsi.wl.client.handle, "wl_proxy_set_queue");
 
     if (!g_wsi.wl.client.display_flush ||
         !g_wsi.wl.client.display_cancel_read ||
@@ -2605,7 +2605,7 @@ static int wayland_init(void)
         return false;
     }
 
-    g_wsi.wl.cursor.handle = impl_platform_load_module("libwayland-cursor.so.0");
+    g_wsi.wl.cursor.handle = P_dl_load("libwayland-cursor.so.0");
     if (!g_wsi.wl.cursor.handle)
     {
         impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
@@ -2614,15 +2614,15 @@ static int wayland_init(void)
     }
 
     g_wsi.wl.cursor.theme_load = (PFN_wl_cursor_theme_load)
-        impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_theme_load");
+        P_dl_get_proc(g_wsi.wl.cursor.handle, "wl_cursor_theme_load");
     g_wsi.wl.cursor.theme_destroy = (PFN_wl_cursor_theme_destroy)
-        impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_theme_destroy");
+        P_dl_get_proc(g_wsi.wl.cursor.handle, "wl_cursor_theme_destroy");
     g_wsi.wl.cursor.theme_get_cursor = (PFN_wl_cursor_theme_get_cursor)
-        impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_theme_get_cursor");
+        P_dl_get_proc(g_wsi.wl.cursor.handle, "wl_cursor_theme_get_cursor");
     g_wsi.wl.cursor.image_get_buffer = (PFN_wl_cursor_image_get_buffer)
-        impl_platform_get_module_symbol(g_wsi.wl.cursor.handle, "wl_cursor_image_get_buffer");
+        P_dl_get_proc(g_wsi.wl.cursor.handle, "wl_cursor_image_get_buffer");
 
-    g_wsi.wl.xkb.handle = impl_platform_load_module("libxkbcommon.so.0");
+    g_wsi.wl.xkb.handle = P_dl_load("libxkbcommon.so.0");
     if (!g_wsi.wl.xkb.handle)
     {
         impl_on_error(SC_WSI_ERR_PLATFORM_ERROR,
@@ -2631,49 +2631,49 @@ static int wayland_init(void)
     }
 
     g_wsi.wl.xkb.context_new = (PFN_xkb_context_new)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_context_new");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_context_new");
     g_wsi.wl.xkb.context_unref = (PFN_xkb_context_unref)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_context_unref");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_context_unref");
     g_wsi.wl.xkb.keymap_new_from_string = (PFN_xkb_keymap_new_from_string)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keymap_new_from_string");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keymap_new_from_string");
     g_wsi.wl.xkb.keymap_unref = (PFN_xkb_keymap_unref)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keymap_unref");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keymap_unref");
     g_wsi.wl.xkb.keymap_mod_get_index = (PFN_xkb_keymap_mod_get_index)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keymap_mod_get_index");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keymap_mod_get_index");
     g_wsi.wl.xkb.keymap_key_repeats = (PFN_xkb_keymap_key_repeats)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keymap_key_repeats");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keymap_key_repeats");
     g_wsi.wl.xkb.keymap_key_get_syms_by_level = (PFN_xkb_keymap_key_get_syms_by_level)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keymap_key_get_syms_by_level");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keymap_key_get_syms_by_level");
     g_wsi.wl.xkb.state_new = (PFN_xkb_state_new)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_new");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_new");
     g_wsi.wl.xkb.state_unref = (PFN_xkb_state_unref)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_unref");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_unref");
     g_wsi.wl.xkb.state_key_get_syms = (PFN_xkb_state_key_get_syms)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_key_get_syms");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_key_get_syms");
     g_wsi.wl.xkb.state_update_mask = (PFN_xkb_state_update_mask)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_update_mask");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_update_mask");
     g_wsi.wl.xkb.state_key_get_layout = (PFN_xkb_state_key_get_layout)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_key_get_layout");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_key_get_layout");
     g_wsi.wl.xkb.state_mod_index_is_active = (PFN_xkb_state_mod_index_is_active)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_state_mod_index_is_active");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_state_mod_index_is_active");
     g_wsi.wl.xkb.compose_table_new_from_locale = (PFN_xkb_compose_table_new_from_locale)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_table_new_from_locale");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_table_new_from_locale");
     g_wsi.wl.xkb.compose_table_unref = (PFN_xkb_compose_table_unref)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_table_unref");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_table_unref");
     g_wsi.wl.xkb.compose_state_new = (PFN_xkb_compose_state_new)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_state_new");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_state_new");
     g_wsi.wl.xkb.compose_state_unref = (PFN_xkb_compose_state_unref)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_state_unref");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_state_unref");
     g_wsi.wl.xkb.compose_state_feed = (PFN_xkb_compose_state_feed)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_state_feed");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_state_feed");
     g_wsi.wl.xkb.compose_state_get_status = (PFN_xkb_compose_state_get_status)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_state_get_status");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_state_get_status");
     g_wsi.wl.xkb.compose_state_get_one_sym = (PFN_xkb_compose_state_get_one_sym)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_compose_state_get_one_sym");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_compose_state_get_one_sym");
     g_wsi.wl.xkb.keysym_to_utf32 = (PFN_xkb_keysym_to_utf32)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keysym_to_utf32");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keysym_to_utf32");
     g_wsi.wl.xkb.keysym_to_utf8 = (PFN_xkb_keysym_to_utf8)
-        impl_platform_get_module_symbol(g_wsi.wl.xkb.handle, "xkb_keysym_to_utf8");
+        P_dl_get_proc(g_wsi.wl.xkb.handle, "xkb_keysym_to_utf8");
 
     if (!g_wsi.wl.xkb.context_new ||
         !g_wsi.wl.xkb.context_unref ||
@@ -2702,62 +2702,62 @@ static int wayland_init(void)
     }
 
     if (g_wsi.hints.init.wl.libdecorMode == SC_WAYLAND_PREFER_LIBDECOR)
-        g_wsi.wl.libdecor.handle = impl_platform_load_module("libdecor-0.so.0");
+        g_wsi.wl.libdecor.handle = P_dl_load("libdecor-0.so.0");
 
     if (g_wsi.wl.libdecor.handle)
     {
         g_wsi.wl.libdecor.libdecor_new_ = (PFN_libdecor_new)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_new");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_new");
         g_wsi.wl.libdecor.libdecor_unref_ = (PFN_libdecor_unref)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_unref");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_unref");
         g_wsi.wl.libdecor.libdecor_get_fd_ = (PFN_libdecor_get_fd)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_get_fd");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_get_fd");
         g_wsi.wl.libdecor.libdecor_dispatch_ = (PFN_libdecor_dispatch)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_dispatch");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_dispatch");
         g_wsi.wl.libdecor.libdecor_decorate_ = (PFN_libdecor_decorate)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_decorate");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_decorate");
         g_wsi.wl.libdecor.libdecor_frame_unref_ = (PFN_libdecor_frame_unref)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_unref");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_unref");
         g_wsi.wl.libdecor.libdecor_frame_set_app_id_ = (PFN_libdecor_frame_set_app_id)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_app_id");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_app_id");
         g_wsi.wl.libdecor.libdecor_frame_set_title_ = (PFN_libdecor_frame_set_title)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_title");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_title");
         g_wsi.wl.libdecor.libdecor_frame_set_minimized_ = (PFN_libdecor_frame_set_minimized)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_minimized");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_minimized");
         g_wsi.wl.libdecor.libdecor_frame_set_fullscreen_ = (PFN_libdecor_frame_set_fullscreen)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_fullscreen");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_fullscreen");
         g_wsi.wl.libdecor.libdecor_frame_unset_fullscreen_ = (PFN_libdecor_frame_unset_fullscreen)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_fullscreen");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_fullscreen");
         g_wsi.wl.libdecor.libdecor_frame_map_ = (PFN_libdecor_frame_map)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_map");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_map");
         g_wsi.wl.libdecor.libdecor_frame_commit_ = (PFN_libdecor_frame_commit)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_commit");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_commit");
         g_wsi.wl.libdecor.libdecor_frame_set_min_content_size_ = (PFN_libdecor_frame_set_min_content_size)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_min_content_size");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_min_content_size");
         g_wsi.wl.libdecor.libdecor_frame_set_max_content_size_ = (PFN_libdecor_frame_set_max_content_size)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_max_content_size");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_max_content_size");
         g_wsi.wl.libdecor.libdecor_frame_set_maximized_ = (PFN_libdecor_frame_set_maximized)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_maximized");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_maximized");
         g_wsi.wl.libdecor.libdecor_frame_unset_maximized_ = (PFN_libdecor_frame_unset_maximized)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_maximized");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_maximized");
         g_wsi.wl.libdecor.libdecor_frame_set_capabilities_ = (PFN_libdecor_frame_set_capabilities)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_capabilities");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_capabilities");
         g_wsi.wl.libdecor.libdecor_frame_unset_capabilities_ = (PFN_libdecor_frame_unset_capabilities)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_capabilities");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_unset_capabilities");
         g_wsi.wl.libdecor.libdecor_frame_set_visibility_ = (PFN_libdecor_frame_set_visibility)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_set_visibility");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_set_visibility");
         g_wsi.wl.libdecor.libdecor_frame_is_visible_ = (PFN_libdecor_frame_is_visible)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_is_visible");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_is_visible");
         g_wsi.wl.libdecor.libdecor_frame_get_xdg_toplevel_ = (PFN_libdecor_frame_get_xdg_toplevel)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_frame_get_xdg_toplevel");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_frame_get_xdg_toplevel");
         g_wsi.wl.libdecor.libdecor_configuration_get_content_size_ = (PFN_libdecor_configuration_get_content_size)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_configuration_get_content_size");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_configuration_get_content_size");
         g_wsi.wl.libdecor.libdecor_configuration_get_window_state_ = (PFN_libdecor_configuration_get_window_state)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_configuration_get_window_state");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_configuration_get_window_state");
         g_wsi.wl.libdecor.libdecor_state_new_ = (PFN_libdecor_state_new)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_state_new");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_state_new");
         g_wsi.wl.libdecor.libdecor_state_free_ = (PFN_libdecor_state_free)
-            impl_platform_get_module_symbol(g_wsi.wl.libdecor.handle, "libdecor_state_free");
+            P_dl_get_proc(g_wsi.wl.libdecor.handle, "libdecor_state_free");
 
         if (!g_wsi.wl.libdecor.libdecor_new_ ||
             !g_wsi.wl.libdecor.libdecor_unref_ ||
@@ -2786,7 +2786,7 @@ static int wayland_init(void)
             !g_wsi.wl.libdecor.libdecor_state_new_ ||
             !g_wsi.wl.libdecor.libdecor_state_free_)
         {
-            impl_platform_unload_module(g_wsi.wl.libdecor.handle);
+            P_dl_unload(g_wsi.wl.libdecor.handle);
             memset(&g_wsi.wl.libdecor, 0, sizeof(g_wsi.wl.libdecor));
         }
     }
@@ -2948,10 +2948,10 @@ static void wayland_terminate(void)
 
     // Free modules only after all Wayland termination functions are called
 
-    impl_platform_unload_module(g_wsi.wl.libdecor.handle);
-    impl_platform_unload_module(g_wsi.wl.xkb.handle);
-    impl_platform_unload_module(g_wsi.wl.cursor.handle);
-    impl_platform_unload_module(g_wsi.wl.client.handle);
+    P_dl_unload(g_wsi.wl.libdecor.handle);
+    P_dl_unload(g_wsi.wl.xkb.handle);
+    P_dl_unload(g_wsi.wl.cursor.handle);
+    P_dl_unload(g_wsi.wl.client.handle);
 
     wsi_free(g_wsi.wl.clipboardString);
 
@@ -3165,8 +3165,8 @@ static void updateXdgSizeLimits(window_st* window)
 
             if (window->wl.fallback.decorations)
             {
-                minwidth  += GLFW_BORDER_SIZE * 2;
-                minheight += GLFW_CAPTION_HEIGHT + GLFW_BORDER_SIZE;
+                minwidth  += WSI_BORDER_SIZE * 2;
+                minheight += WSI_CAPTION_HEIGHT + WSI_BORDER_SIZE;
             }
         }
 
@@ -3179,8 +3179,8 @@ static void updateXdgSizeLimits(window_st* window)
 
             if (window->wl.fallback.decorations)
             {
-                maxwidth  += GLFW_BORDER_SIZE * 2;
-                maxheight += GLFW_CAPTION_HEIGHT + GLFW_BORDER_SIZE;
+                maxwidth  += WSI_BORDER_SIZE * 2;
+                maxheight += WSI_CAPTION_HEIGHT + WSI_BORDER_SIZE;
             }
         }
     }
@@ -3318,9 +3318,9 @@ static void xdgToplevelHandleConfigure(void* userData,
     {
         if (window->wl.fallback.decorations)
         {
-            window->wl.pending.width  = wsi_max(0, width - GLFW_BORDER_SIZE * 2);
+            window->wl.pending.width  = wsi_max(0, width - WSI_BORDER_SIZE * 2);
             window->wl.pending.height =
-                wsi_max(0, height - GLFW_BORDER_SIZE - GLFW_CAPTION_HEIGHT);
+                wsi_max(0, height - WSI_BORDER_SIZE - WSI_CAPTION_HEIGHT);
         }
         else
         {
@@ -3487,7 +3487,7 @@ static void wayland_set_window_title(window_st* window, const char* title)
 }
 
 static void wayland_set_window_icon(window_st* window,
-                               int count, const GLFWimage* images)
+                               int count, const sc_wsi_img* images)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Wayland: The platform does not support setting the window icon");
@@ -3616,13 +3616,13 @@ static void wayland_get_window_frame_size(window_st* window,
     if (window->wl.fallback.decorations)
     {
         if (top)
-            *top = GLFW_CAPTION_HEIGHT;
+            *top = WSI_CAPTION_HEIGHT;
         if (left)
-            *left = GLFW_BORDER_SIZE;
+            *left = WSI_BORDER_SIZE;
         if (right)
-            *right = GLFW_BORDER_SIZE;
+            *right = WSI_BORDER_SIZE;
         if (bottom)
-            *bottom = GLFW_BORDER_SIZE;
+            *bottom = WSI_BORDER_SIZE;
     }
 }
 
@@ -4022,7 +4022,7 @@ static bool wayland_create_standard_cursor(cursor_st* cursor, int shape)
 }
 
 static bool wayland_create_cursor(cursor_st* cursor,
-                                  const GLFWimage* image,
+                                  const sc_wsi_img* image,
                                   int xhot, int yhot)
 {
     cursor->wl.buffer = createShmBuffer(image);
@@ -4559,7 +4559,7 @@ bool wayland_connect(int platformID, platform_st* platform)
         .setGammaRamp = wayland_set_gamma_ramp,
     };
 
-    void* module = impl_platform_load_module("libwayland-client.so.0");
+    void* module = P_dl_load("libwayland-client.so.0");
     if (!module)
     {
         if (platformID == SC_PLATFORM_WAYLAND)
@@ -4572,7 +4572,7 @@ bool wayland_connect(int platformID, platform_st* platform)
     }
 
     PFN_wl_display_connect wl_display_connect = (PFN_wl_display_connect)
-        impl_platform_get_module_symbol(module, "wl_display_connect");
+        P_dl_get_proc(module, "wl_display_connect");
     if (!wl_display_connect)
     {
         if (platformID == SC_PLATFORM_WAYLAND)
@@ -4581,7 +4581,7 @@ bool wayland_connect(int platformID, platform_st* platform)
                             "Wayland: Failed to load libwayland-client entry point");
         }
 
-        impl_platform_unload_module(module);
+        P_dl_unload(module);
         return false;
     }
 
@@ -4591,7 +4591,7 @@ bool wayland_connect(int platformID, platform_st* platform)
         if (platformID == SC_PLATFORM_WAYLAND)
             impl_on_error(SC_WSI_ERR_PLATFORM_ERROR, "Wayland: Failed to connect to display");
 
-        impl_platform_unload_module(module);
+        P_dl_unload(module);
         return false;
     }
 

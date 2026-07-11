@@ -187,7 +187,7 @@ static DWORD getWindowExStyle(const window_st* window)
 }
 
 // Creates an RGBA icon or cursor
-static HICON createIcon(const GLFWimage* image, int xhot, int yhot, bool icon)
+static HICON createIcon(const sc_wsi_img* image, int xhot, int yhot, bool icon)
 {
     int i;
     HDC dc;
@@ -275,11 +275,11 @@ static HICON createIcon(const GLFWimage* image, int xhot, int yhot, bool icon)
 }
 
 // Returns the image whose area most closely matches the desired one
-static const GLFWimage* chooseImage(int count, const GLFWimage* images,
+static const sc_wsi_img* chooseImage(int count, const sc_wsi_img* images,
                                     int width, int height)
 {
     int i, leastDiff = INT_MAX;
-    const GLFWimage* closest = NULL;
+    const sc_wsi_img* closest = NULL;
 
     for (i = 0;  i < count;  i++)
     {
@@ -821,7 +821,7 @@ static void win32_get_monitor_work_area(monitor_st* monitor,
         *height = mi.rcWork.bottom - mi.rcWork.top;
 }
 
-static bool win32_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
+static bool win32_get_video_mode(monitor_st* monitor, sc_wsi_video_mode* mode)
 {
     DEVMODEW dm;
     ZeroMemory(&dm, sizeof(dm));
@@ -840,17 +840,17 @@ static bool win32_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
     return true;
 }
 
-static GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count)
+static sc_wsi_video_mode* win32_get_video_modes(monitor_st* monitor, int* count)
 {
     int modeIndex = 0, size = 0;
-    GLFWvidmode* result = NULL;
+    sc_wsi_video_mode* result = NULL;
 
     *count = 0;
 
     for (;;)
     {
         int i;
-        GLFWvidmode mode;
+        sc_wsi_video_mode mode;
         DEVMODEW dm;
 
         ZeroMemory(&dm, sizeof(dm));
@@ -895,7 +895,7 @@ static GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count)
         if (*count == size)
         {
             size += 128;
-            result = (GLFWvidmode*) wsi_realloc(result, size * sizeof(GLFWvidmode));
+            result = (sc_wsi_video_mode*) wsi_realloc(result, size * sizeof(sc_wsi_video_mode));
         }
 
         (*count)++;
@@ -905,7 +905,7 @@ static GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count)
     if (!*count)
     {
         // HACK: Report the current mode if no valid modes were found
-        result = wsi_calloc(1, sizeof(GLFWvidmode));
+        result = wsi_calloc(1, sizeof(sc_wsi_video_mode));
         win32_get_video_mode(monitor, result);
         *count = 1;
     }
@@ -913,10 +913,10 @@ static GLFWvidmode* win32_get_video_modes(monitor_st* monitor, int* count)
     return result;
 }
 
-static void win32_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired)
+static void win32_set_video_mode(monitor_st* monitor, const sc_wsi_video_mode* desired)
 {
-    GLFWvidmode current;
-    const GLFWvidmode* best;
+    sc_wsi_video_mode current;
+    const sc_wsi_video_mode* best;
     DEVMODEW dm;
     LONG result;
 
@@ -969,7 +969,7 @@ static void win32_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired
     }
 }
 
-static bool win32_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
+static bool win32_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp)
 {
     HDC dc;
     WORD values[3][256];
@@ -987,7 +987,7 @@ static bool win32_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
     return true;
 }
 
-static void win32_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
+static void win32_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp)
 {
     HDC dc;
     WORD values[3][256];
@@ -1182,7 +1182,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 
 #endif // WSI_USE_HYBRID_HPG
 
-// GLFW DLL entry point
+// WSI DLL entry point
 #if defined(WSI_EXPORTS)
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
@@ -1347,7 +1347,7 @@ static bool loadLibraries(void)
         return false;
     }
 
-    g_wsi.win32.user32.instance = impl_platform_load_module("user32.dll");
+    g_wsi.win32.user32.instance = P_dl_load("user32.dll");
     if (!g_wsi.win32.user32.instance)
     {
         win32_InputError(SC_WSI_ERR_PLATFORM_ERROR,
@@ -1356,21 +1356,21 @@ static bool loadLibraries(void)
     }
 
     g_wsi.win32.user32.EnableNonClientDpiScaling_ = (PFN_EnableNonClientDpiScaling)
-        impl_platform_get_module_symbol(g_wsi.win32.user32.instance, "EnableNonClientDpiScaling");
+        P_dl_get_proc(g_wsi.win32.user32.instance, "EnableNonClientDpiScaling");
     g_wsi.win32.user32.SetProcessDpiAwarenessContext_ = (PFN_SetProcessDpiAwarenessContext)
-        impl_platform_get_module_symbol(g_wsi.win32.user32.instance, "SetProcessDpiAwarenessContext");
+        P_dl_get_proc(g_wsi.win32.user32.instance, "SetProcessDpiAwarenessContext");
     g_wsi.win32.user32.GetDpiForWindow_ = (PFN_GetDpiForWindow)
-        impl_platform_get_module_symbol(g_wsi.win32.user32.instance, "GetDpiForWindow");
+        P_dl_get_proc(g_wsi.win32.user32.instance, "GetDpiForWindow");
     g_wsi.win32.user32.AdjustWindowRectExForDpi_ = (PFN_AdjustWindowRectExForDpi)
-        impl_platform_get_module_symbol(g_wsi.win32.user32.instance, "AdjustWindowRectExForDpi");
+        P_dl_get_proc(g_wsi.win32.user32.instance, "AdjustWindowRectExForDpi");
     g_wsi.win32.user32.GetSystemMetricsForDpi_ = (PFN_GetSystemMetricsForDpi)
-        impl_platform_get_module_symbol(g_wsi.win32.user32.instance, "GetSystemMetricsForDpi");
+        P_dl_get_proc(g_wsi.win32.user32.instance, "GetSystemMetricsForDpi");
 
-    g_wsi.win32.dinput8.instance = impl_platform_load_module("dinput8.dll");
+    g_wsi.win32.dinput8.instance = P_dl_load("dinput8.dll");
     if (g_wsi.win32.dinput8.instance)
     {
         g_wsi.win32.dinput8.Create = (PFN_DirectInput8Create)
-            impl_platform_get_module_symbol(g_wsi.win32.dinput8.instance, "DirectInput8Create");
+            P_dl_get_proc(g_wsi.win32.dinput8.instance, "DirectInput8Create");
     }
 
     {
@@ -1387,46 +1387,46 @@ static bool loadLibraries(void)
 
         for (i = 0;  names[i];  i++)
         {
-            g_wsi.win32.xinput.instance = impl_platform_load_module(names[i]);
+            g_wsi.win32.xinput.instance = P_dl_load(names[i]);
             if (g_wsi.win32.xinput.instance)
             {
                 g_wsi.win32.xinput.GetCapabilities = (PFN_XInputGetCapabilities)
-                    impl_platform_get_module_symbol(g_wsi.win32.xinput.instance, "XInputGetCapabilities");
+                    P_dl_get_proc(g_wsi.win32.xinput.instance, "XInputGetCapabilities");
                 g_wsi.win32.xinput.GetState = (PFN_XInputGetState)
-                    impl_platform_get_module_symbol(g_wsi.win32.xinput.instance, "XInputGetState");
+                    P_dl_get_proc(g_wsi.win32.xinput.instance, "XInputGetState");
 
                 break;
             }
         }
     }
 
-    g_wsi.win32.dwmapi.instance = impl_platform_load_module("dwmapi.dll");
+    g_wsi.win32.dwmapi.instance = P_dl_load("dwmapi.dll");
     if (g_wsi.win32.dwmapi.instance)
     {
         g_wsi.win32.dwmapi.IsCompositionEnabled = (PFN_DwmIsCompositionEnabled)
-            impl_platform_get_module_symbol(g_wsi.win32.dwmapi.instance, "DwmIsCompositionEnabled");
+            P_dl_get_proc(g_wsi.win32.dwmapi.instance, "DwmIsCompositionEnabled");
         g_wsi.win32.dwmapi.Flush = (PFN_DwmFlush)
-            impl_platform_get_module_symbol(g_wsi.win32.dwmapi.instance, "DwmFlush");
+            P_dl_get_proc(g_wsi.win32.dwmapi.instance, "DwmFlush");
         g_wsi.win32.dwmapi.EnableBlurBehindWindow = (PFN_DwmEnableBlurBehindWindow)
-            impl_platform_get_module_symbol(g_wsi.win32.dwmapi.instance, "DwmEnableBlurBehindWindow");
+            P_dl_get_proc(g_wsi.win32.dwmapi.instance, "DwmEnableBlurBehindWindow");
         g_wsi.win32.dwmapi.GetColorizationColor = (PFN_DwmGetColorizationColor)
-            impl_platform_get_module_symbol(g_wsi.win32.dwmapi.instance, "DwmGetColorizationColor");
+            P_dl_get_proc(g_wsi.win32.dwmapi.instance, "DwmGetColorizationColor");
     }
 
-    g_wsi.win32.shcore.instance = impl_platform_load_module("shcore.dll");
+    g_wsi.win32.shcore.instance = P_dl_load("shcore.dll");
     if (g_wsi.win32.shcore.instance)
     {
         g_wsi.win32.shcore.SetProcessDpiAwareness_ = (PFN_SetProcessDpiAwareness)
-            impl_platform_get_module_symbol(g_wsi.win32.shcore.instance, "SetProcessDpiAwareness");
+            P_dl_get_proc(g_wsi.win32.shcore.instance, "SetProcessDpiAwareness");
         g_wsi.win32.shcore.GetDpiForMonitor_ = (PFN_GetDpiForMonitor)
-            impl_platform_get_module_symbol(g_wsi.win32.shcore.instance, "GetDpiForMonitor");
+            P_dl_get_proc(g_wsi.win32.shcore.instance, "GetDpiForMonitor");
     }
 
-    g_wsi.win32.ntdll.instance = impl_platform_load_module("ntdll.dll");
+    g_wsi.win32.ntdll.instance = P_dl_load("ntdll.dll");
     if (g_wsi.win32.ntdll.instance)
     {
         g_wsi.win32.ntdll.RtlVerifyVersionInfo_ = (PFN_RtlVerifyVersionInfo)
-            impl_platform_get_module_symbol(g_wsi.win32.ntdll.instance, "RtlVerifyVersionInfo");
+            P_dl_get_proc(g_wsi.win32.ntdll.instance, "RtlVerifyVersionInfo");
     }
 
     return true;
@@ -1609,12 +1609,12 @@ static void win32_terminate(void)
     wsi_free(g_wsi.win32.clipboardString);
     wsi_free(g_wsi.win32.rawInput);
 
-    impl_platform_unload_module(g_wsi.win32.xinput.instance);
-    impl_platform_unload_module(g_wsi.win32.dinput8.instance);
-    impl_platform_unload_module(g_wsi.win32.user32.instance);
-    impl_platform_unload_module(g_wsi.win32.dwmapi.instance);
-    impl_platform_unload_module(g_wsi.win32.shcore.instance);
-    impl_platform_unload_module(g_wsi.win32.ntdll.instance);
+    P_dl_unload(g_wsi.win32.xinput.instance);
+    P_dl_unload(g_wsi.win32.dinput8.instance);
+    P_dl_unload(g_wsi.win32.user32.instance);
+    P_dl_unload(g_wsi.win32.dwmapi.instance);
+    P_dl_unload(g_wsi.win32.shcore.instance);
+    P_dl_unload(g_wsi.win32.ntdll.instance);
 
     memset(&g_wsi.win32, 0, sizeof(g_wsi.win32));
 }
@@ -1633,16 +1633,16 @@ static void win32_set_window_title(window_st* window, const char* title)
     wsi_free(wideTitle);
 }
 
-static void win32_set_window_icon(window_st* window, int count, const GLFWimage* images)
+static void win32_set_window_icon(window_st* window, int count, const sc_wsi_img* images)
 {
     HICON bigIcon = NULL, smallIcon = NULL;
 
     if (count)
     {
-        const GLFWimage* bigImage = chooseImage(count, images,
+        const sc_wsi_img* bigImage = chooseImage(count, images,
                                                 GetSystemMetrics(SM_CXICON),
                                                 GetSystemMetrics(SM_CYICON));
-        const GLFWimage* smallImage = chooseImage(count, images,
+        const sc_wsi_img* smallImage = chooseImage(count, images,
                                                   GetSystemMetrics(SM_CXSMICON),
                                                   GetSystemMetrics(SM_CYSMICON));
 
@@ -1916,7 +1916,7 @@ static void win32_show_window(window_st* window)
 
     if (window->win32.showDefault)
     {
-        // NOTE: GLFW windows currently do not seem to match the Windows 10 definition of
+        // NOTE: WSI windows currently do not seem to match the Windows 10 definition of
         //       a main window, so even SW_SHOWDEFAULT does nothing
         //       This definition is undocumented and can change (source: Raymond Chen)
         // HACK: Apply the STARTUPINFO show command manually if available
@@ -2054,7 +2054,7 @@ static bool win32_create_standard_cursor(cursor_st* cursor, int shape)
 }
 
 static bool win32_create_cursor(cursor_st* cursor,
-                                const GLFWimage* image,
+                                const sc_wsi_img* image,
                                 int xhot, int yhot)
 {
     cursor->win32.handle = (HCURSOR) createIcon(image, xhot, yhot, false);
@@ -2308,7 +2308,7 @@ static void enableCursor(window_st* window)
 // 窗口过程
 static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    window_st* window = GetPropW(hWnd, L"GLFW");
+    window_st* window = GetPropW(hWnd, L"WSI");
     if (!window)
     {
         if (uMsg == WM_NCCREATE)
@@ -3044,7 +3044,7 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
     return DefWindowProcW(hWnd, uMsg, wParam, lParam);
 }
 
-// Creates the GLFW window
+// Creates the WSI window
 //
 static int createNativeWindow(window_st* window,
                               const wnd_config_st* wndconfig)
@@ -3061,14 +3061,14 @@ static int createNativeWindow(window_st* window,
         wc.lpfnWndProc   = windowProc;
         wc.hInstance     = g_wsi.win32.instance;
         wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
-#if defined(_GLFW_WNDCLASSNAME)
-        wc.lpszClassName = _GLFW_WNDCLASSNAME;
+#if defined(_WSI_WNDCLASSNAME)
+        wc.lpszClassName = _WSI_WNDCLASSNAME;
 #else
-        wc.lpszClassName = L"GLFW30";
+        wc.lpszClassName = L"WSI30";
 #endif
         // Load user-provided icon if available
         wc.hIcon = LoadImageW(GetModuleHandleW(NULL),
-                              L"GLFW_ICON", IMAGE_ICON,
+                              L"WSI_ICON", IMAGE_ICON,
                               0, 0, LR_DEFAULTSIZE | LR_SHARED);
         if (!wc.hIcon)
         {
@@ -3106,7 +3106,7 @@ static int createNativeWindow(window_st* window,
             // HACK: Make one pixel slightly less transparent
             cursorPixels[3] = 1;
 
-            const GLFWimage cursorImage = { cursorWidth, cursorHeight, cursorPixels };
+            const sc_wsi_img cursorImage = { cursorWidth, cursorHeight, cursorPixels };
             g_wsi.win32.blankCursor = createIcon(&cursorImage, 0, 0, FALSE);
             wsi_free(cursorPixels);
 
@@ -3177,7 +3177,7 @@ static int createNativeWindow(window_st* window,
         return false;
     }
 
-    SetPropW(window->win32.handle, L"GLFW", window);
+    SetPropW(window->win32.handle, L"WSI", window);
 
     ChangeWindowMessageFilterEx(window->win32.handle, WM_DROPFILES, MSGFLT_ALLOW, NULL);
     ChangeWindowMessageFilterEx(window->win32.handle, WM_COPYDATA, MSGFLT_ALLOW, NULL);
@@ -3297,7 +3297,7 @@ void win32_destroy_window(window_st* window)
 
     if (window->win32.handle)
     {
-        RemovePropW(window->win32.handle, L"GLFW");
+        RemovePropW(window->win32.handle, L"WSI");
         DestroyWindow(window->win32.handle);
         window->win32.handle = NULL;
     }
@@ -3323,7 +3323,7 @@ static void win32_poll_events(void)
     {
         if (msg.message == WM_QUIT)
         {
-            // NOTE: While GLFW does not itself post WM_QUIT, other processes
+            // NOTE: While WSI does not itself post WM_QUIT, other processes
             //       may post it to this one, for example Task Manager
             // HACK: Treat WM_QUIT as a close on all windows
 
@@ -3351,7 +3351,7 @@ static void win32_poll_events(void)
     handle = GetActiveWindow();
     if (handle)
     {
-        window = GetPropW(handle, L"GLFW");
+        window = GetPropW(handle, L"WSI");
         if (window)
         {
             int i;

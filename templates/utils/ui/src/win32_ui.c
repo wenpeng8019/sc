@@ -284,7 +284,7 @@ static LRESULT CALLBACK ui_win32_root_proc(HWND hWnd, UINT msg, WPARAM wp, LPARA
 
         case WM_DPICHANGED:
         {
-            /* 先让 wsi(GLFW) 原始过程按系统建议矩形缩放窗口本身，
+            /* 先让 wsi 原始过程按系统建议矩形缩放窗口本身，
              * 再据新 DPI 重排子控件——即窗口跨屏移动后的自动适配。 */
             LRESULT r = orig ? CallWindowProcW(orig, hWnd, msg, wp, lp)
                              : DefWindowProcW(hWnd, msg, wp, lp);

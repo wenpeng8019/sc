@@ -10,10 +10,10 @@
 #include <assert.h>
 
 
-// NOTE: The global variables below comprise all mutable global data in GLFW
+// NOTE: The global variables below comprise all mutable global data in WSI
 //       Any other mutable global variable is a bug
 
-// This contains all mutable state shared between compilation units of GLFW
+// This contains all mutable state shared between compilation units of WSI
 //
 library_st g_wsi = { false };
 
@@ -82,7 +82,7 @@ uint64_t wsi_clock_ns(void)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       WSI internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 // Encode a Unicode code point to a UTF-8 stream
@@ -242,7 +242,7 @@ void wsi_free(void* block)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                         GLFW event API                       //////
+//////                         WSI event API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 // Notifies shared code of an error
@@ -265,7 +265,7 @@ void impl_on_error(int code, const char* format, ...)
     else
     {
         if (code == SC_WSI_ERR_NOT_INITIALIZED)
-            strcpy(description, "The GLFW library is not initialized");
+            strcpy(description, "The WSI library is not initialized");
         else if (code == SC_WSI_ERR_NO_CURRENT_CONTEXT)
             strcpy(description, "There is no current context");
         else if (code == SC_WSI_ERR_INVALID_ENUM)
@@ -293,7 +293,7 @@ void impl_on_error(int code, const char* format, ...)
         else if (code == SC_WSI_ERR_PLATFORM_UNAVAILABLE)
             strcpy(description, "The requested platform is unavailable");
         else
-            strcpy(description, "ERROR: UNKNOWN GLFW ERROR");
+            strcpy(description, "ERROR: UNKNOWN WSI ERROR");
     }
 
     error->code = code;
@@ -305,7 +305,7 @@ void impl_on_error(int code, const char* format, ...)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                        GLFW public API                       //////
+//////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 WSI_API int sc_wsi_init(void)

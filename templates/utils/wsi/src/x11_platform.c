@@ -25,7 +25,7 @@
 #define MWM_HINTS_DECORATIONS   2
 #define MWM_DECOR_ALL           1
 
-#define _GLFW_XDND_VERSION 5
+#define _WSI_XDND_VERSION 5
 
 ///////////////////////////////////////////////////////////////////////////////
 // platform utils
@@ -178,7 +178,7 @@ static void getSystemContentScale(float* xscale, float* yscale)
 }
 
 // Creates a native cursor object from the specified image and hotspot
-Cursor x11_CreateNativeCursor(const GLFWimage* image, int xhot, int yhot)
+Cursor x11_CreateNativeCursor(const sc_wsi_img* image, int xhot, int yhot)
 {
     Cursor cursor;
 
@@ -687,7 +687,7 @@ static int translateState(int state)
     return mods;
 }
 
-// Translates an X11 key code to a GLFW key token
+// Translates an X11 key code to a WSI key token
 static int translateKey(int scancode)
 {
     // Use the pre-filled LUT (see createKeyTables() in x11_init.c)
@@ -845,7 +845,7 @@ static const char* getSelectionString(Atom selection)
         XConvertSelection(g_wsi.x11.display,
                           selection,
                           targets[i],
-                          g_wsi.x11.GLFW_SELECTION,
+                          g_wsi.x11.WSI_SELECTION,
                           g_wsi.x11.helperWindowHandle,
                           CurrentTime);
 
@@ -986,11 +986,11 @@ static const XRRModeInfo* getModeInfo(const XRRScreenResources* sr, RRMode id)
     return NULL;
 }
 
-// Convert RandR mode info to GLFW video mode
-static GLFWvidmode vidmodeFromModeInfo(const XRRModeInfo* mi,
+// Convert RandR mode info to WSI video mode
+static sc_wsi_video_mode vidmodeFromModeInfo(const XRRModeInfo* mi,
                                        const XRRCrtcInfo* ci)
 {
-    GLFWvidmode mode;
+    sc_wsi_video_mode mode;
 
     if (ci->rotation == RR_Rotate_90 || ci->rotation == RR_Rotate_270)
     {
@@ -1271,7 +1271,7 @@ void x11_get_monitor_work_area(monitor_st* monitor,
         *height = areaHeight;
 }
 
-bool x11_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
+bool x11_get_video_mode(monitor_st* monitor, sc_wsi_video_mode* mode)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
@@ -1308,14 +1308,14 @@ bool x11_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
 }
 
 // Set the current video mode for the specified monitor
-void x11_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired)
+void x11_set_video_mode(monitor_st* monitor, const sc_wsi_video_mode* desired)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.monitorBroken)
     {
-        GLFWvidmode current;
+        sc_wsi_video_mode current;
         RRMode native = None;
 
-        const GLFWvidmode* best = wsi_choose_video_mode(monitor, desired);
+        const sc_wsi_video_mode* best = wsi_choose_video_mode(monitor, desired);
         x11_get_video_mode(monitor, &current);
         if (wsi_compare_video_mode(&current, best) == 0)
             return;
@@ -1331,7 +1331,7 @@ void x11_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired)
             if (!modeIsGood(mi))
                 continue;
 
-            const GLFWvidmode mode = vidmodeFromModeInfo(mi, ci);
+            const sc_wsi_video_mode mode = vidmodeFromModeInfo(mi, ci);
             if (wsi_compare_video_mode(best, &mode) == 0)
             {
                 native = mi->id;
@@ -1360,9 +1360,9 @@ void x11_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired)
     }
 }
 
-GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count)
+sc_wsi_video_mode* x11_get_video_modes(monitor_st* monitor, int* count)
 {
-    GLFWvidmode* result;
+    sc_wsi_video_mode* result;
 
     *count = 0;
 
@@ -1373,7 +1373,7 @@ GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count)
         XRRCrtcInfo* ci = XRRGetCrtcInfo(g_wsi.x11.display, sr, monitor->x11.crtc);
         XRROutputInfo* oi = XRRGetOutputInfo(g_wsi.x11.display, sr, monitor->x11.output);
 
-        result = wsi_calloc(oi->nmode, sizeof(GLFWvidmode));
+        result = wsi_calloc(oi->nmode, sizeof(sc_wsi_video_mode));
 
         for (int i = 0;  i < oi->nmode;  i++)
         {
@@ -1381,7 +1381,7 @@ GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count)
             if (!modeIsGood(mi))
                 continue;
 
-            const GLFWvidmode mode = vidmodeFromModeInfo(mi, ci);
+            const sc_wsi_video_mode mode = vidmodeFromModeInfo(mi, ci);
             int j;
 
             for (j = 0;  j < *count;  j++)
@@ -1405,7 +1405,7 @@ GLFWvidmode* x11_get_video_modes(monitor_st* monitor, int* count)
     else
     {
         *count = 1;
-        result = wsi_calloc(1, sizeof(GLFWvidmode));
+        result = wsi_calloc(1, sizeof(sc_wsi_video_mode));
         x11_get_video_mode(monitor, result);
     }
 
@@ -1440,7 +1440,7 @@ void x11_RestoreVideoMode(monitor_st* monitor)
     }
 }
 
-bool x11_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
+bool x11_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.gammaBroken)
     {
@@ -1478,7 +1478,7 @@ bool x11_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
     }
 }
 
-void x11_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
+void x11_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp)
 {
     if (g_wsi.x11.randr.available && !g_wsi.x11.randr.gammaBroken)
     {
@@ -1541,7 +1541,7 @@ static void acquireMonitor(window_st* window)
     if (window->x11.overrideRedirect)
     {
         int xpos, ypos;
-        GLFWvidmode mode;
+        sc_wsi_video_mode mode;
 
         // Manually position the window over its monitor
         x11_get_monitor_pos(window->monitor, &xpos, &ypos);
@@ -1580,7 +1580,7 @@ static void releaseMonitor(window_st* window)
 // lib
 ///////////////////////////////////////////////////////////////////////////////
 
-// Translate the X11 KeySyms for a key to a GLFW key code
+// Translate the X11 KeySyms for a key to a WSI key code
 // NOTE: This is only used as a fallback, in case the XKB method fails
 //       It is layout-dependent and will fail partially on most non-US layouts
 static int translateKeySyms(const KeySym* keysyms, int width)
@@ -1895,12 +1895,12 @@ static void createKeyTables(void)
             { SC_KEY_MENU, "MENU" }
         };
 
-        // Find the X11 key code -> GLFW key code mapping
+        // Find the X11 key code -> WSI key code mapping
         for (int scancode = scancodeMin;  scancode <= scancodeMax;  scancode++)
         {
             int key = SC_KEY_UNKNOWN;
 
-            // Map the key name to a GLFW key code. Note: We use the US
+            // Map the key name to a WSI key code. Note: We use the US
             // keyboard layout. Because function keys aren't mapped correctly
             // when using traditional KeySym translations, they are mapped
             // here instead.
@@ -2123,20 +2123,20 @@ static void detectEWMH(void)
 static bool initExtensions(void)
 {
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.vidmode.handle = impl_platform_load_module("libXxf86vm.so");
+    g_wsi.x11.vidmode.handle = P_dl_load("libXxf86vm.so");
 #else
-    g_wsi.x11.vidmode.handle = impl_platform_load_module("libXxf86vm.so.1");
+    g_wsi.x11.vidmode.handle = P_dl_load("libXxf86vm.so.1");
 #endif
     if (g_wsi.x11.vidmode.handle)
     {
         g_wsi.x11.vidmode.QueryExtension = (PFN_XF86VidModeQueryExtension)
-            impl_platform_get_module_symbol(g_wsi.x11.vidmode.handle, "XF86VidModeQueryExtension");
+            P_dl_get_proc(g_wsi.x11.vidmode.handle, "XF86VidModeQueryExtension");
         g_wsi.x11.vidmode.GetGammaRamp = (PFN_XF86VidModeGetGammaRamp)
-            impl_platform_get_module_symbol(g_wsi.x11.vidmode.handle, "XF86VidModeGetGammaRamp");
+            P_dl_get_proc(g_wsi.x11.vidmode.handle, "XF86VidModeGetGammaRamp");
         g_wsi.x11.vidmode.SetGammaRamp = (PFN_XF86VidModeSetGammaRamp)
-            impl_platform_get_module_symbol(g_wsi.x11.vidmode.handle, "XF86VidModeSetGammaRamp");
+            P_dl_get_proc(g_wsi.x11.vidmode.handle, "XF86VidModeSetGammaRamp");
         g_wsi.x11.vidmode.GetGammaRampSize = (PFN_XF86VidModeGetGammaRampSize)
-            impl_platform_get_module_symbol(g_wsi.x11.vidmode.handle, "XF86VidModeGetGammaRampSize");
+            P_dl_get_proc(g_wsi.x11.vidmode.handle, "XF86VidModeGetGammaRampSize");
 
         g_wsi.x11.vidmode.available =
             XF86VidModeQueryExtension(g_wsi.x11.display,
@@ -2145,18 +2145,18 @@ static bool initExtensions(void)
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.xi.handle = impl_platform_load_module("libXi-6.so");
+    g_wsi.x11.xi.handle = P_dl_load("libXi-6.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.xi.handle = impl_platform_load_module("libXi.so");
+    g_wsi.x11.xi.handle = P_dl_load("libXi.so");
 #else
-    g_wsi.x11.xi.handle = impl_platform_load_module("libXi.so.6");
+    g_wsi.x11.xi.handle = P_dl_load("libXi.so.6");
 #endif
     if (g_wsi.x11.xi.handle)
     {
         g_wsi.x11.xi.QueryVersion = (PFN_XIQueryVersion)
-            impl_platform_get_module_symbol(g_wsi.x11.xi.handle, "XIQueryVersion");
+            P_dl_get_proc(g_wsi.x11.xi.handle, "XIQueryVersion");
         g_wsi.x11.xi.SelectEvents = (PFN_XISelectEvents)
-            impl_platform_get_module_symbol(g_wsi.x11.xi.handle, "XISelectEvents");
+            P_dl_get_proc(g_wsi.x11.xi.handle, "XISelectEvents");
 
         if (XQueryExtension(g_wsi.x11.display,
                             "XInputExtension",
@@ -2177,50 +2177,50 @@ static bool initExtensions(void)
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.randr.handle = impl_platform_load_module("libXrandr-2.so");
+    g_wsi.x11.randr.handle = P_dl_load("libXrandr-2.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.randr.handle = impl_platform_load_module("libXrandr.so");
+    g_wsi.x11.randr.handle = P_dl_load("libXrandr.so");
 #else
-    g_wsi.x11.randr.handle = impl_platform_load_module("libXrandr.so.2");
+    g_wsi.x11.randr.handle = P_dl_load("libXrandr.so.2");
 #endif
     if (g_wsi.x11.randr.handle)
     {
         g_wsi.x11.randr.AllocGamma = (PFN_XRRAllocGamma)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRAllocGamma");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRAllocGamma");
         g_wsi.x11.randr.FreeGamma = (PFN_XRRFreeGamma)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRFreeGamma");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRFreeGamma");
         g_wsi.x11.randr.FreeCrtcInfo = (PFN_XRRFreeCrtcInfo)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRFreeCrtcInfo");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRFreeCrtcInfo");
         g_wsi.x11.randr.FreeGamma = (PFN_XRRFreeGamma)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRFreeGamma");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRFreeGamma");
         g_wsi.x11.randr.FreeOutputInfo = (PFN_XRRFreeOutputInfo)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRFreeOutputInfo");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRFreeOutputInfo");
         g_wsi.x11.randr.FreeScreenResources = (PFN_XRRFreeScreenResources)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRFreeScreenResources");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRFreeScreenResources");
         g_wsi.x11.randr.GetCrtcGamma = (PFN_XRRGetCrtcGamma)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetCrtcGamma");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetCrtcGamma");
         g_wsi.x11.randr.GetCrtcGammaSize = (PFN_XRRGetCrtcGammaSize)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetCrtcGammaSize");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetCrtcGammaSize");
         g_wsi.x11.randr.GetCrtcInfo = (PFN_XRRGetCrtcInfo)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetCrtcInfo");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetCrtcInfo");
         g_wsi.x11.randr.GetOutputInfo = (PFN_XRRGetOutputInfo)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetOutputInfo");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetOutputInfo");
         g_wsi.x11.randr.GetOutputPrimary = (PFN_XRRGetOutputPrimary)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetOutputPrimary");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetOutputPrimary");
         g_wsi.x11.randr.GetScreenResourcesCurrent = (PFN_XRRGetScreenResourcesCurrent)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRGetScreenResourcesCurrent");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRGetScreenResourcesCurrent");
         g_wsi.x11.randr.QueryExtension = (PFN_XRRQueryExtension)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRQueryExtension");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRQueryExtension");
         g_wsi.x11.randr.QueryVersion = (PFN_XRRQueryVersion)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRQueryVersion");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRQueryVersion");
         g_wsi.x11.randr.SelectInput = (PFN_XRRSelectInput)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRSelectInput");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRSelectInput");
         g_wsi.x11.randr.SetCrtcConfig = (PFN_XRRSetCrtcConfig)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRSetCrtcConfig");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRSetCrtcConfig");
         g_wsi.x11.randr.SetCrtcGamma = (PFN_XRRSetCrtcGamma)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRSetCrtcGamma");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRSetCrtcGamma");
         g_wsi.x11.randr.UpdateConfiguration = (PFN_XRRUpdateConfiguration)
-            impl_platform_get_module_symbol(g_wsi.x11.randr.handle, "XRRUpdateConfiguration");
+            P_dl_get_proc(g_wsi.x11.randr.handle, "XRRUpdateConfiguration");
 
         if (XRRQueryExtension(g_wsi.x11.display,
                               &g_wsi.x11.randr.eventBase,
@@ -2230,7 +2230,7 @@ static bool initExtensions(void)
                                 &g_wsi.x11.randr.major,
                                 &g_wsi.x11.randr.minor))
             {
-                // The GLFW RandR path requires at least version 1.3
+                // The WSI RandR path requires at least version 1.3
                 if (g_wsi.x11.randr.major > 1 || g_wsi.x11.randr.minor >= 3)
                     g_wsi.x11.randr.available = true;
             }
@@ -2271,43 +2271,43 @@ static bool initExtensions(void)
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.xcursor.handle = impl_platform_load_module("libXcursor-1.so");
+    g_wsi.x11.xcursor.handle = P_dl_load("libXcursor-1.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.xcursor.handle = impl_platform_load_module("libXcursor.so");
+    g_wsi.x11.xcursor.handle = P_dl_load("libXcursor.so");
 #else
-    g_wsi.x11.xcursor.handle = impl_platform_load_module("libXcursor.so.1");
+    g_wsi.x11.xcursor.handle = P_dl_load("libXcursor.so.1");
 #endif
     if (g_wsi.x11.xcursor.handle)
     {
         g_wsi.x11.xcursor.ImageCreate = (PFN_XcursorImageCreate)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorImageCreate");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorImageCreate");
         g_wsi.x11.xcursor.ImageDestroy = (PFN_XcursorImageDestroy)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorImageDestroy");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorImageDestroy");
         g_wsi.x11.xcursor.ImageLoadCursor = (PFN_XcursorImageLoadCursor)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorImageLoadCursor");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorImageLoadCursor");
         g_wsi.x11.xcursor.GetTheme = (PFN_XcursorGetTheme)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorGetTheme");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorGetTheme");
         g_wsi.x11.xcursor.GetDefaultSize = (PFN_XcursorGetDefaultSize)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorGetDefaultSize");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorGetDefaultSize");
         g_wsi.x11.xcursor.LibraryLoadImage = (PFN_XcursorLibraryLoadImage)
-            impl_platform_get_module_symbol(g_wsi.x11.xcursor.handle, "XcursorLibraryLoadImage");
+            P_dl_get_proc(g_wsi.x11.xcursor.handle, "XcursorLibraryLoadImage");
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.xinerama.handle = impl_platform_load_module("libXinerama-1.so");
+    g_wsi.x11.xinerama.handle = P_dl_load("libXinerama-1.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.xinerama.handle = impl_platform_load_module("libXinerama.so");
+    g_wsi.x11.xinerama.handle = P_dl_load("libXinerama.so");
 #else
-    g_wsi.x11.xinerama.handle = impl_platform_load_module("libXinerama.so.1");
+    g_wsi.x11.xinerama.handle = P_dl_load("libXinerama.so.1");
 #endif
     if (g_wsi.x11.xinerama.handle)
     {
         g_wsi.x11.xinerama.IsActive = (PFN_XineramaIsActive)
-            impl_platform_get_module_symbol(g_wsi.x11.xinerama.handle, "XineramaIsActive");
+            P_dl_get_proc(g_wsi.x11.xinerama.handle, "XineramaIsActive");
         g_wsi.x11.xinerama.QueryExtension = (PFN_XineramaQueryExtension)
-            impl_platform_get_module_symbol(g_wsi.x11.xinerama.handle, "XineramaQueryExtension");
+            P_dl_get_proc(g_wsi.x11.xinerama.handle, "XineramaQueryExtension");
         g_wsi.x11.xinerama.QueryScreens = (PFN_XineramaQueryScreens)
-            impl_platform_get_module_symbol(g_wsi.x11.xinerama.handle, "XineramaQueryScreens");
+            P_dl_get_proc(g_wsi.x11.xinerama.handle, "XineramaQueryScreens");
 
         if (XineramaQueryExtension(g_wsi.x11.display,
                                    &g_wsi.x11.xinerama.major,
@@ -2347,20 +2347,20 @@ static bool initExtensions(void)
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.xrender.handle = impl_platform_load_module("libXrender-1.so");
+    g_wsi.x11.xrender.handle = P_dl_load("libXrender-1.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.xrender.handle = impl_platform_load_module("libXrender.so");
+    g_wsi.x11.xrender.handle = P_dl_load("libXrender.so");
 #else
-    g_wsi.x11.xrender.handle = impl_platform_load_module("libXrender.so.1");
+    g_wsi.x11.xrender.handle = P_dl_load("libXrender.so.1");
 #endif
     if (g_wsi.x11.xrender.handle)
     {
         g_wsi.x11.xrender.QueryExtension = (PFN_XRenderQueryExtension)
-            impl_platform_get_module_symbol(g_wsi.x11.xrender.handle, "XRenderQueryExtension");
+            P_dl_get_proc(g_wsi.x11.xrender.handle, "XRenderQueryExtension");
         g_wsi.x11.xrender.QueryVersion = (PFN_XRenderQueryVersion)
-            impl_platform_get_module_symbol(g_wsi.x11.xrender.handle, "XRenderQueryVersion");
+            P_dl_get_proc(g_wsi.x11.xrender.handle, "XRenderQueryVersion");
         g_wsi.x11.xrender.FindVisualFormat = (PFN_XRenderFindVisualFormat)
-            impl_platform_get_module_symbol(g_wsi.x11.xrender.handle, "XRenderFindVisualFormat");
+            P_dl_get_proc(g_wsi.x11.xrender.handle, "XRenderFindVisualFormat");
 
         if (XRenderQueryExtension(g_wsi.x11.display,
                                   &g_wsi.x11.xrender.errorBase,
@@ -2376,22 +2376,22 @@ static bool initExtensions(void)
     }
 
 #if defined(__CYGWIN__)
-    g_wsi.x11.xshape.handle = impl_platform_load_module("libXext-6.so");
+    g_wsi.x11.xshape.handle = P_dl_load("libXext-6.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    g_wsi.x11.xshape.handle = impl_platform_load_module("libXext.so");
+    g_wsi.x11.xshape.handle = P_dl_load("libXext.so");
 #else
-    g_wsi.x11.xshape.handle = impl_platform_load_module("libXext.so.6");
+    g_wsi.x11.xshape.handle = P_dl_load("libXext.so.6");
 #endif
     if (g_wsi.x11.xshape.handle)
     {
         g_wsi.x11.xshape.QueryExtension = (PFN_XShapeQueryExtension)
-            impl_platform_get_module_symbol(g_wsi.x11.xshape.handle, "XShapeQueryExtension");
+            P_dl_get_proc(g_wsi.x11.xshape.handle, "XShapeQueryExtension");
         g_wsi.x11.xshape.ShapeCombineRegion = (PFN_XShapeCombineRegion)
-            impl_platform_get_module_symbol(g_wsi.x11.xshape.handle, "XShapeCombineRegion");
+            P_dl_get_proc(g_wsi.x11.xshape.handle, "XShapeCombineRegion");
         g_wsi.x11.xshape.QueryVersion = (PFN_XShapeQueryVersion)
-            impl_platform_get_module_symbol(g_wsi.x11.xshape.handle, "XShapeQueryVersion");
+            P_dl_get_proc(g_wsi.x11.xshape.handle, "XShapeQueryVersion");
         g_wsi.x11.xshape.ShapeCombineMask = (PFN_XShapeCombineMask)
-            impl_platform_get_module_symbol(g_wsi.x11.xshape.handle, "XShapeCombineMask");
+            P_dl_get_proc(g_wsi.x11.xshape.handle, "XShapeCombineMask");
 
         if (XShapeQueryExtension(g_wsi.x11.display,
             &g_wsi.x11.xshape.errorBase,
@@ -2417,8 +2417,8 @@ static bool initExtensions(void)
     g_wsi.x11.ATOM_PAIR = XInternAtom(g_wsi.x11.display, "ATOM_PAIR", False);
 
     // Custom selection property atom
-    g_wsi.x11.GLFW_SELECTION =
-        XInternAtom(g_wsi.x11.display, "GLFW_SELECTION", False);
+    g_wsi.x11.WSI_SELECTION =
+        XInternAtom(g_wsi.x11.display, "WSI_SELECTION", False);
 
     // ICCCM standard clipboard atoms
     g_wsi.x11.TARGETS = XInternAtom(g_wsi.x11.display, "TARGETS", False);
@@ -2492,7 +2492,7 @@ static bool initExtensions(void)
 static Cursor createHiddenCursor(void)
 {
     unsigned char pixels[16 * 16 * 4] = { 0 };
-    GLFWimage image = { 16, 16, pixels };
+    sc_wsi_img image = { 16, 16, pixels };
     return x11_CreateNativeCursor(&image, 0, 0);
 }
 
@@ -2544,203 +2544,203 @@ static bool createEmptyEventPipe(void)
 static int x11_init(void)
 {
     g_wsi.x11.xlib.AllocClassHint = (PFN_XAllocClassHint)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XAllocClassHint");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XAllocClassHint");
     g_wsi.x11.xlib.AllocSizeHints = (PFN_XAllocSizeHints)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XAllocSizeHints");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XAllocSizeHints");
     g_wsi.x11.xlib.AllocWMHints = (PFN_XAllocWMHints)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XAllocWMHints");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XAllocWMHints");
     g_wsi.x11.xlib.ChangeProperty = (PFN_XChangeProperty)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XChangeProperty");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XChangeProperty");
     g_wsi.x11.xlib.ChangeWindowAttributes = (PFN_XChangeWindowAttributes)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XChangeWindowAttributes");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XChangeWindowAttributes");
     g_wsi.x11.xlib.CheckIfEvent = (PFN_XCheckIfEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCheckIfEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCheckIfEvent");
     g_wsi.x11.xlib.CheckTypedWindowEvent = (PFN_XCheckTypedWindowEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCheckTypedWindowEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCheckTypedWindowEvent");
     g_wsi.x11.xlib.CloseDisplay = (PFN_XCloseDisplay)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCloseDisplay");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCloseDisplay");
     g_wsi.x11.xlib.CloseIM = (PFN_XCloseIM)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCloseIM");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCloseIM");
     g_wsi.x11.xlib.ConvertSelection = (PFN_XConvertSelection)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XConvertSelection");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XConvertSelection");
     g_wsi.x11.xlib.CreateColormap = (PFN_XCreateColormap)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCreateColormap");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCreateColormap");
     g_wsi.x11.xlib.CreateFontCursor = (PFN_XCreateFontCursor)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCreateFontCursor");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCreateFontCursor");
     g_wsi.x11.xlib.CreateIC = (PFN_XCreateIC)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCreateIC");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCreateIC");
     g_wsi.x11.xlib.CreateRegion = (PFN_XCreateRegion)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCreateRegion");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCreateRegion");
     g_wsi.x11.xlib.CreateWindow = (PFN_XCreateWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XCreateWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XCreateWindow");
     g_wsi.x11.xlib.DefineCursor = (PFN_XDefineCursor)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDefineCursor");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDefineCursor");
     g_wsi.x11.xlib.DeleteContext = (PFN_XDeleteContext)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDeleteContext");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDeleteContext");
     g_wsi.x11.xlib.DeleteProperty = (PFN_XDeleteProperty)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDeleteProperty");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDeleteProperty");
     g_wsi.x11.xlib.DestroyIC = (PFN_XDestroyIC)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDestroyIC");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDestroyIC");
     g_wsi.x11.xlib.DestroyRegion = (PFN_XDestroyRegion)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDestroyRegion");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDestroyRegion");
     g_wsi.x11.xlib.DestroyWindow = (PFN_XDestroyWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDestroyWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDestroyWindow");
     g_wsi.x11.xlib.DisplayKeycodes = (PFN_XDisplayKeycodes)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XDisplayKeycodes");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XDisplayKeycodes");
     g_wsi.x11.xlib.EventsQueued = (PFN_XEventsQueued)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XEventsQueued");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XEventsQueued");
     g_wsi.x11.xlib.FilterEvent = (PFN_XFilterEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFilterEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFilterEvent");
     g_wsi.x11.xlib.FindContext = (PFN_XFindContext)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFindContext");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFindContext");
     g_wsi.x11.xlib.Flush = (PFN_XFlush)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFlush");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFlush");
     g_wsi.x11.xlib.Free = (PFN_XFree)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFree");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFree");
     g_wsi.x11.xlib.FreeColormap = (PFN_XFreeColormap)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFreeColormap");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFreeColormap");
     g_wsi.x11.xlib.FreeCursor = (PFN_XFreeCursor)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFreeCursor");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFreeCursor");
     g_wsi.x11.xlib.FreeEventData = (PFN_XFreeEventData)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XFreeEventData");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XFreeEventData");
     g_wsi.x11.xlib.GetErrorText = (PFN_XGetErrorText)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetErrorText");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetErrorText");
     g_wsi.x11.xlib.GetEventData = (PFN_XGetEventData)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetEventData");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetEventData");
     g_wsi.x11.xlib.GetICValues = (PFN_XGetICValues)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetICValues");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetICValues");
     g_wsi.x11.xlib.GetIMValues = (PFN_XGetIMValues)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetIMValues");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetIMValues");
     g_wsi.x11.xlib.GetInputFocus = (PFN_XGetInputFocus)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetInputFocus");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetInputFocus");
     g_wsi.x11.xlib.GetKeyboardMapping = (PFN_XGetKeyboardMapping)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetKeyboardMapping");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetKeyboardMapping");
     g_wsi.x11.xlib.GetScreenSaver = (PFN_XGetScreenSaver)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetScreenSaver");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetScreenSaver");
     g_wsi.x11.xlib.GetSelectionOwner = (PFN_XGetSelectionOwner)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetSelectionOwner");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetSelectionOwner");
     g_wsi.x11.xlib.GetVisualInfo = (PFN_XGetVisualInfo)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetVisualInfo");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetVisualInfo");
     g_wsi.x11.xlib.GetWMNormalHints = (PFN_XGetWMNormalHints)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetWMNormalHints");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetWMNormalHints");
     g_wsi.x11.xlib.GetWindowAttributes = (PFN_XGetWindowAttributes)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetWindowAttributes");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetWindowAttributes");
     g_wsi.x11.xlib.GetWindowProperty = (PFN_XGetWindowProperty)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGetWindowProperty");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGetWindowProperty");
     g_wsi.x11.xlib.GrabPointer = (PFN_XGrabPointer)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XGrabPointer");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XGrabPointer");
     g_wsi.x11.xlib.IconifyWindow = (PFN_XIconifyWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XIconifyWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XIconifyWindow");
     g_wsi.x11.xlib.InternAtom = (PFN_XInternAtom)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XInternAtom");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XInternAtom");
     g_wsi.x11.xlib.LookupString = (PFN_XLookupString)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XLookupString");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XLookupString");
     g_wsi.x11.xlib.MapRaised = (PFN_XMapRaised)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XMapRaised");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XMapRaised");
     g_wsi.x11.xlib.MapWindow = (PFN_XMapWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XMapWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XMapWindow");
     g_wsi.x11.xlib.MoveResizeWindow = (PFN_XMoveResizeWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XMoveResizeWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XMoveResizeWindow");
     g_wsi.x11.xlib.MoveWindow = (PFN_XMoveWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XMoveWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XMoveWindow");
     g_wsi.x11.xlib.NextEvent = (PFN_XNextEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XNextEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XNextEvent");
     g_wsi.x11.xlib.OpenIM = (PFN_XOpenIM)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XOpenIM");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XOpenIM");
     g_wsi.x11.xlib.PeekEvent = (PFN_XPeekEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XPeekEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XPeekEvent");
     g_wsi.x11.xlib.Pending = (PFN_XPending)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XPending");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XPending");
     g_wsi.x11.xlib.QueryExtension = (PFN_XQueryExtension)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XQueryExtension");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XQueryExtension");
     g_wsi.x11.xlib.QueryPointer = (PFN_XQueryPointer)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XQueryPointer");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XQueryPointer");
     g_wsi.x11.xlib.RaiseWindow = (PFN_XRaiseWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XRaiseWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XRaiseWindow");
     g_wsi.x11.xlib.RegisterIMInstantiateCallback = (PFN_XRegisterIMInstantiateCallback)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XRegisterIMInstantiateCallback");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XRegisterIMInstantiateCallback");
     g_wsi.x11.xlib.ResizeWindow = (PFN_XResizeWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XResizeWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XResizeWindow");
     g_wsi.x11.xlib.ResourceManagerString = (PFN_XResourceManagerString)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XResourceManagerString");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XResourceManagerString");
     g_wsi.x11.xlib.SaveContext = (PFN_XSaveContext)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSaveContext");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSaveContext");
     g_wsi.x11.xlib.SelectInput = (PFN_XSelectInput)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSelectInput");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSelectInput");
     g_wsi.x11.xlib.SendEvent = (PFN_XSendEvent)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSendEvent");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSendEvent");
     g_wsi.x11.xlib.SetClassHint = (PFN_XSetClassHint)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetClassHint");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetClassHint");
     g_wsi.x11.xlib.SetErrorHandler = (PFN_XSetErrorHandler)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetErrorHandler");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetErrorHandler");
     g_wsi.x11.xlib.SetICFocus = (PFN_XSetICFocus)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetICFocus");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetICFocus");
     g_wsi.x11.xlib.SetIMValues = (PFN_XSetIMValues)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetIMValues");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetIMValues");
     g_wsi.x11.xlib.SetInputFocus = (PFN_XSetInputFocus)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetInputFocus");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetInputFocus");
     g_wsi.x11.xlib.SetLocaleModifiers = (PFN_XSetLocaleModifiers)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetLocaleModifiers");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetLocaleModifiers");
     g_wsi.x11.xlib.SetScreenSaver = (PFN_XSetScreenSaver)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetScreenSaver");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetScreenSaver");
     g_wsi.x11.xlib.SetSelectionOwner = (PFN_XSetSelectionOwner)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetSelectionOwner");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetSelectionOwner");
     g_wsi.x11.xlib.SetWMHints = (PFN_XSetWMHints)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetWMHints");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetWMHints");
     g_wsi.x11.xlib.SetWMNormalHints = (PFN_XSetWMNormalHints)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetWMNormalHints");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetWMNormalHints");
     g_wsi.x11.xlib.SetWMProtocols = (PFN_XSetWMProtocols)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSetWMProtocols");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSetWMProtocols");
     g_wsi.x11.xlib.SupportsLocale = (PFN_XSupportsLocale)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSupportsLocale");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSupportsLocale");
     g_wsi.x11.xlib.Sync = (PFN_XSync)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XSync");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XSync");
     g_wsi.x11.xlib.TranslateCoordinates = (PFN_XTranslateCoordinates)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XTranslateCoordinates");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XTranslateCoordinates");
     g_wsi.x11.xlib.UndefineCursor = (PFN_XUndefineCursor)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XUndefineCursor");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XUndefineCursor");
     g_wsi.x11.xlib.UngrabPointer = (PFN_XUngrabPointer)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XUngrabPointer");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XUngrabPointer");
     g_wsi.x11.xlib.UnmapWindow = (PFN_XUnmapWindow)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XUnmapWindow");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XUnmapWindow");
     g_wsi.x11.xlib.UnsetICFocus = (PFN_XUnsetICFocus)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XUnsetICFocus");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XUnsetICFocus");
     g_wsi.x11.xlib.VisualIDFromVisual = (PFN_XVisualIDFromVisual)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XVisualIDFromVisual");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XVisualIDFromVisual");
     g_wsi.x11.xlib.WarpPointer = (PFN_XWarpPointer)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XWarpPointer");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XWarpPointer");
     g_wsi.x11.xkb.FreeKeyboard = (PFN_XkbFreeKeyboard)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbFreeKeyboard");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbFreeKeyboard");
     g_wsi.x11.xkb.FreeNames = (PFN_XkbFreeNames)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbFreeNames");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbFreeNames");
     g_wsi.x11.xkb.GetMap = (PFN_XkbGetMap)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbGetMap");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbGetMap");
     g_wsi.x11.xkb.GetNames = (PFN_XkbGetNames)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbGetNames");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbGetNames");
     g_wsi.x11.xkb.GetState = (PFN_XkbGetState)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbGetState");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbGetState");
     g_wsi.x11.xkb.KeycodeToKeysym = (PFN_XkbKeycodeToKeysym)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbKeycodeToKeysym");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbKeycodeToKeysym");
     g_wsi.x11.xkb.QueryExtension = (PFN_XkbQueryExtension)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbQueryExtension");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbQueryExtension");
     g_wsi.x11.xkb.SelectEventDetails = (PFN_XkbSelectEventDetails)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbSelectEventDetails");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbSelectEventDetails");
     g_wsi.x11.xkb.SetDetectableAutoRepeat = (PFN_XkbSetDetectableAutoRepeat)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XkbSetDetectableAutoRepeat");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XkbSetDetectableAutoRepeat");
     g_wsi.x11.xrm.DestroyDatabase = (PFN_XrmDestroyDatabase)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XrmDestroyDatabase");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XrmDestroyDatabase");
     g_wsi.x11.xrm.GetResource = (PFN_XrmGetResource)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XrmGetResource");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XrmGetResource");
     g_wsi.x11.xrm.GetStringDatabase = (PFN_XrmGetStringDatabase)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XrmGetStringDatabase");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XrmGetStringDatabase");
     g_wsi.x11.xrm.UniqueQuark = (PFN_XrmUniqueQuark)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XrmUniqueQuark");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XrmUniqueQuark");
     g_wsi.x11.xlib.UnregisterIMInstantiateCallback = (PFN_XUnregisterIMInstantiateCallback)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "XUnregisterIMInstantiateCallback");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "XUnregisterIMInstantiateCallback");
     g_wsi.x11.xlib.utf8LookupString = (PFN_Xutf8LookupString)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "Xutf8LookupString");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "Xutf8LookupString");
     g_wsi.x11.xlib.utf8SetWMProperties = (PFN_Xutf8SetWMProperties)
-        impl_platform_get_module_symbol(g_wsi.x11.xlib.handle, "Xutf8SetWMProperties");
+        P_dl_get_proc(g_wsi.x11.xlib.handle, "Xutf8SetWMProperties");
 
     if (g_wsi.x11.xlib.utf8LookupString && g_wsi.x11.xlib.utf8SetWMProperties)
         g_wsi.x11.xlib.utf8 = true;
@@ -2815,14 +2815,14 @@ static void x11_terminate(void)
         g_wsi.x11.display = NULL;
     }
 
-    impl_platform_unload_module(g_wsi.x11.xcursor.handle);
-    impl_platform_unload_module(g_wsi.x11.randr.handle);
-    impl_platform_unload_module(g_wsi.x11.xinerama.handle);
-    impl_platform_unload_module(g_wsi.x11.xrender.handle);
-    impl_platform_unload_module(g_wsi.x11.xshape.handle);
-    impl_platform_unload_module(g_wsi.x11.vidmode.handle);
-    impl_platform_unload_module(g_wsi.x11.xi.handle);
-    impl_platform_unload_module(g_wsi.x11.xlib.handle);
+    P_dl_unload(g_wsi.x11.xcursor.handle);
+    P_dl_unload(g_wsi.x11.randr.handle);
+    P_dl_unload(g_wsi.x11.xinerama.handle);
+    P_dl_unload(g_wsi.x11.xrender.handle);
+    P_dl_unload(g_wsi.x11.xshape.handle);
+    P_dl_unload(g_wsi.x11.vidmode.handle);
+    P_dl_unload(g_wsi.x11.xi.handle);
+    P_dl_unload(g_wsi.x11.xlib.handle);
 
     if (g_wsi.x11.emptyEventPipe[0] || g_wsi.x11.emptyEventPipe[1])
     {
@@ -2861,7 +2861,7 @@ static void x11_set_window_title(window_st* window, const char* title)
     XFlush(g_wsi.x11.display);
 }
 
-static void x11_set_window_icon(window_st* window, int count, const GLFWimage* images)
+static void x11_set_window_icon(window_st* window, int count, const sc_wsi_img* images)
 {
     if (count)
     {
@@ -3592,7 +3592,7 @@ static bool x11_create_standard_cursor(cursor_st* cursor, int shape)
 }
 
 static bool x11_create_cursor(cursor_st* cursor,
-                              const GLFWimage* image,
+                              const sc_wsi_img* image,
                               int xhot, int yhot)
 {
     cursor->x11.handle = x11_CreateNativeCursor(image, xhot, yhot);
@@ -3721,7 +3721,7 @@ static const char* x11_get_scancode_name(int scancode)
         return NULL;
 
     const uint32_t codepoint = x11_KeySym2Unicode(keysym);
-    if (codepoint == GLFW_INVALID_CODEPOINT)
+    if (codepoint == WSI_INVALID_CODEPOINT)
         return NULL;
 
     const size_t count = wsi_encode_urf8(g_wsi.x11.keynames[key], codepoint);
@@ -3955,7 +3955,7 @@ static void processEvent(XEvent *event)
             {
                 // HACK: Do not report the key press events duplicated by XIM
                 //       Duplicate key releases are filtered out implicitly by
-                //       the GLFW key repeat logic in impl_on_key
+                //       the WSI key repeat logic in impl_on_key
                 //       A timestamp per key is used to handle simultaneous keys
                 // NOTE: Always allow the first event for each key through
                 //       (the server never sends a timestamp of zero)
@@ -4010,7 +4010,7 @@ static void processEvent(XEvent *event)
                 impl_on_key(window, key, keycode, SC_PRESS, mods);
 
                 const uint32_t codepoint = x11_KeySym2Unicode(keysym);
-                if (codepoint != GLFW_INVALID_CODEPOINT)
+                if (codepoint != WSI_INVALID_CODEPOINT)
                     impl_on_chr(window, codepoint, mods, plain);
             }
 
@@ -4163,7 +4163,7 @@ static void processEvent(XEvent *event)
             if (x != window->x11.warpCursorPosX ||
                 y != window->x11.warpCursorPosY)
             {
-                // The cursor was moved by something other than GLFW
+                // The cursor was moved by something other than WSI
 
                 if (window->cursorMode == SC_CURSOR_DISABLED)
                 {
@@ -4283,7 +4283,7 @@ static void processEvent(XEvent *event)
                 g_wsi.x11.xdnd.version = event->xclient.data.l[1] >> 24;
                 g_wsi.x11.xdnd.format  = None;
 
-                if (g_wsi.x11.xdnd.version > _GLFW_XDND_VERSION)
+                if (g_wsi.x11.xdnd.version > _WSI_XDND_VERSION)
                     return;
 
                 if (list)
@@ -4316,7 +4316,7 @@ static void processEvent(XEvent *event)
                 // The drag operation has finished by dropping on the window
                 Time time = CurrentTime;
 
-                if (g_wsi.x11.xdnd.version > _GLFW_XDND_VERSION)
+                if (g_wsi.x11.xdnd.version > _WSI_XDND_VERSION)
                     return;
 
                 if (g_wsi.x11.xdnd.format)
@@ -4355,7 +4355,7 @@ static void processEvent(XEvent *event)
                 Window dummy;
                 int xpos, ypos;
 
-                if (g_wsi.x11.xdnd.version > _GLFW_XDND_VERSION)
+                if (g_wsi.x11.xdnd.version > _WSI_XDND_VERSION)
                     return;
 
                 XTranslateCoordinates(g_wsi.x11.display,
@@ -4636,7 +4636,7 @@ static bool createNativeWindow(window_st* window,
         }
     }
 
-    // Declare the WM protocols supported by GLFW
+    // Declare the WM protocols supported by WSI
     {
         Atom protocols[] =
         {
@@ -4738,7 +4738,7 @@ static bool createNativeWindow(window_st* window,
             if (strlen(window->title))
                 hint->res_class = (char*) window->title;
             else
-                hint->res_class = (char*) "GLFW-Application";
+                hint->res_class = (char*) "WSI-Application";
         }
 
         XSetClassHint(g_wsi.x11.display, window->x11.handle, hint);
@@ -4747,7 +4747,7 @@ static bool createNativeWindow(window_st* window,
 
     // Announce support for Xdnd (drag and drop)
     {
-        const Atom version = _GLFW_XDND_VERSION;
+        const Atom version = _WSI_XDND_VERSION;
         XChangeProperty(g_wsi.x11.display, window->x11.handle,
                         g_wsi.x11.XdndAware, XA_ATOM, 32,
                         PropModeReplace, (unsigned char*) &version, 1);
@@ -5130,11 +5130,11 @@ bool x11_connect(int platformID, platform_st* platform)
         setlocale(LC_CTYPE, "");
 
 #if defined(__CYGWIN__)
-    void* module = impl_platform_load_module("libX11-6.so");
+    void* module = P_dl_load("libX11-6.so");
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-    void* module = impl_platform_load_module("libX11.so");
+    void* module = P_dl_load("libX11.so");
 #else
-    void* module = impl_platform_load_module("libX11.so.6");
+    void* module = P_dl_load("libX11.so.6");
 #endif
     if (!module)
     {
@@ -5145,17 +5145,17 @@ bool x11_connect(int platformID, platform_st* platform)
     }
 
     PFN_XInitThreads XInitThreads = (PFN_XInitThreads)
-        impl_platform_get_module_symbol(module, "XInitThreads");
+        P_dl_get_proc(module, "XInitThreads");
     PFN_XrmInitialize XrmInitialize = (PFN_XrmInitialize)
-        impl_platform_get_module_symbol(module, "XrmInitialize");
+        P_dl_get_proc(module, "XrmInitialize");
     PFN_XOpenDisplay XOpenDisplay = (PFN_XOpenDisplay)
-        impl_platform_get_module_symbol(module, "XOpenDisplay");
+        P_dl_get_proc(module, "XOpenDisplay");
     if (!XInitThreads || !XrmInitialize || !XOpenDisplay)
     {
         if (platformID == SC_PLATFORM_X11)
             impl_on_error(SC_WSI_ERR_PLATFORM_ERROR, "X11: Failed to load Xlib entry point");
 
-        impl_platform_unload_module(module);
+        P_dl_unload(module);
         return false;
     }
 
@@ -5180,7 +5180,7 @@ bool x11_connect(int platformID, platform_st* platform)
             }
         }
 
-        impl_platform_unload_module(module);
+        P_dl_unload(module);
         return false;
     }
 

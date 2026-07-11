@@ -3,7 +3,7 @@
 
 #include "internal.h"
 
-#if defined(GLFW_BUILD_POSIX_POLL)
+#if defined(WSI_BUILD_POSIX_POLL)
 
 #include <signal.h>
 #include <time.h>
@@ -53,5 +53,5 @@ bool sc_poll_posix(struct pollfd* fds, nfds_t count, double* timeout)
     }
 }
 
-#endif // GLFW_BUILD_POSIX_POLL
+#endif // WSI_BUILD_POSIX_POLL
 

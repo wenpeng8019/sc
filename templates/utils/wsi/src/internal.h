@@ -6,8 +6,6 @@
 
 #define WSI_MESSAGE_SIZE      1024
 
-typedef int (*GLFWproc)(void);
-
 typedef struct error_t          error_st;
 typedef struct init_config_t    init_config_st;
 typedef struct wnd_config_t     wnd_config_st;
@@ -123,7 +121,7 @@ struct window_t
     bool            shouldClose;
     void*               userPointer;
     bool            doublebuffer;
-    GLFWvidmode         videoMode;
+    sc_wsi_video_mode         videoMode;
     monitor_st*       monitor;
     cursor_st*        cursor;
     char*               title;
@@ -147,7 +145,7 @@ struct window_t
     sc_wsi_win_cb       callbacks;
 
     // This is defined in platform.h
-    GLFW_PLATFORM_WINDOW_STATE
+    WSI_PLATFORM_WINDOW_STATE
 };
 
 // Monitor structure
@@ -163,15 +161,15 @@ struct monitor_t
     // The window whose video mode is current on this monitor
     window_st*    window;
 
-    GLFWvidmode*    modes;
+    sc_wsi_video_mode*    modes;
     int             modeCount;
-    GLFWvidmode     currentMode;
+    sc_wsi_video_mode     currentMode;
 
-    GLFWgammaramp   originalRamp;
-    GLFWgammaramp   currentRamp;
+    sc_wsi_gamma_ramp   originalRamp;
+    sc_wsi_gamma_ramp   currentRamp;
 
     // This is defined in platform.h
-    GLFW_PLATFORM_MONITOR_STATE
+    WSI_PLATFORM_MONITOR_STAT
 };
 
 // Cursor structure
@@ -180,7 +178,7 @@ struct cursor_t
 {
     struct cursor_t*    next;
     // This is defined in platform.h
-    GLFW_PLATFORM_CURSOR_STATE
+    WSI_PLATFORM_CURSOR_STATE
 };
 
 // Platform API structure
@@ -197,7 +195,7 @@ struct platform_t
     void (*setCursorMode)(window_st*,int);
     void (*setRawMouseMotion)(window_st*,bool);
     bool (*rawMouseMotionSupported)(void);
-    bool (*createCursor)(cursor_st*,const GLFWimage*,int,int);
+    bool (*createCursor)(cursor_st*,const sc_wsi_img*,int,int);
     bool (*createStandardCursor)(cursor_st*,int);
     void (*destroyCursor)(cursor_st*);
     void (*setCursor)(window_st*,cursor_st*);
@@ -210,15 +208,15 @@ struct platform_t
     void (*getMonitorPos)(monitor_st*,int*,int*);
     void (*getMonitorContentScale)(monitor_st*,float*,float*);
     void (*getMonitorWorkarea)(monitor_st*,int*,int*,int*,int*);
-    GLFWvidmode* (*getVideoModes)(monitor_st*,int*);
-    bool (*getVideoMode)(monitor_st*,GLFWvidmode*);
-    bool (*getGammaRamp)(monitor_st*,GLFWgammaramp*);
-    void (*setGammaRamp)(monitor_st*,const GLFWgammaramp*);
+    sc_wsi_video_mode* (*getVideoModes)(monitor_st*,int*);
+    bool (*getVideoMode)(monitor_st*,sc_wsi_video_mode*);
+    bool (*getGammaRamp)(monitor_st*,sc_wsi_gamma_ramp*);
+    void (*setGammaRamp)(monitor_st*,const sc_wsi_gamma_ramp*);
     // window
     bool (*createWindow)(window_st*,const wnd_config_st*);
     void (*destroyWindow)(window_st*);
     void (*setWindowTitle)(window_st*,const char*);
-    void (*setWindowIcon)(window_st*,int,const GLFWimage*);
+    void (*setWindowIcon)(window_st*,int,const sc_wsi_img*);
     void (*getWindowPos)(window_st*,int*,int*);
     void (*setWindowPos)(window_st*,int,int);
     void (*getWindowSize)(window_st*,int*,int*);
@@ -282,24 +280,16 @@ struct library_t
     } callbacks;
 
     // These are defined in platform.h
-    GLFW_PLATFORM_LIBRARY_WINDOW_STATE
-    GLFW_PLATFORM_LIBRARY_CONTEXT_STATE
+    WSI_PLATFORM_LIBRARY_WINDOW_STATE
+    WSI_PLATFORM_LIBRARY_CONTEXT_STATE
 };
 
-// Global state shared between compilation units of GLFW
+// Global state shared between compilation units of WSI
 //
 extern library_st g_wsi;
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW platform API                      //////
-//////////////////////////////////////////////////////////////////////////
-
-void* impl_platform_load_module(const char* path);
-void impl_platform_unload_module(void* module);
-GLFWproc impl_platform_get_module_symbol(void* module, const char* name);
-
-//////////////////////////////////////////////////////////////////////////
-//////                         GLFW event API                       //////
+//////                         WSI event API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 void impl_on_win_focus(window_st* window, bool focused);
@@ -335,19 +325,19 @@ void impl_on_error(int code, const char* format, ...);
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       WSI internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 bool wsi_select_platform(int platformID, platform_st* platform);
 
-const GLFWvidmode* wsi_choose_video_mode(monitor_st* monitor,
-                                        const GLFWvidmode* desired);
-int wsi_compare_video_mode(const GLFWvidmode* first, const GLFWvidmode* second);
+const sc_wsi_video_mode* wsi_choose_video_mode(monitor_st* monitor,
+                                        const sc_wsi_video_mode* desired);
+int wsi_compare_video_mode(const sc_wsi_video_mode* first, const sc_wsi_video_mode* second);
 monitor_st* wsi_alloc_monitor(const char* name, int widthMM, int heightMM);
 void wsi_free_monitor(monitor_st* monitor);
 
-void wsi_alloc_gamma_arrays(GLFWgammaramp* ramp, unsigned int size);
-void wsi_free_gamma_arrays(GLFWgammaramp* ramp);
+void wsi_alloc_gamma_arrays(sc_wsi_gamma_ramp* ramp, unsigned int size);
+void wsi_free_gamma_arrays(sc_wsi_gamma_ramp* ramp);
 
 void wsi_split_bpp(int bpp, int* red, int* green, int* blue);
 

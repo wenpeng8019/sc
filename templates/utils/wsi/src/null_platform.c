@@ -3,9 +3,9 @@
 
 // The the sole (fake) video mode of our (sole) fake monitor
 //
-static GLFWvidmode getVideoMode(void)
+static sc_wsi_video_mode getVideoMode(void)
 {
-    GLFWvidmode mode;
+    sc_wsi_video_mode mode;
     mode.width = 1920;
     mode.height = 1080;
     mode.refreshRate = 60;
@@ -13,13 +13,13 @@ static GLFWvidmode getVideoMode(void)
 }
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       WSI internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 void null_poll_monitors(void)
 {
     const float dpi = 141.f;
-    const GLFWvidmode mode = getVideoMode();
+    const sc_wsi_video_mode mode = getVideoMode();
     monitor_st* monitor = wsi_alloc_monitor("Null SuperNoop 0",
                                               (int) (mode.width * 25.4f / dpi),
                                               (int) (mode.height * 25.4f / dpi));
@@ -27,7 +27,7 @@ void null_poll_monitors(void)
 }
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW platform API                      //////
+//////                       WSI platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 void null_free_monitor(monitor_st* monitor)
@@ -56,7 +56,7 @@ void null_get_monitor_work_area(monitor_st* monitor,
                                  int* xpos, int* ypos,
                                  int* width, int* height)
 {
-    const GLFWvidmode mode = getVideoMode();
+    const sc_wsi_video_mode mode = getVideoMode();
 
     if (xpos)
         *xpos = 0;
@@ -68,21 +68,21 @@ void null_get_monitor_work_area(monitor_st* monitor,
         *height = mode.height - 10;
 }
 
-GLFWvidmode* null_get_video_modes(monitor_st* monitor, int* found)
+sc_wsi_video_mode* null_get_video_modes(monitor_st* monitor, int* found)
 {
-    GLFWvidmode* mode = wsi_calloc(1, sizeof(GLFWvidmode));
+    sc_wsi_video_mode* mode = wsi_calloc(1, sizeof(sc_wsi_video_mode));
     *mode = getVideoMode();
     *found = 1;
     return mode;
 }
 
-bool null_get_video_mode(monitor_st* monitor, GLFWvidmode* mode)
+bool null_get_video_mode(monitor_st* monitor, sc_wsi_video_mode* mode)
 {
     *mode = getVideoMode();
     return true;
 }
 
-bool null_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
+bool null_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp)
 {
     if (!monitor->null.ramp.size)
     {
@@ -111,7 +111,7 @@ bool null_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
     return true;
 }
 
-void null_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
+void null_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp)
 {
     if (monitor->null.ramp.size != ramp->size)
     {
@@ -147,7 +147,7 @@ static void applySizeLimits(window_st* window, int* width, int* height)
 
 static void fitToMonitor(window_st* window)
 {
-    GLFWvidmode mode;
+    sc_wsi_video_mode mode;
     null_get_video_mode(window->monitor, &mode);
     null_get_monitor_pos(window->monitor,
                            &window->null.xpos,
@@ -203,7 +203,7 @@ static int createNativeWindow(window_st* window,
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW platform API                      //////
+//////                       WSI platform API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 bool null_create_window(window_st* window,
@@ -250,7 +250,7 @@ void null_set_window_title(window_st* window, const char* title)
 {
 }
 
-void null_set_window_icon(window_st* window, int count, const GLFWimage* images)
+void null_set_window_icon(window_st* window, int count, const sc_wsi_img* images)
 {
 }
 
@@ -583,7 +583,7 @@ void null_set_cursor_mode(window_st* window, int mode)
 }
 
 bool null_create_cursor(cursor_st* cursor,
-                               const GLFWimage* image,
+                               const sc_wsi_img* image,
                                int xhot, int yhot)
 {
     return true;

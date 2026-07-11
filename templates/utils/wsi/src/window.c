@@ -8,7 +8,7 @@
 #include <math.h>
 
 //////////////////////////////////////////////////////////////////////////
-//////                         GLFW event API                       //////
+//////                         WSI event API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 // Notifies shared code that a window has lost or received input focus
@@ -134,7 +134,7 @@ void impl_on_win_monitor(window_st* window, monitor_st* monitor)
 }
 
 //////////////////////////////////////////////////////////////////////////
-//////                        GLFW public API                       //////
+//////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 WSI_API sc_window* sc_wsi_win_create(int width, int height,
@@ -263,7 +263,7 @@ WSI_API void sc_wsi_window_hint(int hint, int value)
         case SC_WIN_POSITION_Y:
             g_wsi.hints.window.ypos = value;
             return;
-        case GLFW_WIN32_KEYBOARD_MENU:
+        case WSI_WIN32_KEYBOARD_MENU:
             g_wsi.hints.window.win32.keymenu = value;
             return;
         case SC_WIN32_SHOWDEFAULT:
@@ -409,7 +409,7 @@ WSI_API void sc_wsi_win_set_title(sc_window* handle, const char* title)
 }
 
 WSI_API void sc_wsi_win_set_icon(sc_window* handle,
-                               int count, const GLFWimage* images)
+                               int count, const sc_wsi_img* images)
 {
     int i;
 

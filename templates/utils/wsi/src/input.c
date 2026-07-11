@@ -8,7 +8,7 @@
 #include <string.h>
 
 // Internal key state used for sticky keys
-#define _GLFW_STICK 3
+#define _WSI_STICK 3
 #define SC_MOD_MASK (SC_MOD_SHIFT | \
                        SC_MOD_CONTROL | \
                        SC_MOD_ALT | \
@@ -18,7 +18,7 @@
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                         GLFW event API                       //////
+//////                         WSI event API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 // Notifies shared code of a physical key event
@@ -42,7 +42,7 @@ void impl_on_key(window_st* window, int key, int scancode, int action, int mods)
             repeated = true;
 
         if (action == SC_RELEASE && window->stickyKeys)
-            window->keys[key] = _GLFW_STICK;
+            window->keys[key] = _WSI_STICK;
         else
             window->keys[key] = (char) action;
 
@@ -112,7 +112,7 @@ void impl_on_mouse_click(window_st* window, int button, int action, int mods)
     if (button <= SC_MOUSE_BUTTON_LAST)
     {
         if (action == SC_RELEASE && window->stickyMouseButtons)
-            window->mouseButtons[button] = _GLFW_STICK;
+            window->mouseButtons[button] = _WSI_STICK;
         else
             window->mouseButtons[button] = (char) action;
     }
@@ -175,7 +175,7 @@ void wsi_center_cursor_in_content_area(window_st* window)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                        GLFW public API                       //////
+//////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 WSI_API int sc_wsi_input_get_mode(sc_window* handle, int mode)
@@ -258,7 +258,7 @@ WSI_API void sc_wsi_input_set_mode(sc_window* handle, int mode, int value)
                 // Release all sticky keys
                 for (i = 0;  i <= SC_KEY_LAST;  i++)
                 {
-                    if (window->keys[i] == _GLFW_STICK)
+                    if (window->keys[i] == _WSI_STICK)
                         window->keys[i] = SC_RELEASE;
                 }
             }
@@ -280,7 +280,7 @@ WSI_API void sc_wsi_input_set_mode(sc_window* handle, int mode, int value)
                 // Release all sticky mouse buttons
                 for (i = 0;  i <= SC_MOUSE_BUTTON_LAST;  i++)
                 {
-                    if (window->mouseButtons[i] == _GLFW_STICK)
+                    if (window->mouseButtons[i] == _WSI_STICK)
                         window->mouseButtons[i] = SC_RELEASE;
                 }
             }
@@ -392,7 +392,7 @@ WSI_API int sc_wsi_key(sc_window* handle, int key)
         return SC_RELEASE;
     }
 
-    if (window->keys[key] == _GLFW_STICK)
+    if (window->keys[key] == _WSI_STICK)
     {
         // Sticky mode: release key now
         window->keys[key] = SC_RELEASE;
@@ -418,7 +418,7 @@ WSI_API int sc_wsi_mouse_button(sc_window* handle, int button)
         return SC_RELEASE;
     }
 
-    if (window->mouseButtons[button] == _GLFW_STICK)
+    if (window->mouseButtons[button] == _WSI_STICK)
     {
         // Sticky mode: release mouse button now
         window->mouseButtons[button] = SC_RELEASE;
@@ -488,7 +488,7 @@ WSI_API void sc_wsi_set_cursor_pos(sc_window* handle, double xpos, double ypos)
     }
 }
 
-WSI_API sc_cursor* sc_wsi_create_cursor(const GLFWimage* image, int xhot, int yhot)
+WSI_API sc_cursor* sc_wsi_create_cursor(const sc_wsi_img* image, int xhot, int yhot)
 {
     cursor_st* cursor;
 

@@ -4,12 +4,12 @@
 
 #include "../wsi.h"
 
-#define NULL_WINDOW_STATE          null_window_t null;
-#define NULL_LIBRARY_WINDOW_STATE  null_library_t null;
-#define NULL_MONITOR_STATE         null_monitor_t null;
+#define WSI_NULL_WINDOW_STATE          null_window_t null;
+#define WSI_NULL_LIBRARY_WINDOW_STATE  null_library_t null;
+#define WSI_NULL_MONITOR_STATE         null_monitor_t null;
 
 #define NULL_CONTEXT_STATE
-#define NULL_CURSOR_STATE
+#define WSI_NULL_CURSOR_STATE
 #define NULL_LIBRARY_CONTEXT_STATE
 
 #define NULL_SC_FIRST          NULL_SC_SPACE
@@ -153,7 +153,7 @@ typedef struct null_window_t
 
 typedef struct null_monitor_t
 {
-    GLFWgammaramp   ramp;
+    sc_wsi_gamma_ramp   ramp;
 } null_monitor_t;
 
 typedef struct null_library_t
@@ -181,7 +181,7 @@ void null_post_empty_event(void);
 bool null_create_window(window_st* window, const wnd_config_st* wndconfig);
 void null_destroy_window(window_st* window);
 void null_set_window_title(window_st* window, const char* title);
-void null_set_window_icon(window_st* window, int count, const GLFWimage* images);
+void null_set_window_icon(window_st* window, int count, const sc_wsi_img* images);
 void null_set_window_mouse_passthrough(window_st* window, bool enabled);
 void null_set_window_monitor(window_st* window, monitor_st* monitor, int xpos, int ypos, int width, int height, int refreshRate);
 
@@ -217,7 +217,7 @@ bool null_window_iconified(window_st* window);
 
 void null_set_cursor(window_st* window, cursor_st* cursor);
 bool null_create_standard_cursor(cursor_st* cursor, int shape);
-bool null_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot);
+bool null_create_cursor(cursor_st* cursor, const sc_wsi_img* image, int xhot, int yhot);
 void null_destroy_cursor(cursor_st* cursor);
 void null_set_cursor_mode(window_st* window, int mode);
 void null_set_cursor_pos(window_st* window, double x, double y);
@@ -234,9 +234,9 @@ void null_free_monitor(monitor_st* monitor);
 void null_get_monitor_pos(monitor_st* monitor, int* xpos, int* ypos);
 void null_get_monitor_work_area(monitor_st* monitor, int* xpos, int* ypos, int* width, int* height);
 void null_get_monitor_content_scale(monitor_st* monitor, float* xscale, float* yscale);
-GLFWvidmode* null_get_video_modes(monitor_st* monitor, int* found);
-bool null_get_video_mode(monitor_st* monitor, GLFWvidmode* mode);
-bool null_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp);
-void null_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp);
+sc_wsi_video_mode* null_get_video_modes(monitor_st* monitor, int* found);
+bool null_get_video_mode(monitor_st* monitor, sc_wsi_video_mode* mode);
+bool null_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp);
+void null_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp);
 
 #endif // NULL_PLATFORM_H

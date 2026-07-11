@@ -855,7 +855,7 @@ static void on_cursor_pos(sc_window* w, double x, double y)
     int s;
     if (!st) return;
     s = st->scale > 0 ? st->scale : 1;
-    /* GLFW 光标坐标为逻辑点；控件按物理像素布局，故输入也按 scale 放大。 */
+    /* WSI 光标坐标为逻辑点；控件按物理像素布局，故输入也按 scale 放大。 */
     st->cursorX = (int) (x * s);
     st->cursorY = (int) (y * s);
     nk_input_motion(&st->rawfb->ctx, st->cursorX, st->cursorY);

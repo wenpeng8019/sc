@@ -875,7 +875,7 @@ static const struct codepair {
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       WSI internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 // Convert XKB KeySym to Unicode
@@ -910,7 +910,7 @@ uint32_t x11_KeySym2Unicode(unsigned int keysym)
     }
 
     // No matching Unicode value found
-    return GLFW_INVALID_CODEPOINT;
+    return WSI_INVALID_CODEPOINT;
 }
 
 #endif // WSI_X11

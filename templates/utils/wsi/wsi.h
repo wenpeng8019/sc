@@ -10,53 +10,40 @@ extern "C" {
 #endif
 
 /*************************************************************************
- * 编译器与平台相关的预处理
+ * 库声明、和版本宏
  *************************************************************************/
 
-/* 如果我们在 Windows 上，我们希望使用一个统一的宏定义。
- */
-#if !defined(_WIN32) && (defined(__WIN32__) || defined(WIN32) || defined(__MINGW32__))
- #define _WIN32
-#endif /* _WIN32 */
-
 #ifndef WSI_SHARED
- #define WSI_SHARED 0
+#   define WSI_SHARED 0
 #endif
 #ifndef WSI_EXPORTS
- #define WSI_EXPORTS 0
+#   define WSI_EXPORTS 0
 #endif
 
 /* WSI_API 用于声明需要从 DLL / 共享库 / 动态库中导出的公共 API 函数。 */
 #define WSI_API SC_API(WSI)
 
-/*************************************************************************
- * GLFW API 标记
- *************************************************************************/
-
-/*! @name GLFW 版本宏
- *  @{ */
-/*! @brief GLFW 头文件的主版本号。
- *
- *  GLFW 头文件的主版本号。  This is incremented when the
- *  API is changed in non-compatible ways.
+/*! @brief WSI 头文件的主版本号
+ *  This is incremented when the API is changed in non-compatible ways.
  *  @ingroup init
  */
 #define WSI_VERSION_MAJOR          3
-/*! @brief GLFW 头文件的次版本号。
- *
- *  GLFW 头文件的次版本号。  This is incremented when
- *  features are added to the API but it remains backward-compatible.
+
+/*! @brief WSI 头文件的次版本号
+ *  This is incremented when features are added to the API but it remains backward-compatible.
  *  @ingroup init
  */
-#define WSI_VERSION_MINOR          5
-/*! @brief GLFW 头文件的修订号。
- *
- *  GLFW 头文件的修订号。  This is incremented when a bug fix
- *  release is made that does not contain any API changes.
+
+ #define WSI_VERSION_MINOR          5
+/*! @brief WSI 头文件的修订号
+ *  This is incremented when a bug fix release is made that does not contain any API changes.
  *  @ingroup init
  */
 #define WSI_VERSION_REVISION       0
-/*! @} */
+
+/*************************************************************************
+ * WSI API 标识、常量值定义
+ *************************************************************************/
 
 /*! @name 按键与按钮动作
  *  @{ */
@@ -322,18 +309,18 @@ extern "C" {
  *  @analysis Yay.
  */
 #define SC_WSI_ERR_NONE               0
-/*! @brief GLFW has not been initialized.
+/*! @brief WSI has not been initialized.
  *
- *  This occurs if a GLFW function was called that must not be called unless the
+ *  This occurs if a WSI function was called that must not be called unless the
  *  library is [initialized](@ref intro_init).
  *
- *  @analysis Application programmer error.  Initialize GLFW before calling any
+ *  @analysis Application programmer error.  Initialize WSI before calling any
  *  function that requires initialization.
  */
 #define SC_WSI_ERR_NOT_INITIALIZED        0x00010001
 /*! @brief No context is current for this thread.
  *
- *  This occurs if a GLFW function was called that needs and operates on the
+ *  This occurs if a WSI function was called that needs and operates on the
  *  current OpenGL or OpenGL ES context but no context is current on the calling
  *  thread.  One such function is @ref glfwSwapInterval.
  *
@@ -344,7 +331,7 @@ extern "C" {
 /*! @brief One of the arguments to the function was an invalid enum value.
  *
  *  One of the arguments to the function was an invalid enum value, for example
- *  requesting @ref GLFW_RED_BITS with @ref sc_wsi_win_get_attrib.
+ *  requesting @ref WSI_RED_BITS with @ref sc_wsi_win_get_attrib.
  *
  *  @analysis Application programmer error.  Fix the offending call.
  */
@@ -364,13 +351,13 @@ extern "C" {
  *
  *  A memory allocation failed.
  *
- *  @analysis A bug in GLFW or the underlying operating system.  Report the bug
+ *  @analysis A bug in WSI or the underlying operating system.  Report the bug
  *  to our [issue tracker](https://github.com/glfw/glfw/issues).
  */
 #define SC_WSI_ERR_OUT_OF_MEMORY          0x00010005
-/*! @brief GLFW could not find support for the requested API on the system.
+/*! @brief WSI could not find support for the requested API on the system.
  *
- *  GLFW could not find support for the requested API on the system.
+ *  WSI could not find support for the requested API on the system.
  *
  *  @analysis The installed graphics driver does not support the requested
  *  API, or does not support it via the chosen context creation API.
@@ -397,7 +384,7 @@ extern "C" {
  *  @par
  *  Future invalid OpenGL and OpenGL ES versions, for example OpenGL 4.8 if 5.0
  *  comes out before the 4.x series gets that far, also fail with this error and
- *  not @ref SC_WSI_ERR_INVALID_VALUE, because GLFW cannot know what future versions
+ *  not @ref SC_WSI_ERR_INVALID_VALUE, because WSI cannot know what future versions
  *  will exist.
  */
 #define SC_WSI_ERR_VERSION_UNAVAILABLE    0x00010007
@@ -407,7 +394,7 @@ extern "C" {
  *  A platform-specific error occurred that does not match any of the more
  *  specific categories.
  *
- *  @analysis A bug or configuration error in GLFW, the underlying operating
+ *  @analysis A bug or configuration error in WSI, the underlying operating
  *  system or its drivers, or a lack of required resources.  Report the issue to
  *  our [issue tracker](https://github.com/glfw/glfw/issues).
  */
@@ -452,7 +439,7 @@ extern "C" {
 #define SC_WSI_ERR_CURSOR_UNAVAILABLE     0x0001000B
 /*! @brief The requested feature is not provided by the platform.
  *
- *  The requested feature is not provided by the platform, so GLFW is unable to
+ *  The requested feature is not provided by the platform, so WSI is unable to
  *  implement it.  The documentation for each function notes if it could emit
  *  this error.
  *
@@ -466,9 +453,9 @@ extern "C" {
 #define SC_WSI_ERR_FEATURE_UNAVAILABLE    0x0001000C
 /*! @brief The requested feature is not implemented for the platform.
  *
- *  The requested feature has not yet been implemented in GLFW for this platform.
+ *  The requested feature has not yet been implemented in WSI for this platform.
  *
- *  @analysis An incomplete implementation of GLFW for this platform, hopefully
+ *  @analysis An incomplete implementation of WSI for this platform, hopefully
  *  fixed in a future release.  The error can be ignored unless the feature is
  *  critical to the application.
  *
@@ -480,12 +467,12 @@ extern "C" {
 /*! @brief Platform unavailable or no matching platform was found.
  *
  *  If emitted during initialization, no matching platform was found.  If the @ref
- *  SC_PLATFORM init hint was set to `SC_PLATFORM_ANY`, GLFW could not detect any of
+ *  SC_PLATFORM init hint was set to `SC_PLATFORM_ANY`, WSI could not detect any of
  *  the platforms supported by this library binary, except for the Null platform.  If the
  *  init hint was set to a specific platform, it is either not supported by this library
- *  binary or GLFW was not able to detect it.
+ *  binary or WSI was not able to detect it.
  *
- *  If emitted by a native access function, GLFW was initialized for a different platform
+ *  If emitted by a native access function, WSI was initialized for a different platform
  *  than the function is for.
  *
  *  @analysis Failure to detect any platform usually only happens on non-macOS Unix
@@ -507,65 +494,65 @@ extern "C" {
  *  @{ */
 /*! @brief Input focus window hint and attribute
  *
- *  Input focus [window hint](@ref GLFW_FOCUSED_hint) or
- *  [window attribute](@ref GLFW_FOCUSED_attrib).
+ *  Input focus [window hint](@ref WSI_FOCUSED_hint) or
+ *  [window attribute](@ref WSI_FOCUSED_attrib).
  */
 #define SC_WIN_FOCUSED                0x00020001
 /*! @brief Window iconification window attribute
  *
- *  Window iconification [window attribute](@ref GLFW_ICONIFIED_attrib).
+ *  Window iconification [window attribute](@ref WSI_ICONIFIED_attrib).
  */
 #define SC_WIN_ICONIFIED              0x00020002
 /*! @brief Window resize-ability window hint and attribute
  *
- *  Window resize-ability [window hint](@ref GLFW_RESIZABLE_hint) and
- *  [window attribute](@ref GLFW_RESIZABLE_attrib).
+ *  Window resize-ability [window hint](@ref WSI_RESIZABLE_hint) and
+ *  [window attribute](@ref WSI_RESIZABLE_attrib).
  */
 #define SC_WIN_RESIZABLE              0x00020003
 /*! @brief Window visibility window hint and attribute
  *
- *  Window visibility [window hint](@ref GLFW_VISIBLE_hint) and
- *  [window attribute](@ref GLFW_VISIBLE_attrib).
+ *  Window visibility [window hint](@ref WSI_VISIBLE_hint) and
+ *  [window attribute](@ref WSI_VISIBLE_attrib).
  */
 #define SC_WIN_VISIBLE                0x00020004
 /*! @brief Window decoration window hint and attribute
  *
- *  Window decoration [window hint](@ref GLFW_DECORATED_hint) and
- *  [window attribute](@ref GLFW_DECORATED_attrib).
+ *  Window decoration [window hint](@ref WSI_DECORATED_hint) and
+ *  [window attribute](@ref WSI_DECORATED_attrib).
  */
 #define SC_WIN_DECORATED              0x00020005
 /*! @brief Window auto-iconification window hint and attribute
  *
- *  Window auto-iconification [window hint](@ref GLFW_AUTO_ICONIFY_hint) and
- *  [window attribute](@ref GLFW_AUTO_ICONIFY_attrib).
+ *  Window auto-iconification [window hint](@ref WSI_AUTO_ICONIFY_hint) and
+ *  [window attribute](@ref WSI_AUTO_ICONIFY_attrib).
  */
 #define SC_WIN_AUTO_ICONIFY           0x00020006
 /*! @brief Window decoration window hint and attribute
  *
- *  Window decoration [window hint](@ref GLFW_FLOATING_hint) and
- *  [window attribute](@ref GLFW_FLOATING_attrib).
+ *  Window decoration [window hint](@ref WSI_FLOATING_hint) and
+ *  [window attribute](@ref WSI_FLOATING_attrib).
  */
 #define SC_WIN_FLOATING               0x00020007
 /*! @brief Window maximization window hint and attribute
  *
- *  Window maximization [window hint](@ref GLFW_MAXIMIZED_hint) and
- *  [window attribute](@ref GLFW_MAXIMIZED_attrib).
+ *  Window maximization [window hint](@ref WSI_MAXIMIZED_hint) and
+ *  [window attribute](@ref WSI_MAXIMIZED_attrib).
  */
 #define SC_WIN_MAXIMIZED              0x00020008
 /*! @brief Cursor centering window hint
  *
- *  Cursor centering [window hint](@ref GLFW_CENTER_CURSOR_hint).
+ *  Cursor centering [window hint](@ref WSI_CENTER_CURSOR_hint).
  */
 #define SC_WIN_CENTER_CURSOR          0x00020009
 /*! @brief Mouse cursor hover window attribute.
  *
- *  Mouse cursor hover [window attribute](@ref GLFW_HOVERED_attrib).
+ *  Mouse cursor hover [window attribute](@ref WSI_HOVERED_attrib).
  */
 #define SC_WIN_HOVERED                0x0002000B
 /*! @brief Input focus on calling show window hint and attribute
  *
- *  Input focus [window hint](@ref GLFW_FOCUS_ON_SHOW_hint) or
- *  [window attribute](@ref GLFW_FOCUS_ON_SHOW_attrib).
+ *  Input focus [window hint](@ref WSI_FOCUS_ON_SHOW_hint) or
+ *  [window attribute](@ref WSI_FOCUS_ON_SHOW_attrib).
  */
 #define SC_WIN_FOCUS_ON_SHOW          0x0002000C
 
@@ -595,23 +582,23 @@ extern "C" {
  */
 #define SC_SCALE_TO_MONITOR       0x0002200C
 /*! @brief macOS specific
- *  [window hint](@ref GLFW_COCOA_FRAME_NAME_hint).
+ *  [window hint](@ref WSI_COCOA_FRAME_NAME_hint).
  */
 #define SC_COCOA_FRAME_NAME         0x00023002
 /*! @brief X11 specific
- *  [window hint](@ref GLFW_X11_CLASS_NAME_hint).
+ *  [window hint](@ref WSI_X11_CLASS_NAME_hint).
  */
 #define SC_X11_CLASS_NAME         0x00024001
 /*! @brief X11 specific
- *  [window hint](@ref GLFW_X11_CLASS_NAME_hint).
+ *  [window hint](@ref WSI_X11_CLASS_NAME_hint).
  */
 #define SC_X11_INSTANCE_NAME      0x00024002
-#define GLFW_WIN32_KEYBOARD_MENU    0x00025001
-/*! @brief Win32 specific [window hint](@ref GLFW_WIN32_SHOWDEFAULT_hint).
+#define WSI_WIN32_KEYBOARD_MENU    0x00025001
+/*! @brief Win32 specific [window hint](@ref WSI_WIN32_SHOWDEFAULT_hint).
  */
 #define SC_WIN32_SHOWDEFAULT      0x00025002
 /*! @brief Wayland specific
- *  [window hint](@ref GLFW_WAYLAND_APP_ID_hint).
+ *  [window hint](@ref WSI_WAYLAND_APP_ID_hint).
  *  
  *  Allows specification of the Wayland app_id.
  */
@@ -742,7 +729,7 @@ extern "C" {
  *  @{ */
 /*! @brief ANGLE rendering backend init hint.
  *
- *  ANGLE rendering backend [init hint](@ref GLFW_ANGLE_PLATFORM_TYPE_hint).
+ *  ANGLE rendering backend [init hint](@ref WSI_ANGLE_PLATFORM_TYPE_hint).
  */
 #define SC_ANGLE_PLATFORM_TYPE    0x00050002
 /*! @brief Platform selection init hint.
@@ -752,17 +739,17 @@ extern "C" {
 #define SC_PLATFORM               0x00050003
 /*! @brief macOS specific init hint.
  *
- *  macOS specific [init hint](@ref GLFW_COCOA_CHDIR_RESOURCES_hint).
+ *  macOS specific [init hint](@ref WSI_COCOA_CHDIR_RESOURCES_hint).
  */
 #define SC_COCOA_CHDIR_RESOURCES  0x00051001
 /*! @brief macOS specific init hint.
  *
- *  macOS specific [init hint](@ref GLFW_COCOA_MENUBAR_hint).
+ *  macOS specific [init hint](@ref WSI_COCOA_MENUBAR_hint).
  */
 #define SC_COCOA_MENUBAR          0x00051002
 /*! @brief Wayland specific init hint.
  *
- *  Wayland specific [init hint](@ref GLFW_WAYLAND_LIBDECOR_hint).
+ *  Wayland specific [init hint](@ref WSI_WAYLAND_LIBDECOR_hint).
  */
 #define SC_WAYLAND_LIBDECOR       0x00053001
 /*! @} */
@@ -789,7 +776,7 @@ extern "C" {
 
 
 /*************************************************************************
- * GLFW API types
+ * WSI API types
  *************************************************************************/
 
 /*! @brief 错误回调函数指针类型。
@@ -809,7 +796,7 @@ extern "C" {
 typedef void (* sc_error_cb)(int error_code, const char* description);
 
 /*************************************************************************
- * GLFW API types
+ * WSI API types
  *************************************************************************/
 
 /*! @brief 不透明监视器对象。
@@ -854,7 +841,7 @@ typedef struct sc_window sc_window;
 typedef struct sc_cursor sc_cursor;
 
 /*************************************************************************
- * GLFW API types
+ * WSI API types
  *************************************************************************/
 
 /*! @brief 窗口关闭回调函数指针类型。
@@ -1062,9 +1049,9 @@ typedef void (* sc_scroll_cb)(sc_window* window, double xoffset, double yoffset)
  *  当窗口失去输入焦点时，会为所有按下的关联按键生成合成释放事件。  可以通过合成事件在焦点丢失事件处理之后生成这一事实，将这些事件与用户生成的事件区分开来， i.e. after the
  *  [window focus callback](@ref sc_wsi_win_set_focus_callback) has been called.
  *
- *  按键的扫描码是平台相关的，有时甚至与特定机器相关。  扫描码旨在允许用户绑定没有 GLFW 按键标记的按键。  此类按键的 `key` 被设为 `SC_KEY_UNKNOWN`，其状态不会被保存，因此无法通过 @ref sc_wsi_key 查询。
+ *  按键的扫描码是平台相关的，有时甚至与特定机器相关。  扫描码旨在允许用户绑定没有 WSI 按键标记的按键。  此类按键的 `key` 被设为 `SC_KEY_UNKNOWN`，其状态不会被保存，因此无法通过 @ref sc_wsi_key 查询。
  *
- *  Sometimes GLFW needs to generate synthetic key events, in which case the
+ *  Sometimes WSI needs to generate synthetic key events, in which case the
  *  scancode may be zero.
  *
  *  @param[in] window 接收事件的窗口。
@@ -1184,18 +1171,12 @@ WSI_API bool sc_wsi_win_set_callback(sc_window* window, sc_wsi_win_cb cb);
  *
  *  @ingroup monitor
  */
-typedef struct GLFWvidmode
+typedef struct sc_wsi_video_mode
 {
-    /*! 视频模式的宽度（屏幕坐标）。
-     */
-    int width;
-    /*! 视频模式的高度（屏幕坐标）。
-     */
-    int height;
-    /*! 视频模式的刷新率（Hz）。
-     */
-    int refreshRate;
-} GLFWvidmode;
+    int width;              // 视频模式的宽度（屏幕坐标）
+    int height;             // 视频模式的高度（屏幕坐标）   
+    int refreshRate;        // 视频模式的刷新率（Hz）
+} sc_wsi_video_mode;
 
 /*! @brief 伽马斜坡。
  *
@@ -1203,21 +1184,13 @@ typedef struct GLFWvidmode
  *
  *  @ingroup monitor
  */
-typedef struct GLFWgammaramp
+typedef struct sc_wsi_gamma_ramp
 {
-    /*! An array of value describing the response of the red channel.
-     */
-    unsigned short* red;
-    /*! An array of value describing the response of the green channel.
-     */
-    unsigned short* green;
-    /*! An array of value describing the response of the blue channel.
-     */
-    unsigned short* blue;
-    /*! The number of elements in each array.
-     */
-    unsigned int size;
-} GLFWgammaramp;
+    unsigned short* red;    // 用来描述红色通道响应的值数组
+    unsigned short* green;  // 用来描述绿色通道响应的值数组
+    unsigned short* blue;   // 用来描述蓝色通道响应的值数组
+    unsigned int size;      // 每个数组中的元素数量
+} sc_wsi_gamma_ramp;
 
 /*! @brief 图像数据。
  *
@@ -1226,26 +1199,20 @@ typedef struct GLFWgammaramp
  *
  *  @ingroup window
  */
-typedef struct GLFWimage
+typedef struct sc_wsi_img
 {
-    /*! 图像宽度（像素）。
-     */
-    int width;
-    /*! 图像高度（像素）。
-     */
-    int height;
-    /*! 图像像素数据，从左到右、从上到下排列。
-     */
-    unsigned char* pixels;
-} GLFWimage;
+    int width;              // 图像宽度（像素）
+    int height;             // 图像高度（像素）
+    unsigned char* pixels;  // 图像像素数据，从左到右、从上到下排列
+} sc_wsi_img;
 
 /*************************************************************************
- * GLFW API functions
+ * WSI API functions
  *************************************************************************/
 
-/*! @brief 获取 GLFW 库的版本。
+/*! @brief 获取 WSI 库的版本。
  *
- *  此函数获取 GLFW 库的主版本号、次版本号和修订号。  It is intended for when you are using GLFW as a shared library and
+ *  此函数获取 WSI 库的主版本号、次版本号和修订号。  It is intended for when you are using WSI as a shared library and
  *  want to ensure that you are using the minimum required version.
  *
  *  Any or all of the version arguments may be `NULL`.
@@ -1267,19 +1234,19 @@ WSI_API void sc_wsi_get_version(int* major, int* minor, int* rev);
 /*! @brief Returns a string describing the compile-time configuration.
  *
  *  This function returns the compile-time generated
- *  [version string](@ref intro_version_string) of the GLFW library binary.  It describes
+ *  [version string](@ref intro_version_string) of the WSI library binary.  It describes
  *  the version, platforms, compiler and any platform or operating system specific
  *  compile-time options.  It should not be confused with the OpenGL or OpenGL ES version
  *  string, queried with `glGetString`.
  *
- *  __Do not use the version string__ to parse the GLFW library version.  The
+ *  __Do not use the version string__ to parse the WSI library version.  The
  *  @ref sc_wsi_get_version function provides the version of the running library
  *  binary in numerical format.
  *
  *  __Do not use the version string__ to parse what platforms are supported.  The @ref
  *  sc_wsi_platform_supported function lets you query platform support.
  *
- *  @return The ASCII encoded GLFW version string.
+ *  @return The ASCII encoded WSI version string.
  *
  *  @errors None.
  *
@@ -1293,10 +1260,10 @@ WSI_API void sc_wsi_get_version(int* major, int* minor, int* rev);
  */
 WSI_API const char* sc_wsi_get_version_string(void);
 
-/*! @brief 初始化 GLFW 库。
+/*! @brief 初始化 WSI 库。
  *
- *  此函数初始化 GLFW 库。  Before most GLFW functions can
- *  be used, GLFW must be initialized, and before an application terminates GLFW
+ *  此函数初始化 WSI 库。  Before most WSI functions can
+ *  be used, WSI must be initialized, and before an application terminates WSI
  *  should be terminated in order to free any resources allocated during or
  *  after initialization.
  *
@@ -1321,7 +1288,7 @@ WSI_API const char* sc_wsi_get_version_string(void);
  *  SC_COCOA_CHDIR_RESOURCES init hint.
  *
  *  @remark __macOS:__ This function will create the main menu and dock icon for the
- *  application.  If GLFW finds a `MainMenu.nib` it is loaded and assumed to
+ *  application.  If WSI finds a `MainMenu.nib` it is loaded and assumed to
  *  contain a menu bar.  Otherwise a minimal menu bar is created manually with
  *  common commands like Hide, Quit and About.  The About entry opens a minimal
  *  about dialog with information from the application's bundle.  The menu bar
@@ -1345,17 +1312,17 @@ WSI_API const char* sc_wsi_get_version_string(void);
  */
 WSI_API int sc_wsi_init(void);
 
-/*! @brief 终止 GLFW 库。
+/*! @brief 终止 WSI 库。
  *
  *  此函数销毁所有剩余窗口和光标，恢复任何修改过的伽马斜坡，并释放所有其他分配的资源。  Once this
  *  function is called, you must again call @ref sc_wsi_init successfully before
- *  you will be able to use most GLFW functions.
+ *  you will be able to use most WSI functions.
  *
- *  如果 GLFW 已成功初始化，应在应用程序退出前调用此函数。  If initialization fails, there is no need to
+ *  如果 WSI 已成功初始化，应在应用程序退出前调用此函数。  If initialization fails, there is no need to
  *  call this function, as it is called by @ref sc_wsi_init before it returns
  *  failure.
  *
- *  This function has no effect if GLFW is not initialized.
+ *  This function has no effect if WSI is not initialized.
  *
  *  @errors Possible errors include @ref SC_WSI_ERR_PLATFORM_ERROR.
  *
@@ -1374,10 +1341,10 @@ WSI_API void sc_wsi_terminate(void);
 
 /*! @brief 设置指定的初始化提示值。
  *
- *  此函数为 GLFW 的下一次初始化设置提示。
+ *  此函数为 WSI 的下一次初始化设置提示。
  *
- *  The values you set hints to are never reset by GLFW, but they only take
- *  effect during initialization.  Once GLFW has been initialized, any values
+ *  The values you set hints to are never reset by WSI, but they only take
+ *  effect during initialization.  Once WSI has been initialized, any values
  *  you set will be ignored until the library is terminated and initialized
  *  again.
  *
@@ -1413,7 +1380,7 @@ WSI_API void sc_wsi_init_hint(int hint, int value);
  *
  *  @errors None.
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI.  You
  *  should not free it yourself.  It is guaranteed to be valid only until the
  *  next error occurs or the library is terminated.
  *
@@ -1428,14 +1395,14 @@ WSI_API int sc_wsi_get_error(const char** description);
 /*! @brief 设置错误回调。
  *
  *  This function sets the error callback, which is called with an error code
- *  and a human-readable description each time a GLFW error occurs.
+ *  and a human-readable description each time a WSI error occurs.
  *
  *  The error code is set before the callback is called.  Calling @ref
  *  sc_wsi_get_error from the error callback will return the same value as the error
  *  code argument.
  *
  *  The error callback is called on the thread where the error occurred.  If you
- *  are using GLFW from multiple threads, your error callback needs to be
+ *  are using WSI from multiple threads, your error callback needs to be
  *  written accordingly.
  *
  *  Because the description string may have been generated specifically for that
@@ -1466,7 +1433,7 @@ WSI_API int sc_wsi_get_error(const char** description);
 WSI_API sc_error_cb sc_wsi_set_error_callback(sc_error_cb callback);
 
 /*************************************************************************
- * GLFW API functions
+ * WSI API functions
  *************************************************************************/
 
 /*! @brief 处理所有待处理事件。
@@ -1481,9 +1448,9 @@ WSI_API sc_error_cb sc_wsi_set_error_callback(sc_error_cb callback);
  *
  *  Do not assume that callbacks you set will _only_ be called in response to
  *  event processing functions like this one.  While it is necessary to poll for
- *  events, window systems that require GLFW to register callbacks of its own
- *  can pass events to GLFW in response to many window system function calls.
- *  GLFW will pass those events on to the application callbacks before
+ *  events, window systems that require WSI to register callbacks of its own
+ *  can pass events to WSI in response to many window system function calls.
+ *  WSI will pass those events on to the application callbacks before
  *  returning.
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
@@ -1516,9 +1483,9 @@ WSI_API void sc_wsi_poll_events(void);
  *
  *  Do not assume that callbacks you set will _only_ be called in response to
  *  event processing functions like this one.  While it is necessary to poll for
- *  events, window systems that require GLFW to register callbacks of its own
- *  can pass events to GLFW in response to many window system function calls.
- *  GLFW will pass those events on to the application callbacks before
+ *  events, window systems that require WSI to register callbacks of its own
+ *  can pass events to WSI in response to many window system function calls.
+ *  WSI will pass those events on to the application callbacks before
  *  returning.
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
@@ -1556,9 +1523,9 @@ WSI_API void sc_wsi_wait_events(void);
  *
  *  Do not assume that callbacks you set will _only_ be called in response to
  *  event processing functions like this one.  While it is necessary to poll for
- *  events, window systems that require GLFW to register callbacks of its own
- *  can pass events to GLFW in response to many window system function calls.
- *  GLFW will pass those events on to the application callbacks before
+ *  events, window systems that require WSI to register callbacks of its own
+ *  can pass events to WSI in response to many window system function calls.
+ *  WSI will pass those events on to the application callbacks before
  *  returning.
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
@@ -1587,7 +1554,7 @@ WSI_API void sc_wsi_wait_events_timeout(double timeout);
 WSI_API void sc_wsi_post_empty_event(void);
 
 /*************************************************************************
- * GLFW API functions
+ * WSI API functions
  *************************************************************************/
 
 /*! @brief 返回当前连接的监视器列表。
@@ -1602,7 +1569,7 @@ WSI_API void sc_wsi_post_empty_event(void);
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED。
  *
- *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned array is allocated and freed by WSI.  You
  *  should not free it yourself.  It is guaranteed to be valid only until the
  *  monitor configuration changes or the library is terminated.
  *
@@ -1747,7 +1714,7 @@ WSI_API void sc_wsi_monitor_get_content_scale(sc_monitor* monitor, float* xscale
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED。
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the specified monitor is
  *  disconnected or the library is terminated.
  *
@@ -1819,7 +1786,7 @@ WSI_API sc_monitor_cb sc_wsi_monitor_set_callback(sc_monitor_cb callback);
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
  *
- *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned array is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the specified monitor is
  *  disconnected, this function is called again for that monitor or the library
  *  is terminated.
@@ -1828,7 +1795,7 @@ WSI_API sc_monitor_cb sc_wsi_monitor_set_callback(sc_monitor_cb callback);
  *
  *  @ingroup monitor
  */
-WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_modes(sc_monitor* monitor, int* count);
+WSI_API const sc_wsi_video_mode* sc_wsi_monitor_get_video_modes(sc_monitor* monitor, int* count);
 
 /*! @brief 返回指定监视器的当前模式。
  *
@@ -1842,7 +1809,7 @@ WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_modes(sc_monitor* monitor, i
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
  *
- *  @pointer_lifetime The returned array is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned array is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the specified monitor is
  *  disconnected or the library is terminated.
  *
@@ -1850,7 +1817,7 @@ WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_modes(sc_monitor* monitor, i
  *
  *  @ingroup monitor
  */
-WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_mode(sc_monitor* monitor);
+WSI_API const sc_wsi_video_mode* sc_wsi_monitor_get_video_mode(sc_monitor* monitor);
 
 /*! @brief 生成伽马斜坡并设置到指定监视器。
  *
@@ -1864,7 +1831,7 @@ WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_mode(sc_monitor* monitor);
  *  the default (usually sRGB-like) behavior.
  *
  *  For gamma correct rendering with OpenGL or OpenGL ES, see the @ref
- *  GLFW_SRGB_CAPABLE hint.
+ *  WSI_SRGB_CAPABLE hint.
  *
  *  @param[in] monitor The monitor whose gamma ramp to set.
  *  @param[in] gamma The desired exponent.
@@ -1884,7 +1851,7 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* monitor, float gamma);
 /*! @brief 返回/设置指定监视器当前的伽马斜坡。
  *
  *  此函数返回/设置指定监视器的当前伽马斜坡。The
- *  original gamma ramp for that monitor is saved by GLFW the first time this
+ *  original gamma ramp for that monitor is saved by WSI the first time this
  *  function is called and is restored by @ref sc_wsi_terminate.
  *
  *  The software controlled gamma ramp is applied _in addition_ to the hardware
@@ -1893,7 +1860,7 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* monitor, float gamma);
  *  the default (usually sRGB-like) behavior.
  *
  *  For gamma correct rendering with OpenGL or OpenGL ES, see the @ref
- *  GLFW_SRGB_CAPABLE hint.
+ *  WSI_SRGB_CAPABLE hint.
  *
  *  @param[in] monitor 要查询的监视器。
  *  @return The current gamma ramp, or `NULL` if an
@@ -1907,7 +1874,7 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* monitor, float gamma);
  *  returning `NULL`.
  *
  *  @pointer_lifetime The returned structure and its arrays are allocated and
- *  freed by GLFW.  You should not free them yourself.  They are valid until the
+ *  freed by WSI.  You should not free them yourself.  They are valid until the
  *  specified monitor is disconnected, this function is called again for that
  *  monitor or the library is terminated.
  *
@@ -1923,11 +1890,11 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* monitor, float gamma);
  *
  *  @ingroup monitor
  */
-WSI_API const GLFWgammaramp* sc_wsi_monitor_get_gamma_ramp(sc_monitor* monitor);
-WSI_API void sc_wsi_monitor_set_gamma_ramp(sc_monitor* monitor, const GLFWgammaramp* ramp);
+WSI_API const sc_wsi_gamma_ramp* sc_wsi_monitor_get_gamma_ramp(sc_monitor* monitor);
+WSI_API void sc_wsi_monitor_set_gamma_ramp(sc_monitor* monitor, const sc_wsi_gamma_ramp* ramp);
 
 /*************************************************************************
- * GLFW API functions
+ * WSI API functions
  *************************************************************************/
 
 /*! @brief 重置所有窗口提示为默认值。
@@ -2071,7 +2038,7 @@ WSI_API void sc_wsi_window_hint_string(int hint, const char* value);
  *  @remark __Win32:__ Window creation will fail if the Microsoft GDI software
  *  OpenGL implementation is the only one available.
  *
- *  @remark __Win32:__ If the executable has an icon resource named `GLFW_ICON,` it
+ *  @remark __Win32:__ If the executable has an icon resource named `WSI_ICON,` it
  *  will be set as the initial icon for the window.  If no such icon is present,
  *  the `IDI_APPLICATION` icon will be used instead.  To set a different icon,
  *  see @ref sc_wsi_win_set_icon.
@@ -2081,11 +2048,11 @@ WSI_API void sc_wsi_window_hint_string(int hint, const char* value);
  *
  *  @remark __macOS:__ The OS only supports core profile contexts for OpenGL
  *  versions 3.2 and later.  Before creating an OpenGL context of version 3.2 or
- *  later you must set the [GLFW_OPENGL_PROFILE](@ref GLFW_OPENGL_PROFILE_hint)
+ *  later you must set the [WSI_OPENGL_PROFILE](@ref WSI_OPENGL_PROFILE_hint)
  *  hint accordingly.  OpenGL 3.0 and 3.1 contexts are not supported at all
  *  on macOS.
  *
- *  @remark __macOS:__ The GLFW window has no icon, as it is not a document
+ *  @remark __macOS:__ The WSI window has no icon, as it is not a document
  *  window, but the dock icon will be the same as the application bundle's icon.
  *  For more information on bundles, see the
  *  [Bundle Programming Guide][bundle-guide] in the Mac Developer Library.
@@ -2094,24 +2061,24 @@ WSI_API void sc_wsi_window_hint_string(int hint, const char* value);
  *
  *  @remark __macOS:__  The window frame will not be rendered at full resolution
  *  on Retina displays unless the
- *  [GLFW_SCALE_FRAMEBUFFER](@ref GLFW_SCALE_FRAMEBUFFER_hint)
+ *  [WSI_SCALE_FRAMEBUFFER](@ref WSI_SCALE_FRAMEBUFFER_hint)
  *  hint is `true` and the `NSHighResolutionCapable` key is enabled in the
  *  application bundle's `Info.plist`.  For more information, see
  *  [High Resolution Guidelines for OS X][hidpi-guide] in the Mac Developer
- *  Library.  The GLFW test and example programs use a custom `Info.plist`
+ *  Library.  The WSI test and example programs use a custom `Info.plist`
  *  template for this, which can be found as `CMake/Info.plist.in` in the source
  *  tree.
  *
  *  [hidpi-guide]: https://developer.apple.com/library/mac/documentation/GraphicsAnimation/Conceptual/HighResolutionOSX/Explained/Explained.html
  *
  *  @remark __macOS:__ When activating frame autosaving with
- *  [SC_COCOA_FRAME_NAME](@ref GLFW_COCOA_FRAME_NAME_hint), the specified
+ *  [SC_COCOA_FRAME_NAME](@ref WSI_COCOA_FRAME_NAME_hint), the specified
  *  window size and position may be overridden by previously saved values.
  *
- *  @remark __Wayland:__ GLFW uses [libdecor][] where available to create its window
+ *  @remark __Wayland:__ WSI uses [libdecor][] where available to create its window
  *  decorations.  This in turn uses server-side XDG decorations where available
  *  and provides high quality client-side decorations on compositors like GNOME.
- *  If both XDG decorations and libdecor are unavailable, GLFW falls back to
+ *  If both XDG decorations and libdecor are unavailable, WSI falls back to
  *  a very simple set of window decorations that only support moving, resizing
  *  and the window manager's right-click menu.
  *
@@ -2129,8 +2096,8 @@ WSI_API void sc_wsi_window_hint_string(int hint, const char* value);
  *  default be set to the window title passed to this function.  The instance
  *  part will use the contents of the `RESOURCE_NAME` environment variable, if
  *  present and not empty, or fall back to the window title.  Set the
- *  [SC_X11_CLASS_NAME](@ref GLFW_X11_CLASS_NAME_hint) and
- *  [SC_X11_INSTANCE_NAME](@ref GLFW_X11_INSTANCE_NAME_hint) window hints to
+ *  [SC_X11_CLASS_NAME](@ref WSI_X11_CLASS_NAME_hint) and
+ *  [SC_X11_INSTANCE_NAME](@ref WSI_X11_INSTANCE_NAME_hint) window hints to
  *  override this.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -2208,7 +2175,7 @@ WSI_API void sc_wsi_win_set_should_close(sc_window* window, int value);
  *  sc_wsi_win_create or @ref sc_wsi_win_set_title.  It does not include any
  *  additional text which may be appended by the platform or another program.
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the next call to @ref
  *  sc_wsi_win_get_title or @ref sc_wsi_win_set_title, or until the library is
  *  terminated.
@@ -2266,7 +2233,7 @@ WSI_API void sc_wsi_win_set_title(sc_window* window, const char* title);
  *
  *  @ingroup window
  */
-WSI_API void sc_wsi_win_set_icon(sc_window* window, int count, const GLFWimage* images);
+WSI_API void sc_wsi_win_set_icon(sc_window* window, int count, const sc_wsi_img* images);
 
 /*! @brief 获取/设置指定窗口内容区域的位置。
  *
@@ -2279,7 +2246,7 @@ WSI_API void sc_wsi_win_set_icon(sc_window* window, int count, const GLFWimage* 
  *  __Do not use this function__ to move an already visible window unless you
  *  have very good reasons for doing so, as it will confuse and annoy the user.
  *
- *  The window manager may put limits on what positions are allowed.  GLFW
+ *  The window manager may put limits on what positions are allowed.  WSI
  *  cannot and should not override these limits.
  *
  *  @param[in] window 要查询的窗口。
@@ -2318,7 +2285,7 @@ WSI_API void sc_wsi_win_set_pos(sc_window* window, int xpos, int ypos);
  *  If you wish to update the refresh rate of the desired video mode in addition
  *  to its resolution, see @ref sc_wsi_win_set_monitor.
  *
- *  The window manager may put limits on what sizes are allowed.  GLFW cannot
+ *  The window manager may put limits on what sizes are allowed.  WSI cannot
  *  and should not override these limits.
  *
  *  @param[in] window The window whose size to retrieve.
@@ -2499,7 +2466,7 @@ WSI_API void sc_wsi_win_set_opacity(sc_window* window, float opacity);
  *  此函数最小化指定窗口（如果之前处于恢复状态）。  If the window is already iconified, this function does
  *  nothing.
  *
- *  If the specified window is a full screen window, GLFW restores the original
+ *  If the specified window is a full screen window, WSI restores the original
  *  video mode of the monitor.  The window's desired video mode is set again
  *  when the window is restored.
  *
@@ -2558,7 +2525,7 @@ WSI_API void sc_wsi_win_maximize(sc_window* window);
  *  function does nothing.
  *
  *  By default, windowed mode windows are focused when shown
- *  Set the [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) window hint
+ *  Set the [SC_WIN_FOCUS_ON_SHOW](@ref WSI_FOCUS_ON_SHOW_hint) window hint
  *  to change this behavior for all newly created windows, or change the
  *  behavior for an existing window with @ref sc_wsi_win_set_attrib.
  *
@@ -2599,12 +2566,12 @@ WSI_API void sc_wsi_win_hide(sc_window* window);
  *  窗口应已可见且未最小化。
  *
  *  By default, both windowed and full screen mode windows are focused when
- *  initially created.  Set the [SC_WIN_FOCUSED](@ref GLFW_FOCUSED_hint) to
+ *  initially created.  Set the [SC_WIN_FOCUSED](@ref WSI_FOCUSED_hint) to
  *  disable this behavior.
  *
  *  Also by default, windowed mode windows are focused when shown
  *  with @ref sc_wsi_win_show. Set the
- *  [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_hint) to disable this behavior.
+ *  [SC_WIN_FOCUS_ON_SHOW](@ref WSI_FOCUS_ON_SHOW_hint) to disable this behavior.
  *
  *  __Do not use this function__ to steal focus from other applications unless
  *  you are certain that is what the user wants.  Focus stealing can be
@@ -2708,7 +2675,7 @@ WSI_API void sc_wsi_win_set_monitor(sc_window* window, sc_monitor* monitor,
  *  This function returns the value of an attribute of the specified window or
  *  its OpenGL or OpenGL ES context.
  *
- *  支持的属性有 [SC_WIN_DECORATED](@ref GLFW_DECORATED_attrib)、[SC_WIN_RESIZABLE](@ref GLFW_RESIZABLE_attrib)、[SC_WIN_FLOATING](@ref GLFW_FLOATING_attrib)、[SC_WIN_AUTO_ICONIFY](@ref GLFW_AUTO_ICONIFY_attrib) 和 [SC_WIN_FOCUS_ON_SHOW](@ref GLFW_FOCUS_ON_SHOW_attrib)。
+ *  支持的属性有 [SC_WIN_DECORATED](@ref WSI_DECORATED_attrib)、[SC_WIN_RESIZABLE](@ref WSI_RESIZABLE_attrib)、[SC_WIN_FLOATING](@ref WSI_FLOATING_attrib)、[SC_WIN_AUTO_ICONIFY](@ref WSI_AUTO_ICONIFY_attrib) 和 [SC_WIN_FOCUS_ON_SHOW](@ref WSI_FOCUS_ON_SHOW_attrib)。
  *  [SC_WIN_MOUSE_PASSTHROUGH](@ref SC_MOUSE_PASSTHROUGH_attrib)
  *
  *  Some of these attributes are ignored for full screen windows.  The new
@@ -2743,7 +2710,7 @@ WSI_API void sc_wsi_win_set_monitor(sc_window* window, sc_monitor* monitor,
  *  @remark Calling @ref sc_wsi_win_get_attrib will always return the latest
  *  value, even if that value is ignored by the current mode of the window.
  *
- *  @remark __Wayland:__ The [SC_WIN_FLOATING](@ref GLFW_FLOATING_attrib) window attribute is
+ *  @remark __Wayland:__ The [SC_WIN_FLOATING](@ref WSI_FLOATING_attrib) window attribute is
  *  not supported.  Setting this will emit @ref SC_WSI_ERR_FEATURE_UNAVAILABLE.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -2807,7 +2774,7 @@ WSI_API void* sc_wsi_win_get_native_display(sc_window* window);
 WSI_API void* sc_wsi_win_get_native_window(sc_window* window);
 
 /*************************************************************************
- * GLFW API functions
+ * WSI API functions
  *************************************************************************/
 
 
@@ -2877,7 +2844,7 @@ WSI_API void sc_wsi_input_set_mode(sc_window* window, int mode, int value);
 
 /*! @brief 返回是否支持原始鼠标运动。
  *
- *  此函数返回当前系统是否支持原始鼠标运动。  This status does not change after GLFW has been initialized so you
+ *  此函数返回当前系统是否支持原始鼠标运动。  This status does not change after WSI has been initialized so you
  *  only need to check this once.  If you attempt to enable raw motion on
  *  a system that does not support it, @ref SC_WSI_ERR_PLATFORM_ERROR will be emitted.
  *
@@ -2953,7 +2920,7 @@ WSI_API int sc_wsi_mouse_raw_motion_supported(void);
  *  @remark The contents of the returned string may change when a keyboard
  *  layout change event is received.
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the library is terminated.
  *
  *  @thread_safety 此函数必须在主线程中调用。
@@ -3073,7 +3040,7 @@ WSI_API void sc_wsi_get_cursor_pos(sc_window* window, double* xpos, double* ypos
  *  此函数设置光标相对于指定窗口内容区域左上角的位置（屏幕坐标）。  窗口必须有输入焦点。  If the window does not have
  *  input focus when this function is called, it fails silently.
  *
- *  __Do not use this function__ to implement things like camera controls.  GLFW
+ *  __Do not use this function__ to implement things like camera controls.  WSI
  *  already provides the `SC_CURSOR_DISABLED` cursor mode that hides the
  *  cursor, transparently re-centers it and provides unconstrained cursor
  *  motion.  See @ref sc_wsi_input_set_mode for more information.
@@ -3111,7 +3078,7 @@ WSI_API void sc_wsi_set_cursor_pos(sc_window* window, double xpos, double ypos);
  *  as packed sequential rows, starting from the top-left corner.
  *
  *  The cursor hotspot is specified in pixels, relative to the upper-left corner
- *  of the cursor image.  Like all other coordinate systems in GLFW, the X-axis
+ *  of the cursor image.  Like all other coordinate systems in WSI, the X-axis
  *  points to the right and the Y-axis points down.
  *
  *  @param[in] image 所需的光标图像。
@@ -3129,7 +3096,7 @@ WSI_API void sc_wsi_set_cursor_pos(sc_window* window, double xpos, double ypos);
  *
  *  @ingroup input
  */
-WSI_API sc_cursor* sc_wsi_create_cursor(const GLFWimage* image, int xhot, int yhot);
+WSI_API sc_cursor* sc_wsi_create_cursor(const sc_wsi_img* image, int xhot, int yhot);
 
 /*! @brief Creates a cursor with a standard shape.
  *
@@ -3225,11 +3192,11 @@ WSI_API void sc_wsi_cursor_set(sc_window* window, sc_cursor* cursor);
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
  *
  *  @remark __Win32:__ The clipboard on Windows has a single global lock for reading and
- *  writing.  GLFW tries to acquire it a few times, which is almost always enough.  If it
+ *  writing.  WSI tries to acquire it a few times, which is almost always enough.  If it
  *  cannot acquire the lock then this function emits @ref SC_WSI_ERR_PLATFORM_ERROR and returns.
  *  It is safe to try this multiple times.
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW.  You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI.  You
  *  should not free it yourself.  It is valid until the next call to @ref
  *  sc_wsi_clipboard_get_string or @ref sc_wsi_clipboard_set_string, or until the library
  *  is terminated.
@@ -3243,12 +3210,12 @@ WSI_API void sc_wsi_clipboard_set_string(sc_window* window, const char* string);
 
 /*! @brief Returns/Sets the time.
  *
- *  This function sets the current GLFW time, in seconds.  The value must be
+ *  This function sets the current WSI time, in seconds.  The value must be
  *  a positive finite number less than or equal to 18446744073.0, which is
  *  approximately 584.5 years.
  *
- *  This function returns the current GLFW time, in seconds.  Unless the time
- *  has been set using @ref sc_wsi_set_time it measures time elapsed since GLFW was
+ *  This function returns the current WSI time, in seconds.  Unless the time
+ *  has been set using @ref sc_wsi_set_time it measures time elapsed since WSI was
  *  initialized.
  *
  *  This function and @ref sc_wsi_set_time are helper functions on top of @ref
@@ -3263,7 +3230,7 @@ WSI_API void sc_wsi_clipboard_set_string(sc_window* window, const char* string);
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED。
  *
- *  @remark The upper limit of GLFW time is calculated as
+ *  @remark The upper limit of WSI time is calculated as
  *  floor((2<sup>64</sup> - 1) / 10<sup>9</sup>) and is due to implementations
  *  storing nanoseconds in 64 bits.  The limit may be increased in the future.
  *

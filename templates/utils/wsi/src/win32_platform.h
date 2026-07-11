@@ -22,12 +22,12 @@
 // but windows.h assumes no one will define APIENTRY before it does
 #undef APIENTRY
 
-// GLFW on Windows is Unicode only and does not work in MBCS mode
+// WSI on Windows is Unicode only and does not work in MBCS mode
 #ifndef UNICODE
  #define UNICODE
 #endif
 
-// GLFW requires Windows 7 or later
+// WSI requires Windows 7 or later
 #if WINVER < 0x0601
  #undef WINVER
  #define WINVER 0x0601
@@ -37,10 +37,10 @@
  #define _WIN32_WINNT 0x0601
 #endif
 
-// GLFW uses DirectInput8 interfaces
+// WSI uses DirectInput8 interfaces
 #define DIRECTINPUT_VERSION 0x0800
 
-// GLFW uses OEM cursor resources
+// WSI uses OEM cursor resources
 #ifndef OEMRESOURCE
 #define OEMRESOURCE
 #endif
@@ -172,10 +172,10 @@ typedef HRESULT (WINAPI * PFN_GetDpiForMonitor)(HMONITOR,MONITOR_DPI_TYPE,UINT*,
 typedef LONG (WINAPI * PFN_RtlVerifyVersionInfo)(OSVERSIONINFOEXW*,ULONG,ULONGLONG);
 #define RtlVerifyVersionInfo g_wsi.win32.ntdll.RtlVerifyVersionInfo_
 
-#define GLFW_WIN32_WINDOW_STATE         win32_window_t  win32;
-#define GLFW_WIN32_LIBRARY_WINDOW_STATE win32_library_t win32;
-#define GLFW_WIN32_MONITOR_STATE        win32_monitor_t win32;
-#define GLFW_WIN32_CURSOR_STATE         win32_cursor_t  win32;
+#define WSI_WIN32_WINDOW_STATE         win32_window_t  win32;
+#define WSI_WIN32_LIBRARY_WINDOW_STATE win32_library_t win32;
+#define WSI_WIN32_MONITOR_STATE        win32_monitor_t win32;
+#define WSI_WIN32_CURSOR_STATE         win32_cursor_t  win32;
 
 // Win32-specific per-window data
 //

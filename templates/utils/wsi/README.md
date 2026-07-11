@@ -238,7 +238,7 @@ Debian/Ubuntu 推荐安装：
 
 ### 根因
 
-上游 GLFW 的回退装饰实现是：**一个共享的 1×1 灰色 wl_shm buffer**，
+上游 WSI 的回退装饰实现是：**一个共享的 1×1 灰色 wl_shm buffer**，
 每条边一个子表面，通过 `wp_viewport_set_destination()` 把 1×1 放大到
 边框的逻辑尺寸（例如 1×1 → 488×4）。
 

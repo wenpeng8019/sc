@@ -85,7 +85,7 @@ static void createMenuBar(void)
         if (progname && *progname)
             appName = @(*progname);
         else
-            appName = @"GLFW Application";
+            appName = @"WSI Application";
     }
 
     NSMenu* bar = [[NSMenu alloc] init];
@@ -375,11 +375,11 @@ static bool modeIsGood(CGDisplayModeRef mode)
     return true;
 }
 
-// Convert Core Graphics display mode to GLFW video mode
-static GLFWvidmode vidmodeFromCGDisplayMode(CGDisplayModeRef mode,
+// Convert Core Graphics display mode to WSI video mode
+static sc_wsi_video_mode vidmodeFromCGDisplayMode(CGDisplayModeRef mode,
                                             double fallbackRefreshRate)
 {
-    GLFWvidmode result;
+    sc_wsi_video_mode result;
     result.width = (int) CGDisplayModeGetWidth(mode);
     result.height = (int) CGDisplayModeGetHeight(mode);
     result.refreshRate = (int) round(CGDisplayModeGetRefreshRate(mode));
@@ -672,7 +672,7 @@ static void cocoa_get_monitor_work_area(monitor_st* monitor,
     } // autoreleasepool
 }
 
-static GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count)
+static sc_wsi_video_mode* cocoa_get_video_modes(monitor_st* monitor, int* count)
 {
     @autoreleasepool {
 
@@ -680,7 +680,7 @@ static GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count)
 
     CFArrayRef modes = CGDisplayCopyAllDisplayModes(monitor->ns.displayID, NULL);
     const CFIndex found = CFArrayGetCount(modes);
-    GLFWvidmode* result = wsi_calloc(found, sizeof(GLFWvidmode));
+    sc_wsi_video_mode* result = wsi_calloc(found, sizeof(sc_wsi_video_mode));
 
     for (CFIndex i = 0;  i < found;  i++)
     {
@@ -688,7 +688,7 @@ static GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count)
         if (!modeIsGood(dm))
             continue;
 
-        const GLFWvidmode mode =
+        const sc_wsi_video_mode mode =
             vidmodeFromCGDisplayMode(dm, monitor->ns.fallbackRefreshRate);
         CFIndex j;
 
@@ -712,7 +712,7 @@ static GLFWvidmode* cocoa_get_video_modes(monitor_st* monitor, int* count)
     } // autoreleasepool
 }
 
-static bool cocoa_get_video_mode(monitor_st* monitor, GLFWvidmode *mode)
+static bool cocoa_get_video_mode(monitor_st* monitor, sc_wsi_video_mode *mode)
 {
     @autoreleasepool {
 
@@ -731,12 +731,12 @@ static bool cocoa_get_video_mode(monitor_st* monitor, GLFWvidmode *mode)
 }
 
 // Change the current video mode
-static void cocoa_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired)
+static void cocoa_set_video_mode(monitor_st* monitor, const sc_wsi_video_mode* desired)
 {
-    GLFWvidmode current;
+    sc_wsi_video_mode current;
     cocoa_get_video_mode(monitor, &current);
 
-    const GLFWvidmode* best = wsi_choose_video_mode(monitor, desired);
+    const sc_wsi_video_mode* best = wsi_choose_video_mode(monitor, desired);
     if (wsi_compare_video_mode(&current, best) == 0)
         return;
 
@@ -750,7 +750,7 @@ static void cocoa_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired
         if (!modeIsGood(dm))
             continue;
 
-        const GLFWvidmode mode =
+        const sc_wsi_video_mode mode =
             vidmodeFromCGDisplayMode(dm, monitor->ns.fallbackRefreshRate);
         if (wsi_compare_video_mode(best, &mode) == 0)
         {
@@ -772,7 +772,7 @@ static void cocoa_set_video_mode(monitor_st* monitor, const GLFWvidmode* desired
     CFRelease(modes);
 }
 
-static bool cocoa_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
+static bool cocoa_get_gamma_ramp(monitor_st* monitor, sc_wsi_gamma_ramp* ramp)
 {
     @autoreleasepool {
 
@@ -801,7 +801,7 @@ static bool cocoa_get_gamma_ramp(monitor_st* monitor, GLFWgammaramp* ramp)
     } // autoreleasepool
 }
 
-static void cocoa_set_gamma_ramp(monitor_st* monitor, const GLFWgammaramp* ramp)
+static void cocoa_set_gamma_ramp(monitor_st* monitor, const sc_wsi_gamma_ramp* ramp)
 {
     @autoreleasepool {
 
@@ -1358,7 +1358,7 @@ static void cocoa_set_window_title(window_st* window, const char* title)
     } // autoreleasepool
 }
 
-static void cocoa_set_window_icon(window_st* window, int count, const GLFWimage* images)
+static void cocoa_set_window_icon(window_st* window, int count, const sc_wsi_img* images)
 {
     impl_on_error(SC_WSI_ERR_FEATURE_UNAVAILABLE,
                     "Cocoa: Regular windows do not have icons on macOS");
@@ -1785,7 +1785,7 @@ static bool cocoa_create_standard_cursor(cursor_st* cursor, int shape)
     } // autoreleasepool
 }
 
-static bool cocoa_create_cursor(cursor_st* cursor, const GLFWimage* image, int xhot, int yhot)
+static bool cocoa_create_cursor(cursor_st* cursor, const sc_wsi_img* image, int xhot, int yhot)
 {
     @autoreleasepool {
 
@@ -2085,7 +2085,7 @@ static void updateCursorMode(window_st* window)
         updateCursorImage(window);
 }
 
-// Translates macOS key modifiers into GLFW ones
+// Translates macOS key modifiers into WSI ones
 static int translateFlags(NSUInteger flags)
 {
     int mods = 0;
@@ -2104,7 +2104,7 @@ static int translateFlags(NSUInteger flags)
     return mods;
 }
 
-// Translates a macOS keycode to a GLFW keycode
+// Translates a macOS keycode to a WSI keycode
 static int translateKey(unsigned int key)
 {
     if (key >= sizeof(g_wsi.ns.keycodes) / sizeof(g_wsi.ns.keycodes[0]))
@@ -2113,7 +2113,7 @@ static int translateKey(unsigned int key)
     return g_wsi.ns.keycodes[key];
 }
 
-// Translate a GLFW keycode to a Cocoa modifier flag
+// Translate a WSI keycode to a Cocoa modifier flag
 static NSUInteger translateKeyToModifierFlag(int key)
 {
     switch (key)
@@ -2648,10 +2648,10 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
 @end
 
 
-@interface GLFWWindow : NSWindow {}
+@interface WSIWindow : NSWindow {}
 @end
 
-@implementation GLFWWindow
+@implementation WSIWindow
 - (BOOL)canBecomeKeyWindow
 {
     // Required for NSWindowStyleMaskBorderless windows
@@ -2680,7 +2680,7 @@ static bool createNativeWindow(window_st* window, const wnd_config_st* wndconfig
 
     if (window->monitor)
     {
-        GLFWvidmode mode;
+        sc_wsi_video_mode mode;
         int xpos, ypos;
 
         cocoa_get_video_mode(window->monitor, &mode);
@@ -2715,7 +2715,7 @@ static bool createNativeWindow(window_st* window, const wnd_config_st* wndconfig
             styleMask |= NSWindowStyleMaskResizable;
     }
 
-    window->ns.object = [[GLFWWindow alloc]
+    window->ns.object = [[WSIWindow alloc]
         initWithContentRect:contentRect
                   styleMask:styleMask
                     backing:NSBackingStoreBuffered

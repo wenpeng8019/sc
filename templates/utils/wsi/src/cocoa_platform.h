@@ -42,10 +42,10 @@ typedef void* id;
  #define NSPasteboardTypeURL NSURLPboardType
 #endif
 
-#define GLFW_COCOA_WINDOW_STATE         ns_window_t  ns;
-#define GLFW_COCOA_LIBRARY_WINDOW_STATE ns_library_t ns;
-#define GLFW_COCOA_MONITOR_STATE        ns_monitor_t ns;
-#define GLFW_COCOA_CURSOR_STATE         ns_cursor_t  ns;
+#define WSI_COCOA_WINDOW_STATE         ns_window_t  ns;
+#define WSI_COCOA_LIBRARY_WINDOW_STATE ns_library_t ns;
+#define WSI_COCOA_MONITOR_STATE        ns_monitor_t ns;
+#define WSI_COCOA_CURSOR_STATE         ns_cursor_t  ns;
 
 // HIToolbox.framework pointer typedefs
 #define kTISPropertyUnicodeKeyLayoutData g_wsi.ns.tis.kPropertyUnicodeKeyLayoutData

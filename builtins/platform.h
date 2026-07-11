@@ -237,6 +237,48 @@
 #define SC_API(prefix) SC_API_FROM_FLAGS(SC_API_SHARED_FLAG(prefix), SC_API_EXPORTS_FLAG(prefix))
 
 ///////////////////////////////////////////////////////////////////////////////
+// 动态库加载（运行时按名装载共享库、取符号地址、卸载）
+///////////////////////////////////////////////////////////////////////////////
+// 跨平台封装 POSIX 的 dlopen/dlsym/dlclose ↔ Win32 的 LoadLibrary/GetProcAddress/
+// FreeLibrary。各处运行时装载（wsi 按需装载 X11/Wayland 扩展库、gpu 的 Vulkan/GL
+// 加载器等）统一经此，不再各自 #ifdef。
+//   - 模块句柄为不透明 void*（NULL 表示失败）；
+//   - 符号取回为通用函数指针 P_dlproc，调用方按目标原型强转（ISO C 保证函数指针
+//     互转、转回原型后调用合法；POSIX/Win32 亦保证 dlsym/GetProcAddress 返回值
+//     可用作函数指针）。
+//   - <windows.h> 已由上方平台基础头在 P_WIN 下带入；此处补 POSIX 的 <dlfcn.h>。
+
+typedef void (*P_dlproc)(void);
+
+#if !P_WIN
+#   include <dlfcn.h>
+#endif
+
+static inline void* P_dl_load(const char* path) {
+#if P_WIN
+    return (void*) LoadLibraryA(path);
+#else
+    return dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+#endif
+}
+
+static inline void P_dl_unload(void* module) {
+#if P_WIN
+    FreeLibrary((HMODULE) module);
+#else
+    dlclose(module);
+#endif
+}
+
+static inline P_dlproc P_dl_get_proc(void* module, const char* symbol) {
+#if P_WIN
+    return (P_dlproc) GetProcAddress((HMODULE) module, symbol);
+#else
+    return (P_dlproc) dlsym(module, symbol);
+#endif
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // 启动 / 退出钩子（constructor / destructor）
 ///////////////////////////////////////////////////////////////////////////////
 

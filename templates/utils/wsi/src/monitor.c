@@ -13,8 +13,8 @@
 //
 static int compareVideoModes(const void* fp, const void* sp)
 {
-    const GLFWvidmode* fm = fp;
-    const GLFWvidmode* sm = sp;
+    const sc_wsi_video_mode* fm = fp;
+    const sc_wsi_video_mode* sm = sp;
     const int farea = fm->width * fm->height;
     const int sarea = sm->width * sm->height;
 
@@ -35,7 +35,7 @@ static int compareVideoModes(const void* fp, const void* sp)
 static bool refreshVideoModes(monitor_st* monitor)
 {
     int modeCount;
-    GLFWvidmode* modes;
+    sc_wsi_video_mode* modes;
 
     if (monitor->modes)
         return true;
@@ -44,7 +44,7 @@ static bool refreshVideoModes(monitor_st* monitor)
     if (!modes)
         return false;
 
-    qsort(modes, modeCount, sizeof(GLFWvidmode), compareVideoModes);
+    qsort(modes, modeCount, sizeof(sc_wsi_video_mode), compareVideoModes);
 
     wsi_free(monitor->modes);
     monitor->modes = modes;
@@ -55,7 +55,7 @@ static bool refreshVideoModes(monitor_st* monitor)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                         GLFW event API                       //////
+//////                         WSI event API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 // Notifies shared code of a monitor connection or disconnection
@@ -131,7 +131,7 @@ void impl_on_monitor_window(monitor_st* monitor, window_st* window)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                       GLFW internal API                      //////
+//////                       WSI internal API                      //////
 //////////////////////////////////////////////////////////////////////////
 
 // Allocates and returns a monitor object with the specified name and dimensions
@@ -165,7 +165,7 @@ void wsi_free_monitor(monitor_st* monitor)
 
 // Allocates red, green and blue value arrays of the specified size
 //
-void wsi_alloc_gamma_arrays(GLFWgammaramp* ramp, unsigned int size)
+void wsi_alloc_gamma_arrays(sc_wsi_gamma_ramp* ramp, unsigned int size)
 {
     ramp->red = wsi_calloc(size, sizeof(unsigned short));
     ramp->green = wsi_calloc(size, sizeof(unsigned short));
@@ -175,25 +175,25 @@ void wsi_alloc_gamma_arrays(GLFWgammaramp* ramp, unsigned int size)
 
 // Frees the red, green and blue value arrays and clears the struct
 //
-void wsi_free_gamma_arrays(GLFWgammaramp* ramp)
+void wsi_free_gamma_arrays(sc_wsi_gamma_ramp* ramp)
 {
     wsi_free(ramp->red);
     wsi_free(ramp->green);
     wsi_free(ramp->blue);
 
-    memset(ramp, 0, sizeof(GLFWgammaramp));
+    memset(ramp, 0, sizeof(sc_wsi_gamma_ramp));
 }
 
 // Chooses the video mode most closely matching the desired one
 //
-const GLFWvidmode* wsi_choose_video_mode(monitor_st* monitor,
-                                        const GLFWvidmode* desired)
+const sc_wsi_video_mode* wsi_choose_video_mode(monitor_st* monitor,
+                                        const sc_wsi_video_mode* desired)
 {
     int i;
     unsigned int sizeDiff, leastSizeDiff = UINT_MAX;
     unsigned int rateDiff, leastRateDiff = UINT_MAX;
-    const GLFWvidmode* current;
-    const GLFWvidmode* closest = NULL;
+    const sc_wsi_video_mode* current;
+    const sc_wsi_video_mode* closest = NULL;
 
     if (!refreshVideoModes(monitor))
         return NULL;
@@ -224,9 +224,9 @@ const GLFWvidmode* wsi_choose_video_mode(monitor_st* monitor,
     return closest;
 }
 
-// Performs lexical comparison between two @ref GLFWvidmode structures
+// Performs lexical comparison between two @ref sc_wsi_video_mode structures
 //
-int wsi_compare_video_mode(const GLFWvidmode* fm, const GLFWvidmode* sm)
+int wsi_compare_video_mode(const sc_wsi_video_mode* fm, const sc_wsi_video_mode* sm)
 {
     return compareVideoModes(fm, sm);
 }
@@ -254,7 +254,7 @@ void wsi_split_bpp(int bpp, int* red, int* green, int* blue)
 
 
 //////////////////////////////////////////////////////////////////////////
-//////                        GLFW public API                       //////
+//////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
 WSI_API sc_monitor** sc_wsi_get_monitors(int* count)
@@ -417,7 +417,7 @@ WSI_API sc_monitor_cb sc_wsi_monitor_set_callback(sc_monitor_cb cbfun)
     return t;
 }
 
-WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_modes(sc_monitor* handle, int* count)
+WSI_API const sc_wsi_video_mode* sc_wsi_monitor_get_video_modes(sc_monitor* handle, int* count)
 {
     assert(count != NULL);
 
@@ -438,7 +438,7 @@ WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_modes(sc_monitor* handle, in
     return monitor->modes;
 }
 
-WSI_API const GLFWvidmode* sc_wsi_monitor_get_video_mode(sc_monitor* handle)
+WSI_API const sc_wsi_video_mode* sc_wsi_monitor_get_video_mode(sc_monitor* handle)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
@@ -458,8 +458,8 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* handle, float gamma)
 {
     unsigned int i;
     unsigned short* values;
-    GLFWgammaramp ramp;
-    const GLFWgammaramp* original;
+    sc_wsi_gamma_ramp ramp;
+    const sc_wsi_gamma_ramp* original;
 
     assert(gamma > 0.f);
     assert(isfinite(gamma));
@@ -506,7 +506,7 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* handle, float gamma)
     wsi_free(values);
 }
 
-WSI_API const GLFWgammaramp* sc_wsi_monitor_get_gamma_ramp(sc_monitor* handle)
+WSI_API const sc_wsi_gamma_ramp* sc_wsi_monitor_get_gamma_ramp(sc_monitor* handle)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
@@ -523,7 +523,7 @@ WSI_API const GLFWgammaramp* sc_wsi_monitor_get_gamma_ramp(sc_monitor* handle)
     return &monitor->currentRamp;
 }
 
-WSI_API void sc_wsi_monitor_set_gamma_ramp(sc_monitor* handle, const GLFWgammaramp* ramp)
+WSI_API void sc_wsi_monitor_set_gamma_ramp(sc_monitor* handle, const sc_wsi_gamma_ramp* ramp)
 {
     assert(ramp != NULL);
     assert(ramp->size > 0);

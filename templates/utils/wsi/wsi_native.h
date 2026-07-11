@@ -47,7 +47,7 @@ extern "C" {
  *  @code
  *  #define WSI_EXPOSE_NATIVE_WIN32
  *  #define WSI_NATIVE_INCLUDE_NONE
- *  #include <GLFW/glfw3native.h>
+ *  #include <wsi_native.h>
  *  @endcode
  */
 
@@ -63,9 +63,9 @@ extern "C" {
    * example to allow applications to correctly declare a GL_KHR_debug callback)
    * but windows.h assumes no one will define APIENTRY before it does
    */
-  #if defined(GLFW_APIENTRY_DEFINED)
+  #if defined(WSI_APIENTRY_DEFINED)
    #undef APIENTRY
-   #undef GLFW_APIENTRY_DEFINED
+   #undef WSI_APIENTRY_DEFINED
   #endif
   #include <windows.h>
  #endif
@@ -214,9 +214,9 @@ WSI_API id wsi_get_cocoa_view(sc_window* window);
 
 
 #if defined(WSI_EXPOSE_NATIVE_X11)
-/*! @brief Returns the `Display` used by GLFW.
+/*! @brief Returns the `Display` used by WSI.
  *
- *  @return The `Display` used by GLFW, or `NULL` if an
+ *  @return The `Display` used by WSI, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
  *  @errors Possible errors include @ref SC_WSI_ERR_NOT_INITIALIZED and @ref
@@ -315,7 +315,7 @@ WSI_API void wsi_set_x11_selection_string(const char* string);
  *  @errors Possible errors include @ref SC_WSI_ERR_NOT_INITIALIZED, @ref
  *  SC_WSI_ERR_PLATFORM_UNAVAILABLE and @ref SC_WSI_ERR_PLATFORM_ERROR.
  *
- *  @pointer_lifetime The returned string is allocated and freed by GLFW. You
+ *  @pointer_lifetime The returned string is allocated and freed by WSI. You
  *  should not free it yourself. It is valid until the next call to @ref
  *  wsi_get_x11_selection_string or @ref wsi_set_x11_selection_string, or until the
  *  library is terminated.
@@ -335,9 +335,9 @@ WSI_API const char* wsi_get_x11_selection_string(void);
 
 
 #if defined(WSI_EXPOSE_NATIVE_WAYLAND)
-/*! @brief Returns the `struct wl_display*` used by GLFW.
+/*! @brief Returns the `struct wl_display*` used by WSI.
  *
- *  @return The `struct wl_display*` used by GLFW, or `NULL` if an
+ *  @return The `struct wl_display*` used by WSI, or `NULL` if an
  *  [error](@ref error_handling) occurred.
  *
  *  @errors Possible errors include @ref SC_WSI_ERR_NOT_INITIALIZED and @ref
