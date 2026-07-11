@@ -15,13 +15,13 @@
 # 用法：
 #   inc wsi.sc
 #   fnc main: i4
-#       if wsi_init() == 0
+#       if wsi_app_startup() == 0
 #           return 1
 #       var w: & = wsi_win_create(640, 480, "hello", nil, nil)
 #       while wsi_win_get_should_close(w) == 0
-#           wsi_wait_events()
+#           wsi_loop_wait(0)
 #       wsi_win_destroy(w)
-#       wsi_terminate()
+#       wsi_app_cleanup()
 #       return 0
 
 inc wsi.h
@@ -34,21 +34,33 @@ add libwsi.a
 #   同样以 ::sc_error_cb / ::sc_monitor_cb 引用。void* 用户数据映射裸指针 &；
 #   出参基础类型用 i4& / f4& / f8&；char** 用 const char&&。NULL 传 nil。
 
-# ---------------- 版本 / 初始化 / 错误 ----------------
+# ---------------- 版本 / 平台 / 错误 ----------------
 @fnc wsi_get_version:: major: i4&, minor: i4&, rev: i4&   # 运行时版本
 @fnc wsi_get_version_string:: const char&                 # 版本描述串
-@fnc wsi_init:: i4                                        # 初始化（成功非 0）
-@fnc wsi_terminate::                                      # 反初始化，释放全部资源
 @fnc wsi_get_platform:: i4                                # 当前已选择平台（SC_PLATFORM_*）
-@fnc wsi_init_hint:: hint: i4, value: i4                  # 初始化前设置 hint
 @fnc wsi_get_error:: i4, description: const char&&        # 取最近错误码 + 描述
 @fnc wsi_set_error_callback:: ::sc_error_cb, callback: ::sc_error_cb   # 设置错误回调，返回旧回调
 
-# ---------------- 事件 ----------------
-@fnc wsi_poll_events::                                    # 处理挂起事件后立即返回
-@fnc wsi_wait_events::                                    # 阻塞直到有事件
-@fnc wsi_wait_events_timeout:: timeout: f8                # 阻塞至有事件或超时（秒）
-@fnc wsi_post_empty_event::                               # 唤醒 wait_events
+# ---------------- 程序 run ----------------
+# 桌面的 while 主循环在移动端由系统框架接管，app 逻辑改以回调交付。移动端主窗口恒
+# 全屏、由 wsi 自建（app 不再调 wsi_win_create），经 main_window_created 交付句柄（恒非
+# nil，仅创建时回调）；after_startup 子系统就绪后回调一次，on_frame 每帧回调，
+# before_cleanup 终止前回调。窗口丢失/销毁经 delegate 的 destroy 回调（见 wsi_win_set_callback）。
+# 表面调用形式跨平台一致，底层 iOS = 自有主循环（UIApplicationMain 阻塞主线程），
+# Android = 事件注册（ANativeWindow/AChoreographer 后进入渲染线程循环），桌面 = 通用托管循环。
+@fnc wsi_app_run:: i4
+    after_startup:       ::sc_wsi_app_cb
+    main_window_created: ::sc_wsi_window_cb
+    on_frame:            ::sc_wsi_app_cb
+    before_cleanup:      ::sc_wsi_app_cb
+
+# ---------------- 程序 loop ----------------
+@fnc wsi_app_hint:: hint: i4, value: i4                   # 初始化前设置 hint
+@fnc wsi_app_startup:: i4                                 # 启动子系统（成功非 0）
+@fnc wsi_app_cleanup::                                    # 收尾，释放全部资源
+@fnc wsi_loop_poll::                                      # 处理挂起事件后立即返回
+@fnc wsi_loop_wait:: timeout: f8                          # timeout=0 阻塞直到有事件；>0 至多阻塞 timeout 秒
+@fnc wsi_loop_pulse::                                     # 唤醒 wait_events
 
 # ---------------- 显示器（monitor）----------------
 @fnc wsi_get_monitors:: ::sc_monitor&&, count: i4&        # 显示器数组 sc_monitor**
@@ -73,6 +85,12 @@ add libwsi.a
 @fnc wsi_window_hint_string:: hint: i4, value: const char&
 
 # ---------------- 窗口生命周期 / 属性 ----------------
+
+@fnc wsi_app_main_window:: ::sc_window&                    # 当前主窗口（未创建返回 nil）
+# 窗口事件 delegate：按指针传回调表（sc_wsi_win_cb），承接 close/size/touch/suspend/
+#   resume/destroy 等。原生窗口/表面丢失经 destroy 交付（承接原 on_main_window(nil) 语义）。
+@fnc wsi_win_set_callback:: i4, window: ::sc_window&, cb: const ::sc_wsi_win_cb&
+
 @fnc wsi_win_create:: ::sc_window&, width: i4, height: i4, title: const char&, monitor: ::sc_monitor&, share: ::sc_window&
 @fnc wsi_win_destroy:: window: ::sc_window&
 @fnc wsi_win_get_should_close:: i4, window: ::sc_window&
@@ -106,9 +124,6 @@ add libwsi.a
 @fnc wsi_win_set_user_data:: window: ::sc_window&, pointer: &
 @fnc wsi_win_get_native_display:: &, window: ::sc_window&
 @fnc wsi_win_get_native_window:: &, window: ::sc_window&
-
-# 注：sc_wsi_win_set_callback(sc_window*, sc_wsi_win_cb) 按值传结构体，
-#     sc FFI 无法表达（需 C 侧胶水填充回调表），故此处不导出。
 
 # ---------------- 输入 ----------------
 @fnc wsi_input_get_mode:: i4, window: ::sc_window&, mode: i4

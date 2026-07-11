@@ -16,14 +16,14 @@ inc io.sc
 inc ../utils/wsi/wsi.sc
 
 fnc main: i4
-    if wsi_init() == 0
-        print "wsi_init 失败\n"
+    if wsi_app_startup() == 0
+        print "wsi_app_startup 失败\n"
         return 1
 
     var win: ::sc_window& = wsi_win_create(640, 480, "sc · wsi CI demo", nil, nil)
     if win == nil
         print "窗口创建失败\n"
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
 
     wsi_win_show(win)
@@ -33,13 +33,13 @@ fnc main: i4
     # 期间若用户/CI 主动关窗则提前结束。
     var i: i4 = 0
     while i < 120
-        wsi_wait_events_timeout(0.1)
+        wsi_loop_wait(0.1)
         if wsi_win_get_should_close(win) != 0
             i = 120
         else
             i = i + 1
 
     wsi_win_destroy(win)
-    wsi_terminate()
+    wsi_app_cleanup()
     print "WSI_CI_DONE\n"
     return 0

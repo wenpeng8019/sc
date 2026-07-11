@@ -312,6 +312,11 @@ void impl_on_mouse_click(window_st* window, int button, int action, int mods);
 void impl_on_scroll(window_st* window, double xoffset, double yoffset);
 void impl_on_drop(window_st* window, int count, const char** names);
 
+// 移动平台事件（触摸 + 生命周期）；桌面后端不调用
+void impl_on_touch(window_st* window, int phase, int count, const sc_wsi_touchpoint* touches);
+void impl_on_suspend(window_st* window);
+void impl_on_resume(window_st* window);
+
 void impl_on_win_monitor(window_st* window, monitor_st* monitor);
 void impl_on_monitor(monitor_st* monitor, int action, int placement);
 void impl_on_monitor_window(monitor_st* monitor, window_st* window);
@@ -335,6 +340,11 @@ const sc_wsi_video_mode* wsi_choose_video_mode(monitor_st* monitor,
 int wsi_compare_video_mode(const sc_wsi_video_mode* first, const sc_wsi_video_mode* second);
 monitor_st* wsi_alloc_monitor(const char* name, int widthMM, int heightMM);
 void wsi_free_monitor(monitor_st* monitor);
+
+// 分配并登记一个 window_st（校验 + calloc + 入窗口表 + 默认字段），尚未调用平台
+// createWindow。供 sc_wsi_win_create 使用；亦供移动端后端内部自建主窗口（不经公共
+// API、不暴露建窗）时直接取对象。失败返回 NULL（已 impl_on_error）。
+window_st* wsi_alloc_window(int width, int height, const char* title);
 
 void wsi_alloc_gamma_arrays(sc_wsi_gamma_ramp* ramp, unsigned int size);
 void wsi_free_gamma_arrays(sc_wsi_gamma_ramp* ramp);

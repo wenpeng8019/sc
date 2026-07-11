@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android 清单 —— NativeActivity（窗口/帧）+ 自定义 Application（进程级 init）。
+
+  两个 native 锚点，对应三层生命周期模型：
+    * <application android:name="com.sc.wsi.ScApplication">
+        wsi 的进程级垫片（tier A）。Application.onCreate = 每进程一次、早于任何
+        Activity、最可靠的 native init 落点；经自定义 JNI（ScApplication native
+        方法 → android_jni.c）触发 sc_wsi_app_startup；onTrimMemory → 建议保存/挂起。
+        它无窗口，不能取代 NativeActivity 做渲染——二者并存。
+    * <activity android:name="android.app.NativeActivity">
+        框架自带 Java 外壳（tier B/C：窗口 + 帧）。meta-data android.app.lib_name
+        = "hello" → 框架经 JNI 加载 lib/<abi>/libhello.so 并调 ANativeActivity_onCreate。
+    * <meta-data com.sc.wsi.lib_name>：供 ScApplication.resolveLibName 解析要加载的
+      app .so 名（与 activity 的 lib_name 一致），未设则回落 "hello"。
+    * android:hasCode="true"：引入 ScApplication 后 APK 含 classes.dex（极小），
+      不再是纯 native app（对照早期 hasCode="false" 的无 dex 形态）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.sc.helloandroid"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="hello-android"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <!-- ScApplication 据此解析要 loadLibrary 的 app .so 名（须与下方 activity 的
+             android.app.lib_name 及 build.sh 的 LIB=hello 一致）-->
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="hello"/>
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="hello-android"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <!-- 与 build.sh 的 LIB=hello 一致 → libhello.so；ANativeActivity_onCreate 由 wsi 后端提供 -->
+            <meta-data android:name="android.app.lib_name"
+                       android:value="hello"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

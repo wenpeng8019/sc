@@ -4860,7 +4860,7 @@ void x11_poll_events(void)
         x11_get_window_size(window, &width, &height);
 
         // NOTE: Re-center the cursor only if it has moved since the last call,
-        //       to avoid breaking sc_wsi_wait_events with MotionNotify
+        //       to avoid breaking sc_wsi_loop_wait with MotionNotify
         if (window->x11.lastCursorPosX != width / 2 ||
             window->x11.lastCursorPosY != height / 2)
         {

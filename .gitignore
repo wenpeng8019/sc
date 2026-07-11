@@ -44,6 +44,18 @@ templates/demo/spc_model/tiny.mlmodelc/
 templates/demo/spc_model/tiny.mlpackage/
 templates/demo/spc_model/tiny_ref.npy
 
+# app 脚手架构建产物（各平台 build/ 目录：工具链包装、可执行、.app、日志、截图）
+templates/app/*/build/
+templates/app/hello-win/hello.exe
+
+# hello-android@gradle：gradle 工程产物（嵌套 build/ 与本地 wrapper/局部配置）
+templates/app/hello-android@gradle/**/build/
+templates/app/hello-android@gradle/.gradle/
+templates/app/hello-android@gradle/local.properties
+templates/app/hello-android@gradle/gradlew
+templates/app/hello-android@gradle/gradlew.bat
+templates/app/hello-android@gradle/gradle/wrapper/gradle-wrapper.jar
+
 # 第三方依赖构建产物（vendor 源码保留，仅忽略编译输出）
 vendor/libuv/build/
 

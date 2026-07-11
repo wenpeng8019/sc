@@ -1,0 +1,109 @@
+// hello-android@gradle —— :app 模块（gradle 工程化打包 sc 原生 app）
+//
+// 设计要点：sc 不是 CMake/ndk-build 工程，故不用 AGP 的 externalNativeBuild，
+// 而是用一个自定义 gradle 任务 sccBuild 调 scc 交叉编译出 libhello.so，落到
+// jniLibs 目录，再让 AGP 的标准打包链（merge → package → zipalign → sign）
+// 把它打进 APK。gradle 在这里只做「编排 + 打包 + 签名」，编译仍是 scc。
+//
+// 对照 ../hello-android/build.sh（手工 aapt/zipalign/apksigner）：产物一致，
+// 差别只在「谁来编排」——这里换成 gradle/AGP。
+//
+// ⚠ 设计草图：wsi 的 android C 后端未实现，sccBuild 现会失败（同手工脚本）。
+
+plugins {
+    id 'com.android.application'
+}
+
+// ABI → NDK clang 目标三元组（与手工脚本一致）
+def abiTriple = [
+    'arm64-v8a'  : 'aarch64-linux-android',
+    'armeabi-v7a': 'armv7a-linux-androideabi',
+    'x86_64'     : 'x86_64-linux-android',
+    'x86'        : 'i686-linux-android',
+]
+
+android {
+    namespace 'com.sc.hellogradleandroid'
+    compileSdk 34
+    // 需本机已装该 NDK 版本（sdkmanager "ndk;27.0.12077973"）；改成你装的版本
+    ndkVersion '27.0.12077973'
+
+    defaultConfig {
+        applicationId 'com.sc.hellogradleandroid'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        // 只出 arm64（模拟器用 x86_64 时改这里）；须与 sccBuild 产出的 ABI 一致
+        ndk { abiFilters 'arm64-v8a' }
+    }
+
+    // 纯 native app：无 Java/Kotlin 源、无 dex。
+    // jniLibs 从 sccBuild 产出的目录取 libhello.so → AGP 打进 APK 的 lib/<abi>/
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ["${layout.buildDirectory.get()}/scc-jniLibs"]
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false      // 无 Java 代码可缩减
+        }
+    }
+}
+
+// ---- 任务 1：为 android 构建 wsi 库（待 wsi android 后端实现，同手工脚本此步会失败）----
+tasks.register('wsiBuild', Exec) {
+    def wsi = file("${rootDir}/../../utils/wsi/build.sh")
+    // wsi build.sh 读同一批 SCC_* 环境；这里通过 sccEnv 统一注入（见 sccBuild 前置）
+    commandLine 'bash', wsi
+    // 环境在 doFirst 里补齐（需先算出 triple/wrapper）
+    enabled = true
+}
+
+// ---- 任务 2：调 scc 交叉编译 app.sc → libhello.so，落到 jniLibs 目录 ----
+tasks.register('sccBuild') {
+    dependsOn 'wsiBuild'
+    doLast {
+        def scc   = System.getenv('SCC') ?: "${rootDir}/../../../compiler/build/scc"
+        def ndk   = android.ndkDirectory
+        def api   = android.defaultConfig.minSdk.apiLevel
+        // 默认复用 hello-android 的同一份 app.sc（单一事实源）；-PscApp=... 可覆盖
+        def scApp = project.findProperty('scApp') ?: "${rootDir}/../hello-android/app.sc"
+        def hostTag = org.gradle.internal.os.OperatingSystem.current().isMacOsX()
+                        ? 'darwin-x86_64' : 'linux-x86_64'
+
+        android.defaultConfig.ndk.abiFilters.each { abi ->
+            def triple = abiTriple[abi]
+            if (triple == null) throw new GradleException("不支持的 ABI: ${abi}")
+            def tools  = "${ndk}/toolchains/llvm/prebuilt/${hostTag}/bin"
+            def outDir = file("${layout.buildDirectory.get()}/scc-jniLibs/${abi}")
+            outDir.mkdirs()
+
+            // NDK 工具链 wrapper（同手工脚本 cc-android.sh / ar-android.sh）
+            def cc = file("${layout.buildDirectory.get()}/cc-${abi}.sh")
+            cc.text = "#!/bin/sh\nexec \"${tools}/clang\" --target=${triple}${api} -fPIC \"\$@\"\n"
+            cc.setExecutable(true)
+            def ar = file("${layout.buildDirectory.get()}/ar-${abi}.sh")
+            ar.text = "#!/bin/sh\nexec \"${tools}/llvm-ar\" \"\$@\"\n"
+            ar.setExecutable(true)
+
+            exec {
+                environment 'SCC_CC', cc
+                environment 'SCC_AR', ar
+                environment 'SCC_TARGET_TRIPLE', triple
+                environment 'SCC_TARGET_SUFFIX', triple
+                // 无 main → 产共享库；-u 保留 ANativeActivity_onCreate（来自 libwsi）
+                environment 'SCC_LDFLAGS', '-shared -u ANativeActivity_onCreate -landroid -llog'
+                commandLine scc, scApp, '--build', '-o', "${outDir}/libhello.so"
+            }
+        }
+    }
+}
+
+// 让 AGP 的打包链在 native 库合并前先跑 sccBuild（preBuild 是 AGP 各变体的公共前置）
+tasks.matching { it.name == 'preBuild' }.configureEach {
+    dependsOn 'sccBuild'
+}

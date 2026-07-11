@@ -308,7 +308,7 @@ void impl_on_error(int code, const char* format, ...)
 //////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
-WSI_API int sc_wsi_init(void)
+WSI_API int sc_wsi_app_startup(void)
 {
     if (g_wsi.initialized)
         return true;
@@ -333,7 +333,7 @@ WSI_API int sc_wsi_init(void)
     return true;
 }
 
-WSI_API void sc_wsi_terminate(void)
+WSI_API void sc_wsi_app_cleanup(void)
 {
     if (!g_wsi.initialized)
         return;
@@ -341,7 +341,7 @@ WSI_API void sc_wsi_terminate(void)
     terminate();
 }
 
-WSI_API void sc_wsi_init_hint(int hint, int value)
+WSI_API void sc_wsi_app_hint(int hint, int value)
 {
     switch (hint)
     {

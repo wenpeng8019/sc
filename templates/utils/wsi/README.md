@@ -54,16 +54,15 @@ WSI 当前边界如下。
 来自公开 API（wsi.h）的主要能力分组：
 
 - 初始化与错误处理
-  - sc_wsi_init
-  - sc_wsi_terminate
+  - sc_wsi_app_startup
+  - sc_wsi_app_cleanup
   - sc_wsi_get_error
   - sc_wsi_set_error_callback
 
 - 事件循环
-  - sc_wsi_poll_events
-  - sc_wsi_wait_events
-  - sc_wsi_wait_events_timeout
-  - sc_wsi_post_empty_event
+  - sc_wsi_loop_poll
+  - sc_wsi_loop_wait
+  - sc_wsi_loop_pulse
 
 - 显示器
   - sc_wsi_get_monitors

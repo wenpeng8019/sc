@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android@gradle 清单 —— 与 hello-android 同一套 native app 模型：
+    * android.app.NativeActivity 作 Java 外壳（零自写 Java）
+    * android.app.lib_name = "hello" → 框架经 JNI 加载 libhello.so 并调
+      其中的 ANativeActivity_onCreate（由 wsi 提供）
+    * hasCode="false" → 无 Java 字节码 → 无 classes.dex
+
+  与手工版差别仅在打包编排（gradle/AGP vs aapt/zipalign/apksigner）；
+  注意：package 属性由 app/build.gradle 的 namespace 提供，此处不写。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <application android:label="hello-android@gradle"
+                 android:hasCode="false"
+                 android:allowBackup="false">
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="hello-android@gradle"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <!-- 与 app/build.gradle 产出的 libhello.so 一致 -->
+            <meta-data android:name="android.app.lib_name"
+                       android:value="hello"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

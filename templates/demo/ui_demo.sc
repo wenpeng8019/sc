@@ -34,21 +34,21 @@ fnc on_ui_event: c: ::sc_ui_control&, event: i4, user: &
         print "事件: 选择变化\n"
 
 fnc main: i4
-    if wsi_init() == 0
-        print "wsi_init 失败\n"
+    if wsi_app_startup() == 0
+        print "wsi_app_startup 失败\n"
         return 1
 
     var win: ::sc_window& = wsi_win_create(480, 360, "sc · ui demo", nil, nil)
     if win == nil
         print "窗口创建失败\n"
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
 
     var ui: ::sc_ui_ctx& = ui_create(win)
     if ui == nil
         print "ui_create 失败\n"
         wsi_win_destroy(win)
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
 
     # 可选：加载系统字体以显示中文（scc 不内置字库）。传 nil 让后端自动探测
@@ -77,10 +77,10 @@ fnc main: i4
     print "ui demo 窗口已打开，关闭窗口以退出...\n"
 
     while wsi_win_get_should_close(win) == 0
-        wsi_wait_events()
+        wsi_loop_wait(0)
 
     ui_destroy(ui)
     wsi_win_destroy(win)
-    wsi_terminate()
+    wsi_app_cleanup()
     print "已退出\n"
     return 0

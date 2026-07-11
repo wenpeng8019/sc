@@ -12,8 +12,8 @@ inc io.sc
 inc ../utils/wsi/wsi.sc
 
 fnc main: i4
-    if wsi_init() == 0
-        print "wsi_init 失败\n"
+    if wsi_app_startup() == 0
+        print "wsi_app_startup 失败\n"
         return 1
 
     var major: i4 = 0
@@ -25,7 +25,7 @@ fnc main: i4
     var win: ::sc_window& = wsi_win_create(640, 480, "sc · wsi demo", nil, nil)
     if win == nil
         print "窗口创建失败\n"
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
 
     wsi_win_show(win)
@@ -33,9 +33,9 @@ fnc main: i4
 
     # 事件循环：阻塞等待事件，直到窗口被请求关闭
     while wsi_win_get_should_close(win) == 0
-        wsi_wait_events()
+        wsi_loop_wait(0)
 
     wsi_win_destroy(win)
-    wsi_terminate()
+    wsi_app_cleanup()
     print "已退出\n"
     return 0

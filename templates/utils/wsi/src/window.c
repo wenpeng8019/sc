@@ -137,10 +137,7 @@ void impl_on_win_monitor(window_st* window, monitor_st* monitor)
 //////                        WSI public API                       //////
 //////////////////////////////////////////////////////////////////////////
 
-WSI_API sc_window* sc_wsi_win_create(int width, int height,
-                                     const char* title,
-                                     sc_monitor* monitor,
-                                     sc_window* share)
+window_st* wsi_alloc_window(int width, int height, const char* title)
 {
     wnd_config_st wndconfig;
     window_st* window;
@@ -175,7 +172,6 @@ WSI_API sc_window* sc_wsi_win_create(int width, int height,
     window->videoMode.width  = width;
     window->videoMode.height = height;
 
-    window->monitor          = (monitor_st*) monitor;
     window->resizable        = wndconfig.resizable;
     window->decorated        = wndconfig.decorated;
     window->autoIconify      = wndconfig.autoIconify;
@@ -191,6 +187,35 @@ WSI_API sc_window* sc_wsi_win_create(int width, int height,
     window->numer       = SC_DONT_CARE;
     window->denom       = SC_DONT_CARE;
     window->title       = wsi_strdup(title);
+
+    return window;
+}
+
+WSI_API sc_window* sc_wsi_win_create(int width, int height,
+                                     const char* title,
+                                     sc_monitor* monitor,
+                                     sc_window* share)
+{
+    wnd_config_st wndconfig;
+    window_st* window = wsi_alloc_window(width, height, title);
+
+    if (!window)
+        return NULL;
+
+    window->monitor = (monitor_st*) monitor;
+
+    // 平台不提供建窗（如 iOS：窗口由 wsi 内部自建、不经此公共 API）——报错而非崩溃。
+    if (!g_wsi.platform.createWindow)
+    {
+        impl_on_error(SC_WSI_ERR_PLATFORM_UNAVAILABLE,
+                        "window creation is not available on this platform");
+        sc_wsi_win_destroy((sc_window*) window);
+        return NULL;
+    }
+
+    wndconfig = g_wsi.hints.window;
+    wndconfig.width  = width;
+    wndconfig.height = height;
 
     if (!g_wsi.platform.createWindow(window, &wndconfig))
     {
@@ -330,6 +355,11 @@ WSI_API void sc_wsi_win_destroy(sc_window* handle)
     // Allow closing of NULL (to match the behavior of free)
     if (window == NULL)
         return;
+
+    // 通知应用：该窗口的原生表面即将拆除，应释放绑定其上的 GPU 资源（交换链等）。
+    // 需在清零回调与平台销毁之前触发，使 destroy 委托在桌面/移动端均真实可达。
+    if (window->callbacks.destroy)
+        window->callbacks.destroy(handle);
 
     // Clear all callbacks to avoid exposing a half torn-down window object
     memset(&window->callbacks, 0, sizeof(window->callbacks));
@@ -968,7 +998,7 @@ WSI_API void* sc_wsi_win_get_user_data(sc_window* handle)
     return window->userPointer;
 }
 
-WSI_API bool sc_wsi_win_set_callback(sc_window* handle, sc_wsi_win_cb cb) {
+WSI_API int sc_wsi_win_set_callback(sc_window* handle, const sc_wsi_win_cb* cb) {
 
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
@@ -978,12 +1008,12 @@ WSI_API bool sc_wsi_win_set_callback(sc_window* handle, sc_wsi_win_cb cb) {
     window_st* window = (window_st*) handle;
     assert(window != NULL);
 
-    memcpy(&window->callbacks, &cb, sizeof(cb));
+    memcpy(&window->callbacks, cb, sizeof(*cb));
     return true;
 }
 
 
-WSI_API void sc_wsi_poll_events(void)
+WSI_API void sc_wsi_loop_poll(void)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
@@ -992,21 +1022,20 @@ WSI_API void sc_wsi_poll_events(void)
     g_wsi.platform.pollEvents();
 }
 
-WSI_API void sc_wsi_wait_events(void)
+WSI_API void sc_wsi_loop_wait(double timeout)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
         return;
     }
-    g_wsi.platform.waitEvents();
-}
 
-WSI_API void sc_wsi_wait_events_timeout(double timeout)
-{
-    if (!g_wsi.initialized) {
-        impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);
+    // timeout == 0：无限阻塞直到有事件；timeout > 0：至多阻塞 timeout 秒。
+    if (timeout == 0.0)
+    {
+        g_wsi.platform.waitEvents();
         return;
     }
+
     assert(isfinite(timeout));
     assert(timeout >= 0.0);
 
@@ -1019,7 +1048,7 @@ WSI_API void sc_wsi_wait_events_timeout(double timeout)
     g_wsi.platform.waitEventsTimeout(timeout);
 }
 
-WSI_API void sc_wsi_post_empty_event(void)
+WSI_API void sc_wsi_loop_pulse(void)
 {
     if (!g_wsi.initialized) {
         impl_on_error(SC_WSI_ERR_NOT_INITIALIZED, NULL);

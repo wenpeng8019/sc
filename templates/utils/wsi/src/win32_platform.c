@@ -3386,7 +3386,7 @@ static void win32_poll_events(void)
         win32_get_window_size(window, &width, &height);
 
         // NOTE: Re-center the cursor only if it has moved since the last call,
-        //       to avoid breaking sc_wsi_wait_events with WM_MOUSEMOVE
+        //       to avoid breaking sc_wsi_loop_wait with WM_MOUSEMOVE
         // The re-center is required in order to prevent the mouse cursor stopping at the edges of the screen.
         if (window->win32.lastCursorPosX != width / 2 ||
             window->win32.lastCursorPosY != height / 2)

@@ -266,7 +266,7 @@ UI_API void sc_ui_control_set_selected_index(sc_ui_control* control, int index);
  * 控件：事件回调
  * ============================================================
  * 注册控件交互回调（click/toggle/text/select）。cb 传 NULL 清除。
- * 回调在事件处理期间（wsi_wait_events/poll_events 内）被后端调用。
+ * 回调在事件处理期间（wsi_loop_wait/poll_events 内）被后端调用。
  * ============================================================ */
 UI_API void sc_ui_control_set_callback(sc_ui_control* control, sc_ui_control_cb cb, void* user);
 

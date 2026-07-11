@@ -15,7 +15,7 @@
  * – Wayland：自建 wl_shm 缓冲区 attach/commit 到 wsi 的 wl_surface。
  * 输入来自 wsi 的窗口回调，喂给 nk_input。
  *
- * 现有 app 事件循环（while(!should_close) wsi_wait_events()）不需改动：
+ * 现有 app 事件循环（while(!should_close) wsi_loop_wait(0)）不需改动：
  * 本后端在 ui 内部注册 wsi 回调，事件到来即重绘并呈现。
  * ============================================================ */
 
@@ -307,7 +307,7 @@ static void nkui_wl_present(nkui_state* st)
     wl_surface_attach(st->wl_surface, st->wl_buf[idx], 0, 0);
     wl_surface_damage(st->wl_surface, 0, 0, st->w / s, st->h / s);
 
-    /* 登记下一帧回调，驱动重绘循环（wsi_wait_events 会因 frame-done 唤醒）。 */
+    /* 登记下一帧回调，驱动重绘循环（wsi_loop_wait 会因 frame-done 唤醒）。 */
     if (!st->wl_frameCb)
     {
         st->wl_frameCb = wl_surface_frame(st->wl_surface);

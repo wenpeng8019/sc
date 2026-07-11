@@ -766,11 +766,12 @@ extern "C" {
 #define SC_PLATFORM_WAYLAND       0x00060003
 #define SC_PLATFORM_X11           0x00060004
 #define SC_PLATFORM_NULL          0x00060005
-/*! @} */
-
 /* Reserved platform define for external Emscripten ports: 0x00060006
  * See https://github.com/pongasoft/emscripten-glfw
  */
+#define SC_PLATFORM_IOS           0x00060007
+#define SC_PLATFORM_ANDROID       0x00060008
+/*! @} */
 
 #define SC_DONT_CARE              -1
 
@@ -1136,6 +1137,87 @@ typedef void (* sc_char_mods_cb)(sc_window* window, unsigned int codepoint, int 
  */
 typedef void (* sc_drop_cb)(sc_window* window, int path_count, const char* paths[]);
 
+/*! @brief 触摸阶段（移动平台）。
+ *
+ *  传给 @ref sc_win_touch_cb 的 `phase` 参数，标识本批触点的整体状态。
+ *  @ingroup input
+ */
+#define SC_TOUCH_BEGAN            0   // 一个或多个触点按下
+#define SC_TOUCH_MOVED            1   // 触点移动
+#define SC_TOUCH_ENDED            2   // 触点抬起
+#define SC_TOUCH_CANCELLED        3   // 系统取消（如来电、手势打断）
+
+/*! @brief 触摸工具类型（主要用于 Android；iOS 恒为 FINGER）。
+ *  @ingroup input
+ */
+#define SC_TOOLTYPE_UNKNOWN       0
+#define SC_TOOLTYPE_FINGER        1
+#define SC_TOOLTYPE_STYLUS        2
+#define SC_TOOLTYPE_MOUSE         3
+
+#ifndef SC_MAX_TOUCHPOINTS
+ #define SC_MAX_TOUCHPOINTS       8   // 单次事件最多上报的触点数
+#endif
+
+/*! @brief 单个触点。
+ *
+ *  描述一次触摸事件中的一个触点。坐标为帧缓冲像素（已乘 DPI 缩放）。
+ *  @ingroup input
+ */
+typedef struct sc_wsi_touchpoint
+{
+    uint64_t identifier;    // 触点唯一 ID（同一根手指在按下->移动->抬起间保持不变）
+    float    x;             // X 坐标（帧缓冲像素）
+    float    y;             // Y 坐标（帧缓冲像素）
+    int      tooltype;      // SC_TOOLTYPE_*（Android）；iOS 恒为 SC_TOOLTYPE_FINGER
+    bool     changed;       // 该触点是否在本次事件中发生状态改变
+} sc_wsi_touchpoint;
+
+/*! @brief 触摸回调函数指针类型（移动平台）。
+ *
+ *  当触点按下、移动、抬起或被取消时调用。桌面后端不会触发此回调。
+ *
+ *  @param[in] window 接收事件的窗口。
+ *  @param[in] phase `SC_TOUCH_BEGAN`/`SC_TOUCH_MOVED`/`SC_TOUCH_ENDED`/`SC_TOUCH_CANCELLED`。
+ *  @param[in] count 有效触点数量。
+ *  @param[in] touches 触点数组，仅在回调返回前有效。
+ *
+ *  @ingroup input
+ */
+typedef void (* sc_win_touch_cb)(sc_window* window, int phase, int count, const sc_wsi_touchpoint* touches);
+
+/*! @brief 应用挂起回调函数指针类型（移动平台）。
+ *
+ *  当应用进入后台/失去活动状态时调用（iOS sceneWillResignActive、Android onPause）。
+ *  桌面后端不会触发此回调。应在此暂停渲染循环并释放易失资源。
+ *
+ *  @param[in] window 接收事件的窗口。
+ *  @ingroup window
+ */
+typedef void (* sc_win_suspend_cb)(sc_window* window);
+
+/*! @brief 应用恢复回调函数指针类型（移动平台）。
+ *
+ *  当应用回到前台/恢复活动状态时调用（iOS sceneDidBecomeActive、Android onResume）。
+ *  桌面后端不会触发此回调。
+ *
+ *  @param[in] window 接收事件的窗口。
+ *  @ingroup window
+ */
+typedef void (* sc_win_resume_cb)(sc_window* window);
+
+/*! @brief 主窗口原生窗口/表面被销毁时回调。
+ *
+ *  与 @ref sc_win_close_cb（用户**请求**关闭，应用自决）不同：本回调表示原生窗口/
+ *  渲染表面**已/即将失效**，应用必须在此释放绑定该窗口的 GPU 资源（交换链等）。
+ *  各平台触发时机：
+ *    * 桌面（Cocoa/Win32/X11/Wayland）：@ref sc_wsi_win_destroy 内、原生窗口拆除**前**触发。
+ *    * iOS：主窗口拆除 / 应用终止时触发；进入后台**不**触发（用 suspend/resume）。
+ *    * Android：`onNativeWindowDestroyed`（后台/旋转导致 ANativeWindow 失效）触发；重建时
+ *      经 @ref sc_wsi_app_run 的 `main_window_created` 再次交付新窗口（Android 后端待实现）。
+ */
+typedef void (* sc_win_destroy_cb)(sc_window* window);
+
 typedef struct sc_wsi_win_cb {
     sc_win_close_cb         close;
     sc_win_maximize_cb      maximize;
@@ -1157,9 +1239,17 @@ typedef struct sc_wsi_win_cb {
     sc_win_mouse_button_cb  mouse_button;
     sc_drop_cb              drop;
     sc_scroll_cb            scroll;
+
+    // 移动平台专用（桌面后端不会触发）
+    sc_win_touch_cb         touch;
+    sc_win_suspend_cb       suspend;
+    sc_win_resume_cb        resume;
+
+    // 原生窗口/表面销毁（各平台触发时机见 sc_win_destroy_cb 注释）
+    sc_win_destroy_cb       destroy;
 } sc_wsi_win_cb;
 
-WSI_API bool sc_wsi_win_set_callback(sc_window* window, sc_wsi_win_cb cb);
+WSI_API int sc_wsi_win_set_callback(sc_window* window, const sc_wsi_win_cb* cb);
 
 /*************************************************************************
  *
@@ -1223,7 +1313,7 @@ typedef struct sc_wsi_img
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remark 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
@@ -1250,7 +1340,7 @@ WSI_API void sc_wsi_get_version(int* major, int* minor, int* rev);
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remark 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @pointer_lifetime The returned string is static and compile-time generated.
  *
@@ -1267,8 +1357,8 @@ WSI_API const char* sc_wsi_get_version_string(void);
  *  should be terminated in order to free any resources allocated during or
  *  after initialization.
  *
- *  如果此函数失败，它会在返回前调用 @ref sc_wsi_terminate。  If it
- *  succeeds, you should call @ref sc_wsi_terminate before the application exits.
+ *  如果此函数失败，它会在返回前调用 @ref sc_wsi_app_cleanup。  If it
+ *  succeeds, you should call @ref sc_wsi_app_cleanup before the application exits.
  *
  *  Additional calls to this function after successful initialization but before
  *  termination will return `true` immediately.
@@ -1310,23 +1400,23 @@ WSI_API const char* sc_wsi_get_version_string(void);
  *
  *  @ingroup init
  */
-WSI_API int sc_wsi_init(void);
+WSI_API int sc_wsi_app_startup(void);
 
 /*! @brief 终止 WSI 库。
  *
  *  此函数销毁所有剩余窗口和光标，恢复任何修改过的伽马斜坡，并释放所有其他分配的资源。  Once this
- *  function is called, you must again call @ref sc_wsi_init successfully before
+ *  function is called, you must again call @ref sc_wsi_app_startup successfully before
  *  you will be able to use most WSI functions.
  *
  *  如果 WSI 已成功初始化，应在应用程序退出前调用此函数。  If initialization fails, there is no need to
- *  call this function, as it is called by @ref sc_wsi_init before it returns
+ *  call this function, as it is called by @ref sc_wsi_app_startup before it returns
  *  failure.
  *
  *  This function has no effect if WSI is not initialized.
  *
  *  @errors Possible errors include @ref SC_WSI_ERR_PLATFORM_ERROR.
  *
- *  @remark 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remark 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @warning The contexts of any remaining windows must not be current on any
  *  other thread when this function is called.
@@ -1337,7 +1427,7 @@ WSI_API int sc_wsi_init(void);
  *
  *  @ingroup init
  */
-WSI_API void sc_wsi_terminate(void);
+WSI_API void sc_wsi_app_cleanup(void);
 
 /*! @brief 设置指定的初始化提示值。
  *
@@ -1358,13 +1448,13 @@ WSI_API void sc_wsi_terminate(void);
  *  @errors Possible errors include @ref SC_WSI_ERR_INVALID_ENUM and @ref
  *  SC_WSI_ERR_INVALID_VALUE.
  *
- *  @remarks 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remarks 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
  *  @ingroup init
  */
-WSI_API void sc_wsi_init_hint(int hint, int value);
+WSI_API void sc_wsi_app_hint(int hint, int value);
 
 /*! @brief Returns and clears the last error for the calling thread.
  *
@@ -1384,7 +1474,7 @@ WSI_API void sc_wsi_init_hint(int hint, int value);
  *  should not free it yourself.  It is guaranteed to be valid only until the
  *  next error occurs or the library is terminated.
  *
- *  @remark 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remark 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @thread_safety 此函数可以从任何线程调用。
  *
@@ -1424,7 +1514,7 @@ WSI_API int sc_wsi_get_error(const char** description);
  *
  *  @errors None.
  *
- *  @remark 此函数可在 @ref sc_wsi_init 之前调用。
+ *  @remark 此函数可在 @ref sc_wsi_app_startup 之前调用。
  *
  *  @thread_safety 此函数必须在主线程中调用。
  *
@@ -1463,53 +1553,16 @@ WSI_API sc_error_cb sc_wsi_set_error_callback(sc_error_cb callback);
  *
  *  @ingroup window
  */
-WSI_API void sc_wsi_poll_events(void);
+WSI_API void sc_wsi_loop_poll(void);
 
 /*! @brief Waits until events are queued and processes them.
  *
- *  此函数使调用线程休眠，直到事件队列中至少有一个事件可用。一旦有一个或多个事件可用，其行为与 @ref sc_wsi_poll_events 完全相同。  Processing events
+ *  此函数使调用线程休眠，直到事件队列中至少有一个事件可用（或达到指定超时）。一旦有一个或多个事件可用，其行为与 @ref sc_wsi_loop_poll 完全相同。  Processing events
  *  will cause the window and input callbacks associated with those events to be
  *  called.
  *
- *  Since not all events are associated with callbacks, this function may return
- *  without a callback having been called even if you are monitoring all
- *  callbacks.
- *
- *  On some platforms, a window move, resize or menu operation will cause event
- *  processing to block.  This is due to how event processing is designed on
- *  those platforms.  You can use the
- *  [window refresh callback](@ref window_refresh) to redraw the contents of
- *  your window when necessary during such operations.
- *
- *  Do not assume that callbacks you set will _only_ be called in response to
- *  event processing functions like this one.  While it is necessary to poll for
- *  events, window systems that require WSI to register callbacks of its own
- *  can pass events to WSI in response to many window system function calls.
- *  WSI will pass those events on to the application callbacks before
- *  returning.
- *
- *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
- *
- *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
- *
- *  @reentrancy 此函数禁止在回调中调用。
- *
- *  @thread_safety 此函数必须在主线程中调用。
- *
- *  @ingroup window
- */
-WSI_API void sc_wsi_wait_events(void);
-
-/*! @brief Waits with timeout until events are queued and processes them.
- *
- *  This function puts the calling thread to sleep until at least one event is
- *  available in the event queue, or until the specified timeout is reached.  If
- *  one or more events are available, it behaves exactly like @ref
- *  sc_wsi_poll_events, i.e. the events in the queue are processed and the function
- *  then returns immediately.  Processing events will cause the window and input
- *  callbacks associated with those events to be called.
- *
- *  The timeout value must be a positive finite number.
+ *  `timeout == 0` 表示无限阻塞直到有事件；`timeout > 0` 表示至多阻塞 timeout 秒
+ *  （必须为正的有限数）。
  *
  *  Since not all events are associated with callbacks, this function may return
  *  without a callback having been called even if you are monitoring all
@@ -1530,20 +1583,21 @@ WSI_API void sc_wsi_wait_events(void);
  *
  *  接收手柄输入不需要事件处理。  手柄状态在调用手柄输入或游戏手柄输入函数时被轮询。
  *
- *  @param[in] timeout The maximum amount of time, in seconds, to wait.
+ *  @param[in] timeout 最多等待的秒数；`0` 表示无限等待。
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED、@ref SC_WSI_ERR_INVALID_VALUE 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
  *
  *  @reentrancy 此函数禁止在回调中调用。
  *
  *  @thread_safety 此函数必须在主线程中调用。
+ *
  *  @ingroup window
  */
-WSI_API void sc_wsi_wait_events_timeout(double timeout);
+WSI_API void sc_wsi_loop_wait(double timeout);
 
 /*! @brief 向事件队列发送空事件。
  *
- *  此函数从当前线程向事件队列发送一个空事件，导致 @ref sc_wsi_wait_events 或 @ref sc_wsi_wait_events_timeout 返回。
+ *  此函数从当前线程向事件队列发送一个空事件，导致 @ref sc_wsi_loop_wait 返回。
  *
  *  @errors 可能的错误包括 @ref SC_WSI_ERR_NOT_INITIALIZED 和 @ref SC_WSI_ERR_PLATFORM_ERROR。
  *
@@ -1551,7 +1605,7 @@ WSI_API void sc_wsi_wait_events_timeout(double timeout);
  *
  *  @ingroup window
  */
-WSI_API void sc_wsi_post_empty_event(void);
+WSI_API void sc_wsi_loop_pulse(void);
 
 /*************************************************************************
  * WSI API functions
@@ -1852,7 +1906,7 @@ WSI_API void sc_wsi_monitor_get_gamma(sc_monitor* monitor, float gamma);
  *
  *  此函数返回/设置指定监视器的当前伽马斜坡。The
  *  original gamma ramp for that monitor is saved by WSI the first time this
- *  function is called and is restored by @ref sc_wsi_terminate.
+ *  function is called and is restored by @ref sc_wsi_app_cleanup.
  *
  *  The software controlled gamma ramp is applied _in addition_ to the hardware
  *  gamma correction, which today is usually an approximation of sRGB gamma.
@@ -2773,6 +2827,71 @@ WSI_API void* sc_wsi_win_get_native_display(sc_window* window);
  */
 WSI_API void* sc_wsi_win_get_native_window(sc_window* window);
 
+/*! @brief 应用主循环回调（无参无返回）。 */
+typedef void (*sc_wsi_app_cb)(void);
+
+/*! @brief 主窗口创建回调。
+ *
+ *  当主窗口被创建/就绪时回调，参数为窗口句柄（**恒非 NULL**）。窗口由 wsi 创建，应用
+ *  **不再自行调用** @ref sc_wsi_win_create，窗口经此回调交付：
+ *    * iOS：`didFinishLaunching` 内建好全屏窗口后回调一次。
+ *    * Android：`onNativeWindowCreated` 回调（初始 + 后台/旋转后重建均会再次触发）。
+ *    * 桌面：@ref sc_wsi_app_run 建好默认窗口后回调一次（应用可在此改写标题/尺寸）。
+ *
+ *  窗口的**丢失/销毁**（如 Android 后台/旋转）不经本回调，而是经挂在窗口上的
+ *  delegate（@ref sc_wsi_win_set_callback 的 @ref sc_win_destroy_cb）交付。
+ */
+typedef void (*sc_wsi_window_cb)(sc_window* window);
+
+/*! @brief 启动应用主循环 / 帧驱动（通常永不返回）。
+ *
+ *  统一的应用入口：桌面与移动共用同一套三回调，应用源码除入口外可完全一致。
+ *  移动平台的系统框架拥有事件循环，无法沿用桌面的
+ *  `while(!should_close){ poll_events(); render(); }` 拉取式循环，因此改为回调驱动；
+ *  桌面则由本函数在内部跑同形态的托管循环。三种后端实现：
+ *
+ *    * iOS（WSI_IOS）＝**自有主循环实现**：`sc_wsi_app_run` 由应用 `main` 调用，内部
+ *      进入 `UIApplicationMain` 并**阻塞主线程**；wsi 建好全屏窗口后回调 `main_window_created`，
+ *      `on_frame` 由 CADisplayLink 每帧回调。
+ *    * Android（WSI_ANDROID）＝**事件注册实现**：`sc_wsi_app_run` 由 wsi 的
+ *      `ANativeActivity_onCreate` 在渲染线程上经固定符号 `sc_app_main` 调用；内部注册
+ *      ANativeWindow 就绪→`main_window_created`、AChoreographer vsync→`on_frame`，随后进入该线程
+ *      的事件循环（阻塞渲染线程，非主线程）。
+ *    * 桌面（Cocoa/Win32/X11/Wayland）＝**通用托管循环**：`sc_wsi_app_run` 内部
+ *      `sc_wsi_app_startup` → `after_startup()` → 建默认窗口（1280×720、标题 "sc"）→
+ *      回调 `main_window_created` 交付句柄 → 显示窗口 →
+ *      `while(!should_close){ poll_events(); on_frame(); }` → 退出时 `before_cleanup()`
+ *      并 `sc_wsi_app_cleanup`。桌面程序也可不用本函数，沿用显式 `while` 自管循环。
+ *
+ *  四个回调语义各平台一致（按运行顺序）：
+ *    * `after_startup`  —— wsi 子系统启动后调用一次（尚未建窗），可为 `NULL`。
+ *    * `main_window_created` —— 主窗口创建时回调（参数恒非 `NULL`）。窗口由 wsi 创建，应用
+ *                          **不再调用** @ref sc_wsi_win_create；在此自定义窗口（桌面可改标题/尺寸）、
+ *                          初始化 gpu/gfx，并经 @ref sc_wsi_win_set_callback 挂上 delegate
+ *                          （touch/suspend/resume/destroy 等）。窗口丢失经 delegate 的 destroy 交付。
+ *    * `on_frame`  —— 每帧回调（桌面主循环 / CADisplayLink / AChoreographer），应用在此渲染并 present。
+ *    * `before_cleanup`—— 应用终止、收尾前调用一次（可为 `NULL`）。
+ *
+ *  @return 进程退出码（通常不返回）。
+ *
+ *  @thread_safety iOS/桌面：主线程（应用 `main` 中）。Android：wsi 渲染线程（`sc_app_main` 中）。
+ *
+ *  @ingroup window
+ */
+WSI_API int sc_wsi_app_run(sc_wsi_app_cb after_startup,
+                           sc_wsi_window_cb main_window_created,
+                           sc_wsi_app_cb on_frame,
+                           sc_wsi_app_cb before_cleanup);
+
+/*! @brief 返回当前主窗口句柄。
+ *
+ *  在 @ref sc_wsi_app_run 的 `main_window_created`/`on_frame` 回调中使用。
+ *
+ *  @return 当前主窗口句柄，若尚未创建则为 `NULL`。
+ *  @ingroup window
+ */
+WSI_API sc_window* sc_wsi_app_main_window(void);
+
 /*************************************************************************
  * WSI API functions
  *************************************************************************/
@@ -3071,7 +3190,7 @@ WSI_API void sc_wsi_set_cursor_pos(sc_window* window, double xpos, double ypos);
  *
  *  Creates a new custom cursor image that can be set for a window with @ref
  *  sc_wsi_cursor_set.  The cursor can be destroyed with @ref sc_wsi_destroy_cursor.
- *  Any remaining cursors are destroyed by @ref sc_wsi_terminate.
+ *  Any remaining cursors are destroyed by @ref sc_wsi_app_cleanup.
  *
  *  The pixels are 32-bit, little-endian, non-premultiplied RGBA, i.e. eight
  *  bits per channel with the red channel first.  They are arranged canonically
@@ -3144,7 +3263,7 @@ WSI_API sc_cursor* sc_wsi_create_standard_cursor(int shape);
 /*! @brief 销毁光标。
  *
  *  此函数销毁之前通过 @ref sc_wsi_create_cursor 创建的光标。  Any remaining cursors will be destroyed by @ref
- *  sc_wsi_terminate.
+ *  sc_wsi_app_cleanup.
  *
  *  If the specified cursor is current for any window, that window will be
  *  reverted to the default cursor.  This does not affect the cursor mode.

@@ -1,0 +1,21 @@
+// hello-android@gradle —— gradle 工程根配置
+//
+// pluginManagement / dependencyResolutionManagement 指定插件与依赖仓库
+// （google + mavenCentral 是 Android 生态标配）。
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'hello-android-gradle'
+include ':app'

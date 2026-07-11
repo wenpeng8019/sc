@@ -38,13 +38,13 @@ def shader_blob: {
 
 fnc main: i4
     # ---- wsi 窗口 ----
-    if wsi_init() == 0
-        print "wsi_init 失败\n"
+    if wsi_app_startup() == 0
+        print "wsi_app_startup 失败\n"
         return 1
     var win: ::sc_window& = wsi_win_create(640, 480, "sc · gpu demo (三角形)", nil, nil)
     if win == nil
         print "窗口创建失败\n"
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
     wsi_win_show(win)
 
@@ -73,7 +73,7 @@ fnc main: i4
         gd.backend = 4                              # SC_GPU_BACKEND_D3D11
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n"
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
     var bk: i4 = gpu_query_backend()
     print "gpu 后端: ", bk, " (1=Metal 2=GL 3=Vulkan 4=D3D11 5=Null)\n"
@@ -84,7 +84,7 @@ fnc main: i4
     if gfx_init(&fd) == 0
         print "gfx_init 失败\n"
         gpu_shutdown()
-        wsi_terminate()
+        wsi_app_cleanup()
         return 1
 
     # ---- 着色器：直接消费内嵌资源表（按后端选目标三连 [reflect, vs, fs]）----
@@ -138,7 +138,7 @@ fnc main: i4
     var cur_fbw: i4 = fbw
     var cur_fbh: i4 = fbh
     while wsi_win_get_should_close(win) == 0
-        wsi_poll_events()
+        wsi_loop_poll()
         var nw: i4 = 0
         var nh: i4 = 0
         wsi_win_get_size(win, &nw, &nh)
@@ -171,6 +171,6 @@ fnc main: i4
     gfx_shutdown()
     gpu_shutdown()
     wsi_win_destroy(win)
-    wsi_terminate()
+    wsi_app_cleanup()
     print "已退出\n"
     return 0

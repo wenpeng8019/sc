@@ -22,6 +22,9 @@ WSI_API const char* sc_wsi_get_version_string(void)
 #if defined(WSI_COCOA)
         " Cocoa NSGL"
 #endif
+#if defined(WSI_IOS)
+        " iOS UIKit"
+#endif
 #if defined(WSI_WAYLAND)
         " Wayland"
 #endif
@@ -66,6 +69,9 @@ static const struct
 #if defined(WSI_COCOA)
     { SC_PLATFORM_COCOA, cocoa_connect },
 #endif
+#if defined(WSI_IOS)
+    { SC_PLATFORM_IOS, uikit_connect },
+#endif
 #if defined(WSI_WAYLAND)
     { SC_PLATFORM_WAYLAND, wayland_connect },
 #endif
@@ -87,6 +93,7 @@ bool wsi_select_platform(int desiredID, platform_st* platform)
     if (desiredID != SC_PLATFORM_ANY &&
         desiredID != SC_PLATFORM_WIN32 &&
         desiredID != SC_PLATFORM_COCOA &&
+        desiredID != SC_PLATFORM_IOS &&
         desiredID != SC_PLATFORM_WAYLAND &&
         desiredID != SC_PLATFORM_X11 &&
         desiredID != SC_PLATFORM_NULL)

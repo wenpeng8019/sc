@@ -80,7 +80,7 @@ inc ../wsi/wsi.sc
 inc ui.sc
 
 fnc main: i4
-    if wsi_init() == 0
+    if wsi_app_startup() == 0
         return 1
 
     var win: ::sc_window& = wsi_win_create(800, 600, "ui demo", nil, nil)
@@ -96,11 +96,11 @@ fnc main: i4
     ui_control_set_checked(btn, 1)
 
     while wsi_win_get_should_close(win) == 0
-        wsi_wait_events()
+        wsi_loop_wait(0)
 
     ui_destroy(ui)
     wsi_win_destroy(win)
-    wsi_terminate()
+    wsi_app_cleanup()
     return 0
 ```
 

@@ -163,6 +163,38 @@ void impl_on_drop(window_st* window, int count, const char** paths)
         window->callbacks.drop((sc_window*) window, count, paths);
 }
 
+// Notifies shared code of a touch event (mobile platforms)
+//
+void impl_on_touch(window_st* window, int phase, int count, const sc_wsi_touchpoint* touches)
+{
+    assert(window != NULL);
+    assert(phase >= SC_TOUCH_BEGAN && phase <= SC_TOUCH_CANCELLED);
+    assert(count >= 0 && count <= SC_MAX_TOUCHPOINTS);
+
+    if (window->callbacks.touch)
+        window->callbacks.touch((sc_window*) window, phase, count, touches);
+}
+
+// Notifies shared code that the application is being suspended (mobile)
+//
+void impl_on_suspend(window_st* window)
+{
+    assert(window != NULL);
+
+    if (window->callbacks.suspend)
+        window->callbacks.suspend((sc_window*) window);
+}
+
+// Notifies shared code that the application is resuming (mobile)
+//
+void impl_on_resume(window_st* window)
+{
+    assert(window != NULL);
+
+    if (window->callbacks.resume)
+        window->callbacks.resume((sc_window*) window);
+}
+
 // Center the cursor in the content area of the specified window
 //
 void wsi_center_cursor_in_content_area(window_st* window)
