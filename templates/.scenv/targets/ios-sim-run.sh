@@ -25,5 +25,12 @@ xcrun simctl boot "$DEV" 2>/dev/null || true    # 已启动则忽略
 open -a Simulator                                # 显示模拟器 UI
 xcrun simctl bootstatus "$DEV" -b                # 阻塞直到启动完成
 xcrun simctl install "$DEV" "$APP"
+# DETACH=1：不挂 --console（launch 后即返回，不阻塞）——供自动化/AI 调试用；
+#   看 app 输出：xcrun simctl spawn booted log stream --predicate 'process=="'$NAME'"'
+#   看画面：    xcrun simctl io booted screenshot out.png
+if [[ -n "$DETACH" ]]; then
+    echo "==> 启动 $BID（DETACH：不挂 console，启动即返回）"
+    exec xcrun simctl launch "$DEV" "$BID"
+fi
 echo "==> 启动 $BID（--console：app 的 print 直连本终端，Ctrl-C 结束）"
 exec xcrun simctl launch --console "$DEV" "$BID"

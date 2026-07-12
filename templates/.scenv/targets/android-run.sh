@@ -27,5 +27,12 @@ echo "==> adb 安装并启动 $PKG"
 "$ADB" shell setprop log.redirect-stdio true      # app 的 stdout(print) → logcat
 # 启动清单声明的 LAUNCHER Activity（NativeActivity / ScActivity 皆可，用 monkey 免硬编）
 "$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+# DETACH=1：启动后不挂 logcat（不阻塞）——供自动化/AI 调试用；
+#   看日志：adb logcat -s stdout:V sc.wsi:V
+#   看画面：adb exec-out screencap -p > out.png
+if [[ -n "$DETACH" ]]; then
+    echo "==> 已启动 $PKG（DETACH：不挂 logcat，启动即返回）"
+    exit 0
+fi
 echo "==> logcat（Ctrl-C 结束）"
 exec "$ADB" logcat -s stdout:V sc.wsi:V
