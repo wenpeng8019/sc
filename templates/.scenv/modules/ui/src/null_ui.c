@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 
-#if !defined(SC_UI_COCOA) && !defined(SC_UI_WIN32) && !defined(SC_UI_NK)
+#if !defined(SC_UI_COCOA) && !defined(SC_UI_WIN32) && !defined(SC_UI_NK) \
+    && !defined(SC_UI_UIKIT) && !defined(SC_UI_ANDROID)
 
 /* ============================================================
  * ui null 后端 —— 非本机图形平台的空实现
@@ -30,4 +31,4 @@ int ui_backend_set_font(sc_ui_ctx* ctx, const char* path, float size)
     return 0;
 }
 
-#endif /* !SC_UI_COCOA && !SC_UI_WIN32 && !SC_UI_NK */
+#endif /* !SC_UI_COCOA && !SC_UI_WIN32 && !SC_UI_NK && !SC_UI_UIKIT && !SC_UI_ANDROID */

@@ -55,6 +55,7 @@ enum {
     ANDROID_CMD_FOCUS_LOST,
     ANDROID_CMD_CONFIG_CHANGED,
     ANDROID_CMD_DESTROY,
+    ANDROID_CMD_TOUCH,             // shell：touchRing 有待消费的触摸事件
 };
 
 // app 4 回调（存文件静态：sc_wsi_app_startup 会 memset g_wsi，回调不放 g_wsi.android）
@@ -458,6 +459,26 @@ static void android_process_cmd(void)
             g_wsi.android.destroyRequested = true;
             break;
 
+        case ANDROID_CMD_TOUCH:
+            // shell 形态：排空 UI 线程投递的触摸环，逐个交付给 window 委托
+            for (;;)
+            {
+                android_touch_ev ev;
+                pthread_mutex_lock(&g_wsi.android.touchMutex);
+                if (g_wsi.android.touchHead == g_wsi.android.touchTail)
+                {
+                    pthread_mutex_unlock(&g_wsi.android.touchMutex);
+                    break;
+                }
+                ev = g_wsi.android.touchRing[g_wsi.android.touchTail];
+                g_wsi.android.touchTail = (g_wsi.android.touchTail + 1) % ANDROID_TOUCH_RING;
+                pthread_mutex_unlock(&g_wsi.android.touchMutex);
+
+                if (g_wsi.android.window && ev.count > 0)
+                    impl_on_touch(g_wsi.android.window, ev.phase, ev.count, ev.points);
+            }
+            break;
+
         default:
             break;
     }
@@ -583,6 +604,207 @@ JNIEXPORT void ANativeActivity_onCreate(ANativeActivity* activity,
     while (!g_wsi.android.running)
         pthread_cond_wait(&g_wsi.android.cond, &g_wsi.android.mutex);
     pthread_mutex_unlock(&g_wsi.android.mutex);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// view-tree 外壳（ScActivity + FrameLayout(SurfaceView + 控件)）
+//
+// 分工：纯 NativeActivity 让框架独占整窗 Surface 与 AInputQueue（无原生 UI 的纯 gpu
+// 轻量档）；view-tree 外壳则由自研 Java 外壳 com.sc.wsi.ScActivity 拥有 root
+// （FrameLayout），底层放一张 SurfaceView 供 gpu 渲染，ui 控件叠其上
+// （sc_wsi_android_ui_root 返回该 FrameLayout）。生命周期/窗口/触摸经本节 native 方法
+// 复用同一套渲染线程 + 命令管道机制（与 NativeActivity 路径共用 android_run /
+// android_setup_window / AChoreographer 等）。
+///////////////////////////////////////////////////////////////////////////////
+
+// 起渲染线程 + 命令管道（与 ANativeActivity_onCreate 同构；外壳的窗口/生命周期/输入
+// 改由下面各 native 方法经命令管道驱动，故此处不挂 ANativeActivity 回调）。
+static void android_shell_spawn(void)
+{
+    int fds[2];
+    if (pipe(fds) != 0)
+    {
+        WSI_ALOGW("shell: pipe 失败: %s", strerror(errno));
+        return;
+    }
+    g_wsi.android.msgread  = fds[0];
+    g_wsi.android.msgwrite = fds[1];
+
+    pthread_mutex_init(&g_wsi.android.mutex, NULL);
+    pthread_cond_init(&g_wsi.android.cond, NULL);
+    pthread_mutex_init(&g_wsi.android.touchMutex, NULL);
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&g_wsi.android.thread, &attr, android_thread_entry, NULL);
+    pthread_attr_destroy(&attr);
+
+    pthread_mutex_lock(&g_wsi.android.mutex);
+    while (!g_wsi.android.running)
+        pthread_cond_wait(&g_wsi.android.cond, &g_wsi.android.mutex);
+    pthread_mutex_unlock(&g_wsi.android.mutex);
+}
+
+// nativeOnCreate(Object activity, Object uiRoot, float density) —— UI 线程
+static void JNICALL shell_nativeOnCreate(JNIEnv* env, jobject thiz,
+                                         jobject activity, jobject uiRoot, jfloat density)
+{
+    (void) thiz;
+    if (!sc_wsi_app_startup())
+    {
+        WSI_ALOGW("shell nativeOnCreate: sc_wsi_app_startup 失败");
+        return;
+    }
+
+    g_wsi.android.usesShell     = true;
+    g_wsi.android.shellActivity = (*env)->NewGlobalRef(env, activity);
+    g_wsi.android.uiRoot        = (*env)->NewGlobalRef(env, uiRoot);
+    g_wsi.android.scale         = density > 0.f ? density : 1.f;
+
+    WSI_ALOGI("view-tree 外壳就绪（ScActivity）· scale %.2f", (double) density);
+
+    android_shell_spawn();
+}
+
+// nativeSurfaceCreated(Surface s)
+static void JNICALL shell_nativeSurfaceCreated(JNIEnv* env, jobject thiz, jobject surface)
+{
+    (void) thiz;
+    ANativeWindow* nw = ANativeWindow_fromSurface(env, surface);
+    if (!nw)
+    {
+        WSI_ALOGW("shell: ANativeWindow_fromSurface 返回 NULL");
+        return;
+    }
+    g_wsi.android.shellNativeWindow = nw;   // fromSurface 增引用，销毁时须 release
+    android_set_window(nw);
+}
+
+// nativeSurfaceChanged(Surface s, int w, int h)
+static void JNICALL shell_nativeSurfaceChanged(JNIEnv* env, jobject thiz, jobject surface, jint w, jint h)
+{
+    (void) env; (void) thiz; (void) surface; (void) w; (void) h;
+    if (g_wsi.android.window && g_wsi.android.nativeWindow)
+        android_write_cmd(ANDROID_CMD_WINDOW_RESIZED);
+}
+
+// nativeSurfaceDestroyed()
+static void JNICALL shell_nativeSurfaceDestroyed(JNIEnv* env, jobject thiz)
+{
+    (void) env; (void) thiz;
+    android_set_window(NULL);
+    if (g_wsi.android.shellNativeWindow)
+    {
+        ANativeWindow_release(g_wsi.android.shellNativeWindow);
+        g_wsi.android.shellNativeWindow = NULL;
+    }
+}
+
+static void JNICALL shell_nativeOnResume(JNIEnv* env, jobject thiz)
+{ (void) env; (void) thiz; android_write_cmd(ANDROID_CMD_RESUME); }
+
+static void JNICALL shell_nativeOnPause(JNIEnv* env, jobject thiz)
+{ (void) env; (void) thiz; android_write_cmd(ANDROID_CMD_PAUSE); }
+
+static void JNICALL shell_nativeOnDestroy(JNIEnv* env, jobject thiz)
+{
+    (void) thiz;
+    android_set_destroy();
+    if (g_wsi.android.shellActivity) { (*env)->DeleteGlobalRef(env, g_wsi.android.shellActivity); g_wsi.android.shellActivity = NULL; }
+    if (g_wsi.android.uiRoot)        { (*env)->DeleteGlobalRef(env, g_wsi.android.uiRoot);        g_wsi.android.uiRoot = NULL; }
+}
+
+static void JNICALL shell_nativeOnFocus(JNIEnv* env, jobject thiz, jboolean focused)
+{ (void) env; (void) thiz; android_write_cmd(focused ? ANDROID_CMD_FOCUS_GAINED : ANDROID_CMD_FOCUS_LOST); }
+
+// nativeOnTouch(int action, int actionIndex, int[] ids, float[] xs, float[] ys)
+// SurfaceView 区域触摸（控件触摸由 Java 视图系统各自消费，不到此）。UI 线程构造事件、
+// 入环、唤醒渲染线程消费，保持 app 触摸回调始终在渲染线程。
+static void JNICALL shell_nativeOnTouch(JNIEnv* env, jobject thiz, jint action, jint actionIndex,
+                                        jintArray ids, jfloatArray xs, jfloatArray ys)
+{
+    (void) thiz;
+    const int masked = action & AMOTION_EVENT_ACTION_MASK;
+    int phase;
+    switch (masked)
+    {
+        case AMOTION_EVENT_ACTION_DOWN:
+        case AMOTION_EVENT_ACTION_POINTER_DOWN: phase = SC_TOUCH_BEGAN;     break;
+        case AMOTION_EVENT_ACTION_MOVE:         phase = SC_TOUCH_MOVED;     break;
+        case AMOTION_EVENT_ACTION_UP:
+        case AMOTION_EVENT_ACTION_POINTER_UP:   phase = SC_TOUCH_ENDED;     break;
+        case AMOTION_EVENT_ACTION_CANCEL:       phase = SC_TOUCH_CANCELLED; break;
+        default: return;
+    }
+
+    jsize n = (*env)->GetArrayLength(env, ids);
+    if (n <= 0) return;
+    if (n > SC_MAX_TOUCHPOINTS) n = SC_MAX_TOUCHPOINTS;
+
+    jint*   idp = (*env)->GetIntArrayElements(env, ids, NULL);
+    jfloat* xp  = (*env)->GetFloatArrayElements(env, xs, NULL);
+    jfloat* yp  = (*env)->GetFloatArrayElements(env, ys, NULL);
+
+    android_touch_ev ev;
+    ev.phase = phase;
+    ev.count = 0;
+    for (jsize i = 0; i < n; i++)
+    {
+        sc_wsi_touchpoint* dst = &ev.points[ev.count];
+        dst->identifier = (uint64_t) idp[i];
+        dst->x          = xp[i];   // 已是帧缓冲像素
+        dst->y          = yp[i];
+        dst->tooltype   = SC_TOOLTYPE_FINGER;
+        dst->changed    = (phase == SC_TOUCH_MOVED) ? true : ((int) i == actionIndex);
+        ev.count++;
+    }
+
+    (*env)->ReleaseIntArrayElements(env, ids, idp, JNI_ABORT);
+    (*env)->ReleaseFloatArrayElements(env, xs, xp, JNI_ABORT);
+    (*env)->ReleaseFloatArrayElements(env, ys, yp, JNI_ABORT);
+
+    pthread_mutex_lock(&g_wsi.android.touchMutex);
+    int next = (g_wsi.android.touchHead + 1) % ANDROID_TOUCH_RING;
+    if (next != g_wsi.android.touchTail)   // 非满则入环（满则丢弃最新，保护实时性）
+    {
+        g_wsi.android.touchRing[g_wsi.android.touchHead] = ev;
+        g_wsi.android.touchHead = next;
+    }
+    pthread_mutex_unlock(&g_wsi.android.touchMutex);
+    android_write_cmd(ANDROID_CMD_TOUCH);
+}
+
+int wsi_android_shell_register(JNIEnv* env)
+{
+    jclass cls = (*env)->FindClass(env, "com/sc/wsi/ScActivity");
+    if (!cls)
+    {
+        (*env)->ExceptionClear(env);
+        return 0;   // 无 ScActivity（纯 gpu NativeActivity 形态）——正常跳过
+    }
+
+    static const JNINativeMethod methods[] = {
+        { "nativeOnCreate",         "(Ljava/lang/Object;Ljava/lang/Object;F)V", (void*) shell_nativeOnCreate },
+        { "nativeSurfaceCreated",   "(Landroid/view/Surface;)V",                (void*) shell_nativeSurfaceCreated },
+        { "nativeSurfaceChanged",   "(Landroid/view/Surface;II)V",              (void*) shell_nativeSurfaceChanged },
+        { "nativeSurfaceDestroyed", "()V",                                       (void*) shell_nativeSurfaceDestroyed },
+        { "nativeOnResume",         "()V",                                       (void*) shell_nativeOnResume },
+        { "nativeOnPause",          "()V",                                       (void*) shell_nativeOnPause },
+        { "nativeOnDestroy",        "()V",                                       (void*) shell_nativeOnDestroy },
+        { "nativeOnFocus",          "(Z)V",                                      (void*) shell_nativeOnFocus },
+        { "nativeOnTouch",          "(II[I[F[F)V",                               (void*) shell_nativeOnTouch },
+    };
+    const int n = (int)(sizeof(methods) / sizeof(methods[0]));
+    if ((*env)->RegisterNatives(env, cls, methods, n) != 0)
+    {
+        WSI_ALOGW("shell: RegisterNatives(ScActivity) 失败");
+        (*env)->DeleteLocalRef(env, cls);
+        return -1;
+    }
+    (*env)->DeleteLocalRef(env, cls);
+    WSI_ALOGI("已注册 com.sc.wsi.ScActivity 外壳 native 方法");
+    return 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

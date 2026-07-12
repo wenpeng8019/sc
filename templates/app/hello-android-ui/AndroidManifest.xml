@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android-ui 清单 —— view-tree 外壳形态（ScActivity + ScApplication）。
+  ScActivity 拥有 root（FrameLayout），底层 SurfaceView 供 gpu 渲染，ui 原生控件
+  （android_ui.c 经 Bridge 反射创建）叠其上，可显示、可经 Java 视图系统收触摸。
+  对照 hello-android（纯 gpu）用 android.app.NativeActivity。
+  classes.dex = wsi-android.dex（含 ScApplication + Bridge + ScActivity 三个 Java 类）。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.sc.helloandroidui"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="hello-android-ui"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="app"/>
+
+        <activity android:name="com.sc.wsi.ScActivity"
+                  android:label="hello-android-ui"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

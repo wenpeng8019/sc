@@ -193,8 +193,12 @@ int sc_jni_available(void)
 
 sc_jref sc_jni_activity(void)
 {
+    // view-tree 外壳（ScActivity）形态：返回外壳 Activity 对象
+    if (g_wsi.android.usesShell && g_wsi.android.shellActivity)
+        return (sc_jref)(uintptr_t)g_wsi.android.shellActivity;   // 借用，勿 release
+    // 纯 NativeActivity 形态
     if (!g_wsi.android.activity) return 0;
-    return (sc_jref)(uintptr_t)g_wsi.android.activity->clazz;   // 借用，勿 release
+    return (sc_jref)(uintptr_t)g_wsi.android.activity->clazz;      // 借用，勿 release
 }
 
 sc_jref sc_jni_find_class(const char* name)
@@ -382,6 +386,15 @@ int32_t sc_jni_call_static_int(sc_jref clazz, sc_jmethod m, const sc_jval* args,
     return (int32_t)r;
 }
 
+int32_t sc_jni_get_static_int(sc_jref clazz, sc_jfield field)
+{
+    JNIEnv* e = env_get();
+    if (!e || !clazz || !field) return 0;
+    jint v = (*e)->GetStaticIntField(e, (jclass)(uintptr_t)clazz, (jfieldID)(uintptr_t)field);
+    if ((*e)->ExceptionCheck(e)) { exc_clear(e); return 0; }
+    return (int32_t)v;
+}
+
 char* sc_jni_string_utf8(sc_jref jstr)
 {
     JNIEnv* e = env_get();
@@ -392,6 +405,32 @@ char* sc_jni_string_utf8(sc_jref jstr)
     (*e)->ReleaseStringUTFChars(e, (jstring)(uintptr_t)jstr, c);
     return d;
 }
+
+sc_jref sc_jni_new_string(const char* utf8)
+{
+    JNIEnv* e = env_get();
+    if (!e) return 0;
+    jstring j = (*e)->NewStringUTF(e, utf8 ? utf8 : "");
+    return to_global(e, j);
+}
+
+sc_jref sc_jni_new_object_array(sc_jref elemClass, int n)
+{
+    JNIEnv* e = env_get();
+    if (!e || !elemClass || n < 0) return 0;
+    jobjectArray a = (*e)->NewObjectArray(e, n, (jclass)(uintptr_t)elemClass, NULL);
+    if ((*e)->ExceptionCheck(e)) { exc_clear(e); return 0; }
+    return to_global(e, a);
+}
+
+void sc_jni_set_object_array(sc_jref arr, int index, sc_jref value)
+{
+    JNIEnv* e = env_get();
+    if (!e || !arr) return;
+    (*e)->SetObjectArrayElement(e, (jobjectArray)(uintptr_t)arr, index, (jobject)(uintptr_t)value);
+    if ((*e)->ExceptionCheck(e)) exc_clear(e);
+}
+
 
 void sc_jni_release(sc_jref obj)
 {
@@ -434,6 +473,63 @@ void sc_jni_post_ui(void (*fn)(void* user), void* user)
         if (pe.fn) pe.fn(pe.user);
     }
 }
+
+// UI 主线程同步执行（阻塞至完成）。
+typedef struct
+{
+    void (*fn)(void*);
+    void* user;
+    pthread_mutex_t m;
+    pthread_cond_t  c;
+    int done;
+} sync_task;
+
+static void sync_trampoline(void* p)
+{
+    sync_task* t = (sync_task*)p;
+    t->fn(t->user);
+    pthread_mutex_lock(&t->m);
+    t->done = 1;
+    pthread_cond_signal(&t->c);
+    pthread_mutex_unlock(&t->m);
+}
+
+void sc_jni_run_ui_sync(void (*fn)(void* user), void* user)
+{
+    if (!fn) return;
+    if (!g_bridge_ready || sc_jni_on_ui_thread())   // 就地执行
+    {
+        fn(user);
+        return;
+    }
+    sync_task t;
+    t.fn = fn; t.user = user; t.done = 0;
+    pthread_mutex_init(&t.m, NULL);
+    pthread_cond_init(&t.c, NULL);
+    sc_jni_post_ui(sync_trampoline, &t);
+    pthread_mutex_lock(&t.m);
+    while (!t.done) pthread_cond_wait(&t.c, &t.m);
+    pthread_mutex_unlock(&t.m);
+    pthread_mutex_destroy(&t.m);
+    pthread_cond_destroy(&t.c);
+}
+
+// ---- UI 挂载根容器 ----
+// view-tree 外壳（ScActivity）形态：根 = ScActivity 的 FrameLayout（其底层子视图是
+// gpu 渲染的 SurfaceView，ui 控件叠其上）。该 FrameLayout 由 android_platform.c 的
+// shell_nativeOnCreate 缓存为 g_wsi.android.uiRoot（global ref）。
+// 纯 gpu（NativeActivity）形态：无原生 UI 外壳，返回 0——ui 控件无处挂载（属预期，
+// 该档定位为无原生 UI 的纯 gpu 轻量档）。
+sc_jref sc_wsi_android_ui_root(void)
+{
+    if (g_wsi.android.usesShell && g_wsi.android.uiRoot)
+        return (sc_jref)(uintptr_t)g_wsi.android.uiRoot;   // 借用，勿 release
+
+    JP_LOGW("sc_wsi_android_ui_root: 当前为纯 gpu(NativeActivity)形态，无 view-tree "
+            "外壳可挂载 ui 控件；ui app 请在 manifest 使用 com.sc.wsi.ScActivity");
+    return 0;
+}
+
 
 sc_jref sc_jni_new_proxy(const char* const* ifaces, int niface, sc_jni_invoke_cb cb, void* user)
 {
@@ -558,6 +654,7 @@ int wsi_jni_proxy_register(JNIEnv* env)
 
 int      sc_jni_available(void) { return 0; }
 sc_jref  sc_jni_activity(void) { return 0; }
+sc_jref  sc_wsi_android_ui_root(void) { return 0; }
 sc_jref  sc_jni_find_class(const char* name) { (void)name; return 0; }
 sc_jmethod sc_jni_method(sc_jref c, const char* n, const char* s) { (void)c; (void)n; (void)s; return 0; }
 sc_jmethod sc_jni_static_method(sc_jref c, const char* n, const char* s) { (void)c; (void)n; (void)s; return 0; }
@@ -573,11 +670,16 @@ int      sc_jni_call_bool(sc_jref o, sc_jmethod m, const sc_jval* a, int n) { (v
 void     sc_jni_call_static_void(sc_jref c, sc_jmethod m, const sc_jval* a, int n) { (void)c; (void)m; (void)a; (void)n; }
 sc_jref  sc_jni_call_static_obj(sc_jref c, sc_jmethod m, const sc_jval* a, int n) { (void)c; (void)m; (void)a; (void)n; return 0; }
 int32_t  sc_jni_call_static_int(sc_jref c, sc_jmethod m, const sc_jval* a, int n) { (void)c; (void)m; (void)a; (void)n; return 0; }
+int32_t  sc_jni_get_static_int(sc_jref c, sc_jfield f) { (void)c; (void)f; return 0; }
 char*    sc_jni_string_utf8(sc_jref j) { (void)j; return NULL; }
+sc_jref  sc_jni_new_string(const char* s) { (void)s; return 0; }
+sc_jref  sc_jni_new_object_array(sc_jref c, int n) { (void)c; (void)n; return 0; }
+void     sc_jni_set_object_array(sc_jref a, int i, sc_jref v) { (void)a; (void)i; (void)v; }
 void     sc_jni_release(sc_jref o) { (void)o; }
 sc_jref  sc_jni_retain(sc_jref o) { (void)o; return 0; }
 int      sc_jni_on_ui_thread(void) { return 0; }
 void     sc_jni_post_ui(void (*fn)(void*), void* u) { if (fn) fn(u); }
+void     sc_jni_run_ui_sync(void (*fn)(void*), void* u) { if (fn) fn(u); }
 sc_jref  sc_jni_new_proxy(const char* const* i, int n, sc_jni_invoke_cb cb, void* u)
 { (void)i; (void)n; (void)cb; (void)u; return 0; }
 

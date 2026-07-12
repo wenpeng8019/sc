@@ -22,6 +22,8 @@
 #include <jni.h>
 #include <android/log.h>
 #include <string.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #include "internal.h"   // g_wsi、sc_wsi_app_startup/cleanup、impl_on_suspend/resume（契约）
 
@@ -35,9 +37,59 @@ static JavaVM* g_android_vm = NULL;
 
 JavaVM* sc_wsi_android_get_vm(void) { return g_android_vm; }
 
+// ============================================================
+// 原生 stdout/stderr → logcat 重定向
+//
+// Android 上 app 进程的原生 fd 1/2（printf / sc 的 print 走 write(1,...)）默认落
+// /dev/null——`log.redirect-stdio` 只转 Java 的 System.out/err，不管原生 fd。故 sc
+// print 在设备上看不到。这里用管道把 fd 1/2 接到一个读线程，逐行转 __android_log，
+// tag=sc.stdout，让 print 输出可经 logcat 观察。进程内幂等，只装一次。
+// ============================================================
+static void* wsi_stdio_pump(void* arg)
+{
+    int fd = (int)(intptr_t)arg;
+    char buf[512];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf) - 1)) > 0)
+    {
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) n--;
+        buf[n] = '\0';
+        if (n > 0)
+            __android_log_write(ANDROID_LOG_INFO, "sc.stdout", buf);
+    }
+    return NULL;
+}
+
+static void wsi_redirect_stdio(void)
+{
+    static int done = 0;
+    if (done) return;
+    done = 1;
+
+    setvbuf(stdout, NULL, _IONBF, 0);   // 行/全缓冲会吞输出，改无缓冲即时可见
+    setvbuf(stderr, NULL, _IONBF, 0);
+
+    int pfd[2];
+    if (pipe(pfd) != 0) return;
+    dup2(pfd[1], STDOUT_FILENO);
+    dup2(pfd[1], STDERR_FILENO);
+    close(pfd[1]);
+
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&t, &attr, wsi_stdio_pump, (void*)(intptr_t)pfd[0]);
+    pthread_attr_destroy(&attr);
+}
+
 // 通用 JNI 反射代理注册（android_jni_proxy.c）：在 JNI_OnLoad 里于 app 主线程
 // 调用，解析 com.sc.wsi.Bridge 并绑定其 native 方法。返回非 0 表示代理就绪。
 extern int wsi_jni_proxy_register(JNIEnv* env);
+
+// view-tree 外壳注册（android_platform.c）：向 com.sc.wsi.ScActivity 绑定 native
+// 方法；无该类时安全跳过。
+extern int wsi_android_shell_register(JNIEnv* env);
 
 
 // ---- 进程级钩子实现（从 Java native 方法转发到 wsi C 侧）----
@@ -106,6 +158,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
     (void)reserved;
     g_android_vm = vm;
 
+    wsi_redirect_stdio();   // 原生 stdout/stderr → logcat（sc print 设备可见）
+
     JNIEnv* env = NULL;
     if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK || env == NULL) {
         WSI_LOGW("JNI_OnLoad: GetEnv 失败");
@@ -136,6 +190,11 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         WSI_LOGI("JNI_OnLoad: 已注册 com.sc.wsi.Bridge 反射代理");
     else
         WSI_LOGI("JNI_OnLoad: 未启用 Bridge 反射代理（纯 gpu 形态或 dex 缺失）");
+
+    // view-tree 外壳（android_platform.c）：向 com.sc.wsi.ScActivity 注册 native
+    // 方法。无该类（纯 gpu NativeActivity 形态）时安全跳过。此处引用亦是把外壳代码
+    // 从静态库拉入的锚点之一。
+    wsi_android_shell_register(env);
 
     return JNI_VERSION_1_6;
 }

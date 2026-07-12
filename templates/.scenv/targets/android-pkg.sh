@@ -29,8 +29,8 @@ APPDIR="${SCC_APP_DIR:?}"
 MANIFEST="$APPDIR/AndroidManifest.xml"
 [[ -f "$MANIFEST" ]] || { echo "android-pkg: 缺 AndroidManifest.xml（$MANIFEST）"; exit 1; }
 
-# ScApplication 的 classes.dex（wsi 预编交付；进程级垫片，hasCode=true）
-WSI_DEX="${SCC_TARGET_DIR:?}/../utils/wsi/wsi-android.dex"
+# ScApplication + Bridge 的 classes.dex（wsi 预编交付；进程级垫片 + JNI 反射 shim，hasCode=true）
+WSI_DEX="${SCC_TARGET_DIR:?}/../modules/wsi/wsi-android.dex"
 [[ -f "$WSI_DEX" ]] || { echo "android-pkg: 缺 wsi-android.dex（$WSI_DEX）；先跑 wsi/build.sh（android）"; exit 1; }
 
 # SDK 组件定位

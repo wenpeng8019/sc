@@ -23,7 +23,9 @@ PKG="$(sed -n 's/.*package="\([^"]*\)".*/\1/p' "$SCC_APP_DIR/AndroidManifest.xml
 
 echo "==> adb 安装并启动 $PKG"
 "$ADB" install -r "$APK"
+"$ADB" shell am force-stop "$PKG"                 # 清掉旧进程，确保新 APK 生效
 "$ADB" shell setprop log.redirect-stdio true      # app 的 stdout(print) → logcat
-"$ADB" shell am start -n "$PKG/android.app.NativeActivity"
+# 启动清单声明的 LAUNCHER Activity（NativeActivity / ScActivity 皆可，用 monkey 免硬编）
+"$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 echo "==> logcat（Ctrl-C 结束）"
 exec "$ADB" logcat -s stdout:V sc.wsi:V

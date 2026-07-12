@@ -82,6 +82,13 @@ int sc_jni_available(void);
  * 借用语义：不转移所有权，勿 release。未就绪返回 0。 */
 sc_jref sc_jni_activity(void);
 
+/* Android UI 覆盖层根容器（一个铺满窗口的 FrameLayout，经 Activity.addContentView
+ * 叠加在 NativeActivity 的渲染表面之上，供 ui 模块挂载原生控件）。首次调用时在
+ * UI 主线程惰性创建（会阻塞至创建完成）。借用语义：由 wsi 持有，勿 release。
+ * 非 android 或未就绪返回 0。 */
+sc_jref sc_wsi_android_ui_root(void);
+
+
 /* ---------------- 类 / 方法 / 字段查找（内部缓存） ---------------- */
 
 /* 查找类，name 用 "java/lang/String" 斜杠形式；返回常驻 global ref 句柄，
@@ -115,10 +122,27 @@ void    sc_jni_call_static_void(sc_jref clazz, sc_jmethod m, const sc_jval* args
 sc_jref sc_jni_call_static_obj (sc_jref clazz, sc_jmethod m, const sc_jval* args, int nargs);
 int32_t sc_jni_call_static_int (sc_jref clazz, sc_jmethod m, const sc_jval* args, int nargs);
 
+/* 读取静态 int 字段（如 android.R.layout.* 资源 id）。失败返回 0。 */
+int32_t sc_jni_get_static_int(sc_jref clazz, sc_jfield field);
+
+
 /* ---------------- 字符串便捷 ---------------- */
 
 /* java.lang.String 句柄 → 新分配的 UTF-8 C 串（调用者 free）。失败返回 NULL。 */
 char* sc_jni_string_utf8(sc_jref jstr);
+
+/* UTF-8 C 串 → 新建 java.lang.String（global ref 句柄）。用于把字符串传给
+ * 需要 CharSequence/String 对象参数或塞进数组的场景。失败返回 0。 */
+sc_jref sc_jni_new_string(const char* utf8);
+
+/* ---------------- 对象数组 ---------------- */
+
+/* 新建长度 n 的对象数组（元素初值 null，元素类型为 elemClass）。返回 global ref。 */
+sc_jref sc_jni_new_object_array(sc_jref elemClass, int n);
+
+/* 设置对象数组 index 处元素（value 可为 0=null）。 */
+void sc_jni_set_object_array(sc_jref arr, int index, sc_jref value);
+
 
 /* ---------------- 句柄生命周期 ---------------- */
 
@@ -133,8 +157,13 @@ sc_jref sc_jni_retain(sc_jref obj);
 /* 把 native 闭包投到 Android UI 主线程执行（经 Bridge 的 Handler）。 */
 void sc_jni_post_ui(void (*fn)(void* user), void* user);
 
+/* 在 UI 主线程**同步**执行 fn（阻塞至完成）。若已在 UI 主线程或代理不可用，
+ * 则就地直接执行。用于「创建控件后须立刻取回 jobject」这类同步语义。 */
+void sc_jni_run_ui_sync(void (*fn)(void* user), void* user);
+
 /* 当前是否在 UI 主线程。 */
 int sc_jni_on_ui_thread(void);
+
 
 /* ---------------- 回调代理（Java→C） ---------------- */
 

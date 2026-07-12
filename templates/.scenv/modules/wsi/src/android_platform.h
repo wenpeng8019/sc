@@ -24,6 +24,7 @@
 
 #include <android/native_activity.h>
 #include <android/native_window.h>
+#include <android/native_window_jni.h>
 #include <android/input.h>
 #include <android/looper.h>
 #include <android/configuration.h>
@@ -47,6 +48,15 @@ typedef struct android_window_t
     int             fbWidth, fbHeight;  // 帧缓冲像素
     float           xscale, yscale;     // = densityDpi / 160
 } android_window_t;
+
+// 触摸事件（shell 形态下 UI 线程 → 渲染线程转发环的元素）
+#define ANDROID_TOUCH_RING 64
+typedef struct android_touch_ev
+{
+    int                 phase;
+    int                 count;
+    sc_wsi_touchpoint   points[SC_MAX_TOUCHPOINTS];
+} android_touch_ev;
 
 // 库级（全局）状态。渲染线程 ⇄ UI 线程的全部运行时管线均在此，且在
 // ANativeActivity_onCreate 内「先 sc_wsi_app_startup 后填字段」，故不会被 startup
@@ -82,6 +92,18 @@ typedef struct android_library_t
     bool              firstFrameLogged; // 首帧生命周期日志只打一次
 
     float             scale;            // 内容缩放（densityDpi/160）
+
+    // ── view-tree 外壳（ScActivity + FrameLayout(SurfaceView + 控件)）────────
+    // 纯 NativeActivity（pure-gpu）形态下以下字段全为 0/NULL/false。
+    jobject           shellActivity;      // ScActivity 对象（global ref）
+    jobject           uiRoot;             // FrameLayout（ui 控件挂载根，global ref）
+    bool              usesShell;          // true = view-tree 外壳；false = 纯 gpu
+    ANativeWindow*    shellNativeWindow;  // ANativeWindow_fromSurface 取得，需 release
+
+    // 触摸转发环（shell：UI 线程 nativeOnTouch 入队，渲染线程 CMD_TOUCH 消费）
+    pthread_mutex_t   touchMutex;
+    android_touch_ev  touchRing[ANDROID_TOUCH_RING];
+    int               touchHead, touchTail;
 } android_library_t;
 
 // 显示器（Android 主屏占位；无物理尺寸/多屏 API）
@@ -105,5 +127,9 @@ int  android_run(sc_wsi_app_cb after_startup, sc_wsi_window_cb main_window_creat
 
 // 内部：窗口销毁（vtable destroyWindow）
 void android_destroy_window(window_st* window);
+
+// view-tree 外壳：向 com/sc/wsi/ScActivity 注册 native 方法（JNI_OnLoad 调用；
+// 若无该类——纯 gpu NativeActivity 形态——安全跳过）。
+int  wsi_android_shell_register(JNIEnv* env);
 
 #endif // ANDROID_PLATFORM_H
