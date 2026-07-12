@@ -1,14 +1,14 @@
-# TGA 单元测试：templates/utils/img/img.sc 的 tga_read/tga_write/tga_shape。
+# TGA 单元测试：templates/.scenv/modules/img/img.sc 的 tga_read/tga_write/tga_shape。
 #   经 com（内存 stream 设备）做编解码 round-trip，覆盖 24 位(RGB)/32 位(RGBA)、
 #   类型 10（RLE，复用 codec 流式行程码）、自顶向下朝向、tga_shape 只读元信息。
 #   含「行内含长重复」用例，专门压实 RLE 行程包路径。
 # 运行：scc tests/cases/tga_test.sc --test
 #
-# 被测：templates/utils/img/img.sc（inc io.sc + mem.sc + codec.sc）。
+# 被测：templates/.scenv/modules/img/img.sc（inc io.sc + mem.sc + codec.sc）。
 
 inc io.sc
 inc mem.sc
-inc ../../templates/utils/img/img.sc
+inc ../../templates/.scenv/modules/img/img.sc
 
 # 构造 TGA 18 字节头（清零后填公共字段）。颜色表字段（b[1]/b[3..7]）由调用方另设。
 fnc tga_put_hdr: i4, b: u1&, itype: u4, w: u4, hgt: u4, bpp: u4, desc: u4

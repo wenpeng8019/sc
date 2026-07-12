@@ -15,6 +15,12 @@
 
 namespace host {
 
+// 设置临时/中间产物的根目录（覆盖系统临时根）。传空 path 恢复系统默认。
+// 用途：.scenv 虚拟环境把 scc_units/scc_build/scc_run 等中间物落到 .scenv/cache，
+// 免于污染 /tmp 并便于跨构建复用/清理。若指定目录不可用，makeTempDir/makeTempPath
+// 自动回退系统临时根。
+void setTempBase(const std::filesystem::path& base);
+
 // 在系统临时根下创建唯一目录 <tag>-<pid>-<rand>，返回其路径；失败返回空 path。
 // 取代 POSIX 的 char tmpl[]="/tmp/xxx_XXXXXX"; mkdtemp(tmpl) 惯用法。
 std::filesystem::path makeTempDir(const char* tag);

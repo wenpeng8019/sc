@@ -70,7 +70,7 @@ sc_layout_apply(ctx);   /* 把各节点几何/层叠推送到其 target */
 ## 7. 构建
 
 ```sh
-cd templates/utils/layout
+cd templates/.scenv/modules/layout
 ./build.sh
 ```
 

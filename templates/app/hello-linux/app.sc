@@ -10,7 +10,7 @@
 #   ./templates/app/hello-linux/build.sh      # 构建并运行（X11/Wayland 运行时选择）
 
 inc io.sc
-inc ../../utils/wsi/wsi.sc
+inc wsi.sc
 
 fnc main: i4
     # ---- 初始化窗口系统 ----

@@ -1,6 +1,6 @@
 # ws_echo —— WebSocket 回显服务端示例 + socketpair 单进程自测
 #
-# 用 templates/utils/ws.sc 组件（构建在 io.sc 的 tcp com 设备之上）实现一个最小
+# 用 templates/.scenv/modules/ws.sc 组件（构建在 io.sc 的 tcp com 设备之上）实现一个最小
 # WebSocket echo 服务端，并用 sys.sc 的 sock_socketpair 在单进程里同时跑「服务端 + 测试
 # 客户端」两个 async rpc，事件循环驱动一次完整闭环：握手 → 收发文本帧 → 关闭。
 #
@@ -13,7 +13,7 @@
 inc async.sc
 inc io.sc
 inc sys.sc
-inc ../utils/ws.sc
+inc ws.sc
 
 var g_echo[64]: u1       # 客户端收到的回显载荷
 var g_n: i4 = -1         # 回显长度

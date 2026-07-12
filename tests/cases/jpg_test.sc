@@ -1,13 +1,13 @@
-# JPEG 单元测试：templates/utils/img/img.sc 的 jpg_read/jpg_write/jpg_shape。
+# JPEG 单元测试：templates/.scenv/modules/img/img.sc 的 jpg_read/jpg_write/jpg_shape。
 #   经 com（内存 stream 设备）做编解码 round-trip。JPEG 有损，故用平滑渐变图 + 容差断言；
 #   编解码器的标准符合性（与 libjpeg 双向对齐 baseline/progressive/灰度/4:2:0）已另经 PIL 交叉验证。
 # 运行：scc tests/cases/jpg_test.sc --test
 #
-# 被测：templates/utils/img/img.sc（inc io.sc + mem.sc + img_jpg_codec 熵层）。
+# 被测：templates/.scenv/modules/img/img.sc（inc io.sc + mem.sc + img_jpg_codec 熵层）。
 
 inc io.sc
 inc mem.sc
-inc ../../templates/utils/img/img.sc
+inc ../../templates/.scenv/modules/img/img.sc
 
 # 平滑渐变（无 &255 回绕，避免有损量化在硬边处的振铃）填 RGB。
 fnc jt_fill_rgb: dst: u1&, w: i4, h: i4

@@ -14,7 +14,7 @@
 #   每通道位深 depth=8 或 16（16 位样本按本机字节序 u2 存于 pixels）。
 #
 # 用法：
-#   inc ../../templates/utils/img/img.sc   # 或按实际相对路径
+#   inc ../../templates/.scenv/modules/img/img.sc   # 或按实际相对路径
 #   var info: img
 #   if bmp_shape(c, &info) == 0            # 只读元信息（宽/高/通道）
 #       ...

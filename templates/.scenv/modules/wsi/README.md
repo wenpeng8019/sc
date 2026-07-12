@@ -110,7 +110,7 @@ build.sh 已降为 scc 薄包装（仅做 Wayland 协议头生成 + 调
 `scc . --build`）；平台后端宏与链接项在模块 [.sc](.sc) 段配置
 （见 compiler.md §7.4/§7.6）。在模块目录执行：
 
-  cd templates/utils/wsi
+  cd templates/.scenv/modules/wsi
   ./build.sh
 
 产物：libwsi.a（实体文件）
@@ -181,7 +181,7 @@ Debian/Ubuntu 推荐安装：
 
 ### 5.3 容器内执行 WSI 构建
 
-  container exec sc-ubuntu-build sh -lc 'cd /work/sc/templates/utils/wsi && ./build.sh'
+  container exec sc-ubuntu-build sh -lc 'cd /work/sc/templates/.scenv/modules/wsi && ./build.sh'
 
 
 ### 5.4 容器内执行主工程构建

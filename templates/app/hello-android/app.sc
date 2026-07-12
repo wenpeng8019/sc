@@ -6,7 +6,7 @@
 #     调用打进 .so 的 ANativeActivity_onCreate（由 wsi 后端提供，非本文件）。
 #     故 app 编译为「共享库 libhello.so」而非可执行文件（详见 build.sh）。
 #   * 进程级 init 归 Application：wsi 提供 app 无关的 Application 子类
-#     com.sc.wsi.ScApplication（templates/utils/wsi/java），其 onCreate（每进程一次、
+#     com.sc.wsi.ScApplication（templates/.scenv/modules/wsi/java），其 onCreate（每进程一次、
 #     早于任何 Activity）经自定义 JNI（wsi/src/android_jni.c）触发 sc_wsi_app_startup（tier A）。
 #     本文件的回调是「窗口/帧级」（tier B/C），挂在 NativeActivity/ANativeWindow 上——
 #     Application 无窗口、不做渲染，二者并存（详见 AndroidManifest.xml / README）。
@@ -27,7 +27,7 @@
 #   ANDROID_NDK_HOME=... ANDROID_HOME=... ./templates/app/hello-android/build.sh
 
 inc io.sc
-inc ../../utils/wsi/wsi.sc
+inc wsi.sc
 
 var g_frames: i4 = 0          # 帧计数（跨回调共享，模块级全局）
 

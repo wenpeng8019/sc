@@ -1,5 +1,5 @@
 # 目标档示例：Cortex-M4 裸机（无 OS，无托管 libc/线程）
-# 用法：scc fw.sc --build -o fw.bin --target templates/targets/cortex-m4.target \
+# 用法：scc fw.sc --build -o fw.bin --target cortex-m4 \
 #                 --builtins path/to/m4-builtins
 #       （.bin/.hex 后缀触发 objcopy 转镜像；--builtins 指向目标适配的库实现）
 #

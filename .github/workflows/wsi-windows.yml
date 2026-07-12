@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "templates/utils/wsi/**"
+      - "templates/.scenv/modules/wsi/**"
       - "templates/demo/wsi_demo*.sc"
-      - "templates/targets/windows-x64-mingw.target"
+      - "templates/.scenv/targets/windows-x64-mingw.target"
       - "compiler/**"
       - ".github/workflows/wsi-windows.yml"
 
@@ -37,7 +37,7 @@ jobs:
         run: ./build.sh build
 
       - name: 交叉编译 libwsi（Windows / mingw）
-        working-directory: templates/utils/wsi
+        working-directory: templates/.scenv/modules/wsi
         run: |
           ./build.sh \
             --cc x86_64-w64-mingw32-gcc \
@@ -52,7 +52,7 @@ jobs:
         run: |
           ./compiler/build/scc templates/demo/wsi_demo_ci.sc \
             --build -o wsi_demo_ci.exe \
-            --target templates/targets/windows-x64-mingw.target
+            --target templates/.scenv/targets/windows-x64-mingw.target
           file wsi_demo_ci.exe
 
       - name: 上传 .exe 产物

@@ -48,7 +48,7 @@ bool getPtrCheck();
 void setRefSrcFile(const std::string& path);
 
 // 项目根目录（builtins 目录的上级）：头支撑模块手写头的 #include 路径相对此根计算，
-//   使 builtins/adt、templates/utils/wsi 等任意分组层级模块均落为根相对可解析路径。
+//   使 builtins/adt、templates/.scenv/modules/wsi 等任意分组层级模块均落为根相对可解析路径。
 void setProjectRoot(const std::string& path);
 
 // 模块路径 → 合法 C 标识符 token（scm_ 前缀）：位于项目根下时以「相对项目根」路径为

@@ -24,7 +24,7 @@ SCC="${SCC:-$ROOT/compiler/build/scc}"
 [[ -n "$SCC" ]] || { echo "错误：找不到 scc（先构建编译器或设 SCC=<路径>）"; exit 1; }
 
 # wsi 库：Linux 变体未随仓库入库，本机现场构建（build.sh 会先生成 wayland 协议头）
-WSI="$ROOT/templates/utils/wsi"
+WSI="$ROOT/templates/.scenv/modules/wsi"
 "$WSI/build.sh"
 
 # 编译并运行

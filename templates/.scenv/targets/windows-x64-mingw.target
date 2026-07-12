@@ -7,7 +7,7 @@
 #   Debian/Ubuntu：apt install mingw-w64
 #
 # 用法：
-#   scc app.sc --build -o app.exe --target templates/targets/windows-x64-mingw.target
+#   scc app.sc --build -o app.exe --target windows-x64-mingw
 #
 # 注意：产物是 Windows PE，本机（macOS/Linux）不能直接执行；
 #   需拷到 Windows 运行，或经 Wine（run = wine，见下）在本机跑。
@@ -43,5 +43,5 @@ ldflags = -lws2_32
 #  - 链接窗口/GUI 库（如 wsi 的 win32 后端需 gdi32/user32/shell32 等）用 SCC_LDFLAGS 传入，
 #    与 macOS 传 -framework Cocoa 同理，例如：
 #      SCC_LDFLAGS="-lgdi32 -luser32 -lshell32 -limm32 -lole32 -loleaut32 -lversion -luuid -ldwmapi" \
-#        scc app.sc --build -o app.exe --target templates/targets/windows-x64-mingw.target
+#        scc app.sc --build -o app.exe --target windows-x64-mingw
 #  - 只做纯计算/stdio 的程序无需额外 ldflags，mingw 默认已带 C 运行时。

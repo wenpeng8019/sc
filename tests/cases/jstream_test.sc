@@ -7,7 +7,7 @@
 # 运行：scc tests/cases/jstream_test.sc --test
 
 inc mem.sc
-add ../../templates/utils/img/img_jpg_codec.sc
+add ../../templates/.scenv/modules/img/img_jpg_codec.sc
 
 # zigzag→自然序映射（与 img_jpg_codec.sc 的 cj_dezigzag 前 64 项一致）。
 fnc fill_zz: zz: i4&

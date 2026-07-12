@@ -80,7 +80,11 @@ static void usage() {
               << "  --cflags <opts>  透传任意 C 编译选项给 C 编译器（可重复；如 --cflags -O3）\n"
               << "  --adt <x>  adt 自定义实现（.c/.o/.a，照 builtins/adt/adt.h 契约实现）；\n"
               << "             未指定时 inc adt.sc 自动链接内置默认实现 builtins/adt/adt_impl.c\n"
-              << "  --target <file>  加载交叉编译目标档（key=value，同 .sc 配置语法；SCC_TARGET 亦可）\n"
+              << "  --target <档|裸名>  加载交叉编译目标档（key=value，同 .sc 配置语法；SCC_TARGET 亦可）\n"
+              << "             裸名（如 android）在 .scenv/targets/<名>.target 内解析（见 --env）\n"
+              << "  --env <dir>  显式指定 .scenv 虚拟环境根（覆盖自动发现；SCC_ENV 亦可）。\n"
+              << "             .scenv 类 python venv：自动作 inc（modules/）、--target 裸名（targets/）、\n"
+              << "             -L（lib/）地址基，环境配置读 env.sc，缓存落 cache/。从源文件/cwd 向上自动发现\n"
               << "  --builtins <dir> 目标适配 builtins 目录（最高优先级，替换默认库实现）\n"
               << "  --kind <t>  run 模式强制产物类型（exe|shared|static）；缺省自动——\n"
               << "             根含 main→可执行；无 main（如移动 app 逻辑入口由框架拉起）→共享库。\n"
@@ -211,6 +215,25 @@ static std::map<std::string, std::string> g_profile;
 // 以此为基准解析，令目标档与其配套脚本（wrapper/打包器）可放同一目录、任意 cwd 下可用。
 static std::filesystem::path g_profileDir;
 
+// scc 虚拟环境根（.scenv 目录，绝对）：类 python venv 的「域基」。从源文件目录与 cwd
+// 向上递归查找最近的 .scenv 目录，命中后自动作为 inc（.scenv/modules）、--target 裸名
+// （.scenv/targets）、-L（.scenv/lib）的地址基，环境默认配置读 .scenv/env.sc，中间/缓存
+// 物落 .scenv/cache。优先级：--env > SCC_ENV > 源文件目录向上 > cwd 向上。空=未启用（零影响）。
+static std::filesystem::path g_envRoot;
+
+// 从 start 向上查找最近含 .scenv 子目录的目录，返回该 .scenv 目录（未找到返回空）。
+static std::filesystem::path findEnvDir(const std::filesystem::path& start) {
+    std::error_code ec;
+    for (auto p = start; !p.empty(); ) {
+        auto cand = p / ".scenv";
+        if (std::filesystem::is_directory(cand, ec)) return cand;
+        auto parent = p.parent_path();
+        if (parent == p) break;  // 已到根目录（"/" 的 parent 仍是 "/"），防死循环
+        p = parent;
+    }
+    return {};
+}
+
 // --builtins 指定的目标适配 builtins 目录（最高优先级；空=按默认搜索）
 static std::filesystem::path g_builtinsOverride;
 
@@ -224,11 +247,11 @@ static std::string stripInlineComment(const std::string& v) {
     return v;
 }
 
-// 读取当前目录下的 .sc 配置文件，返回指定 key 的值（未配置返回空串）
-// 格式：每行 key = value，'#' 开头为注释，键值两侧空白忽略
-//   cc = clang
-static std::string readConfig(const std::string& key) {
-    std::ifstream fin(".sc");
+// 读取一个 .sc 语法配置文件，返回指定 key 的值（未配置/无文件返回空串）
+// 格式：每行 key = value，'#' 开头为注释，键值两侧空白忽略；遇 INI 段头 '[' 即停
+// （段内属模块构建/链接配置，由 loadModuleConfig 消费，项目/环境配置只认无段区）。
+static std::string readScFile(const std::filesystem::path& file, const std::string& key) {
+    std::ifstream fin(file);
     if (!fin) return "";
     auto trim = [](std::string s) {
         size_t a = s.find_first_not_of(" \t\r");
@@ -240,9 +263,7 @@ static std::string readConfig(const std::string& key) {
     while (std::getline(fin, line)) {
         std::string l = trim(line);
         if (l.empty() || l[0] == '#') continue;
-        // 遇 INI 段头即停：段内属模块构建/链接配置（loadModuleConfig 消费），
-        // cwd 项目配置只认无段区——避免从模块目录运行 scc 时误读目标段键。
-        if (l.front() == '[') break;
+        if (l.front() == '[') break;   // 遇段头即停（见函数注释）
         size_t eq = l.find('=');
         if (eq == std::string::npos) continue;
         if (trim(l.substr(0, eq)) == key) return trim(stripInlineComment(l.substr(eq + 1)));
@@ -250,13 +271,25 @@ static std::string readConfig(const std::string& key) {
     return "";
 }
 
-// 获取配置项：环境变量 > --target 目标档 > ./.sc 配置文件
+// 读取当前目录下的 .sc 配置文件（cwd 项目配置），返回指定 key 的值（未配置返回空串）
+//   cc = clang
+static std::string readConfig(const std::string& key) {
+    return readScFile(".sc", key);
+}
+
+// 获取配置项：环境变量 > --target 目标档 > ./.sc（cwd 项目）> .scenv/env.sc（环境默认）> 内置默认
 static std::string configValue(const char* env, const char* key) {
     const char* v = std::getenv(env);
     if (v && *v) return v;
     auto it = g_profile.find(key);
     if (it != g_profile.end() && !it->second.empty()) return it->second;
-    return readConfig(key);
+    std::string cw = readConfig(key);                        // ./.sc（cwd 项目配置）
+    if (!cw.empty()) return cw;
+    if (!g_envRoot.empty()) {                                // .scenv/env.sc（环境默认层）
+        std::string ev = readScFile(g_envRoot / "env.sc", key);
+        if (!ev.empty()) return ev;
+    }
+    return "";
 }
 
 // 加载 --target 目标档（与 .sc 配置同语法：每行 key = value，'#' 注释）；失败即退出
@@ -286,6 +319,18 @@ static void loadProfile(const std::string& path) {
     }
 }
 
+// --target 值解析：裸名（无路径分隔、无 .target 后缀）优先在 .scenv/targets/<名>.target
+// 找，命中即展开为该绝对路径（令 `--target android` 直接命中环境内目标档）；含路径分隔
+// 或 .target 后缀者视为显式路径，原样返回。无环境或未命中亦原样返回（回退旧行为）。
+static std::string resolveTargetArg(const std::string& t) {
+    if (t.empty() || g_envRoot.empty()) return t;
+    if (t.find('/') != std::string::npos || endsWith(t, ".target")) return t;  // 显式路径
+    std::error_code ec;
+    const std::filesystem::path cand = g_envRoot / "targets" / (t + ".target");
+    if (std::filesystem::is_regular_file(cand, ec)) return cand.string();
+    return t;
+}
+
 static std::vector<std::string> splitBy(const std::string& s, const char* seps) {
     std::vector<std::string> out;
     std::string cur;
@@ -300,7 +345,7 @@ static std::vector<std::string> splitBy(const std::string& s, const char* seps) 
 }
 
 // 目标档相对脚本/工具解析：若 tok 是相对路径且在目标档目录下确有此文件，改写为绝对路径。
-// 令 .target 的 cc/ar/objcopy 与其配套 wrapper 脚本同放 templates/targets/，任意 cwd 可用。
+// 令 .target 的 cc/ar/objcopy 与其配套 wrapper 脚本同放 templates/.scenv/targets/，任意 cwd 可用。
 // 非路径（如 aarch64-linux-gnu-gcc 走 PATH）或档外路径（不存在于目标档目录）原样返回。
 static std::string resolveProfileTool(const std::string& tok) {
     if (tok.empty() || g_profileDir.empty()) return tok;
@@ -420,13 +465,24 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
         std::string base;
         auto it = g_profile.find("ldflags");
         if (it != g_profile.end() && !it->second.empty()) base = it->second;
-        else base = readConfig("ldflags");
+        else {
+            base = readConfig("ldflags");                          // ./.sc（cwd 项目）
+            if (base.empty() && !g_envRoot.empty())                // .scenv/env.sc（环境默认）
+                base = readScFile(g_envRoot / "env.sc", "ldflags");
+        }
         if (!base.empty()) tc.ldflags += " " + base;
         const char* envld = std::getenv("SCC_LDFLAGS");
         if (envld && *envld) tc.ldflags += std::string(" ") + envld;
     }
     for (auto& p : splitBy(configValue("SCC_LIB", "lib"), ":"))
         tc.ldflags += " -L " + p;
+    // .scenv/lib：环境库目录存在即自动 -L（venv 式，模块预编库放此处即可被链接）
+    if (!g_envRoot.empty()) {
+        std::error_code ec;
+        const auto libdir = g_envRoot / "lib";
+        if (std::filesystem::is_directory(libdir, ec))
+            tc.ldflags += " -L " + libdir.string();
+    }
     for (auto& l : splitBy(configValue("SCC_LIBS", "libs"), " ,"))
         tc.ldflags += " -l" + l;
     for (auto& l : extraLibs)
@@ -988,7 +1044,7 @@ static std::filesystem::path resolveBuiltinsDir(const std::string& input) {
 }
 
 // 项目根（= builtins 目录的上级）：头支撑模块手写头 #include 路径相对此根计算。
-//   在任何后端 codegen 前调用，使 emit-c/run/build 各模式一致（含 templates/utils/* 深层分组）。
+//   在任何后端 codegen 前调用，使 emit-c/run/build 各模式一致（含 templates/.scenv/modules/* 深层分组）。
 static void setupProjectRoot(const std::string& input) {
     namespace fs = std::filesystem;
     const fs::path b = resolveBuiltinsDir(input);
@@ -1010,7 +1066,7 @@ static void addBuiltinsInclude(ToolConfig& tc, const std::string& input) {
         const fs::path parent = b.parent_path();
         if (!parent.empty() && parent != b) {
             tc.cflags += " -I " + parent.string();
-            // 项目根：头支撑模块手写头 #include 路径相对此根计算（含 templates/utils/* 深层分组）
+            // 项目根：头支撑模块手写头 #include 路径相对此根计算（含 templates/.scenv/modules/* 深层分组）
             setProjectRoot(parent.string());
         }
     }
@@ -1463,6 +1519,7 @@ resolveModulePath(const std::string& raw, const std::filesystem::path& baseDir) 
         if (!endsWith(target, ".sc")) candidates.push_back(b / (rel.string() + ".sc"));
     };
     pushBuiltins(g_builtinsOverride);  // --builtins 目标适配目录：最高优先级
+    if (!g_envRoot.empty()) pushBuiltins(g_envRoot / "modules");  // .scenv/modules：环境模块根（venv 式 site-packages）
     pushBuiltins(builtins);
     if (cwdBuiltins != builtins) pushBuiltins(cwdBuiltins);
     if (const char* envB = std::getenv("SCC_BUILTINS"))
@@ -2777,7 +2834,7 @@ static bool prepareRemoteUnits(const std::filesystem::path& rootPath,
         ? std::filesystem::path{}
         : std::filesystem::weakly_canonical(std::filesystem::path(tc.builtinsDir), ec);
     // 项目根（= builtins 上级）：用户模块手写头按「项目根相对」入包，与 codegen 的
-    //   手写头 #include 路径（如 templates/utils/wsi/wsi.h）一致，令其在远端 /I . 下解析。
+    //   手写头 #include 路径（如 templates/.scenv/modules/wsi/wsi.h）一致，令其在远端 /I . 下解析。
     const std::filesystem::path proot = broot.empty()
         ? std::filesystem::path{} : broot.parent_path();
     std::unordered_set<std::string> hdrDirsDone;
@@ -3017,10 +3074,10 @@ static int runPackagedApp(const std::string& input, const std::string& csrcForSt
 
 int main(int argc, char** argv) {
 
-    // 环境变量 SCC_TARGET 指定的目标档先加载（命令行 --target 后加载可覆盖其键值）
-    if (const char* envT = std::getenv("SCC_TARGET")) {
-        if (*envT) loadProfile(envT);
-    }
+    // SCC_TARGET / --target 的加载推迟到解析出输入文件、并发现 .scenv 环境之后，
+    // 以支持「--target <裸名>」在 .scenv/targets 内解析（见下方环境发现块）。
+    std::string envTarget;                    // SCC_TARGET 环境变量指定的目标档（作基线）
+    if (const char* envT = std::getenv("SCC_TARGET")) { if (*envT) envTarget = envT; }
 
     // ---- 1. 解析命令行参数 ----
     std::string input, output, mode = "run";  // 默认：编译+执行
@@ -3036,6 +3093,8 @@ int main(int argc, char** argv) {
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
     bool graphWhole = true;                    // --graph 默认整程序；--graph=unit 仅当前单元
     std::string forcedKind;                   // --kind exe|shared|static：强制 run 模式产物类型（空=自动，按 main 判定）
+    std::string cliTarget;                    // --target 值（延迟到环境发现后解析/加载；覆盖 SCC_TARGET）
+    std::string cliEnv;                       // --env 指定的 .scenv 目录（覆盖自动发现）
     if (const char* rc = std::getenv("SCC_REF_CHECK"); rc && *rc && std::string(rc) != "0")
         setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     if (const char* mc = std::getenv("SCC_MEM_CHECK"); mc && *mc && std::string(mc) != "0")
@@ -3061,7 +3120,8 @@ int main(int argc, char** argv) {
         else if (a.size() > 2 && a.compare(0, 2, "-D") == 0)
             cmdCflags.push_back(a);                          // -DFOO=1 连写，透传给 C 编译器
         else if (a == "--adt" && i + 1 < argc) adtOpt = argv[++i];  // adt 自定义实现
-        else if (a == "--target" && i + 1 < argc) loadProfile(argv[++i]);  // 交叉编译目标档
+        else if (a == "--target" && i + 1 < argc) cliTarget = argv[++i];  // 交叉编译目标档（延迟加载，支持 .scenv 裸名）
+        else if (a == "--env" && i + 1 < argc) cliEnv = argv[++i];  // 显式指定 .scenv 环境根（覆盖自动发现）
         else if (a == "--builtins" && i + 1 < argc)                 // 目标适配 builtins 目录
             g_builtinsOverride = argv[++i];
         else if (a.rfind("--kind=", 0) == 0) forcedKind = a.substr(7);  // --kind=exe|shared|static
@@ -3102,6 +3162,33 @@ int main(int argc, char** argv) {
         else { usage(); return 1; }
     }
     if (input.empty()) { usage(); return 1; }
+
+    // ---- 1b. 发现 .scenv 虚拟环境（域基），并据此加载目标档 ----
+    // 优先级：--env > SCC_ENV > 输入源文件目录向上 > cwd 向上。命中即设 g_envRoot，
+    // 令 inc（.scenv/modules）、--target 裸名（.scenv/targets）、-L（.scenv/lib）、
+    // 环境配置（.scenv/env.sc）、缓存（.scenv/cache）自动生效。未命中 → 零影响（旧行为）。
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path env;
+        if (!cliEnv.empty()) env = fs::absolute(fs::path(cliEnv), ec);
+        else if (const char* e = std::getenv("SCC_ENV"); e && *e) env = fs::absolute(fs::path(e), ec);
+        else {
+            if (input != "-") {
+                const fs::path abs = fs::absolute(fs::path(input), ec);
+                if (!ec) env = findEnvDir(abs.parent_path());
+            }
+            if (env.empty()) env = findEnvDir(fs::current_path());
+        }
+        if (!env.empty() && fs::is_directory(env, ec))
+            g_envRoot = fs::weakly_canonical(env, ec);
+        // 中间/缓存产物落 .scenv/cache（scc_units/scc_build/scc_run 等），免污染 /tmp、
+        // 便于跨构建复用与整体清理；目录不可用时 host 层自动回退系统临时根。
+        if (!g_envRoot.empty()) host::setTempBase(g_envRoot / "cache");
+    }
+    // 目标档加载：SCC_TARGET 作基线，--target 覆盖其键（延迟至此以便裸名在 .scenv 内解析）
+    if (!envTarget.empty()) loadProfile(resolveTargetArg(envTarget));
+    if (!cliTarget.empty()) loadProfile(resolveTargetArg(cliTarget));
 
     // 裸 -o（未指定文件名）：按输入文件名 + 模式后缀推导输出路径，写入输入文件所在目录
     //   --emit-c → .c     --ast → .json     --emit-sc → .out.sc     --build → 无后缀

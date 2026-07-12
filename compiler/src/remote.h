@@ -91,7 +91,7 @@ struct RemoteJob {
     std::string unitsDir;               // 本机单元 .c/.h 临时目录（推送到 bundle/units/）
     std::vector<RemoteUnit> units;      // 单元清单（含 root）；非空=多单元模式
     // 用户模块（非 builtins）手写头：按「项目根相对路径」入包（remoteRel 即相对项目根，
-    //   如 "templates/utils/wsi/wsi.h"），令生成 C 的相对根 #include 及头内 "../../../builtins/…"
+    //   如 "templates/.scenv/modules/wsi/wsi.h"），令生成 C 的相对根 #include 及头内 "../../../../builtins/…"
     //   相对包含在远端（/I . + builtins/）一并解析。
     std::vector<RemoteFile> extraHeaders;
     std::string output;                 // 非空=--build（取回到此路径）；空=远端运行

@@ -1,7 +1,7 @@
 # 目标档：iOS 模拟器 app（交叉编译 → .app bundle → simctl 部署启动）
 # 用法（一条龙，构建 + 打包 + 部署 + 启动）：
-#   scc templates/app/hello-ios/app.sc --target templates/targets/ios-sim.target
-#   DEV="iPhone 16" scc app.sc --target templates/targets/ios-sim.target   # 指定机型
+#   scc templates/app/hello-ios/app.sc --target ios-sim
+#   DEV="iPhone 16" scc app.sc --target ios-sim   # 指定机型
 #
 # 前置：安装 Xcode（含 iOS 模拟器运行时与命令行工具 xcrun）。
 # 预置：wsi 的 iOS 模拟器变体库需先由 wsi/build.sh（iOS 模拟器）预编交付

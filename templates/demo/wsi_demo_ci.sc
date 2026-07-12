@@ -5,15 +5,15 @@
 # 在窗口显示期间截图，随后进程自行结束（不会挂死）。
 #
 # 用法（交叉编译到 Windows）：
-#   ./templates/utils/wsi/build.sh --cc x86_64-w64-mingw32-gcc \
+#   ./templates/.scenv/modules/wsi/build.sh --cc x86_64-w64-mingw32-gcc \
 #       --ar x86_64-w64-mingw32-ar --target x86_64-windows-gnu
 #   SCC_LDFLAGS="-lgdi32 -luser32 -lshell32 -limm32 -lole32 -loleaut32 \
 #       -lversion -luuid -ldwmapi -static" \
 #       ./compiler/build/scc templates/demo/wsi_demo_ci.sc --build \
-#       -o wsi_demo_ci.exe --target templates/targets/windows-x64-mingw.target
+#       -o wsi_demo_ci.exe --target windows-x64-mingw
 
 inc io.sc
-inc ../utils/wsi/wsi.sc
+inc wsi.sc
 
 fnc main: i4
     if wsi_app_startup() == 0

@@ -10,14 +10,14 @@
 #                          └▶ gfx_make_pipeline ─▶ 帧循环 gfx_draw(3)
 #
 # 用法（macOS，从仓库根目录运行；gpu/gfx 源码动态编译，平台框架链接由编译器自动注入，零 SCC_LDFLAGS）：
-#   ./templates/utils/wsi/build.sh                 # 仅 wsi 需预编（libwsi.a 已入库，改源码后重跑）
+#   ./templates/.scenv/modules/wsi/build.sh                 # 仅 wsi 需预编（libwsi.a 已入库，改源码后重跑）
 #   ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
 #   ./compiler/build/scc templates/demo/gpu_demo.sc
 #   ./templates/demo/gpu_demo                      # 着色器已内嵌，任意目录可运行
 #   GPU_BACKEND=gl ./templates/demo/gpu_demo       # 切 OpenGL 后端
 
 inc io.sc
-inc ../utils/wsi/wsi.sc
+inc wsi.sc
 inc gpu.sc
 inc gfx.sc
 

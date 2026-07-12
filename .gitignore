@@ -5,7 +5,7 @@ compiler/build-uv/
 compiler/build-dist/
 compiler/build-ssl/
 compiler/build-linux/
-templates/utils/wsi/build/
+templates/.scenv/modules/wsi/build/
 builtins/gpu/build/
 builtins/gfx/build/
 builtins/spc/build/
@@ -65,15 +65,18 @@ vendor/glfw/
 vendor/sokol/
 vendor/bgfx/
 
-# ssh 组件自包含静态库（由 templates/utils/ssh/build.sh 生成）
+# ssh 组件自包含静态库（由 templates/.scenv/modules/ssh/build.sh 生成）
 # 宿主裸名 libssh2.a + 交叉签名变体 libssh2.<triple>.a 均为本地产物
-templates/utils/ssh/libssh2.a
-templates/utils/ssh/libssh2.*.a
+templates/.scenv/modules/ssh/libssh2.a
+templates/.scenv/modules/ssh/libssh2.*.a
 
 # plib 跨平台库模板构建产物
 templates/plib/*.a
 # 模块库 host 默认档（lib<名>.a）= 本地构建产物，不入库；
 # 交叉交付变体 lib<名>.<triple>.a 仍随 git 交付。
-templates/utils/wsi/libwsi.a
-templates/utils/ui/libui.a
-templates/utils/layout/liblayout.a
+templates/.scenv/modules/wsi/libwsi.a
+templates/.scenv/modules/ui/libui.a
+templates/.scenv/modules/layout/liblayout.a
+
+# .scenv 虚拟环境缓存（交叉编译中间物、模块库缓存等）
+templates/.scenv/cache/

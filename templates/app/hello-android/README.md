@@ -115,7 +115,7 @@ ABI=x86_64 API=24 ./build.sh          # 指定 ABI / 最低 API（默认 arm64-v
 > → `sc_wsi_app_startup` / 保存钩子）+ manifest 两锤点 + build.sh 的 javac→d8→dex 打包。
 > 桥本身完整可用；桥到的 wsi 内部挂起/保存路径待 android 后端接（android_jni.c 内 TODO）。
 
-1. **wsi Android 窗口/帧后端**（`templates/utils/wsi/src/android_platform.c/.h`）：镜像
+1. **wsi Android 窗口/帧后端**（`templates/.scenv/modules/wsi/src/android_platform.c/.h`）：镜像
    `uikit_platform.m` 的 path A——`ANativeActivity_onCreate` 建渲染线程 + ALooper +
    command pipe；`ANativeWindow` create/destroy → 建/毁 surface（交 gpu 做 EGL/Vulkan）；
    `AInputQueue` → `impl_on_touch/key`；`AChoreographer` → 帧驱动 → `on_frame`；

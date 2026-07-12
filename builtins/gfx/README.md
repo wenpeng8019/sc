@@ -90,7 +90,7 @@ macOS 链接框架见 [.sc](.sc)（编译器自动注入）。
 [templates/demo/gpu_headless_demo.sc](../../demo/gpu_headless_demo.sc)。
 
 ```sh
-./templates/utils/wsi/build.sh    # 仅 wsi 需预编（libwsi.a 已入库）；gpu/gfx 源码动态编译
+./templates/.scenv/modules/wsi/build.sh    # 仅 wsi 需预编（libwsi.a 已入库）；gpu/gfx 源码动态编译
 ./compiler/build/scc templates/demo/gpu_shader/gpu_tri.ss -o templates/demo/gpu_shader/out/gpu_tri
 ./compiler/build/scc templates/demo/gpu_demo.sc     # Metal 三角形（框架链接自动注入，零 SCC_LDFLAGS）
 # GPU_BACKEND=gl 前缀同一命令 → OpenGL 后端（同一三角形）

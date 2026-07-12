@@ -29,18 +29,26 @@
 ```sh
 ./build.sh test            # 构建 + examples 冒烟 + 本回归比对
 ./build.sh test --update   # 有意改动产物后，重新生成黄金文件
-tests/run.sh               # 仅跑回归比对（需先 ./build.sh build）
-tests/run.sh --update      # 仅更新黄金文件
-tests/run_linalg_dual_path.sh  # 默认核 vs SCC_WITH_LAPACK 路径一致性检查
-tests/bench_ts.sh          # 轻量性能基线（ts_basic + dnn）
-tests/linux_wsl_validate.sh --with-vulkaninfo --with-shader-tri  # Linux/WSL 平台适配验证
-python3 tests/numpy_parity_smoke.py  # 与 numpy 对拍 smoke（需 numpy）
+
+# tests/run.sh —— 统一测试运行入口（子命令分发）
+tests/run.sh               # golden 回归比对（默认；需先 ./build.sh build）
+tests/run.sh --update       # 更新黄金文件（等价 golden --update，向后兼容）
+tests/run.sh golden --update
+tests/run.sh linalg         # 默认核 vs SCC_WITH_LAPACK 路径一致性检查
+tests/run.sh bench          # 轻量性能基线（ts_basic + dnn）
+tests/run.sh linux --with-vulkaninfo --with-shader-tri  # Linux/WSL 平台适配验证
+tests/run.sh win-remote [case...]   # Windows/MSVC 远程构建对拍（需远程目标）
+tests/run.sh numpy          # 与 numpy 对拍 smoke（需 numpy）
+tests/run.sh all            # 离线安全全集（golden + linalg + bench + numpy）
+tests/run.sh help
 ```
 
 说明：
-- `run_linalg_dual_path.sh` 会在本机存在 OpenBLAS/LAPACKE 时自动启用 LAPACK 路径；
-  缺少依赖时仅做默认路径 smoke。
-- `numpy_parity_smoke.py` 走真实 `scc` 执行结果与 numpy 对比，用于快速发现语义偏差。
+- 此前散落的 `run_linalg_dual_path.sh` / `bench_ts.sh` / `linux_wsl_validate.sh` /
+  `win_remote_check.sh` 已全部收拢为 `run.sh` 的子命令；`numpy_parity_smoke.py`
+  保留为 Python 助手，经 `run.sh numpy` 调用。
+- `linalg` 会在本机存在 OpenBLAS/LAPACKE 时自动启用 LAPACK 路径；缺少依赖时仅做默认路径 smoke。
+- `numpy` 走真实 `scc` 执行结果与 numpy 对比，用于快速发现语义偏差。
 
 新增专项用例：在 `cases/` 放 `.sc`，把相对路径加入 `run.sh` 的 `POSITIVE`
 （负向用例加入 `NEGATIVE`），再 `./build.sh test --update` 生成黄金文件并提交。

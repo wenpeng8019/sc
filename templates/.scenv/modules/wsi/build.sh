@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # scc：环境变量 SCC > 仓库内构建产物 > PATH
-SCC="${SCC:-${SCRIPT_DIR}/../../../compiler/build/scc}"
+SCC="${SCC:-${SCRIPT_DIR}/../../../../compiler/build/scc}"
 [[ -x "$SCC" ]] || SCC="$(command -v scc || true)"
 [[ -n "$SCC" ]] || { echo "错误: 找不到 scc（先构建编译器或设 SCC=<路径>）"; exit 1; }
 

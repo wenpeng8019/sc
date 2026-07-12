@@ -1,6 +1,6 @@
 # sec_demo —— securechn 自通讯加密信道示例 + socketpair 单进程自测
 #
-# 用 templates/utils/securechn.sc 组件，在单进程里用 sys.sc 的 sock_socketpair 同时跑
+# 用 templates/.scenv/modules/securechn.sc 组件，在单进程里用 sys.sc 的 sock_socketpair 同时跑
 # 「发起方 + 响应方」两个 async rpc，事件循环驱动一次完整闭环：
 #   握手（PSK 或 PSK+X25519 临时）→ 双向加密收发明文 → 篡改帧被拒。
 #
@@ -15,7 +15,7 @@ inc async.sc
 inc io.sc
 inc sys.sc
 inc crypto.sc
-inc ../utils/securechn.sc
+inc securechn.sc
 
 var g_srv_msg[64]: u1     # 响应方收到的明文
 var g_srv_n: i4 = -1

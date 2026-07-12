@@ -3,13 +3,13 @@
 # 打开一个原生窗口并进入事件循环，直到用户关闭窗口后退出。
 #
 # 用法（macOS，需链接 Cocoa 系列框架）：
-#   ./templates/utils/wsi/build.sh    # 先编出 libwsi.a
+#   ./templates/.scenv/modules/wsi/build.sh    # 先编出 libwsi.a
 #   SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation" \
 #       ./compiler/build/scc templates/demo/wsi_demo.sc
 #   # 其他平台请改用对应系统窗口库的链接选项。
 
 inc io.sc
-inc ../utils/wsi/wsi.sc
+inc wsi.sc
 
 fnc main: i4
     if wsi_app_startup() == 0

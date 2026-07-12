@@ -10,7 +10,7 @@
 #   ./templates/app/hello-win/build.sh
 
 inc io.sc
-inc ../../utils/wsi/wsi.sc
+inc wsi.sc
 
 fnc main: i4
     # ---- 初始化窗口系统 ----

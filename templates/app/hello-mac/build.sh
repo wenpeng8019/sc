@@ -20,7 +20,7 @@ SCC="${SCC:-$ROOT/compiler/build/scc}"
 [[ -n "$SCC" ]] || { echo "错误：找不到 scc（先构建编译器或设 SCC=<路径>）"; exit 1; }
 
 # wsi 库（libwsi.a 已随仓库入库；缺失才现场构建）
-WSI="$ROOT/templates/utils/wsi"
+WSI="$ROOT/templates/.scenv/modules/wsi"
 [[ -f "$WSI/libwsi.a" ]] || "$WSI/build.sh"
 
 # 编译并运行

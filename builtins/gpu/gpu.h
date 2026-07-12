@@ -25,7 +25,7 @@
  *
  * 平台原生句柄标准（本头即标准定义，窗口库适配本标准）：
  *   gpu 不依赖任何窗口库——native_window/native_display 是平台原生
- *   句柄（void*），含义由下表定义。任何窗口库（如 templates/utils/wsi）
+ *   句柄（void*），含义由下表定义。任何窗口库（如 templates/.scenv/modules/wsi）
  *   按此标准交付句柄即可对接；无窗口场景（MEMORY surface）两者均 NULL。
  *
  *   | 平台        | native_window     | native_display |

@@ -13,7 +13,7 @@
 #   ./templates/app/hello-ios/build.sh
 
 inc io.sc
-inc ../../utils/wsi/wsi.sc
+inc wsi.sc
 
 var g_frames: i4 = 0          # 帧计数（跨回调共享，模块级全局）
 

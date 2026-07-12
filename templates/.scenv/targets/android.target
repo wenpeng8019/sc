@@ -1,7 +1,7 @@
 # 目标档：Android app（NDK 交叉编译 → APK → adb 部署启动）
 # 用法（一条龙，构建 + 打包 + 部署 + 启动）：
 #   ANDROID_NDK_HOME=... ANDROID_HOME=... \
-#     scc templates/app/hello-android/app.sc --target templates/targets/android.target
+#     scc templates/app/hello-android/app.sc --target android
 #
 # 前置：Android NDK（ANDROID_NDK_HOME）+ SDK（ANDROID_HOME，含 build-tools/platform-tools）。
 # 预置：wsi 的 android 变体库与 ScApplication dex 需先由 wsi/build.sh（android）预编交付

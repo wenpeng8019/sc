@@ -1,13 +1,13 @@
-# PNG 单元测试：templates/utils/img/img.sc 的 png_read/png_write/png_shape。
+# PNG 单元测试：templates/.scenv/modules/img/img.sc 的 png_read/png_write/png_shape。
 #   经 com（内存 stream 设备）做编解码 round-trip，覆盖 channels 1/2/3/4（灰/灰A/RGB/RGBA）、
 #   req_comp 通道强制转换、flip_mode 朝向、png_shape 元信息。
 # 运行：scc tests/cases/png_test.sc --test
 #
-# 被测：templates/utils/img/img.sc（inc io.sc + mem.sc + codec.sc）。
+# 被测：templates/.scenv/modules/img/img.sc（inc io.sc + mem.sc + codec.sc）。
 
 inc io.sc
 inc mem.sc
-inc ../../templates/utils/img/img.sc
+inc ../../templates/.scenv/modules/img/img.sc
 
 tst "PNG RGB 8 位 round-trip（6x5，含 png_shape）"
     var src[90]: u1                              # 6x5 RGB = 90

@@ -1,6 +1,6 @@
 # 目标档示例：64 位 ARM Linux（托管 OS，有 libc/线程）
-# 用法：scc app.sc --build -o app --target templates/targets/aarch64-linux.target
-#       scc app.sc        --target templates/targets/aarch64-linux.target   # run 模式经 run 模拟器执行
+# 用法：scc app.sc --build -o app --target aarch64-linux
+#       scc app.sc        --target aarch64-linux   # run 模式经 run 模拟器执行
 #
 # 每行 key = value，'#' 起整行注释；同名键被环境变量 SCC_* 覆盖。
 

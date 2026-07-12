@@ -61,7 +61,7 @@
 ## 5. 构建
 
 ```sh
-cd templates/utils/ui
+cd templates/.scenv/modules/ui
 ./build.sh                       # → libui.a
 ./build.sh --target <目标档>     # → libui.<suffix|triple>.a（交叉）
 ```

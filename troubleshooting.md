@@ -50,7 +50,7 @@ SCC_LDFLAGS=-lrt scc app.sc --build -o app --target your-linux.target
 ... | LC_ALL=C tr -d '\r'
 
 # 2) 只比较程序 stdout，丢弃编译回显/警告
-scc app.sc --target templates/targets/windows-x64.target 2>/dev/null | LC_ALL=C tr -d '\r'
+scc app.sc --target templates/.scenv/targets/windows-x64.target 2>/dev/null | LC_ALL=C tr -d '\r'
 ```
 
 对比本机与远端时，两侧都用同一套 `2>/dev/null | LC_ALL=C tr -d '\r'` 规整后再 `diff`。
@@ -69,7 +69,7 @@ scc app.sc --target templates/targets/windows-x64.target 2>/dev/null | LC_ALL=C 
 | `ssl` 模块（mbedTLS/OpenSSL） | vendor 静态库需为目标现场编译并烘进产物，远程分发只上传生成的 `.c`，未搬运/远端重编 vendor 静态库 | 远程构建避开 TLS |
 | 异步（`async` / `op` 的 libuv 后端） | 同上，依赖 `libuv.a` vendor 静态库 | 远程构建避开异步机制 |
 
-MSVC 远端编译配方要点（见 [templates/targets/windows-x64.target](templates/targets/windows-x64.target)）：
+MSVC 远端编译配方要点（见 [templates/.scenv/targets/windows-x64.target](templates/.scenv/targets/windows-x64.target)）：
 `cl.exe` 无法读 stdin（需落临时 `.c`）；`/utf-8` 消非 ASCII 注释的 C4819；
 `/experimental:c11atomics` 启用 `<stdatomic.h>`/`_Atomic`；链接 `-l<name>` 自动转 `<name>.lib`，
 本机 `-L`/绝对 `.a`/`.o` 路径远端忽略。

@@ -4,14 +4,14 @@
 # radiobox/combo/list），进入事件循环直到窗口关闭。
 #
 # 用法（macOS，需链接 Cocoa 系列框架）：
-#   ./templates/utils/wsi/build.sh    # 先编出 libwsi.a
-#   ./templates/utils/ui/build.sh     # 再编出 libui.a
+#   ./templates/.scenv/modules/wsi/build.sh    # 先编出 libwsi.a
+#   ./templates/.scenv/modules/ui/build.sh     # 再编出 libui.a
 #   SCC_LDFLAGS="-framework Cocoa -framework IOKit -framework CoreFoundation" \
 #       ./compiler/build/scc templates/demo/ui_demo.sc
 #
 # 用法（Linux，Nuklear 后端软件渲染到 wsi 窗口，当前支持 X11）：
-#   ./templates/utils/wsi/build.sh
-#   ./templates/utils/ui/build.sh     # Linux 目标自动选用 nk_ui.c（SC_UI_NK）
+#   ./templates/.scenv/modules/wsi/build.sh
+#   ./templates/.scenv/modules/ui/build.sh     # Linux 目标自动选用 nk_ui.c（SC_UI_NK）
 #   SCC_LDFLAGS="-L.../ui -lui -L.../wsi -lwsi -lX11 -lXrandr -lXinerama \
 #       -lXcursor -lXi -lXext -lXfixes -lwayland-client -lwayland-cursor \
 #       -lxkbcommon -lm -ldl -lpthread -lrt" \
@@ -19,8 +19,8 @@
 #   # Wayland 呈现待补；Windows/其他平台的 ui 后端尚未实现（null 后端仅维护逻辑树）。
 
 inc io.sc
-inc ../utils/wsi/wsi.sc
-inc ../utils/ui/ui.sc
+inc wsi.sc
+inc ui.sc
 
 # 控件事件回调（event 取值见 ui.h：1=CLICK 2=TOGGLE 3=TEXT 4=SELECT）。
 fnc on_ui_event: c: ::sc_ui_control&, event: i4, user: &

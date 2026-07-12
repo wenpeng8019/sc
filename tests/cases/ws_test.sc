@@ -3,7 +3,7 @@
 #   被测组件 ws.sc 是 templates 通用 utils 件，经相对路径 inc。
 # 运行：scc tests/cases/ws_test.sc --test
 
-inc ../../templates/utils/ws.sc
+inc ../../templates/.scenv/modules/ws.sc
 
 # C 风格 strcmp（相等返回 1）。
 fnc sceq: i4, a: char&, b: char&

@@ -1,14 +1,14 @@
-# BMP 单元测试：templates/utils/img/img.sc 的 bmp_read/bmp_write/bmp_shape。
+# BMP 单元测试：templates/.scenv/modules/img/img.sc 的 bmp_read/bmp_write/bmp_shape。
 #   经 com（内存 stream 设备）做编解码 round-trip + 手工构造位流覆盖读侧格式，
 #   覆盖 24 位(RGB)/32 位(RGBA)、行 4 字节对齐、朝向、调色板 8 位、16 位 RGB555、
 #   以及 alpha_mode/flip_mode/invert_mode 参数语义（对齐参考 iAlphaMode/iFlipMode/iInvertMode）。
 # 运行：scc tests/cases/bmp_test.sc --test
 #
-# 被测：templates/utils/img/img.sc（inc io.sc + mem.sc）。
+# 被测：templates/.scenv/modules/img/img.sc（inc io.sc + mem.sc）。
 
 inc io.sc
 inc mem.sc
-inc ../../templates/utils/img/img.sc
+inc ../../templates/.scenv/modules/img/img.sc
 
 # -------- 手工构造位流用的小端写入辅助 --------
 fnc bmp_le32: buf: u1&, o: u4, v: u4

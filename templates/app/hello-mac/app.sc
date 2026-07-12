@@ -10,7 +10,7 @@
 #   ./templates/app/hello-mac/build.sh        # 构建并运行（Cocoa 链接自动注入）
 
 inc io.sc
-inc ../../utils/wsi/wsi.sc
+inc wsi.sc
 
 fnc main: i4
     # ---- 初始化窗口系统 ----

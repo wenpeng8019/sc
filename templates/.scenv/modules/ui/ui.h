@@ -1,7 +1,7 @@
 #ifndef SC_UI_H
 #define SC_UI_H
 
-#include "../../../builtins/platform.h"
+#include "../../../../builtins/platform.h"
 #include "../wsi/wsi.h"
 
 #ifdef __cplusplus

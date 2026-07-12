@@ -34,8 +34,8 @@ set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
-# 仓库根 = 本脚本三级上级（templates/utils/ssh/..）
-REPO="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# 仓库根 = 本脚本四级上级（templates/.scenv/modules/ssh/..）
+REPO="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 # ---- 目标档解析（key = value，'#' 起注释；SCC_* 环境变量优先，与 scc 同源）----
 TARGET_FILE=""

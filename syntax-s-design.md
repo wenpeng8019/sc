@@ -607,7 +607,7 @@ flowchart LR
 - ✅ **P1**：GPU 运行环境与渲染模块：[builtins/gpu](builtins/gpu/)（device/surface/
   memimg，含无表面渲染）+ [builtins/gfx](builtins/gfx/)（读反射清单自动装配管线，
   Metal/GL 双后端）。
-- ✅ **P2**：跨平台窗口/输入模块 [utils/wsi](templates/utils/wsi/)（自研，glfw 同构）。
+- ✅ **P2**：跨平台窗口/输入模块 [modules/wsi](templates/.scenv/modules/wsi/)（自研，glfw 同构）。
 
 ### 14.3 三期（SPIR-V 直发 + 产物资源化，**当前，进行中**）
 

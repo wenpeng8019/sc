@@ -46,7 +46,7 @@ bool g_ptrCheck = false;
 std::string g_refSrcFile;
 
 // 项目根目录（= builtins 目录的上级）。头支撑模块手写头的 #include 路径优先相对此根
-// 计算，令任意分组层级（builtins/adt、templates/utils/wsi）均落为根相对路径，随
+// 计算，令任意分组层级（builtins/adt、templates/.scenv/modules/wsi）均落为根相对路径，随
 // -I <项目根> 可解析。空=未知（回退祖父目录名前缀的历史行为）。
 std::string g_projectRoot;
 
@@ -168,7 +168,7 @@ std::string moduleHeaderName(const std::string& s) {
 
 // 头支撑模块手写头的 #include 路径：<模块目录>/<stem>.h（模块目录名恒等于 stem）。
 // 优先相对项目根（g_projectRoot = builtins 上级）计算，令任意分组层级
-// （builtins/adt → "builtins/adt/adt.h"、templates/utils/wsi → "templates/utils/wsi/wsi.h"）
+// （builtins/adt → "builtins/adt/adt.h"、templates/.scenv/modules/wsi → "templates/.scenv/modules/wsi/wsi.h"）
 // 均落为根相对路径且经 -I <项目根> 可解析。无根信息或模块在根外（相对路径逃出根）时，
 // 回退历史行为「祖父目录名/stem/stem.h」。moduleDir 期望即 p.parent_path()。
 std::string headerBackedPath(const std::filesystem::path& moduleDir,
@@ -7013,7 +7013,7 @@ struct CGen {
             if (p.has_parent_path() && p.parent_path().filename() == stem &&
                 std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
                 // 相对项目根的模块头路径（含分组，如 "builtins/adt/adt.h"、
-                // "templates/utils/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
+                // "templates/.scenv/modules/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
                 out << "#include \"" << headerBackedPath(p.parent_path(), stem)
                     << "\"\n";
                 return;
@@ -7453,7 +7453,7 @@ struct CGen {
                 p.parent_path().filename() == stem &&
                 std::filesystem::exists(p.parent_path() / (stem + ".h"))) {
                 // 引用手写头的相对项目根路径（如 "builtins/adt/adt.h"、
-                // "templates/utils/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
+                // "templates/.scenv/modules/wsi/wsi.h"），随 -I <项目根> 可见；支持任意分组层级。
                 headerBackedInclude = headerBackedPath(p.parent_path(), stem);
                 unitHeaderBacked = true;
             }

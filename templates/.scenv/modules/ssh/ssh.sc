@@ -31,7 +31,7 @@
 
 inc sys.sc                                     # sock_connect / sock_close（跨平台 socket）
 inc mem.sc                                     # chunk / chunk0（动态内存）
-inc "../../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（'::' 逃逸到 C 域按名调用）
+inc "../../../../vendor/libssh2/include/libssh2.h"   # libssh2 C API 原型（'::' 逃逸到 C 域按名调用）
 
 # 把 native 静态库并入工程（路径相对本 .sc 目录解析）。
 add libssh2.a

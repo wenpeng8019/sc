@@ -30,10 +30,28 @@ long host::processId() {
 #endif
 }
 
+// 临时/中间产物根目录覆盖（空=用系统临时根）。见 host_compat.h setTempBase 说明。
+static fs::path g_tempBase;
+
+void host::setTempBase(const fs::path& base) {
+    g_tempBase = base;
+}
+
+// 临时产物根：优先 setTempBase 指定目录（不存在则尝试创建），失败回退系统临时根。
+static fs::path tempBase() {
+    std::error_code ec;
+    if (!g_tempBase.empty()) {
+        if (fs::is_directory(g_tempBase, ec)) return g_tempBase;
+        if (fs::create_directories(g_tempBase, ec), fs::is_directory(g_tempBase, ec))
+            return g_tempBase;
+    }
+    return fs::temp_directory_path(ec);
+}
+
 fs::path host::makeTempDir(const char* tag) {
     std::error_code ec;
-    const fs::path base = fs::temp_directory_path(ec);
-    if (ec) return {};
+    const fs::path base = tempBase();
+    if (base.empty()) return {};
     std::random_device rd;
     for (int attempt = 0; attempt < 64; ++attempt) {
         char buf[64];
@@ -47,8 +65,8 @@ fs::path host::makeTempDir(const char* tag) {
 
 fs::path host::makeTempPath(const char* tag, const char* suffix) {
     std::error_code ec;
-    const fs::path base = fs::temp_directory_path(ec);
-    if (ec) return {};
+    const fs::path base = tempBase();
+    if (base.empty()) return {};
     std::random_device rd;
     for (int attempt = 0; attempt < 64; ++attempt) {
         char buf[80];

@@ -60,7 +60,7 @@ if (-not $cross -and (Test-Path $plain)) {
             'x86'   { 'i686' }
             default { if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' } }
         }
-        $triple = "$arch-pc-windows-msvc"   # matches templates/targets/windows-x64.target
+        $triple = "$arch-pc-windows-msvc"   # matches templates/.scenv/targets/windows-x64.target
     }
     $variant = "lib$name.$triple.a"
     Move-Item -Force $plain $variant

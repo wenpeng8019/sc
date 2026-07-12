@@ -1,7 +1,7 @@
 #ifndef SC_LAYOUT_H
 #define SC_LAYOUT_H
 
-#include "../../../builtins/platform.h"
+#include "../../../../builtins/platform.h"
 #include "../ui/ui.h"
 
 #ifdef __cplusplus

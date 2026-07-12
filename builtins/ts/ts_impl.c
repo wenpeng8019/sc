@@ -942,7 +942,7 @@ bool sc_tensor_mul_scalar_(sc_tensor *_this, double s) { return sc_tensor_scalar
 bool sc_tensor_div_scalar_(sc_tensor *_this, double s) { return sc_tensor_scalar_(_this, s, op_div); }
 
 /* where(cond, a, b)：三方广播（先 cond⊕a 再 ⊗b），物化。 */
-sc_tensor *sc_tensor_where(sc_tensor *cond, sc_tensor *a, sc_tensor *b) {
+sc_tensor *sc_where(sc_tensor *cond, sc_tensor *a, sc_tensor *b) {
     if (!cond || !a || !b) return NULL;
     int32_t s1[TS_MAXD]; int n1 = bc_shape(cond, a, s1);
     if (n1 < 0) return NULL;
@@ -1486,7 +1486,7 @@ sc_tensor *sc_tensor_inv(sc_tensor *_this) {
         if (info == 0) info = LAPACKE_dgetri(LAPACK_ROW_MAJOR, n, a, n, ipiv);
         sc_free(ipiv);
         if (info != 0) { sc_free(a); return NULL; }
-        tensor *r = mat_from(n, n, a, _this->dtype);
+        sc_tensor *r = mat_from(n, n, a, _this->dtype);
         sc_free(a);
         return r;
     }
@@ -1534,7 +1534,7 @@ sc_tensor *sc_tensor_solve(sc_tensor *_this, sc_tensor *b) {
         lapack_int info = LAPACKE_dgesv(LAPACK_ROW_MAJOR, n, kcols, a, n, ipiv, x, kcols);
         sc_free(ipiv);
         if (info != 0) { sc_free(a); sc_free(x); return NULL; }
-        tensor *r = (b->ndim == 1) ? vec_from(n, x, _this->dtype) : mat_from(n, kcols, x, _this->dtype);
+        sc_tensor *r = (b->ndim == 1) ? vec_from(n, x, _this->dtype) : mat_from(n, kcols, x, _this->dtype);
         sc_free(a); sc_free(x);
         return r;
     }
@@ -2919,7 +2919,7 @@ sc_tensor *sc_tensor_avg_pool2d(sc_tensor *_this, int32_t kh, int32_t kw, int32_
  * 15. 拼接 / 堆叠 / 拆分 / 平铺
  * ============================================================ */
 
-sc_tensor *sc_tensor_concat(void *arr_, int32_t n, int32_t axis) {
+sc_tensor *sc_concat(void *arr_, int32_t n, int32_t axis) {
     sc_tensor **arr = (sc_tensor **)arr_;
     if (!arr || n <= 0) return NULL;
     sc_tensor *a0 = arr[0];
@@ -2956,7 +2956,7 @@ sc_tensor *sc_tensor_concat(void *arr_, int32_t n, int32_t axis) {
     return r;
 }
 
-sc_tensor *sc_tensor_stack(void *arr_, int32_t n, int32_t axis) {
+sc_tensor *sc_stack(void *arr_, int32_t n, int32_t axis) {
     sc_tensor **arr = (sc_tensor **)arr_;
     if (!arr || n <= 0) return NULL;
     sc_tensor *a0 = arr[0];

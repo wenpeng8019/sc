@@ -1,4 +1,4 @@
-# path_stack_demo —— 路径段栈示例（templates/utils/path.sc 的 path_stack）
+# path_stack_demo —— 路径段栈示例（templates/.scenv/modules/path.sc 的 path_stack）
 #
 # path_stack 移植自 c_prototype 的 C_pth_*（C_stk/proto 的路径应用）：把路径当作「段的栈」，
 #   以 proto（FILO 纪律）为底座——push 下钻追加、up/ascend 上溯（等价 ".."）、build 按压入序
@@ -17,7 +17,7 @@
 #   ps.build_to(&buf[0], size)    # 或直接写入用户缓冲；buffer 为 nil 时仅测长
 #   ps.drop()                     # 释放底座 proto
 
-inc ../utils/path.sc
+inc path.sc
 inc mem.sc
 
 # 打印一个路径栈：标签 + 段数 + 拼接结果。
