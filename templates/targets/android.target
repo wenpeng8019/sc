@@ -1,0 +1,30 @@
+# 目标档：Android app（NDK 交叉编译 → APK → adb 部署启动）
+# 用法（一条龙，构建 + 打包 + 部署 + 启动）：
+#   ANDROID_NDK_HOME=... ANDROID_HOME=... \
+#     scc templates/app/hello-android/app.sc --target templates/targets/android.target
+#
+# 前置：Android NDK（ANDROID_NDK_HOME）+ SDK（ANDROID_HOME，含 build-tools/platform-tools）。
+# 预置：wsi 的 android 变体库与 ScApplication dex 需先由 wsi/build.sh（android）预编交付
+#   （libwsi.aarch64-linux-android.a + wsi-android.dex，随仓库入库）。
+#
+# 产物类型自动判定：app.sc 无 main（@fnc app_main + ANativeActivity_onCreate 入口）
+#   → scc 构建为共享库 libapp.so。ABI/API 由 cc-android.sh 的环境变量控制（默认 arm64-v8a/24）。
+#
+# 每行 key = value，'#' 起整行注释；相对 cc/ar/pkg/run 路径按本档所在目录解析。
+
+# ---- 交叉工具链（NDK clang / llvm-ar 包装；同目录脚本）----
+cc = cc-android.sh
+ar = ar-android.sh
+
+# ---- 目标平台 ----
+triple        = aarch64-linux-android      # 驱动平台族=android（Bionic：pthread/rt 内置 libc）
+target_suffix = aarch64-linux-android      # add libwsi.a 优先匹配 libwsi.aarch64-linux-android.a
+
+# ---- app 链接：导出 native 锚点 + Bionic 分离的 libm ----
+# -u 强制从 libwsi.a 拉入 ANativeActivity_onCreate / JNI_OnLoad（无引用者会被裁剪）；
+# -landroid -llog 亦经 wsi 的 .sc [*android*] 段消费侧注入，此处再列一遍求自洽。
+ldflags = -u ANativeActivity_onCreate -u JNI_OnLoad -landroid -llog -lm
+
+# ---- 打包 + 部署启动（同目录脚本；参数经环境变量契约传入，见 compiler.md §5.8）----
+pkg = android-pkg.sh
+run = android-run.sh

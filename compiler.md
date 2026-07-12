@@ -56,6 +56,7 @@ scc <input.sc | 模块目录 | -> [选项] [-- 程序参数...]
 | `--target <file>` | 加载交叉编译目标档（`key = value`，同 `.sc` 配置语法；`SCC_TARGET` 亦可，§5） |
 | `--builtins <dir>` | 目标适配 builtins 目录（**最高优先级**，替换默认库实现，§5.5/§7.1） |
 | `--build` | 构建产物模式（§3.5）；输入为模块目录时走模块库构建（§7.6） |
+| `--kind <exe\|shared\|static>` | 强制产物类型，覆盖「有无 `main` 自动判定」（§5.8 移动 app pkg/run 一条龙用；缺省 exe） |
 | `--emit-c` | 转译为 C 源码（不受工具链配置影响） |
 | `--ast` | 输出 AST JSON |
 | `--emit-sc` | 再生规范化 sc 源码 |
@@ -305,7 +306,14 @@ scc fw.sc --build -o fw.bin --target templates/targets/cortex-m4.target \
 | `debug` | `SCC_DEBUG` | 链接后调试打包（`dsymutil` / `none`），显式覆盖平台表 |
 | `freestanding` | `SCC_FREESTANDING` | `1` 表示裸机目标（无托管运行时） |
 | `platforms` | `SCC_PLATFORMS` | 外置平台表文件（见 §5.3） |
-| `run` | `SCC_RUN` | 运行包装器/模拟器（run 模式用，见 §5.4） |
+| `pkg` | `SCC_PKG` | 打包器命令/脚本（构建后打成可部署包，见 §5.8；空=不打包） |
+| `run` | `SCC_RUN` | 运行包装器/模拟器/部署器（run 模式用，见 §5.4 与 §5.8） |
+
+> 目标档里 `cc`/`ar`/`objcopy`/`pkg`/`run` 若写的是**相对路径且该文件存在于目标档
+> 所在目录**，scc 会自动解析为绝对路径（相对目标档，而非相对当前工作目录）。因此
+> 目标档可与它引用的工具链包装脚本（`cc-android.sh`、`android-pkg.sh` 等）同放
+> `templates/targets/`，从任意目录 `--target` 都能正确定位。以 `/` 开头的绝对路径
+> 或 `PATH` 中的裸命令名不受影响。
 
 > 为什么 `target_flags`/`sysroot` 要同时进入链接？因为交叉 `gcc` 在**链接**时也据
 > 机器选项与 sysroot 选择 multilib、`libgcc`、`crt0` 等启动/运行时组件；只在编译
@@ -395,6 +403,53 @@ SCC_SYSROOT=/other/sysroot scc app.sc --build -o app --target my.target
 | `add` 原生源码 | 本机交叉编译 | 远端现场重编（跨架构也对） |
 | `add` 预编译库 | 需目标架构版本 | 同架构可用，跨架构需远端自备 |
 | 产物 | 全部类型 | 目前仅可执行 |
+
+### 5.8 打包与部署运行（pkg / run，移动 app 一条龙）
+
+桌面产物 `fork+exec` 即可跑（§5.4）；但**移动 app 多了两步**：产物不是可直接执行的
+宿主程序，须先**打包**（Android→APK、iOS→`.app` bundle），再经**部署器**（`adb`、
+`simctl`）装到设备/模拟器上由框架拉起。于是把「移动 app 构建」看成一种交叉构建：
+目标档除工具链外，再配 `pkg`（打包器）与 `run`（部署运行器），scc 自动串起
+**构建 → 打包 → 部署启动**一条龙：
+
+```sh
+scc app.sc --target templates/targets/android.target   # 建 .so → 打 APK → adb 装启
+scc app.sc --target templates/targets/ios-sim.target    # 建 exe → 拼 .app → simctl 启
+```
+
+**输出类型自动判定 / `--kind` 覆盖**：scc 按源码是否含 `main` 决定产物类型——
+有 `main`→可执行文件（iOS：Mach-O 打进 `.app`）；无 `main`→共享库
+（Android：`ANativeActivity_onCreate` 导出进 `libapp.so`，由 `NativeActivity` 加载）。
+可用 `--kind exe|shared|static` 强制指定。产物落在 `<app 目录>/build/` 下，基名取
+`-o` 的名字，缺省取源文件名（如 `app.sc`→`libapp.so`/`app`）。
+
+**触发条件**：目标档配了 `pkg`，或产物类型非可执行（如共享库），即进入 pkg/run
+一条龙；否则退化为 §5.4 的 host/模拟器直跑。
+
+**调用约定与环境变量契约**：scc 先构建产物，再依次调用（缺省任一为空则跳过该步）：
+
+- 打包：`<pkg 命令> <产物路径>`
+- 部署运行：`<run 命令> <产物路径> [-- 透传给 app 的参数…]`
+
+构建产物的路径/名称、目标信息经**环境变量**传给 pkg/run 脚本（不靠命令行位置约定，
+跨平台一致，Windows 亦可用）：
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `SCC_ARTIFACT` | 构建产物绝对路径（同时作为 pkg/run 的位置参数 `$1`） |
+| `SCC_APP_DIR` | app 源目录（含 `AndroidManifest.xml`/`Info.plist` 等） |
+| `SCC_APP_NAME` | app 基名（产物名去前缀去扩展，如 `app`） |
+| `SCC_BUILD_DIR` | 构建输出目录（`<app 目录>/build`），打包中间物落此 |
+| `SCC_TARGET_DIR` | 目标档所在目录（脚本据此定位同目录的 dex/垫片等资源） |
+| `SCC_TARGET_TRIPLE` | 目标三元组 |
+| `SCC_TARGET_SUFFIX` | 目标库变体后缀（§7.3） |
+
+**职责边界**：pkg/run 脚本只消费产物与 wsi 等模块**预编交付**的资源（Android 的
+`wsi-android.dex` 由 wsi 自身 `build.sh` 产出并入库，app 不重编 wsi 的 Java 垫片）。
+app 侧 `build.sh` 因此可薄成一条 `scc … --target …`（外加为该目标重编 wsi 变体库）。
+
+示例目标档与脚本见 [templates/targets/](templates/targets/)（`android.target`、
+`ios-sim.target` 及配套 `*-pkg.sh`/`*-run.sh`、NDK/xcrun 工具链包装）。
 
 ## 6. 远程工具链构建（remote build）
 

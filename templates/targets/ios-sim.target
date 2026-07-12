@@ -1,0 +1,26 @@
+# 目标档：iOS 模拟器 app（交叉编译 → .app bundle → simctl 部署启动）
+# 用法（一条龙，构建 + 打包 + 部署 + 启动）：
+#   scc templates/app/hello-ios/app.sc --target templates/targets/ios-sim.target
+#   DEV="iPhone 16" scc app.sc --target templates/targets/ios-sim.target   # 指定机型
+#
+# 前置：安装 Xcode（含 iOS 模拟器运行时与命令行工具 xcrun）。
+# 预置：wsi 的 iOS 模拟器变体库需先由 wsi/build.sh（iOS 模拟器）预编交付
+#   （libwsi.arm64-apple-ios-simulator.a，随仓库入库）。
+#
+# 产物类型自动判定：app.sc 有 main → scc 构建为可执行文件（iOS Mach-O，须打 .app
+#   由模拟器加载，不能本机直跑）；因配了 pkg/run，scc 走「构建→打包→部署启动」链路。
+# 最低部署目标由 cc-iossim.sh 的 IOS_MIN 控制（默认 13.0）。
+#
+# 每行 key = value，'#' 起整行注释；相对 cc/ar/pkg/run 路径按本档所在目录解析。
+
+# ---- 交叉工具链（xcrun clang / ar，iphonesimulator SDK 包装；同目录脚本）----
+cc = cc-iossim.sh
+ar = ar-iossim.sh
+
+# ---- 目标平台 ----
+triple        = arm64-apple-ios-simulator  # 平台族=darwin（线程内置，debug=dsymutil）
+target_suffix = arm64-apple-ios-simulator  # add libwsi.a 优先匹配 libwsi.arm64-apple-ios-simulator.a
+
+# ---- 打包 + 部署启动（同目录脚本；参数经环境变量契约传入，见 compiler.md §5.8）----
+pkg = ios-sim-pkg.sh
+run = ios-sim-run.sh

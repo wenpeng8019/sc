@@ -72,7 +72,8 @@ static void usage() {
               << "          debug   = dsymutil / none   # 链接后调试打包步骤，覆盖平台表（SCC_DEBUG）\n"
               << "          freestanding = 1         # 裸机目标（无托管运行时；SCC_FREESTANDING 优先）\n"
               << "          platforms = plat.tbl     # 外置平台表文件（SCC_PLATFORMS 优先；行 pattern:threads:debug）\n"
-              << "          run     = qemu-arm -L .. # 运行包装器/模拟器（SCC_RUN 优先；run 模式用）\n"
+              << "          run     = qemu-arm -L .. # 运行包装器/模拟器/部署器（SCC_RUN 优先；run 模式用）\n"
+              << "          pkg     = ./pkg.sh       # 打包器脚本（SCC_PKG 优先；run 模式先打包再经 run 部署）\n"
               << "  -l <名>    追加链接库（可重复；-lm 写法也支持，与配置的 libs 合并）\n"
               << "  -D<宏>[=值]  透传宏定义给 C 编译器（可重复；-D FOO=1 分写亦可）；\n"
               << "             最高优先级，追加在末尾，可覆盖配置/内置默认（如 -DSC_PRINT_BUF=4096）\n"
@@ -81,6 +82,9 @@ static void usage() {
               << "             未指定时 inc adt.sc 自动链接内置默认实现 builtins/adt/adt_impl.c\n"
               << "  --target <file>  加载交叉编译目标档（key=value，同 .sc 配置语法；SCC_TARGET 亦可）\n"
               << "  --builtins <dir> 目标适配 builtins 目录（最高优先级，替换默认库实现）\n"
+              << "  --kind <t>  run 模式强制产物类型（exe|shared|static）；缺省自动——\n"
+              << "             根含 main→可执行；无 main（如移动 app 逻辑入口由框架拉起）→共享库。\n"
+              << "             配合目标档 pkg/run 实现「scc app.sc --target ...」构建+打包+部署启动一条龙\n"
               << "  --build    构建产物模式：编译链接为持久产物，应用与 run 相同的工具链配置\n"
               << "             产物类型按 -o 后缀决定：.a → 静态库（ar rcs）；\n"
               << "             .so/.dylib → 动态库（-shared，单元编译附加 -fPIC）；\n"
@@ -168,6 +172,7 @@ struct ToolConfig {
     std::string ar = "ar";   // 静态库归档器（SCC_AR/ar；交叉如 arm-none-eabi-ar）
     std::string objcopy;     // 目标文件转换器（SCC_OBJCOPY/objcopy；产 .bin/.hex）
     std::string runner;      // 运行包装器（SCC_RUN/run；如 "qemu-arm -L <sysroot>"，空=直接执行）
+    std::string pkgTool;     // 打包器（SCC_PKG/pkg；如打 .app/APK 的脚本，空=不打包）
     std::string triple;      // 目标三元组（SCC_TARGET_TRIPLE/triple；空=本机）
     std::string targetSuffix;// target_suffix：add 预编译库优先匹配 <名>.<suffix>.<ext>（空=回退三元组）
     std::string threadsLib;  // 线程库链接选项（平台表/显式 threads 解析，如 "-lpthread"）
@@ -201,6 +206,10 @@ struct ToolConfig {
 // 目标档（--target 文件）键值表：configValue 在环境变量之后、./.sc 配置之前回退到此。
 // 优先级：环境变量 SCC_* > --target 目标档 > ./.sc 配置 > 内置默认
 static std::map<std::string, std::string> g_profile;
+
+// --target 目标档所在目录（绝对）：档内相对路径的 cc/ar/objcopy/run/pkg（工具/脚本）
+// 以此为基准解析，令目标档与其配套脚本（wrapper/打包器）可放同一目录、任意 cwd 下可用。
+static std::filesystem::path g_profileDir;
 
 // --builtins 指定的目标适配 builtins 目录（最高优先级；空=按默认搜索）
 static std::filesystem::path g_builtinsOverride;
@@ -257,6 +266,10 @@ static void loadProfile(const std::string& path) {
         std::cerr << "错误: 无法打开目标档 " << path << "\n";
         std::exit(1);
     }
+    // 记录目标档所在目录（绝对）：档内相对的 cc/ar/run/pkg 脚本以此解析（见 resolveProfileTool）
+    std::error_code ec;
+    g_profileDir = std::filesystem::weakly_canonical(
+        std::filesystem::absolute(std::filesystem::path(path), ec).parent_path(), ec);
     auto trim = [](std::string s) {
         size_t a = s.find_first_not_of(" \t\r");
         if (a == std::string::npos) return std::string();
@@ -283,6 +296,30 @@ static std::vector<std::string> splitBy(const std::string& s, const char* seps) 
         } else cur += ch;
     }
     if (!cur.empty()) out.push_back(cur);
+    return out;
+}
+
+// 目标档相对脚本/工具解析：若 tok 是相对路径且在目标档目录下确有此文件，改写为绝对路径。
+// 令 .target 的 cc/ar/objcopy 与其配套 wrapper 脚本同放 templates/targets/，任意 cwd 可用。
+// 非路径（如 aarch64-linux-gnu-gcc 走 PATH）或档外路径（不存在于目标档目录）原样返回。
+static std::string resolveProfileTool(const std::string& tok) {
+    if (tok.empty() || g_profileDir.empty()) return tok;
+    if (!tok.empty() && tok[0] == '/') return tok;                 // 已是绝对路径
+    std::error_code ec;
+    const std::filesystem::path cand = g_profileDir / tok;
+    if (std::filesystem::is_regular_file(cand, ec))
+        return cand.string();
+    return tok;
+}
+
+// 命令串（run/pkg：脚本 + 参数）首 token 按目标档目录解析为绝对路径，其余原样。
+static std::string resolveProfileCmd(const std::string& cmd) {
+    if (cmd.empty() || g_profileDir.empty()) return cmd;
+    std::vector<std::string> parts = splitBy(cmd, " ");
+    if (parts.empty()) return cmd;
+    parts[0] = resolveProfileTool(parts[0]);
+    std::string out;
+    for (size_t i = 0; i < parts.size(); ++i) { if (i) out += " "; out += parts[i]; }
     return out;
 }
 
@@ -364,7 +401,7 @@ static PlatProps externalPlatform(const std::string& triple) {
 // 选择工具程序：环境变量 > 目标档/.sc 配置 > 缺省值（空缺省表示可留空）
 static std::string pickTool(const char* env, const char* key, const char* def) {
     std::string v = configValue(env, key);
-    return v.empty() ? std::string(def ? def : "") : v;
+    return resolveProfileTool(v.empty() ? std::string(def ? def : "") : v);
 }
 
 // 汇总所有扩展配置为两段命令行片段；extraLibs 来自命令行 -l、extraCflags 来自 -D/--cflags
@@ -399,7 +436,8 @@ static ToolConfig loadToolConfig(const std::vector<std::string>& extraLibs,
     // ---- 交叉编译：工具程序 + 目标机器选项 + 平台行为解析 ----
     tc.ar      = pickTool("SCC_AR", "ar", "ar");
     tc.objcopy = pickTool("SCC_OBJCOPY", "objcopy", "objcopy");
-    tc.runner  = configValue("SCC_RUN", "run");
+    tc.runner  = resolveProfileCmd(configValue("SCC_RUN", "run"));
+    tc.pkgTool = resolveProfileCmd(configValue("SCC_PKG", "pkg"));
 
     // 目标机器选项（target_flags + sysroot）：同时进入编译与链接两步
     const std::string tflags = configValue("SCC_TARGET_FLAGS", "target_flags");
@@ -1008,7 +1046,7 @@ static std::string pickCC() {
     cc = std::getenv("CC");
     if (cc && *cc) return cc;
     auto it = g_profile.find("cc");
-    if (it != g_profile.end() && !it->second.empty()) return it->second;
+    if (it != g_profile.end() && !it->second.empty()) return resolveProfileTool(it->second);
     std::string conf = readConfig("cc");
     if (!conf.empty()) return conf;
 #ifdef _WIN32
@@ -1695,6 +1733,16 @@ static bool isBuiltinUnit(const std::filesystem::path& p) {
 // 程序是否含可导出对象（@导出 且非 external）：决定根模块是否生成非空接口头 / 启用注入。
 static bool programHasExports(const Program& prog) {
     for (auto& d : prog.decls) if (d->exported && !d->external) return true;
+    return false;
+}
+
+// 根程序是否含自由函数 main（非外部、非方法）：run 模式据此自动定产物类型——
+// 有 main → 可执行；无 main（如移动 app 仅 @导出 逻辑入口，由框架/宿主拉起）→ 共享库。
+static bool programHasMain(const Program& prog) {
+    for (auto& d : prog.decls)
+        if (d->kind == Decl::FuncD && !d->external
+            && d->methodOwner.empty() && d->name == "main")
+            return true;
     return false;
 }
 
@@ -2870,6 +2918,101 @@ static int compileAndRunProject(const std::filesystem::path& rootPath,
     return rc;   // rc<0：启动失败(-1，runProgram 已诊断)或崩溃异常码；否则程序退出码
 }
 
+// 设置子进程环境变量（pkg/run 脚本消费）：跨宿主可移植封装
+static void setEnvVar(const char* name, const std::string& val) {
+#ifdef _WIN32
+    _putenv_s(name, val.c_str());
+#else
+    setenv(name, val.c_str(), 1);
+#endif
+}
+
+// ---------------- 移动/打包 app 一条龙（run 模式 · 目标档配 pkg/run）----------------
+// 面向「构建 → 打包 → 部署启动」的目标（移动 app 等）：产物非普通可直接执行的本机程序，
+// 需先打成平台包（.app/APK），再经部署器（simctl/adb）装到设备/模拟器启动。
+//   1. 按 kind 把 app 构建为持久产物（无 main→共享库；有 main→可执行）到 <app>/build/
+//   2. 导出环境变量（见下），若配 pkg 则调打包器把产物打成平台包
+//   3. 若配 run 则调部署器启动（产物作位置参数[0]兼容 qemu 式 runner，脚本另可用环境变量
+//      定位平台包）；否则可执行且非跨族时退化本机直跑，跨族/库产物则仅报告已构建
+// 环境变量契约（pkg 与 run 均可见）：
+//   SCC_ARTIFACT   构建产物绝对路径（.so/.dylib/可执行）
+//   SCC_APP_DIR    app 源目录（绝对）        SCC_APP_NAME  产物基名（stem 或 -o）
+//   SCC_BUILD_DIR  构建输出目录（=<app>/build）SCC_TARGET_DIR 目标档所在目录
+//   SCC_TARGET_TRIPLE / SCC_TARGET_SUFFIX     目标三元组 / add 变体后缀
+static int runPackagedApp(const std::string& input, const std::string& csrcForStdin,
+                          OutKind kind, const std::string& nameHint,
+                          const ToolConfig& tc, const std::vector<std::string>& progArgs) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // app 源目录与产物基名
+    const fs::path appDir = input == "-"
+        ? fs::current_path(ec)
+        : fs::weakly_canonical(fs::absolute(fs::path(input), ec).parent_path(), ec);
+    const std::string name = !nameHint.empty()
+        ? nameHint
+        : (input == "-" ? std::string("app") : fs::path(input).stem().string());
+
+    // 构建输出目录 <app>/build
+    const fs::path buildDir = appDir / "build";
+    fs::create_directories(buildDir, ec);
+
+    // 产物路径：共享库按目标平台族定扩展名/lib 前缀；可执行/静态库直用基名
+    const std::string fam = platformFamily(tc.triple.empty() ? hostTriple() : tc.triple);
+    fs::path artifact;
+    if (kind == OutKind::SharedLib) {
+        const std::string ext = fam == "windows" ? ".dll" : (fam == "darwin" ? ".dylib" : ".so");
+        const std::string pre = fam == "windows" ? "" : "lib";
+        artifact = buildDir / (pre + name + ext);
+    } else if (kind == OutKind::StaticLib) {
+        artifact = buildDir / ("lib" + name + ".a");
+    } else {
+        artifact = buildDir / name;
+    }
+    const std::string artifactPath = fs::weakly_canonical(artifact, ec).string();
+
+    // 1. 构建产物（buildProject/buildSource 按产物后缀定 kind）
+    std::cerr << "==> 构建 " << artifactPath << "\n";
+    int rc = input == "-" ? buildSource(csrcForStdin, artifactPath, tc)
+                          : buildProject(fs::path(input), artifactPath, tc);
+    if (rc != 0) return rc;
+
+    // 2. 导出环境变量（pkg/run 脚本消费）
+    setEnvVar("SCC_ARTIFACT", artifactPath);
+    setEnvVar("SCC_APP_DIR", appDir.string());
+    setEnvVar("SCC_APP_NAME", name);
+    setEnvVar("SCC_BUILD_DIR", buildDir.string());
+    if (!g_profileDir.empty()) setEnvVar("SCC_TARGET_DIR", g_profileDir.string());
+    if (!tc.triple.empty()) setEnvVar("SCC_TARGET_TRIPLE", tc.triple);
+    if (!tc.targetSuffix.empty()) setEnvVar("SCC_TARGET_SUFFIX", tc.targetSuffix);
+
+    // 3. 打包（可选）：pkg 脚本 + 产物位置参数
+    if (!tc.pkgTool.empty()) {
+        std::cerr << "==> 打包（" << tc.pkgTool << "）\n";
+        std::vector<std::string> argv = splitBy(tc.pkgTool, " ");
+        argv.push_back(artifactPath);
+        rc = host::runProgram(argv);
+        if (rc != 0) { std::cerr << "错误: 打包失败（退出码 " << rc << "）\n"; return rc; }
+    }
+
+    // 4. 部署启动：run 部署器 > 本机直跑（可执行且非跨族）> 仅报告
+    if (!tc.runner.empty()) {
+        std::cerr << "==> 部署启动（" << tc.runner << "）\n";
+        std::vector<std::string> argv = splitBy(tc.runner, " ");
+        argv.push_back(artifactPath);
+        for (auto& a : progArgs) argv.push_back(a);
+        return host::runProgram(argv);
+    }
+    if (kind == OutKind::Exe && !tc.crossRun) {
+        std::vector<std::string> argv{artifactPath};
+        for (auto& a : progArgs) argv.push_back(a);
+        return host::runProgram(argv);
+    }
+    std::cerr << "==> 已构建 " << artifactPath
+              << "（未配置 run 部署器，跳过启动）\n";
+    return 0;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char** argv) {
@@ -2892,6 +3035,7 @@ int main(int argc, char** argv) {
     bool clangRequested = false;              // 是否出现 --clang（决定检测/加载失败是否报错）
     bool bareO = false;                       // -o 未带值（按输入文件名+模式后缀推导）
     bool graphWhole = true;                    // --graph 默认整程序；--graph=unit 仅当前单元
+    std::string forcedKind;                   // --kind exe|shared|static：强制 run 模式产物类型（空=自动，按 main 判定）
     if (const char* rc = std::getenv("SCC_REF_CHECK"); rc && *rc && std::string(rc) != "0")
         setRefCheck(true);                    // 环境变量开启 T@ 栈悬挂检查（等价 --check=ref）
     if (const char* mc = std::getenv("SCC_MEM_CHECK"); mc && *mc && std::string(mc) != "0")
@@ -2920,6 +3064,8 @@ int main(int argc, char** argv) {
         else if (a == "--target" && i + 1 < argc) loadProfile(argv[++i]);  // 交叉编译目标档
         else if (a == "--builtins" && i + 1 < argc)                 // 目标适配 builtins 目录
             g_builtinsOverride = argv[++i];
+        else if (a.rfind("--kind=", 0) == 0) forcedKind = a.substr(7);  // --kind=exe|shared|static
+        else if (a == "--kind" && i + 1 < argc) forcedKind = argv[++i];  // --kind exe|shared|static
         else if (a == "--from" && i + 1 < argc) fromPath = argv[++i];  // stdin 输入的源路径（inc 解析基准）
         else if (a == "--clang") {                                  // libclang 路径；缺省值则自动检测平台默认位置
             clangRequested = true;
@@ -3192,6 +3338,23 @@ int main(int argc, char** argv) {
                 if (input != "-") gatherAddDeps(std::filesystem::path(input), tc.targetSuffix, deps);
                 return remoteDispatch(c, tc, "", progArgs, deps, input);
             }
+
+            // 产物类型：--kind 强制 > 自动（有 main→可执行，无 main→共享库）
+            OutKind kind;
+            if      (forcedKind == "shared") kind = OutKind::SharedLib;
+            else if (forcedKind == "static") kind = OutKind::StaticLib;
+            else if (forcedKind == "exe")    kind = OutKind::Exe;
+            else if (!forcedKind.empty()) {
+                std::cerr << "错误: 未知 --kind '" << forcedKind
+                          << "'（可选 exe|shared|static）\n";
+                return 1;
+            }
+            else kind = programHasMain(prog) ? OutKind::Exe : OutKind::SharedLib;
+
+            // 打包/部署一条龙：配了 pkg（移动 app 等）或产物非可执行时走 build→pkg→run；
+            // 否则（普通本机/qemu 交叉可执行）保持临时产物直跑/模拟器包装的既有快路径。
+            if (!tc.pkgTool.empty() || kind != OutKind::Exe)
+                return runPackagedApp(input, c, kind, output, tc, progArgs);
 
             if (input == "-") return compileAndRunSource(c, progArgs, tc);
             return compileAndRunProject(std::filesystem::path(input), progArgs, tc);

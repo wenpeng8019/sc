@@ -29,18 +29,18 @@
                  android:allowBackup="false">
 
         <!-- ScApplication 据此解析要 loadLibrary 的 app .so 名（须与下方 activity 的
-             android.app.lib_name 及 build.sh 的 LIB=hello 一致）-->
+             android.app.lib_name 一致；libapp.so ← scc 构建的 app.sc）-->
         <meta-data android:name="com.sc.wsi.lib_name"
-                   android:value="hello"/>
+                   android:value="app"/>
 
         <activity android:name="android.app.NativeActivity"
                   android:label="hello-android"
                   android:exported="true"
                   android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
 
-            <!-- 与 build.sh 的 LIB=hello 一致 → libhello.so；ANativeActivity_onCreate 由 wsi 后端提供 -->
+            <!-- 与 app.sc 产物 libapp.so 一致；ANativeActivity_onCreate 由 wsi 后端提供 -->
             <meta-data android:name="android.app.lib_name"
-                       android:value="hello"/>
+                       android:value="app"/>
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
