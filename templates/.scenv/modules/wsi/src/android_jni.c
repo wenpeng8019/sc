@@ -42,12 +42,19 @@ JavaVM* sc_wsi_android_get_vm(void) { return g_android_vm; }
 //
 // Android 上 app 进程的原生 fd 1/2（printf / sc 的 print 走 write(1,...)）默认落
 // /dev/null——`log.redirect-stdio` 只转 Java 的 System.out/err，不管原生 fd。故 sc
-// print 在设备上看不到。这里用管道把 fd 1/2 接到一个读线程，逐行转 __android_log，
-// tag=sc.stdout，让 print 输出可经 logcat 观察。进程内幂等，只装一次。
+// print 在设备上看不到。这里用管道把 fd 1/2 接到读线程，逐行转 __android_log。
+//
+// stdout 与 stderr 分开走两条管道、两个 tag：app 的 print（fd 1）→ sc.stdout 保持
+// 干净；框架/emugl 驱动的调试噪声（hwui 渲染我们挂上去的原生控件时经 fd 2 输出的
+// s_glBindAttribLocation 之类）→ sc.stderr，不污染 print。进程内幂等，只装一次。
 // ============================================================
 static void* wsi_stdio_pump(void* arg)
 {
-    int fd = (int)(intptr_t)arg;
+    // arg 高位打包 fd，低位区分 tag：0=stdout，1=stderr
+    intptr_t packed = (intptr_t)arg;
+    int fd = (int)(packed >> 1);
+    const char* tag = (packed & 1) ? "sc.stderr" : "sc.stdout";
+    int prio = (packed & 1) ? ANDROID_LOG_WARN : ANDROID_LOG_INFO;
     char buf[512];
     ssize_t n;
     while ((n = read(fd, buf, sizeof(buf) - 1)) > 0)
@@ -55,9 +62,25 @@ static void* wsi_stdio_pump(void* arg)
         while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) n--;
         buf[n] = '\0';
         if (n > 0)
-            __android_log_write(ANDROID_LOG_INFO, "sc.stdout", buf);
+            __android_log_write(prio, tag, buf);
     }
     return NULL;
+}
+
+static void wsi_redirect_one(int target_fd, int tag_bit)
+{
+    int pfd[2];
+    if (pipe(pfd) != 0) return;
+    dup2(pfd[1], target_fd);
+    close(pfd[1]);
+
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&t, &attr, wsi_stdio_pump,
+                   (void*)(intptr_t)(((intptr_t)pfd[0] << 1) | tag_bit));
+    pthread_attr_destroy(&attr);
 }
 
 static void wsi_redirect_stdio(void)
@@ -69,18 +92,8 @@ static void wsi_redirect_stdio(void)
     setvbuf(stdout, NULL, _IONBF, 0);   // 行/全缓冲会吞输出，改无缓冲即时可见
     setvbuf(stderr, NULL, _IONBF, 0);
 
-    int pfd[2];
-    if (pipe(pfd) != 0) return;
-    dup2(pfd[1], STDOUT_FILENO);
-    dup2(pfd[1], STDERR_FILENO);
-    close(pfd[1]);
-
-    pthread_t t;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&t, &attr, wsi_stdio_pump, (void*)(intptr_t)pfd[0]);
-    pthread_attr_destroy(&attr);
+    wsi_redirect_one(STDOUT_FILENO, 0);   // fd 1 → sc.stdout
+    wsi_redirect_one(STDERR_FILENO, 1);   // fd 2 → sc.stderr
 }
 
 // 通用 JNI 反射代理注册（android_jni_proxy.c）：在 JNI_OnLoad 里于 app 主线程
