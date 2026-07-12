@@ -10,6 +10,8 @@
 # （见 compiler.md §5.8）。M Mac 上模拟器是原生 arm64（同架构跑 iOS 运行时，速度好）。
 #
 # 本脚本只做两件事：先（重）编 wsi 的 iOS 模拟器变体库，再跑上面的 scc 一条龙。
+# 本目录无 Info.plist——ios-sim-pkg.sh 拼 .app 前自动生成默认 plist（零配置即可跑）；
+# 如需定制，在本目录放 Info.plist 即覆盖。
 #
 # 前置：安装 Xcode（含 iOS 模拟器运行时与命令行工具 xcrun）。
 # 用法：

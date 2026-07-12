@@ -26,8 +26,54 @@ ABI="${ABI:-arm64-v8a}"
 NAME="${SCC_APP_NAME:-app}"
 BUILD="${SCC_BUILD_DIR:?}"
 APPDIR="${SCC_APP_DIR:?}"
+
+# 清单：优先用 app 目录内的 AndroidManifest.xml（可定制）；缺失则自动生成默认清单
+# 落到 build 目录（app 目录零配置即可跑）。默认包名/标签由 app 目录名派生，
+# lib_name/meta-data 用产物基名（$NAME，须与 scc 构建的 libapp.so 一致）。
+# android-run.sh 同样按「app 目录 → build 目录」顺序解析 package，保持一致。
 MANIFEST="$APPDIR/AndroidManifest.xml"
-[[ -f "$MANIFEST" ]] || { echo "android-pkg: 缺 AndroidManifest.xml（$MANIFEST）"; exit 1; }
+if [[ ! -f "$MANIFEST" ]]; then
+  SLUG="$(basename "$APPDIR" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+  PKG="com.sc.${SLUG:-app}"
+  LABEL="$(basename "$APPDIR")"
+  MANIFEST="$BUILD/AndroidManifest.xml"
+  echo "==> app 目录无 AndroidManifest.xml → 自动生成默认清单（package=${PKG}, lib_name=${NAME}）"
+  cat > "$MANIFEST" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 由 android-pkg.sh 自动生成的默认清单（app 目录未提供 AndroidManifest.xml）。
+     如需定制（图标/权限/多 Activity 等），在 app 目录放置 AndroidManifest.xml 即覆盖此文件。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="$PKG"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="$LABEL"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="$NAME"/>
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="$LABEL"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <meta-data android:name="android.app.lib_name"
+                       android:value="$NAME"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+EOF
+fi
 
 # ScApplication + Bridge 的 classes.dex（wsi 预编交付；进程级垫片 + JNI 反射 shim，hasCode=true）
 WSI_DEX="${SCC_TARGET_DIR:?}/../modules/wsi/wsi-android.dex"

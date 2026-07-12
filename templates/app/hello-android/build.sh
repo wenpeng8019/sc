@@ -13,6 +13,8 @@
 #
 # 打包工具链：不用 gradle，直接调 SDK 底层工具手工拼 APK（清单 + .so + dex + 签名），
 # 呈现最小构建链路（细节见 templates/.scenv/targets/android-pkg.sh，与 hello-ios 手工拼 .app 对称）。
+# 本目录无 AndroidManifest.xml——android-pkg.sh 打包前自动生成默认清单（零配置即可跑）；
+# 如需定制，在本目录放 AndroidManifest.xml 即覆盖。
 #
 # 前置：Android NDK（ANDROID_NDK_HOME）+ SDK（ANDROID_HOME，含 build-tools/platform-tools）。
 # 用法：

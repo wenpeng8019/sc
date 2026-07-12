@@ -10,8 +10,11 @@
 ## 目录内容
 
 - [app.sc](app.sc) — app 逻辑（四回调 + `app_main` 入口，**无 main**）
-- [AndroidManifest.xml](AndroidManifest.xml) — NativeActivity + 自定义 Application(`ScApplication`) + `lib_name` 绑定，`hasCode=true`
-- [build.sh](build.sh) — NDK 交叉编译 → `libhello.so`；javac→d8→`classes.dex`；→ APK → adb 安装启动
+- [build.sh](build.sh) — （重）编 wsi 的 android 变体，再跑 `scc app.sc --target android` 一条龙
+- **无 `AndroidManifest.xml`**：本目录零清单即可跑——`android-pkg.sh` 打包前若发现
+  app 目录无清单，会自动生成默认清单（`package`/`label` 由目录名派生、`lib_name`=
+  产物基名 `app`、`ScApplication`+`NativeActivity`+`hasCode=true`）落到 build 目录。
+  如需定制（图标/权限/多 Activity 等），在本目录放置 `AndroidManifest.xml` 即覆盖默认。
 - wsi 侧垫片（可复用基础设施，不在本目录）：
   [ScApplication.java](../../utils/wsi/java/com/sc/wsi/ScApplication.java) — 进程级 Application 子类；
   [android_jni.c](../../utils/wsi/src/android_jni.c) — Application ⇄ wsi 的 JNI 桥
@@ -77,21 +80,23 @@ iOS = 自有主循环、Android = 事件注册）。
 ## 打包模型（含极小 dex 的 APK）
 
 ```
-libhello.so（app.sc + libwsi.a 交叉编译，含 ANativeActivity_onCreate + sc_app_main + JNI 桥）
-classes.dex（ScApplication.java → javac → d8；进程级垫片）
-AndroidManifest.xml（Application=ScApplication + NativeActivity + lib_name=hello + hasCode=true）
-        │  aapt 打包 + 塞入 lib/<abi>/libhello.so 与 /classes.dex
+libapp.so（app.sc + libwsi.a 交叉编译，含 ANativeActivity_onCreate + sc_app_main + JNI 桥）
+classes.dex（ScApplication.java → javac → d8；进程级垫片，wsi 预编交付 wsi-android.dex）
+AndroidManifest.xml（app 目录未提供时由 android-pkg.sh 自动生成：Application=ScApplication +
+        NativeActivity + lib_name=app + hasCode=true，落 build 目录）
+        │  aapt 打包 + 塞入 lib/<abi>/libapp.so 与 /classes.dex
         ▼
-base.apk → zipalign → apksigner(debug) → hello-android.apk
-        │  adb install + am start -n com.sc.helloandroid/android.app.NativeActivity
+base.apk → zipalign → apksigner(debug) → app.apk
+        │  adb install + monkey 启动 LAUNCHER（NativeActivity）
         ▼
 设备/模拟器由框架加载（先 ScApplication.onCreate → sc_wsi_app_startup，再 启动 NativeActivity）
 ```
 
 - `hasCode="true"` + `ScApplication` → APK 含一个**极小 classes.dex**（单个 Application 子类）；
   这是为了拿到进程级生命周期钩子（tier A）——对照早期纯 native（hasCode=false、无 dex）形态。
-- `lib_name="hello"` 必须与 build.sh 的 `LIB=hello`（→ `libhello.so`）一致；`ScApplication`
-  亦据 <application> 级 meta-data `com.sc.wsi.lib_name` 解析同名 .so。
+- `lib_name` 必须与 scc 构建的 app 产物基名（默认 `app` → `libapp.so`）一致；自动生成的清单
+  已用产物基名填入 activity 的 `android.app.lib_name` 与 <application> 级 `com.sc.wsi.lib_name`
+  （`ScApplication` 据后者解析要 loadLibrary 的 .so）。
 
 ## 前置与用法（wsi 后端就绪后）
 

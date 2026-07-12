@@ -17,9 +17,11 @@ APK="$BUILD/$NAME.apk"
 ADB="$(command -v adb || echo "$ANDROID_HOME/platform-tools/adb")"
 [[ -x "$ADB" ]] || { echo "android-run: 找不到 adb（装 platform-tools 或设 ANDROID_HOME）"; exit 1; }
 
-# 包名从清单读取（package="..."）
-PKG="$(sed -n 's/.*package="\([^"]*\)".*/\1/p' "$SCC_APP_DIR/AndroidManifest.xml" | head -1)"
-[[ -n "$PKG" ]] || { echo "android-run: 无法从清单解析 package"; exit 1; }
+# 包名从清单读取（package="..."）——app 目录优先，缺失则用 pkg 自动生成落在 build 目录的清单
+MANIFEST="$SCC_APP_DIR/AndroidManifest.xml"
+[[ -f "$MANIFEST" ]] || MANIFEST="$BUILD/AndroidManifest.xml"
+PKG="$(sed -n 's/.*package="\([^"]*\)".*/\1/p' "$MANIFEST" | head -1)"
+[[ -n "$PKG" ]] || { echo "android-run: 无法从清单解析 package（$MANIFEST）"; exit 1; }
 
 echo "==> adb 安装并启动 $PKG"
 "$ADB" install -r "$APK"
@@ -31,7 +33,7 @@ echo "==> adb 安装并启动 $PKG"
 #   看日志：adb logcat -s stdout:V sc.wsi:V
 #   看画面：adb exec-out screencap -p > out.png
 if [[ -n "$DETACH" ]]; then
-    echo "==> 已启动 $PKG（DETACH：不挂 logcat，启动即返回）"
+    echo "==> 已启动 ${PKG}（DETACH：不挂 logcat，启动即返回）"
     exit 0
 fi
 echo "==> logcat（Ctrl-C 结束）"

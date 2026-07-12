@@ -16,9 +16,11 @@ APP="$BUILD/$NAME.app"
 [[ -d "$APP" ]] || { echo "ios-sim-run: 找不到 .app（$APP）"; exit 1; }
 DEV="${DEV:-iPhone 16 Pro}"
 
-# bundle id 从 Info.plist 读取
-BID="$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$SCC_APP_DIR/Info.plist" 2>/dev/null)"
-[[ -n "$BID" ]] || { echo "ios-sim-run: 无法解析 CFBundleIdentifier"; exit 1; }
+# bundle id 从 Info.plist 读取——app 目录优先，缺失则用 pkg 自动生成落在 build 目录的 plist
+PLIST="$SCC_APP_DIR/Info.plist"
+[[ -f "$PLIST" ]] || PLIST="$BUILD/Info.plist"
+BID="$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$PLIST" 2>/dev/null)"
+[[ -n "$BID" ]] || { echo "ios-sim-run: 无法解析 CFBundleIdentifier（$PLIST）"; exit 1; }
 
 echo "==> 启动模拟器：$DEV"
 xcrun simctl boot "$DEV" 2>/dev/null || true    # 已启动则忽略
@@ -29,8 +31,8 @@ xcrun simctl install "$DEV" "$APP"
 #   看 app 输出：xcrun simctl spawn booted log stream --predicate 'process=="'$NAME'"'
 #   看画面：    xcrun simctl io booted screenshot out.png
 if [[ -n "$DETACH" ]]; then
-    echo "==> 启动 $BID（DETACH：不挂 console，启动即返回）"
+    echo "==> 启动 ${BID}（DETACH：不挂 console，启动即返回）"
     exec xcrun simctl launch "$DEV" "$BID"
 fi
-echo "==> 启动 $BID（--console：app 的 print 直连本终端，Ctrl-C 结束）"
+echo "==> 启动 ${BID}（--console：app 的 print 直连本终端，Ctrl-C 结束）"
 exec xcrun simctl launch --console "$DEV" "$BID"
