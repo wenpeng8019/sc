@@ -21,11 +21,20 @@
  * 平台判定用 platform.h 的 P_XXX（尊重交叉目标 SC_TARGET_*，非裸 __APPLE__/_WIN32）。
  * SC_GPU_GLES 由目标档 cflags 显式给出。 */
 #if P_DARWIN
+  /* Apple 平台细分：iOS/tvOS/模拟器仅 Metal；macOS 才 Metal+GL（同 gpu/internal.h）。 */
+  #include <TargetConditionals.h>
+  #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    #ifndef SC_GPU_IOS
+    #define SC_GPU_IOS 1
+    #endif
+  #endif
   #ifndef SC_GPU_METAL
   #define SC_GPU_METAL 1
   #endif
-  #ifndef SC_GPU_GL
-  #define SC_GPU_GL 1
+  #if !defined(SC_GPU_IOS)
+    #ifndef SC_GPU_GL
+    #define SC_GPU_GL 1
+    #endif
   #endif
 #elif P_LINUX
   #ifndef SC_GPU_GL

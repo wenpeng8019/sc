@@ -4,6 +4,11 @@
 #   target_suffix = aarch64-linux-gnu-gles   ← 命中 [*gles*] 段(cflags/inc/ldflags 全套)
 # 即命中 [*gles*] 段。段自上而下取首个命中：特殊形态在前、一般平台在后。
 
+[*ios*]
+# iOS/tvOS/模拟器：仅 Metal（无桌面 NSOpenGL）；UIKit 供 UIView layer 取用。
+# triple/target_suffix 含 "ios"（含 -simulator），须置于 [darwin] 之前（首个命中独占）。
+ldflags = -framework Metal -framework QuartzCore -framework UIKit -framework Foundation -framework IOSurface -framework CoreFoundation
+
 [darwin]
 ldflags = -framework Cocoa -framework Metal -framework QuartzCore -framework OpenGL -framework IOSurface -framework CoreFoundation
 

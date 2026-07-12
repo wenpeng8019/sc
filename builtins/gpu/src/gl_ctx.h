@@ -9,8 +9,13 @@
 
 #include "../../platform.h"   /* 平台判定宏 P_DARWIN/P_LINUX/P_WIN（尊重交叉目标 SC_TARGET_*） */
 
-/* 后端宏自推导（与 internal.h 同源逻辑；gl_ctx.m 独立于 internal.h） */
-#if !defined(SC_GPU_GL) && (P_DARWIN || P_LINUX || P_WIN)
+/* 后端宏自推导（与 internal.h 同源逻辑；gl_ctx.m 独立于 internal.h）。
+ * iOS/tvOS/模拟器无桌面 NSOpenGL——排除之（仅 macOS 的 Darwin 才启用 GL）。 */
+#if P_DARWIN
+#include <TargetConditionals.h>
+#endif
+#if !defined(SC_GPU_GL) && (P_LINUX || P_WIN || \
+    (P_DARWIN && !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)))
 #define SC_GPU_GL 1
 #endif
 

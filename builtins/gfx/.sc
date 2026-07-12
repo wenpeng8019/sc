@@ -1,6 +1,10 @@
 # gfx 模块构建/链接配置（格式说明见 builtins/gpu/.sc）
 # 与 gpu 同目标共链一套平台库（消费侧按词元查重，重复注入自动去重）。
 
+[*ios*]
+# iOS/tvOS/模拟器：仅 Metal（须置于 [darwin] 之前，首个命中独占）。
+ldflags = -framework Metal -framework QuartzCore -framework UIKit -framework Foundation -framework IOSurface -framework CoreFoundation
+
 [darwin]
 ldflags = -framework Cocoa -framework Metal -framework QuartzCore -framework OpenGL -framework IOSurface -framework CoreFoundation
 

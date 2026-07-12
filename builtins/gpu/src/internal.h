@@ -22,11 +22,21 @@
  * SC_GPU_GLES（GLES 形态）是构建选择非平台事实，由目标档 cflags 显式给出
  *（-DSC_GPU_GLES -I builtins/gpu/khr）。显式 -D 优先（#ifndef 保护）。 */
 #if P_DARWIN
+  /* Apple 平台细分：iOS/tvOS/模拟器无桌面 NSOpenGL——仅 Metal；macOS 才 Metal+GL。
+   * TargetConditionals.h 在任何 Darwin SDK 均存在（此块仅 P_DARWIN 时纳入）。 */
+  #include <TargetConditionals.h>
+  #if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+    #ifndef SC_GPU_IOS
+    #define SC_GPU_IOS 1
+    #endif
+  #endif
   #ifndef SC_GPU_METAL
   #define SC_GPU_METAL 1
   #endif
-  #ifndef SC_GPU_GL
-  #define SC_GPU_GL 1
+  #if !defined(SC_GPU_IOS)
+    #ifndef SC_GPU_GL
+    #define SC_GPU_GL 1
+    #endif
   #endif
 #elif P_LINUX
   #ifndef SC_GPU_GL

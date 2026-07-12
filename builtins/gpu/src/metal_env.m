@@ -18,8 +18,13 @@
 
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#if SC_GPU_IOS
+#import <UIKit/UIKit.h>
+#import <IOSurface/IOSurfaceRef.h>   /* iOS SDK 无 IOSurface 伞头，用 C 接口头 */
+#else
 #import <Cocoa/Cocoa.h>
 #import <IOSurface/IOSurface.h>
+#endif
 
 #define MTL_MAX_ACQUIRED 16   /* 单帧最多触达的 surface 数 */
 
@@ -138,6 +143,22 @@ static bool mtlSurfaceCreate(gpu_surface_t* surf) {
     layer.pixelFormat = toMtlFormat(surf->desc.color_format);
     layer.framebufferOnly = YES;
     layer.drawableSize = CGSizeMake(surf->desc.width, surf->desc.height);
+#if SC_GPU_IOS
+    /* iOS：UIView 的 layerClass 已是 CAMetalLayer（见 wsi uikit_platform.m），
+     * 直接取用其 layer 并配置（无 displaySyncEnabled / wantsLayer）。 */
+    UIView* iosView = (__bridge UIView*)surf->desc.native_window;
+    if (iosView) {
+        CAMetalLayer* existing = (CAMetalLayer*)iosView.layer;
+        if ([existing isKindOfClass:[CAMetalLayer class]]) {
+            layer = existing;
+            layer.device = env.device;
+            layer.pixelFormat = toMtlFormat(surf->desc.color_format);
+            layer.framebufferOnly = YES;
+            layer.drawableSize = CGSizeMake(surf->desc.width, surf->desc.height);
+        }
+    }
+    s->layer = layer;
+#else
     if (@available(macOS 10.13, *))
         layer.displaySyncEnabled = surf->desc.swap_interval != 0;
     s->layer = layer;
@@ -149,6 +170,7 @@ static bool mtlSurfaceCreate(gpu_surface_t* surf) {
     };
     if ([NSThread isMainThread]) attach();
     else dispatch_sync(dispatch_get_main_queue(), attach);
+#endif
 
     surfaceCreateTargets(s, &surf->desc);
     surf->backend = s;
