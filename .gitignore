@@ -1,14 +1,10 @@
 # 构建产物
-/build/
-compiler/build/
+# 任意层级中名为 build 的目录一律视为编译产物，不入库
+build/
 compiler/build-uv/
 compiler/build-dist/
 compiler/build-ssl/
 compiler/build-linux/
-templates/.scenv/modules/wsi/build/
-builtins/gpu/build/
-builtins/gfx/build/
-builtins/spc/build/
 *.o
 *.out
 *.exe
@@ -44,20 +40,17 @@ templates/demo/spc_model/tiny.mlmodelc/
 templates/demo/spc_model/tiny.mlpackage/
 templates/demo/spc_model/tiny_ref.npy
 
-# app 脚手架构建产物（各平台 build/ 目录：工具链包装、可执行、.app、日志、截图）
-templates/app/*/build/
+# app 脚手架构建产物（build/ 目录由全局规则忽略；此处仅额外产物）
 templates/app/hello-win/hello.exe
 
-# hello-android@gradle：gradle 工程产物（嵌套 build/ 与本地 wrapper/局部配置）
-templates/app/hello-android@gradle/**/build/
+# hello-android@gradle：gradle 工程产物（嵌套 build/ 由全局规则忽略；本地 wrapper/局部配置）
 templates/app/hello-android@gradle/.gradle/
 templates/app/hello-android@gradle/local.properties
 templates/app/hello-android@gradle/gradlew
 templates/app/hello-android@gradle/gradlew.bat
 templates/app/hello-android@gradle/gradle/wrapper/gradle-wrapper.jar
 
-# 第三方依赖构建产物（vendor 源码保留，仅忽略编译输出）
-vendor/libuv/build/
+# 第三方依赖构建产物（vendor 源码保留，build/ 由全局规则忽略）
 
 # 后端选型参考源码（bgfx/sokol/glfw，仅本地比对参考，暂不入库；
 # 若某个转正为 sc 后端依赖，再从此处移除对应条目）
