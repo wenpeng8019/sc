@@ -22,9 +22,10 @@
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#if !defined(__ANDROID__)   /* headless GBM/dma-heap 路径专用；Android NDK 无此二头 */
 #include <linux/dma-heap.h>
-
 #include <gbm.h>
+#endif
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #if defined(SC_GPU_GLES)
@@ -40,6 +41,14 @@
 #ifndef EGL_NO_NATIVE_FENCE_FD_ANDROID
 #define EGL_NO_NATIVE_FENCE_FD_ANDROID -1
 #endif
+
+/* ============================================================
+ * headless（GBM/DRM/dma-heap → EGLImage 无表面渲染 + memimg）
+ * ------------------------------------------------------------
+ * Android 属 P_LINUX 但 NDK 无 GBM/dma-heap（memimg 应走 AHardwareBuffer，
+ * 待补）——整段不编译；Android 只用下方 window surface（EGL 窗口）。
+ * ============================================================ */
+#if !defined(__ANDROID__)
 
 typedef struct gl_memimg {
     struct gbm_bo* bo;      /* GBM 模式 */
@@ -381,8 +390,10 @@ int gl_egl_fence_fd(void) {
     return fd;   /* -1 = 失败 */
 }
 
+#endif /* !__ANDROID__ —— headless 段终 */
+
 /* ============================================================
- * window surface —— EGL 窗口路径（Wayland/X11/嵌入式）
+ * window surface —— EGL 窗口路径（Wayland/X11/嵌入式/Android）
  * ============================================================
  * 与 headless（GBM 平台 display）分属不同 EGLDisplay：窗口路径用
  * native_display（wl_display* / X11 Display*）。同进程多窗口共享

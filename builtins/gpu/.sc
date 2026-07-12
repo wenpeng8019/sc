@@ -17,6 +17,15 @@ cflags  = -DSC_GPU_GLES
 inc     = khr
 ldflags = -lGLESv2 -lEGL -lgbm
 
+[*android*]
+# Android NDK：GLES3 + EGL 窗口交换链（ANativeWindow 即 EGLNativeWindowType）。
+# 无 GBM/dma-heap/X11 → 无 headless memimg（走窗口路径；memimg 待接 AHardwareBuffer）。
+# triple/target_suffix 含 "android"（属 linux 族但 family=android，[linux] 不命中），
+# 须置于 [linux] 之前。
+cflags  = -DSC_GPU_GLES
+inc     = khr
+ldflags = -lGLESv3 -lEGL
+
 [windows]
 # WGL 桌面 GL：GL 函数 = opengl32；ChoosePixelFormat/SetPixelFormat/SwapBuffers = gdi32；
 # GetDC/ReleaseDC = user32。Vulkan：自包含——头文件 vendor 至 khr/（inc）、运行时

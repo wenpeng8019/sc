@@ -68,6 +68,14 @@
   typedef BOOL   (WINAPI *PFN_wglDXUnlockObjectsNV)(HANDLE hDevice, GLint count, HANDLE* hObjects);
 #endif
 
+/* GL 无表面渲染（MEMORY surface / memimg）支持面：
+ *   linux 桁面 = GBM/dma-heap→EGLImage；mac = IOSurface；win = WGL+D3D interop。
+ * Android 属 P_LINUX 但 NDK 无 GBM/dma-heap（memimg 应走 AHardwareBuffer，待补）
+ * ——禁用之，Android 仅窗口交换链（gl_egl_win）。 */
+#if (P_LINUX && !defined(__ANDROID__)) || P_DARWIN || P_WIN
+#define SC_GPU_GL_MEMIMG 1
+#endif
+
 #define GL_MAX_ACQUIRED 16
 
 typedef struct GlSurface {
@@ -127,7 +135,7 @@ static bool glInit(const sc_gpu_desc* desc) {
 }
 
 static void glShutdown(void) {
-#if P_LINUX
+#if P_LINUX && !defined(__ANDROID__)
     gl_egl_shutdown();
 #endif
 #if P_WIN
@@ -152,7 +160,7 @@ static void* glDevice(void) { return NULL; }   /* GL 无设备概念（上下文
 
 /* ---- surface ----------------------------------------------- */
 
-#if P_LINUX
+#if P_LINUX && !defined(__ANDROID__)
 /* MEMORY surface（linux）：headless 上下文 + 每槽 EGLImage→tex+FBO */
 static bool glMemorySurfaceCreate(gpu_surface_t* surf, GlSurface* s) {
     if (!gl_egl_init()) return false;
@@ -412,7 +420,7 @@ static bool glSurfaceCreate(gpu_surface_t* surf) {
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX || P_DARWIN || P_WIN
+#if SC_GPU_GL_MEMIMG
         if (!glMemorySurfaceCreate(surf, s)) {
             /* 失败清理由 surface_destroy 兼顾 */
             surf->backend = s;
@@ -460,7 +468,7 @@ static void glSurfaceDestroy(gpu_surface_t* surf) {
             break;
         }
     }
-#if P_LINUX || P_DARWIN || P_WIN
+#if SC_GPU_GL_MEMIMG
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
 #if P_LINUX
         gl_egl_make_current();
@@ -503,7 +511,7 @@ static void glSurfaceActivate(gpu_surface_t* surf) {
     if (surf && surf->backend) {
         GlSurface* s = (GlSurface*)surf->backend;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX
+#if P_LINUX && !defined(__ANDROID__)
             gl_egl_make_current();
             glBindVertexArray(env.headlessVao);
 #elif P_DARWIN
@@ -545,7 +553,7 @@ static bool glFrameAcquire(gpu_surface_t* surf, sc_gpu_frame* f) {
     if (!s) return false;
 
     if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX || P_DARWIN || P_WIN
+#if SC_GPU_GL_MEMIMG
         if (surf->ring_cur < 0) return false;
         f->gl_fbo = s->ringFbo[surf->ring_cur];
 #if P_WIN
@@ -586,7 +594,7 @@ static void glFrameEnd(void) {
         GlSurface* s = (GlSurface*)surf->backend;
         if (!s) continue;
         if (surf->desc.kind == SC_GPU_SURFACE_MEMORY) {
-#if P_LINUX
+#if P_LINUX && !defined(__ANDROID__)
             /* 栓栏随命令流提交，存入本帧槽位（dequeue 时交付） */
             if (surf->ring_cur >= 0) {
                 if (s->ringFence[surf->ring_cur] >= 0)
@@ -613,7 +621,7 @@ static void glFrameEnd(void) {
 
 /* ---- memimg（linux：dma-buf/EGLImage） ---------------------- */
 
-#if P_LINUX
+#if P_LINUX && !defined(__ANDROID__)
 
 static bool glMemimgAlloc(gpu_memimg_t* img) {
     gl_memimg* m = gl_memimg_alloc(img->desc.width, img->desc.height,
@@ -958,7 +966,7 @@ static const gpu_env_api glApi = {
     .surface_resize = glSurfaceResize,
     .frame_acquire = glFrameAcquire,
     .frame_end = glFrameEnd,
-#if P_LINUX || P_DARWIN || P_WIN
+#if SC_GPU_GL_MEMIMG
     .memimg_alloc = glMemimgAlloc,
     .memimg_import = glMemimgImport,
     .memimg_export = glMemimgExport,

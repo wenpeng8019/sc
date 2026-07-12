@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android-gfx 清单 —— NativeActivity（窗口/帧）+ 自定义 Application（进程级 init）。
+  与 hello-android 结构一致（三层生命周期模型说明见该文件），仅 package/label 改为
+  gfx 版；app.sc 产物同为 libapp.so（gpu/gfx 静态编入），GLES 三角形渲染。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.sc.helloandroidgfx"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <!-- GLES3 硬件要求（模拟器/真机均满足） -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="hello-android-gfx"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="app"/>
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="hello-android-gfx"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <meta-data android:name="android.app.lib_name"
+                       android:value="app"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

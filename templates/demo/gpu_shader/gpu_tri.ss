@@ -8,6 +8,7 @@
 
 tar metal@2.0
 tar glcore@410
+tar gles@300
 tar vulkan@450
 tar d3d@50
 

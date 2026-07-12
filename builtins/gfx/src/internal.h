@@ -40,8 +40,10 @@
   #ifndef SC_GPU_GL
   #define SC_GPU_GL 1
   #endif
+  #if !defined(__ANDROID__)   /* Android 一期只 GLES；Vulkan 待接 */
   #ifndef SC_GPU_VULKAN
   #define SC_GPU_VULKAN 1
+  #endif
   #endif
 #elif P_WIN
   #ifndef SC_GPU_GL

@@ -5,7 +5,7 @@
  * 经 vkGetInstanceProcAddr 解析所有入口点——免链接 vulkan-1.lib、免 SDK。
  * ============================================================ */
 #include "../platform.h"   /* 动态库加载：P_dl_load/P_dl_get_proc（跨平台） */
-#if P_WIN || P_LINUX   /* Vulkan 仅 Windows/Linux 启用；mac 用 Metal，本 TU 空化 */
+#if (P_WIN || P_LINUX) && !defined(__ANDROID__)   /* Vulkan 仅 Windows/Linux 启用；mac 用 Metal、Android 一期只 GLES，本 TU 空化 */
 #if P_WIN
   #define VK_USE_PLATFORM_WIN32_KHR   /* vkCreateWin32SurfaceKHR 需 <windows.h>（platform.h 已带入） */
 #else
