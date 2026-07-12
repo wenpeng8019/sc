@@ -20,8 +20,8 @@
  *     removeFromSuperview + release 归零（与 cocoa 一致）。
  * ============================================================ */
 
-/* ---- LIST 的表数据源：直接读 sc_ui_control 的 items ---- */
-@interface SCTableSource : NSObject <UITableViewDataSource>
+/* ---- LIST 的表数据源 + 委托：读 items、选中转 SELECT 事件 ---- */
+@interface SCTableSource : NSObject <UITableViewDataSource, UITableViewDelegate>
 @property (assign) sc_ui_control* control;
 @end
 
@@ -40,6 +40,12 @@
                         ? self.control->items[indexPath.row] : "";
     cell.textLabel.text = s ? [NSString stringWithUTF8String:s] : @"";
     return cell;
+}
+- (void)tableView:(UITableView*)tableView didSelectRowAtIndexPath:(NSIndexPath*)indexPath
+{
+    if (!self.control) return;
+    self.control->selectedIndex = (int) indexPath.row;
+    ui_emit_event(self.control, SC_UI_EVENT_SELECT);
 }
 @end
 
@@ -62,6 +68,37 @@
     const char* s = self.control->items[row];
     return s ? [NSString stringWithUTF8String:s] : @"";
 }
+- (void)pickerView:(UIPickerView*)pickerView
+      didSelectRow:(NSInteger)row
+       inComponent:(NSInteger)component
+{
+    if (!self.control) return;
+    self.control->selectedIndex = (int) row;
+    ui_emit_event(self.control, SC_UI_EVENT_SELECT);
+}
+@end
+
+/* ---- 控件事件目标：UIButton 点击 / UISwitch 切换 → ui_emit_event ---- */
+@interface SCTarget : NSObject
+@property (assign) sc_ui_control* control;
+- (void)onButton:(id)sender;
+- (void)onSwitch:(id)sender;
+@end
+
+@implementation SCTarget
+- (void)onButton:(id)sender
+{
+    (void) sender;
+    if (self.control)
+        ui_emit_event(self.control, SC_UI_EVENT_CLICK);
+}
+- (void)onSwitch:(id)sender
+{
+    if (!self.control) return;
+    /* 读回开关态同步 control->checked，令 get_checked 拿到最新值。 */
+    self.control->checked = [(UISwitch*) sender isOn] ? 1 : 0;
+    ui_emit_event(self.control, SC_UI_EVENT_TOGGLE);
+}
 @end
 
 /* ============================================================
@@ -70,6 +107,7 @@
 
 static char g_z_key;  /* associated object key：视图的 z 值 */
 static char g_ds_key; /* associated object key：LIST/COMBO 的数据源 */
+static char g_tgt_key; /* associated object key：BUTTON/SWITCH 的事件目标 */
 
 static void ui_uikit_set_z(id view, int z)
 {
@@ -197,6 +235,9 @@ void ui_backend_control_create(sc_ui_control* control)
         {
             UILabel* l = [[UILabel alloc] initWithFrame:frame];
             [l setText:text];
+            /* 透明底标签叠在深色 gpu 画面上——默认 labelColor 在浅色外观下为黑，
+             * 会不可见；显式浅色确保可读（与 android setTextColor 对齐）。 */
+            [l setTextColor:[UIColor colorWithWhite:0.925 alpha:1.0]];
             obj = l;
             break;
         }
@@ -221,6 +262,12 @@ void ui_backend_control_create(sc_ui_control* control)
             UIButton* b = [[UIButton buttonWithType:UIButtonTypeSystem] retain];
             [b setFrame:frame];
             [b setTitle:text forState:UIControlStateNormal];
+            SCTarget* tgt = [[SCTarget alloc] init];
+            tgt.control = control;
+            [b addTarget:tgt action:@selector(onButton:)
+                forControlEvents:UIControlEventTouchUpInside];
+            objc_setAssociatedObject(b, &g_tgt_key, tgt, OBJC_ASSOCIATION_RETAIN);
+            [tgt release];
             obj = b;
             break;
         }
@@ -230,6 +277,12 @@ void ui_backend_control_create(sc_ui_control* control)
             /* UIKit 无原生复选/单选，用 UISwitch 表达开关态（frame 尺寸被忽略）。 */
             UISwitch* sw = [[UISwitch alloc] initWithFrame:frame];
             [sw setOn:(control->checked ? YES : NO)];
+            SCTarget* tgt = [[SCTarget alloc] init];
+            tgt.control = control;
+            [sw addTarget:tgt action:@selector(onSwitch:)
+                 forControlEvents:UIControlEventValueChanged];
+            objc_setAssociatedObject(sw, &g_tgt_key, tgt, OBJC_ASSOCIATION_RETAIN);
+            [tgt release];
             obj = sw;
             break;
         }
@@ -253,6 +306,7 @@ void ui_backend_control_create(sc_ui_control* control)
             SCTableSource* ds = [[SCTableSource alloc] init];
             ds.control = control;
             [tv setDataSource:ds];
+            [tv setDelegate:ds];
             objc_setAssociatedObject(tv, &g_ds_key, ds, OBJC_ASSOCIATION_RETAIN);
             [ds release];
             [tv reloadData];
