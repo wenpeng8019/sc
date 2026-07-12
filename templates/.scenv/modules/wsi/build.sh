@@ -61,32 +61,37 @@ idle-inhibit-unstable-v1-client-protocol:idle-inhibit-unstable-v1.xml"
     echo "wayland 协议头已生成 -> ${WL_PROTO_DIR}"
 fi
 
-# ---- ScApplication.java → classes.dex（仅 Android 目标）----
-# wsi 的进程级垫片（Application 子类，经 android_jni.c 触发 sc_wsi_app_startup）须编成
-# Dalvik 字节码随 APK 交付。此编译属 wsi 模块自身职责——app（模块使用者）不该编 wsi 的
-# Java 垫片，故放在此。产物 wsi-android.dex 随仓库入库（与 libwsi.<triple>.a 同理预编交付），
-# 供 targets/android-pkg.sh 直接塞进 APK 根（classes.dex）。
+# ---- com.sc.wsi/*.java → classes.dex（仅 Android 目标）----
+# wsi 的 Java 垫片须编成 Dalvik 字节码随 APK 交付。目前两个：
+#   ScApplication —— 进程级生命周期（Application 子类，触发 sc_wsi_app_startup）；
+#   Bridge        —— 通用 JNI 反射 shim（回调 + 主线程投递，见 android_jni_proxy.c）。
+# 此编译属 wsi 模块自身职责——app（模块使用者）不该编 wsi 的 Java 垫片，故放在此。
+# 产物 wsi-android.dex 随仓库入库（与 libwsi.<triple>.a 同理预编交付），供
+# targets/android-pkg.sh 直接塞进 APK 根（classes.dex）。
 if [[ "$_wsi_target_probe" == *[Aa]ndroid* ]]; then
     : "${ANDROID_HOME:=${ANDROID_SDK_ROOT:-}}"
     API="${API:-24}"                          # d8 --min-api，须 ≤ 清单 minSdkVersion
-    JAVA_SRC="$SCRIPT_DIR/java/com/sc/wsi/ScApplication.java"
+    JAVA_DIR="$SCRIPT_DIR/java"
     DEX_OUT="$SCRIPT_DIR/wsi-android.dex"
-    if [[ -d "$ANDROID_HOME" && -f "$JAVA_SRC" ]]; then
+    # 包内所有 .java 一起编（新增垫片自动纳入，无需改本脚本）
+    JAVA_SRCS=()
+    while IFS= read -r _f; do JAVA_SRCS+=("$_f"); done < <(find "$JAVA_DIR" -name '*.java' 2>/dev/null)
+    if [[ -d "$ANDROID_HOME" && ${#JAVA_SRCS[@]} -gt 0 ]]; then
         BT="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)"
         PLATFORM="$(ls -d "$ANDROID_HOME"/platforms/android-* 2>/dev/null | sort -V | tail -1)"
         D8="$BT/d8"
         command -v javac >/dev/null || { echo "错误: 找不到 javac（需 JDK）"; exit 1; }
         [[ -x "$D8" ]] || { echo "错误: 找不到 d8（$BT/d8，需 SDK build-tools）"; exit 1; }
         CLS="$SCRIPT_DIR/build/classes"; rm -rf "$CLS"; mkdir -p "$CLS"
-        echo "==> javac ScApplication.java → d8 → wsi-android.dex"
-        javac -source 8 -target 8 -bootclasspath "$PLATFORM/android.jar" -d "$CLS" "$JAVA_SRC"
+        echo "==> javac com.sc.wsi/*.java（${#JAVA_SRCS[@]} 个）→ d8 → wsi-android.dex"
+        javac -source 8 -target 8 -bootclasspath "$PLATFORM/android.jar" -d "$CLS" "${JAVA_SRCS[@]}"
         # d8 产出 classes.dex 到临时目录，再取名 wsi-android.dex 入库交付
         rm -f "$SCRIPT_DIR/build/classes.dex"
         "$D8" --min-api "$API" --output "$SCRIPT_DIR/build" $(find "$CLS" -name '*.class')
         mv -f "$SCRIPT_DIR/build/classes.dex" "$DEX_OUT"
         echo "  -> ${DEX_OUT}"
     else
-        echo "提示: 未设置 ANDROID_HOME 或缺 ScApplication.java，跳过 wsi-android.dex 生成"
+        echo "提示: 未设置 ANDROID_HOME 或 java/ 下无 .java，跳过 wsi-android.dex 生成"
     fi
 fi
 

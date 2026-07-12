@@ -35,6 +35,11 @@ static JavaVM* g_android_vm = NULL;
 
 JavaVM* sc_wsi_android_get_vm(void) { return g_android_vm; }
 
+// 通用 JNI 反射代理注册（android_jni_proxy.c）：在 JNI_OnLoad 里于 app 主线程
+// 调用，解析 com.sc.wsi.Bridge 并绑定其 native 方法。返回非 0 表示代理就绪。
+extern int wsi_jni_proxy_register(JNIEnv* env);
+
+
 // ---- 进程级钩子实现（从 Java native 方法转发到 wsi C 侧）----
 
 static void wsi_android_process_create(void) {
@@ -122,6 +127,16 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
         WSI_LOGI("JNI_OnLoad: 未找到 com.sc.wsi.ScApplication（纯 NativeActivity 形态）");
     }
+
+    // 通用 JNI 反射代理（android_jni_proxy.c）：解析并缓存 com.sc.wsi.Bridge、
+    // 绑定其 nativeInvoke / nativeRunUi。app 类须在此线程（app 主线程、app
+    // 类加载器）解析——渲染线程的 FindClass 找不到 app 类。此处的引用亦是把
+    // android_jni_proxy.c TU 从静态库拉入的锚点。Bridge 缺失（纯 gpu app）非致命。
+    if (wsi_jni_proxy_register(env))
+        WSI_LOGI("JNI_OnLoad: 已注册 com.sc.wsi.Bridge 反射代理");
+    else
+        WSI_LOGI("JNI_OnLoad: 未启用 Bridge 反射代理（纯 gpu 形态或 dex 缺失）");
+
     return JNI_VERSION_1_6;
 }
 
