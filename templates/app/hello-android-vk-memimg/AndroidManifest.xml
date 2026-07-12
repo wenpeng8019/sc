@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android-vk-memimg 清单 —— NativeActivity + 自定义 Application。
+  与 hello-android-vk 结构一致，仅 package/label 改为 memimg 版；app.sc 产物同为
+  libapp.so，在 on_after_startup 跑一次性 Vulkan memimg 无表面渲染自检。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.sc.helloandroidvkmemimg"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <uses-feature android:name="android.hardware.vulkan.version"
+                  android:version="0x400003" android:required="true"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="hello-android-vk-memimg"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="app"/>
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="hello-android-vk-memimg"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <meta-data android:name="android.app.lib_name"
+                       android:value="app"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

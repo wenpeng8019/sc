@@ -4,10 +4,12 @@
  * 运行时动态加载 vulkan-1.dll（Windows）/ libvulkan.so.1（Linux），
  * 经 vkGetInstanceProcAddr 解析所有入口点——免链接 vulkan-1.lib、免 SDK。
  * ============================================================ */
-#include "../platform.h"   /* 动态库加载：P_dl_load/P_dl_get_proc（跨平台） */
-#if (P_WIN || P_LINUX) && !defined(__ANDROID__)   /* Vulkan 仅 Windows/Linux 启用；mac 用 Metal、Android 一期只 GLES，本 TU 空化 */
+#include "../../platform.h"   /* 动态库加载：P_dl_load/P_dl_get_proc（跨平台） */
+#if P_WIN || P_LINUX   /* Vulkan 仅 Windows/Linux/Android 启用；mac 用 Metal，本 TU 空化 */
 #if P_WIN
   #define VK_USE_PLATFORM_WIN32_KHR   /* vkCreateWin32SurfaceKHR 需 <windows.h>（platform.h 已带入） */
+#elif defined(__ANDROID__)
+  #define VK_USE_PLATFORM_ANDROID_KHR /* vkCreateAndroidSurfaceKHR（ANativeWindow*） */
 #else
   #define VK_USE_PLATFORM_XLIB_KHR
   #define VK_USE_PLATFORM_WAYLAND_KHR
@@ -28,6 +30,9 @@ PFN_vkCreateXlibSurfaceKHR vkCreateXlibSurfaceKHR = NULL;
 #endif
 #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
 PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR = NULL;
+#endif
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+PFN_vkCreateAndroidSurfaceKHR vkCreateAndroidSurfaceKHR = NULL;
 #endif
 
 static void* g_vklib = NULL;
@@ -66,6 +71,10 @@ void sc_vk_load_instance(VkInstance instance) {
 #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
     vkCreateWaylandSurfaceKHR = (PFN_vkCreateWaylandSurfaceKHR)
         vkGetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR");
+#endif
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    vkCreateAndroidSurfaceKHR = (PFN_vkCreateAndroidSurfaceKHR)
+        vkGetInstanceProcAddr(instance, "vkCreateAndroidSurfaceKHR");
 #endif
 }
 

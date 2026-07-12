@@ -34,6 +34,9 @@
 #if P_WIN
   #define VK_USE_PLATFORM_WIN32_KHR
   #include <windows.h>
+#elif defined(__ANDROID__)
+  #define VK_USE_PLATFORM_ANDROID_KHR /* vkCreateAndroidSurfaceKHR（ANativeWindow*） */
+  #include <unistd.h>                 /* close()（外部内存 fd 释放，若可用） */
 #else
   #define VK_USE_PLATFORM_XLIB_KHR
   #define VK_USE_PLATFORM_WAYLAND_KHR
@@ -99,6 +102,7 @@ typedef struct {
     bool             hasXlib;
     bool             hasWayland;
     bool             hasWin32;
+    bool             hasAndroid;
     VkSurfaceCtx*    cur;                  /* 当前 surface（sync 访问器用） */
     VkCommandPool    utilPool;             /* 一次性命令（memimg 布局转换/回读拷贝） */
     bool             hasExtMem;            /* 外部内存导出扩展可用（dma-buf/win32 NT 句柄） */
@@ -228,6 +232,11 @@ static bool vkInit(const sc_gpu_desc* desc) {
     if (ext_present(exts, nExt, VK_KHR_WIN32_SURFACE_EXTENSION_NAME)) {
         wanted[nWanted++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
         g_vk.hasWin32 = true;
+    }
+#elif defined(__ANDROID__)
+    if (ext_present(exts, nExt, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME)) {
+        wanted[nWanted++] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+        g_vk.hasAndroid = true;
     }
 #else
     if (ext_present(exts, nExt, VK_KHR_XLIB_SURFACE_EXTENSION_NAME)) {
@@ -989,6 +998,21 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
         free(c);
         return false;
     }
+#elif defined(__ANDROID__)
+    c->wayland = false;
+    if (g_vk.hasAndroid) {
+        VkAndroidSurfaceCreateInfoKHR asci = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
+        asci.window = (struct ANativeWindow*)c->native_window;   /* wsi 交付的 ANativeWindow* */
+        if (vkCreateAndroidSurfaceKHR(g_vk.dev.instance, &asci, NULL, &c->surface) != VK_SUCCESS) {
+            gpu_log("vulkan: vkCreateAndroidSurfaceKHR 失败");
+            free(c);
+            return false;
+        }
+    } else {
+        gpu_log("vulkan: 无可用 Android surface 扩展");
+        free(c);
+        return false;
+    }
 #else
     c->wayland = prefer_wayland();
     if (c->wayland && g_vk.hasWayland) {
@@ -1052,6 +1076,8 @@ static bool vkSurfaceCreate(gpu_surface_t* surf) {
     gpu_log("vulkan: surface 就绪 (%s, %ux%u, %u 镜像)",
 #if P_WIN
             "win32",
+#elif defined(__ANDROID__)
+            "android",
 #else
             c->wayland ? "wayland" : "x11",
 #endif

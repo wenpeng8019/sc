@@ -124,6 +124,9 @@ extern PFN_vkCreateXlibSurfaceKHR vkCreateXlibSurfaceKHR;
 #if defined(VK_USE_PLATFORM_WAYLAND_KHR)
 extern PFN_vkCreateWaylandSurfaceKHR vkCreateWaylandSurfaceKHR;
 #endif
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+extern PFN_vkCreateAndroidSurfaceKHR vkCreateAndroidSurfaceKHR;
+#endif
 
 /* 装载 vulkan-1.dll/libvulkan + 全局函数；返回 1=成功、0=无 Vulkan 运行时。 */
 int  sc_vk_load_global(void);

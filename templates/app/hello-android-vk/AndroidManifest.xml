@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  hello-android-vk 清单 —— NativeActivity（窗口/帧）+ 自定义 Application（进程级 init）。
+  与 hello-android-gfx 结构一致，仅 package/label 改为 vk 版；app.sc 产物同为
+  libapp.so（gpu/gfx 静态编入），Vulkan 三角形渲染。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.sc.helloandroidvk"
+          android:versionCode="1"
+          android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+
+    <!-- Vulkan 硬件要求（1.0.3 起，模拟器 SwiftShader/真机满足） -->
+    <uses-feature android:name="android.hardware.vulkan.version"
+                  android:version="0x400003" android:required="true"/>
+
+    <application android:name="com.sc.wsi.ScApplication"
+                 android:label="hello-android-vk"
+                 android:hasCode="true"
+                 android:allowBackup="false">
+
+        <meta-data android:name="com.sc.wsi.lib_name"
+                   android:value="app"/>
+
+        <activity android:name="android.app.NativeActivity"
+                  android:label="hello-android-vk"
+                  android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
+
+            <meta-data android:name="android.app.lib_name"
+                       android:value="app"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
