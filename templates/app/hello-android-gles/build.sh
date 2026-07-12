@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# hello-android-gfx 构建并运行 —— GLES 三角形（桌面 gpu_demo 的 Android 等效）
+# hello-android-gles 构建并运行 —— GLES 三角形（桌面 gpu_demo 的 Android 等效）
 #
 # 结构同 hello-android/build.sh（说明见该文件）：先（重）编 wsi 的 android 变体库
 # 与 ScApplication dex，再跑 scc 一条龙（app.sc 无 main → 构建 libapp.so，

@@ -1,8 +1,8 @@
 #!/bin/bash
 # ============================================================
-# hello-android-vk 构建并运行 —— Vulkan 三角形（hello-android-gfx 的 Vulkan 等效）
+# hello-android-vk 构建并运行 —— Vulkan 三角形（hello-android-gles 的 Vulkan 等效）
 #
-# 结构同 hello-android-gfx/build.sh：先（重）编 wsi 的 android 变体库与
+# 结构同 hello-android-gles/build.sh：先（重）编 wsi 的 android 变体库与
 # ScApplication dex，再跑 scc 一条龙（app.sc 无 main → 构建 libapp.so，
 # 目标档 pkg/run 打 APK + adb 部署启动）。app.sc 额外 inc gpu.sc/gfx.sc，
 # gpu/gfx 源码随 app 静态编入（Vulkan 后端经 gd.backend=3 选，vk_loader 动态

@@ -1,6 +1,6 @@
-# hello-android-vk —— Android(Vulkan) 三角形：hello-android-gfx 的 Vulkan 等效（回调驱动 · 无 main）
+# hello-android-vk —— Android(Vulkan) 三角形：hello-android-gles 的 Vulkan 等效（回调驱动 · 无 main）
 #
-# 与 hello-android-gfx 同一闭环、同一四回调，只把 gpu 后端从 GLES 换成 Vulkan：
+# 与 hello-android-gles 同一闭环、同一四回调，只把 gpu 后端从 GLES 换成 Vulkan：
 #   gpu_shader/gpu_tri.ss ──scc──▶ gpu_tri.shader.h/.c（资源化，每目标三连
 #                                  [reflect, vs, fs]；Vulkan 取 vulkan450 SPIR-V，base=9）
 #   on_main_window_created ─▶ gpu_init（gd.backend=3=Vulkan，
@@ -9,7 +9,7 @@
 #                          └▶ gfx_init ─▶ gfx_make_shader(SPIR-V) ─▶ gfx_make_pipeline
 #   on_frame（AChoreographer vsync 每帧）─▶ gfx_begin_pass/draw(3)/commit
 #
-# 与 hello-android-gfx 对照：仅 gd.backend=3（GLES 走平台默认）、着色器取
+# 与 hello-android-gles 对照：仅 gd.backend=3（GLES 走平台默认）、着色器取
 # vulkan450 三连（base=9，vs/fs 为 SPIR-V 二进制）两处不同；渲染调用完全一致。
 #
 # 用法（M 芯片 Mac + Android NDK/SDK + 支持 Vulkan 的模拟器或真机）：

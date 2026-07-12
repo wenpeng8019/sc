@@ -1,22 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  hello-android-vk 清单 —— NativeActivity（窗口/帧）+ 自定义 Application（进程级 init）。
-  与 hello-android-gles 结构一致，仅 package/label 改为 vk 版；app.sc 产物同为
-  libapp.so（gpu/gfx 静态编入），Vulkan 三角形渲染。
+  hello-android-gles-memimg 清单 —— NativeActivity + 自定义 Application。
+  与 hello-android-vk-memimg 结构一致，仅 package/label 改为 gles 版、feature 换成
+  GLES 3.0；app.sc 产物同为 libapp.so，在 on_after_startup 跑一次性 GLES memimg
+  （AHardwareBuffer）无表面渲染自检。AHardwareBuffer 需 API 26+，故 minSdk=26。
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.sc.helloandroidvk"
+          package="com.sc.helloandroidglesmemimg"
           android:versionCode="1"
           android:versionName="1.0">
 
-    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34"/>
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
 
-    <!-- Vulkan 硬件要求（1.0.3 起，模拟器 SwiftShader/真机满足） -->
-    <uses-feature android:name="android.hardware.vulkan.version"
-                  android:version="0x400003" android:required="true"/>
+    <uses-feature android:glEsVersion="0x00030000" android:required="true"/>
 
     <application android:name="com.sc.wsi.ScApplication"
-                 android:label="hello-android-vk"
+                 android:label="hello-android-gles-memimg"
                  android:hasCode="true"
                  android:allowBackup="false">
 
@@ -24,7 +23,7 @@
                    android:value="app"/>
 
         <activity android:name="android.app.NativeActivity"
-                  android:label="hello-android-vk"
+                  android:label="hello-android-gles-memimg"
                   android:exported="true"
                   android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density">
 

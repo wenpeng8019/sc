@@ -393,6 +393,243 @@ int gl_egl_fence_fd(void) {
 #endif /* !__ANDROID__ —— headless 段终 */
 
 /* ============================================================
+ * Android headless（AHardwareBuffer → EGLImage）—— GBM/dma-heap 的对偶
+ * ------------------------------------------------------------
+ * NDK 无 GBM/dma-heap；Android 的可导出内存图像原语是 AHardwareBuffer
+ * （与 dma-buf/IOSurface 三元对偶，可导 EGLImage / Vulkan external memory，
+ *  直送 MediaCodec）。此处提供与非-Android 段同一 gl_egl.h 接口：
+ *   · gl_egl_init：EGL_DEFAULT_DISPLAY + surfaceless ES3 上下文（无 GBM/DRM，
+ *     无 surfaceless 扩展则 1×1 pbuffer 兜底）
+ *   · gl_memimg_alloc：AHardwareBuffer_allocate（R8G8B8A8）→
+ *     eglGetNativeClientBufferANDROID → eglCreateImageKHR(EGL_NATIVE_BUFFER_ANDROID)
+ *   · gl_memimg_map：AHardwareBuffer_lock（CPU 回读）
+ *   · fence：一期返回 -1（frame_end glFinish 退化）
+ * AHardwareBuffer 全套 API 需 API 26+（__ANDROID_API__>=26 方编入；否则
+ * SC_GPU_GL_MEMIMG 不定义，Android memimg 优雅返回未支持）。
+ * ============================================================ */
+#if defined(__ANDROID__) && __ANDROID_API__ >= 26
+
+#include <android/hardware_buffer.h>
+
+#ifndef EGL_NATIVE_BUFFER_ANDROID
+#define EGL_NATIVE_BUFFER_ANDROID 0x3140
+#endif
+#ifndef EGL_IMAGE_PRESERVED_KHR
+#define EGL_IMAGE_PRESERVED_KHR 0x30D2
+#endif
+
+typedef EGLClientBuffer (EGLAPIENTRYP PFN_scEglGetNativeClientBufferANDROID)(const struct AHardwareBuffer*);
+
+typedef struct gl_memimg {
+    AHardwareBuffer* ahb;      /* alloc 拥有 / import 借用（均 acquire 保活，free release） */
+    EGLImageKHR      image;
+    int              width, height;
+    uint32_t         fourcc;
+    uint32_t         stride;   /* 字节/行（AHB describe 的 stride 像素 × 4） */
+    void*            map_ptr;
+} gl_memimg;
+
+static struct {
+    bool        inited;
+    EGLDisplay  dpy;
+    EGLContext  ctx;
+    EGLConfig   cfg;
+    EGLSurface  pbuf;          /* 无 surfaceless 扩展时的 1×1 兜底面 */
+    PFNEGLCREATEIMAGEKHRPROC  pCreateImage;
+    PFNEGLDESTROYIMAGEKHRPROC pDestroyImage;
+    PFN_scEglGetNativeClientBufferANDROID pGetClientBuffer;
+} egl;
+
+bool gl_egl_init(void) {
+    if (egl.inited) return true;
+    egl.pbuf = EGL_NO_SURFACE;
+    egl.dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (egl.dpy == EGL_NO_DISPLAY || !eglInitialize(egl.dpy, NULL, NULL)) {
+        gpu_log("egl(android): display 初始化失败(%d)", eglGetError());
+        return false;
+    }
+    eglBindAPI(EGL_OPENGL_ES_API);
+    const EGLint cfg_attribs[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+        EGL_NONE
+    };
+    EGLint ncfg = 0;
+    if (!eglChooseConfig(egl.dpy, cfg_attribs, &egl.cfg, 1, &ncfg) || ncfg < 1) {
+        gpu_log("egl(android): 无可用 config(%d)", eglGetError());
+        goto fail;
+    }
+    const EGLint ctx_attribs[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
+    egl.ctx = eglCreateContext(egl.dpy, egl.cfg, EGL_NO_CONTEXT, ctx_attribs);
+    if (egl.ctx == EGL_NO_CONTEXT) {
+        gpu_log("egl(android): 创建上下文失败(%d)", eglGetError());
+        goto fail;
+    }
+    if (!eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl.ctx)) {
+        /* 无 surfaceless_context 扩展 → 1×1 pbuffer 兜底 */
+        const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+        egl.pbuf = eglCreatePbufferSurface(egl.dpy, egl.cfg, pb);
+        if (egl.pbuf == EGL_NO_SURFACE ||
+            !eglMakeCurrent(egl.dpy, egl.pbuf, egl.pbuf, egl.ctx)) {
+            gpu_log("egl(android): make current 失败(%d)", eglGetError());
+            eglDestroyContext(egl.dpy, egl.ctx);
+            goto fail;
+        }
+    }
+    egl.pCreateImage  = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+    egl.pDestroyImage = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
+    egl.pGetClientBuffer = (PFN_scEglGetNativeClientBufferANDROID)
+        eglGetProcAddress("eglGetNativeClientBufferANDROID");
+    if (!egl.pCreateImage || !egl.pDestroyImage || !egl.pGetClientBuffer) {
+        gpu_log("egl(android): 缺 AHB/EGLImage 扩展入口");
+        eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroyContext(egl.dpy, egl.ctx);
+        goto fail;
+    }
+    egl.inited = true;
+    return true;
+fail:
+    if (egl.pbuf != EGL_NO_SURFACE) { eglDestroySurface(egl.dpy, egl.pbuf); egl.pbuf = EGL_NO_SURFACE; }
+    eglTerminate(egl.dpy);
+    egl.dpy = EGL_NO_DISPLAY;
+    return false;
+}
+
+void gl_egl_shutdown(void) {
+    if (!egl.inited) return;
+    eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (egl.pbuf != EGL_NO_SURFACE) eglDestroySurface(egl.dpy, egl.pbuf);
+    if (egl.ctx != EGL_NO_CONTEXT) eglDestroyContext(egl.dpy, egl.ctx);
+    eglTerminate(egl.dpy);
+    memset(&egl, 0, sizeof(egl));
+    egl.dpy = EGL_NO_DISPLAY;
+}
+
+void gl_egl_make_current(void) {
+    if (egl.inited)
+        eglMakeCurrent(egl.dpy, egl.pbuf, egl.pbuf, egl.ctx);
+}
+
+static EGLImageKHR createAhbImage(AHardwareBuffer* ahb) {
+    EGLClientBuffer cb = egl.pGetClientBuffer(ahb);
+    if (!cb) return EGL_NO_IMAGE_KHR;
+    const EGLint attrs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+    return egl.pCreateImage(egl.dpy, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID, cb, attrs);
+}
+
+gl_memimg* gl_memimg_alloc(int w, int h, uint32_t fourcc,
+                           sc_gpu_memory_kind memory, uint64_t modifier,
+                           int renderable) {
+    (void)fourcc; (void)memory; (void)modifier;   /* AHB 无 BGRA，统一 R8G8B8A8 */
+    if (!gl_egl_init()) return NULL;
+    gl_memimg* m = (gl_memimg*)calloc(1, sizeof(gl_memimg));
+    if (!m) return NULL;
+    m->width = w; m->height = h;
+    m->fourcc = SC_GPU_FOURCC('A','B','2','4');   /* DRM_FORMAT_ABGR8888 = RGBA 字节序 */
+
+    AHardwareBuffer_Desc d;
+    memset(&d, 0, sizeof(d));
+    d.width  = (uint32_t)w;
+    d.height = (uint32_t)h;
+    d.layers = 1;
+    d.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    d.usage  = AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN |
+               AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE |
+               (renderable ? AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT : 0);
+    if (AHardwareBuffer_allocate(&d, &m->ahb) != 0 || !m->ahb) {
+        gpu_log("egl(android): AHardwareBuffer_allocate 失败");
+        free(m);
+        return NULL;
+    }
+    AHardwareBuffer_Desc got;
+    AHardwareBuffer_describe(m->ahb, &got);
+    m->stride = got.stride * 4;   /* describe 的 stride 单位=像素 */
+
+    m->image = createAhbImage(m->ahb);
+    if (m->image == EGL_NO_IMAGE_KHR) {
+        gpu_log("egl(android): eglCreateImage(AHB) 失败(%d)", eglGetError());
+        gl_memimg_free(m);
+        return NULL;
+    }
+    return m;
+}
+
+gl_memimg* gl_memimg_import(const sc_gpu_memory_frame* src) {
+    if (!gl_egl_init()) return NULL;
+    if (!src->native) { gpu_log("egl(android): import 需 native=AHardwareBuffer*"); return NULL; }
+    gl_memimg* m = (gl_memimg*)calloc(1, sizeof(gl_memimg));
+    if (!m) return NULL;
+    m->ahb = (AHardwareBuffer*)src->native;
+    AHardwareBuffer_acquire(m->ahb);   /* 借用 + 保活（free 时 release 对称） */
+    m->width = src->width; m->height = src->height;
+    m->fourcc = src->fourcc ? src->fourcc : SC_GPU_FOURCC('A','B','2','4');
+    AHardwareBuffer_Desc got;
+    AHardwareBuffer_describe(m->ahb, &got);
+    m->stride = got.stride * 4;
+    m->image = createAhbImage(m->ahb);
+    if (m->image == EGL_NO_IMAGE_KHR) {
+        gpu_log("egl(android): 导入 eglCreateImage(AHB) 失败");
+        gl_memimg_free(m);
+        return NULL;
+    }
+    return m;
+}
+
+bool gl_memimg_export(gl_memimg* m, sc_gpu_memory_frame* out) {
+    if (!m) return false;
+    out->planes    = 1;
+    out->fd[0]     = -1;              /* AHB 不经 fd（native 传句柄） */
+    out->stride[0] = m->stride;
+    out->offset[0] = 0;
+    out->fourcc    = m->fourcc;
+    out->width     = m->width;
+    out->height    = m->height;
+    out->native    = (void*)m->ahb;   /* 借用；可导 Vulkan external / MediaCodec */
+    return true;
+}
+
+void* gl_memimg_egl_image(gl_memimg* m) {
+    return m ? (void*)m->image : NULL;
+}
+
+void* gl_memimg_map(gl_memimg* m, uint32_t* out_stride) {
+    if (!m || !m->ahb) return NULL;
+    if (!m->map_ptr) {
+        if (AHardwareBuffer_lock(m->ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN,
+                                 -1, NULL, &m->map_ptr) != 0) {
+            gpu_log("egl(android): AHardwareBuffer_lock 失败");
+            m->map_ptr = NULL;
+            return NULL;
+        }
+    }
+    if (out_stride) *out_stride = m->stride;
+    return m->map_ptr;
+}
+
+void gl_memimg_unmap(gl_memimg* m) {
+    if (m && m->map_ptr) {
+        AHardwareBuffer_unlock(m->ahb, NULL);
+        m->map_ptr = NULL;
+    }
+}
+
+void gl_memimg_free(gl_memimg* m) {
+    if (!m) return;
+    gl_memimg_unmap(m);
+    if (m->image != EGL_NO_IMAGE_KHR && egl.pDestroyImage)
+        egl.pDestroyImage(egl.dpy, m->image);
+    if (m->ahb) AHardwareBuffer_release(m->ahb);
+    free(m);
+}
+
+int gl_egl_fence_fd(void) {
+    return -1;   /* 一期不导出 fence：frame_end/export 已 glFinish 退化 */
+}
+
+#endif /* __ANDROID__ && API>=26 —— AHB headless 段终 */
+
+/* ============================================================
  * window surface —— EGL 窗口路径（Wayland/X11/嵌入式/Android）
  * ============================================================
  * 与 headless（GBM 平台 display）分属不同 EGLDisplay：窗口路径用

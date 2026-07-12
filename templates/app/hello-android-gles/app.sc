@@ -1,4 +1,4 @@
-# hello-android-gfx —— Android(GLES) 三角形：桌面 gpu_demo 的移动等效（回调驱动 · 无 main）
+# hello-android-gles —— Android(GLES) 三角形：桌面 gpu_demo 的移动等效（回调驱动 · 无 main）
 #
 # 与 hello-ios-gfx 同一闭环，只把驱动入口从 iOS 的 main/UIKit 换成 Android 的
 # app_main/NativeActivity（详见 hello-android/app.sc 的入口模型说明）：
@@ -15,7 +15,7 @@
 # 且着色器取 gles300 三连（base=6）而非 metal20000（base=0）。
 #
 # 用法（M 芯片 Mac + Android NDK/SDK + 模拟器或真机）：
-#   ANDROID_NDK_HOME=... ANDROID_HOME=... ./templates/app/hello-android-gfx/build.sh
+#   ANDROID_NDK_HOME=... ANDROID_HOME=... ./templates/app/hello-android-gles/build.sh
 
 inc io.sc
 inc wsi.sc
@@ -44,7 +44,7 @@ var g_fbh:    i4  = 0
 var g_frames: i4  = 0
 
 fnc on_after_startup:
-    print "hello-android-gfx: 子系统就绪\n"
+    print "hello-android-gles: 子系统就绪\n"
     ::fflush(nil)
 
 # 主窗口创建：wsi 已自建全屏窗口，交付 ANativeWindow* 句柄；在此初始化 gpu/gfx/管线。
@@ -52,7 +52,7 @@ fnc on_main_window_created: win: ::sc_window&
     var fbw: i4 = 0
     var fbh: i4 = 0
     wsi_win_get_framebuffer_size(win, &fbw, &fbh)
-    print "hello-android-gfx: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n"
+    print "hello-android-gles: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n"
     ::fflush(nil)
 
     # ---- gpu 初始化（GLES；native_window = ANativeWindow*，native_display = NULL） ----
@@ -63,17 +63,17 @@ fnc on_main_window_created: win: ::sc_window&
     gd.surface.width  = fbw
     gd.surface.height = fbh
     if gpu_init(&gd) == 0
-        print "hello-android-gfx: gpu_init 失败\n"
+        print "hello-android-gles: gpu_init 失败\n"
         ::fflush(nil)
         return
     var bk: i4 = gpu_query_backend()
-    print "hello-android-gfx: gpu 后端 ", bk, " (2=GL)\n"
+    print "hello-android-gles: gpu 后端 ", bk, " (2=GL)\n"
 
     # ---- gfx 渲染层 ----
     var fd: ::sc_gfx_desc
     ::memset(&fd, 0, sizeof(::sc_gfx_desc))
     if gfx_init(&fd) == 0
-        print "hello-android-gfx: gfx_init 失败\n"
+        print "hello-android-gles: gfx_init 失败\n"
         ::fflush(nil)
         gpu_shutdown()
         return
@@ -101,7 +101,7 @@ fnc on_main_window_created: win: ::sc_window&
     sd.label        = "tri"
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
-        print "hello-android-gfx: make_shader 失败\n"
+        print "hello-android-gles: make_shader 失败\n"
         ::fflush(nil)
         return
     g_shd = shd
@@ -112,7 +112,7 @@ fnc on_main_window_created: win: ::sc_window&
     pd.label  = "tri"
     var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
-        print "hello-android-gfx: make_pipeline 失败\n"
+        print "hello-android-gles: make_pipeline 失败\n"
         ::fflush(nil)
         return
     g_pip = pip
@@ -120,7 +120,7 @@ fnc on_main_window_created: win: ::sc_window&
     g_fbw   = fbw
     g_fbh   = fbh
     g_ready = 1
-    print "hello-android-gfx: 三角形管线就绪\n"
+    print "hello-android-gles: 三角形管线就绪\n"
     ::fflush(nil)
 
 # 每帧回调（AChoreographer vsync 驱动）：清屏 + 画三角形。
@@ -145,11 +145,11 @@ fnc on_frame:
     gfx_commit()
 
     if g_frames % 60 == 0
-        print "hello-android-gfx: 帧 ", g_frames, "\n"
+        print "hello-android-gles: 帧 ", g_frames, "\n"
         ::fflush(nil)
 
 fnc on_before_cleanup:
-    print "hello-android-gfx: cleanup\n"
+    print "hello-android-gles: cleanup\n"
     if g_ready != 0
         gfx_destroy_pipeline(g_pip)
         gfx_destroy_shader(g_shd)
@@ -160,5 +160,5 @@ fnc on_before_cleanup:
 # ANativeActivity_onCreate 在渲染线程上调用。@ 导出令其成为外部链接符号
 #（wsi 后端 extern 引用）；进入 wsi 循环，不返回。
 @fnc app_main: i4
-    print "hello-android-gfx: 进入 wsi 事件循环（wsi_app_run）\n"
+    print "hello-android-gles: 进入 wsi 事件循环（wsi_app_run）\n"
     return wsi_app_run(on_after_startup, on_main_window_created, on_frame, on_before_cleanup)
