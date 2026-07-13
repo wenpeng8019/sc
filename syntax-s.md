@@ -504,6 +504,7 @@ scc file.ss --ast                    # AST JSON（spec 以首实例呈现）
 全目标统一 SPIR-V 中枢（AST 直发）：`vulkan` 直落 `.spv`；`metal` 经
 SPIRV-Cross → MSL；`glcore`/`gles` 经 SPIRV-Cross 反译 GLSL（ES100 legacy 形态，
 uniform 块平铺 + `attribute`/`varying`/`gl_FragColor`）。
+**例外：`cpu` 目标不过 SPIR-V**，由 codegen_cpu 直发 C 源码（见 §13.4）。
 
 资源化产物（默认）：`<stem>.shader.h/.c` —— 字节数组（文本带尾 NUL）+ enum id +
 反射 JSON 内嵌 + `sc_shader_<sym>_get(i)` / `_find(entry, target, ext)` 查询；
@@ -539,6 +540,27 @@ uniform 块平铺 + `attribute`/`varying`/`gl_FragColor`）。
 - 低版本目标（无显式 binding）`set`/`binding` 为 -1，运行时按 `name` 绑定；
   legacy ES 目标 `flattenUniforms: true`（块字段平铺为 `块_字段` 普通 uniform）。
 - `spec` 字段仅在该实例来自 spec 展开时出现。
+
+### 13.4 CPU/SIMD 后端（`tar cpu@99`）
+
+同一份 comp kernel 也可编到 **CPU 并行执行**（无 GPU 的嵌入式/DSP 场景、
+或作为 GPU 结果的数值对拍基准）。设计详见设计文档 §17。
+
+- **执行模型**：SPMD 循环化——invocation → 循环迭代，**SIMD 向量化交给
+  目标 C 编译器**（NEON/SVE/AVX/RVV/DSP 向量指令由 `-march`/厂商工具链
+  自动兑现，无需逐 ISA 适配；产物是带 `restrict` + 向量化提示的规整 C99）。
+  含 `barrier()` 的 kernel 经相位分裂变换（按 barrier 切相位；`shared` =
+  工作组局部数组；`atomic_*` = C11 原子）；workgroup 间多线程分片。
+- **产物形态**：`<stem>.cpu.c` 散文件（待编译源码，不进资源字节数组）——
+  宿主 `add out/stem.cpu.c` 编入后构造器自注册；运行时经 spc 的
+  `desc.kernel_backend = SC_SPC_KERNEL_CPU` 选用（同一套 dispatch API）。
+- **能力集**（能力表 cpu 列）：计算面全支持（storage/uniform/shared/
+  barrier/atomic/spec 传值/f2/i8·u8/i1·u1/i2·u2）；图形面（采样器/导数/
+  MRT）与 subgroup 不支持（硬门控报错）。
+- **当前限制**（超出编译期报错）：仅标量与标量数组（无 vec/mat）、
+  uniform 块限标量成员（数组用 storage）、无 push 块、`barrier()` 仅
+  kernel 顶层或顶层 `while` 内、含 barrier 的工作组限 1D。
+- 运行时消费与板端验证：[builtins/spc/PORTING.md](builtins/spc/PORTING.md) §8。
 
 ---
 
