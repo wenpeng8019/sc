@@ -16,6 +16,7 @@ inc spc.sc
 add spc_kernel/out/sg_test.shader.c
 add spc_kernel/out/f16_test.shader.c
 add spc_kernel/out/i64_test.shader.c
+add spc_kernel/out/narrow_test.shader.c
 
 def shader_blob: {
     entry:  const char&
@@ -28,6 +29,7 @@ def shader_blob: {
 @fnc shader_sg_test_get::  shader_blob&, i: u8
 @fnc shader_f16_test_get:: shader_blob&, i: u8
 @fnc shader_i64_test_get:: shader_blob&, i: u8
+@fnc shader_narrow_test_get:: shader_blob&, i: u8
 
 # 后端 → 产物 base（条目 = base+0 reflect、base+1 comp；tar 声明序 vulkan,metal）
 fnc vk_or_mtl_base: u8, backend: i4
@@ -194,6 +196,62 @@ fnc main: i4
             io->drop()
         spc_destroy_kernel(krni)
         spc_destroy_buffer(iobf)
+
+    # ============ [NARROW] int8(i1) + int16(i2) 存储+算术 ============
+    var nb: u8 = vk_or_mtl_base(bk)
+    var nrj: shader_blob& = shader_narrow_test_get(nb)
+    var ncs: shader_blob& = shader_narrow_test_get(nb + 1)
+    var kdn: ::sc_spc_kernel_desc
+    ::memset(&kdn, 0, sizeof(::sc_spc_kernel_desc))
+    kdn.code.ptr  = (ncs->data: &)
+    kdn.code.size = ncs->size
+    kdn.entry     = "cs_narrow"
+    kdn.reflect_json = (nrj->data: const char&)
+    var krnn: u4 = spc_make_kernel(&kdn)
+    if krnn == 0
+        print "[NARROW] make_kernel 失败\n", .
+        fails = fails + 1
+    else
+        var nshp: i4 = 1024
+        var b8d: ::sc_spc_buffer_desc
+        ::memset(&b8d, 0, sizeof(::sc_spc_buffer_desc))
+        b8d.size = (1024: u8)                          # int8 暂存 1024*1B
+        var b8: u4 = spc_make_buffer(&b8d)
+        var s16d: ::sc_spc_buffer_desc
+        ::memset(&s16d, 0, sizeof(::sc_spc_buffer_desc))
+        s16d.size = (1024 * 2: u8)                     # int16 暂存 1024*2B
+        var s16: u4 = spc_make_buffer(&s16d)
+        var nod: ::sc_spc_buffer_desc
+        ::memset(&nod, 0, sizeof(::sc_spc_buffer_desc))
+        nod.size = (1024 * 4: u8)
+        var nobf: u4 = spc_make_buffer(&nod)
+        var pnn: u4 = 1024
+        var bndn: ::sc_spc_bindings
+        ::memset(&bndn, 0, sizeof(::sc_spc_bindings))
+        bndn.uniforms[0].ptr  = (&pnn: &)
+        bndn.uniforms[0].size = 4
+        bndn.buffers[1] = b8
+        bndn.buffers[2] = s16
+        bndn.buffers[3] = nobf
+        if spc_dispatch(krnn, n, 1, 1, &bndn) == 0
+            print "[NARROW] dispatch 失败\n", .
+            fails = fails + 1
+        else
+            spc_finish()
+            var no: tensor& = zeros(1, &nshp, DT_F4)
+            spc_buffer_to_tensor(nobf, no)
+            var expn: tensor& = full(1, &nshp, 520.0, DT_F4)   # 120(i8)+400(i16)
+            if no->allclose(expn, 0.00001, 0.000001)
+                print "[NARROW] int8+int16 存储+算术:通过(120+400=520)\n", .
+            else
+                print "[NARROW] 结果不符!o[0]=", no->at(0), "\n", .
+                fails = fails + 1
+            expn->drop()
+            no->drop()
+        spc_destroy_kernel(krnn)
+        spc_destroy_buffer(b8)
+        spc_destroy_buffer(s16)
+        spc_destroy_buffer(nobf)
 
     spc_shutdown()
     gpu_shutdown()

@@ -167,7 +167,7 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 | subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
 | f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
 | i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ | Metal buffer 内 long 需 MSL 2.3 |
-| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | 待板验（8bit/16bit_storage 已启用，未逐一跑核） | ❌ | |
+| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | ✅ 实测（8bit/16bit_storage 存取 + 算术，120+400=520） | ❌ | |
 
 ## 7. 板端排错工具链
 
