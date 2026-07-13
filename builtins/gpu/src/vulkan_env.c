@@ -345,7 +345,7 @@ static bool vkInit(const sc_gpu_desc* desc) {
     dqci.queueCount = 1;
     dqci.pQueuePriorities = &prio;
 
-    const char* devExts[8];
+    const char* devExts[12];
     uint32_t nDE = 0;
     devExts[nDE++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 
@@ -372,9 +372,39 @@ static bool vkInit(const sc_gpu_desc* desc) {
         g_vk.hasExtMem = true;
     }
 #endif
+    /* 高级计算能力扩展探测（供 spc 的 f16/int8 内核；16bit_storage 在 VK1.1 为核心，无需扩展）*/
+    bool haveF16I8ext = ext_present(devExtList, nDevExt, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+    bool haveStor8ext = ext_present(devExtList, nDevExt, VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
     free(devExtList);
 
+    /* --- 高级计算特性链（VkPhysicalDeviceFeatures2 查询→仅启用设备支持者）---
+     * 16bit 存储 + 8bit 存储 + f16/i8 算术 + int64/int16：供 spc 的 f2/i1/i2/i8 内核。
+     * 渲染路径不使用这些特性，启用受支持位对其无影响；扩展缺失则相应特性自然为 0。 */
+    VkPhysicalDeviceShaderFloat16Int8Features fp16i8 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES };
+    VkPhysicalDevice8BitStorageFeatures stor8 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES };
+    VkPhysicalDevice16BitStorageFeatures stor16 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES };
+    VkPhysicalDeviceFeatures2 feats2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    void** ftail = &feats2.pNext;
+    *ftail = &stor16; ftail = &stor16.pNext;                 /* 16bit 核心，恒查询 */
+    if (haveStor8ext) { *ftail = &stor8;  ftail = &stor8.pNext; }
+    if (haveF16I8ext) { *ftail = &fp16i8; ftail = &fp16i8.pNext; }
+    if (vkGetPhysicalDeviceFeatures2)
+        vkGetPhysicalDeviceFeatures2(g_vk.dev.phys, &feats2);
+    /* 核心 VkPhysicalDeviceFeatures 只保留 int64/int16（其余清零，勿启用未验证特性）*/
+    VkPhysicalDeviceFeatures keepFeats;
+    memset(&keepFeats, 0, sizeof(keepFeats));
+    keepFeats.shaderInt64 = feats2.features.shaderInt64;
+    keepFeats.shaderInt16 = feats2.features.shaderInt16;
+    feats2.features = keepFeats;
+    if (haveF16I8ext) devExts[nDE++] = VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME;
+    if (haveStor8ext) devExts[nDE++] = VK_KHR_8BIT_STORAGE_EXTENSION_NAME;
+
     VkDeviceCreateInfo dci = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    dci.pNext = (vkGetPhysicalDeviceFeatures2 ? (void*)&feats2 : NULL);
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &dqci;
     dci.enabledExtensionCount = nDE;

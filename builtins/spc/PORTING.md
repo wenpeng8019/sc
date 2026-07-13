@@ -93,13 +93,15 @@ uniform 小参数每次 dispatch 建临时 uniform buffer。
 3. **内存类型**：`vkspcFindMemType` 要求 HOST_VISIBLE|HOST_COHERENT。
    个别嵌入式驱动的 device-local 才快——一期先跑通正确性，性能后议。
 4. **subgroup 内核**（用了 subgroup_* 的 .ss）需要 Vulkan 1.1+ 实例/设备：
-   gpu env 的 vulkan_env.c 目前建 1.0 实例的话，SPIR-V 1.3 模块会被
-   vkCreateShaderModule 拒——先跑非 subgroup 内核；subgroup 板验时若报
-   版本错，把 vulkan_env.c 的 apiVersion 提到 VK_API_VERSION_1_1。
-5. **16bit/8bit storage**（f2/i1 进块）需设备 feature：
-   VkPhysicalDevice16BitStorageFeatures.storageBuffer16BitAccess。gpu env
-   建 device 时未启——板验 f2 内核报 validation 错时，在 vulkan_env.c 的
-   vkCreateDevice pNext 链加该 feature（PORTING 后续项）。
+   **【已解决】** vulkan_env.c 的 app.apiVersion 已是 VK_API_VERSION_1_1，
+   SPIR-V 1.3 GroupNonUniform 模块被接受；vote/ballot/shuffle 已板验（Win AMD
+   + WSL llvmpipe，见 §6）。若移植到更旧驱动仍建 1.0 实例，才需按此项提版本。
+5. **16bit/8bit storage + f16/int8/int64 算术**（f2/i1/i2/i8 进块或算术）需设备 feature：
+   **【已解决 2026-07-13】** vulkan_env.c 的 vkCreateDevice 现经 VkPhysicalDeviceFeatures2
+   pNext 链查询并启用（仅设备支持者）：16BitStorage.storageBuffer16BitAccess（1.1 核心）、
+   8BitStorage（VK_KHR_8bit_storage 扩展）、ShaderFloat16Int8（VK_KHR_shader_float16_int8
+   扩展）、核心 shaderInt64/shaderInt16。f16/int64 已板验；扩展缺失则对应特性自然为 0
+   （渲染路径不受影响）。需 vk_loader 有 vkGetPhysicalDeviceFeatures2（已加）。
 6. 在飞环满（>16 未 finish 的 dispatch）会同步回收最老一槽——高频提交
    场景想提性能再改环大小。
 
@@ -162,10 +164,10 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 |---|---|---|---|---|
 | local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待板验 | gles 门控 310 |
 | spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
-| subgroup 三件 | ✅ 编译实测（2.1+） | 待板验（需 VK 1.1 实例，见 §3.1-4） | ❌（无核心途径） | SPIR-V 1.3 |
-| f2(f16) | ✅ 编译实测（half） | 待板验（需 16bit_storage feature，见 §3.1-5） | ❌ 门控 | |
-| i8/u8(int64) | ✅ 编译实测（2.3+，long） | 待板验 | ❌ | Metal buffer 内 long 需 MSL 2.3 |
-| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | 待板验（8bit_storage） | ❌ | |
+| subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
+| f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
+| i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ | Metal buffer 内 long 需 MSL 2.3 |
+| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | 待板验（8bit/16bit_storage 已启用，未逐一跑核） | ❌ | |
 
 ## 7. 板端排错工具链
 

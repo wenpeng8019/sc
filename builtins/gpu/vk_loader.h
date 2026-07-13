@@ -92,6 +92,7 @@ extern "C" {
     X(vkGetDeviceProcAddr) \
     X(vkGetDeviceQueue) \
     X(vkGetImageMemoryRequirements) \
+    X(vkGetPhysicalDeviceFeatures2) \
     X(vkGetPhysicalDeviceFormatProperties) \
     X(vkGetPhysicalDeviceMemoryProperties) \
     X(vkGetPhysicalDeviceProperties) \
