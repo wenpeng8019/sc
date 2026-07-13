@@ -62,15 +62,15 @@ static void cs_cpu_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Params_p = (const unsigned char*)bind[0];
-  const float* restrict Params_a = (const float*)(Params_p + 0);
-  const uint32_t* restrict Params_n = (const uint32_t*)(Params_p + 4);
+  const float* restrict Params_a = (const float*)(Params_p + 0); (void)Params_a;
+  const uint32_t* restrict Params_n = (const uint32_t*)(Params_p + 4); (void)Params_n;
   const unsigned char* XBuf_p = (const unsigned char*)bind[1];
-  float* restrict XBuf_x = (float*)(XBuf_p + 0);
+  float* restrict XBuf_x = (float*)(XBuf_p + 0); (void)XBuf_x;
   const unsigned char* YBuf_p = (const unsigned char*)bind[2];
-  _Float16* restrict YBuf_scale = (_Float16*)(YBuf_p + 0);
-  int64_t* restrict YBuf_big = (int64_t*)(YBuf_p + 8);
-  float* restrict YBuf_lut = (float*)(YBuf_p + 16);
-  float* restrict YBuf_y = (float*)(YBuf_p + 32);
+  _Float16* restrict YBuf_scale = (_Float16*)(YBuf_p + 0); (void)YBuf_scale;
+  int64_t* restrict YBuf_big = (int64_t*)(YBuf_p + 8); (void)YBuf_big;
+  float* restrict YBuf_lut = (float*)(YBuf_p + 16); (void)YBuf_lut;
+  float* restrict YBuf_y = (float*)(YBuf_p + 32); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
