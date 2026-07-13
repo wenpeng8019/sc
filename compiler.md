@@ -772,6 +772,36 @@ scc mymod --build -o libmymod.dylib            # 动态库（-fPIC -shared + 段
 引用，§9）：搜索顺序为 **相对 `.ss` 源文件目录 → `builtins/gpu/caps/`**；
 随 `--builtins` 目录整体替换，交叉/板级适配时可自带板卡档案。
 
+### 7.9 预编交付产物与构建链（kernels/out、wsi .a）
+
+builtins 里有两类**预编交付产物随 git 入库**，fresh clone 即可直接消费，
+不引入构建循环：
+
+- **spc 算子内核**：`builtins/spc/kernels/*.ss` 经 `kernels/build.sh` 预编为
+  `out/*.shader.h/.c`（多目标字节数组 + 反射，§9），`spc.c` 编译期 include/
+  `add` 进用户程序——消费方无需具备 `.ss` 离线编译能力；
+- **wsi/ui 静态库**：`templates/.scenv/modules/` 下 `lib*.a` 预编入库
+  （改源码后重跑各自 `build.sh`）。
+
+**依赖链是线性的（非循环）**：
+
+```
+compiler/src（纯 C++，不依赖任何产物）
+  → scc 二进制
+  → kernels/build.sh 刷新 out/（git 入库 = 自举锚点）
+  → 用户程序编译期经 spc.c 消费
+```
+
+构建 scc 本身不需要 `out/`——include 它的是 spc 运行时源码，只在用户程序
+编译期被拉入，彼时产物已在仓库中。产物需要刷新的时机仅两个：改了
+`kernels/*.ss`，或编译器着色 codegen 改动影响产物。为防**静默过期**，
+根 `build.sh` 已把刷新挂进构建链：
+
+- `./build.sh build`：构建 scc 后自动重跑 `kernels/build.sh`（用刚构建的 scc）；
+- `./build.sh dist`：先走完整 `build`（含内核刷新）再做内嵌构建——因为
+  §7.7 的内嵌快照取磁盘现状，若本次改了 codegen/`.ss`，嵌入前必须先刷新，
+  "两遍"顺序由脚本形式化；初始构建仍是一条命令（git 快照天然自举）。
+
 ## 8. C 代码生成（codegen_c）
 
 ### 8.1 类型映射
