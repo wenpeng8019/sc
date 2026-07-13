@@ -38,6 +38,12 @@
 #ifndef EGL_PLATFORM_GBM_KHR
 #define EGL_PLATFORM_GBM_KHR 0x31D7
 #endif
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
+#ifndef EGL_OPENGL_ES3_BIT
+#define EGL_OPENGL_ES3_BIT 0x0040
+#endif
 #ifndef EGL_NO_NATIVE_FENCE_FD_ANDROID
 #define EGL_NO_NATIVE_FENCE_FD_ANDROID -1
 #endif
@@ -68,6 +74,7 @@ static struct {
     int                drm_fd;
     int                dma_fd;      /* dma-heap（懒开） */
     struct gbm_device* gbm;
+    bool               no_memimg;   /* surfaceless 回退：无 GBM，memimg 不可用（仅计算/离屏）*/
     EGLDisplay         dpy;
     EGLContext         ctx;
     bool               has_fence;
@@ -85,17 +92,16 @@ static struct {
 bool gl_egl_init(void) {
     if (egl.inited) return true;
 
+    /* 显示后端：优先 GBM/DRM（支持 memimg dma-buf 导出）；无 /dev/dri 时回退
+     * EGL_MESA_platform_surfaceless（仅计算/离屏，memimg 不可用；如 WSL 无 DRM 环境）。*/
+    egl.drm_fd = -1; egl.gbm = NULL; egl.no_memimg = false;
+    bool useGbm = false;
     egl.drm_fd = open("/dev/dri/card0", O_RDWR | O_CLOEXEC);
     if (egl.drm_fd < 0) egl.drm_fd = open("/dev/dri/card1", O_RDWR | O_CLOEXEC);
-    if (egl.drm_fd < 0) {
-        gpu_log("egl: 打开 DRM 设备失败(%d)", errno);
-        return false;
-    }
-    egl.gbm = gbm_create_device(egl.drm_fd);
-    if (!egl.gbm) {
-        gpu_log("egl: 创建 GBM 设备失败(%d)", errno);
-        close(egl.drm_fd); egl.drm_fd = -1;
-        return false;
+    if (egl.drm_fd >= 0) {
+        egl.gbm = gbm_create_device(egl.drm_fd);
+        if (egl.gbm) useGbm = true;
+        else { close(egl.drm_fd); egl.drm_fd = -1; }
     }
 
     egl.pGetPlatformDisplay = (PFNEGLGETPLATFORMDISPLAYEXTPROC)
@@ -106,54 +112,55 @@ bool gl_egl_init(void) {
     egl.pDestroySync  = (PFNEGLDESTROYSYNCKHRPROC)eglGetProcAddress("eglDestroySyncKHR");
     egl.pDupFenceFd   = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)
         eglGetProcAddress("eglDupNativeFenceFDANDROID");
-    if (!egl.pGetPlatformDisplay || !egl.pCreateImage || !egl.pDestroyImage) {
-        gpu_log("egl: 缺少必需扩展入口");
+    if (!egl.pGetPlatformDisplay) {
+        gpu_log("egl: 缺少 eglGetPlatformDisplayEXT");
         goto fail;
     }
 
-    egl.dpy = egl.pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, egl.gbm, NULL);
+    if (useGbm) {
+        egl.dpy = egl.pGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, egl.gbm, NULL);
+    } else {
+        egl.dpy = egl.pGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                          EGL_DEFAULT_DISPLAY, NULL);
+        egl.no_memimg = true;
+        gpu_log("egl: 无 /dev/dri → surfaceless 平台（仅计算/离屏，memimg 不可用）");
+    }
     if (egl.dpy == EGL_NO_DISPLAY || !eglInitialize(egl.dpy, NULL, NULL)) {
         gpu_log("egl: display 初始化失败(%d)", eglGetError());
         goto fail;
     }
 
     const char* exts = eglQueryString(egl.dpy, EGL_EXTENSIONS);
-    bool surfaceless = exts && strstr(exts, "EGL_KHR_surfaceless_context");
     egl.has_fence = exts && strstr(exts, "EGL_ANDROID_native_fence_sync") &&
                     egl.pCreateSync && egl.pDupFenceFd;
-    if (!surfaceless)
-        gpu_log("egl: 无 surfaceless_context 扩展（尝试继续）");
 
-    /* 桌面 GL 优先（对应 scc glcore410），失败回落 GLES */
-    EGLint cfg_attribs[] = {
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT,
-        EGL_NONE
-    };
+    /* 上下文：SC_GPU_GLES 形态直接 GLES3.1；否则桌面 GL core（失败回退 GLES3.1）。
+     * GLES3.1 起支持 compute；WSL 的 d3d12 驱动仅给 GLES，桌面 GL surfaceless 会 BAD_MATCH。*/
     EGLConfig cfg; EGLint ncfg = 0;
-    EGLint api = EGL_OPENGL_API;
-    if (!eglChooseConfig(egl.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
-        cfg_attribs[9] = EGL_OPENGL_ES2_BIT;
-        api = EGL_OPENGL_ES_API;
-        if (!eglChooseConfig(egl.dpy, cfg_attribs, &cfg, 1, &ncfg) || ncfg < 1) {
-            gpu_log("egl: 无可用 config");
-            goto fail;
+#if !defined(SC_GPU_GLES)
+    {
+        EGLint a[] = { EGL_RED_SIZE,8, EGL_GREEN_SIZE,8, EGL_BLUE_SIZE,8, EGL_ALPHA_SIZE,8,
+                       EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                       EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE };
+        if (eglChooseConfig(egl.dpy, a, &cfg, 1, &ncfg) && ncfg >= 1) {
+            eglBindAPI(EGL_OPENGL_API);
+            EGLint c[] = { EGL_CONTEXT_MAJOR_VERSION,4, EGL_CONTEXT_MINOR_VERSION,3,
+                           EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT, EGL_NONE };
+            egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT, c);
+            if (egl.ctx == EGL_NO_CONTEXT) { c[3] = 1; egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT, c); }
         }
     }
-    eglBindAPI((EGLenum)api);
-
-    EGLint ctx_attribs_gl[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 1,
-        EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_NONE
-    };
-    EGLint ctx_attribs_es[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT,
-                               api == EGL_OPENGL_API ? ctx_attribs_gl : ctx_attribs_es);
-    if (egl.ctx == EGL_NO_CONTEXT && api == EGL_OPENGL_API) {
-        /* 4.1 core 不可用 → 3.3 core */
-        ctx_attribs_gl[1] = 3; ctx_attribs_gl[3] = 3;
-        egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT, ctx_attribs_gl);
+#endif
+    if (egl.ctx == EGL_NO_CONTEXT) {
+        EGLint a[] = { EGL_RED_SIZE,8, EGL_GREEN_SIZE,8, EGL_BLUE_SIZE,8, EGL_ALPHA_SIZE,8,
+                       EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+                       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE };
+        if (!eglChooseConfig(egl.dpy, a, &cfg, 1, &ncfg) || ncfg < 1) {
+            gpu_log("egl: 无可用 config"); goto fail;
+        }
+        eglBindAPI(EGL_OPENGL_ES_API);
+        EGLint c[] = { EGL_CONTEXT_MAJOR_VERSION,3, EGL_CONTEXT_MINOR_VERSION,1, EGL_NONE };
+        egl.ctx = eglCreateContext(egl.dpy, cfg, EGL_NO_CONTEXT, c);
     }
     if (egl.ctx == EGL_NO_CONTEXT) {
         gpu_log("egl: 创建上下文失败(%d)", eglGetError());
@@ -161,7 +168,7 @@ bool gl_egl_init(void) {
     }
     if (!eglMakeCurrent(egl.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl.ctx)) {
         gpu_log("egl: surfaceless make current 失败(%d)", eglGetError());
-        eglDestroyContext(egl.dpy, egl.ctx);
+        eglDestroyContext(egl.dpy, egl.ctx); egl.ctx = EGL_NO_CONTEXT;
         goto fail;
     }
 

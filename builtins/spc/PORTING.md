@@ -15,7 +15,8 @@ spc.c（公共层：句柄池/反射解析/校验）
   └─ K（spc_kernel_api vtable，init 时按 gpu_query_backend() 选定，不静默降级）
        ├─ metal_spc.m   darwin   （✅ 实机验证）
        ├─ vulkan_spc.c  linux/android/win（✅ 板验 2026-07-13：Win AMD 真机 + WSL llvmpipe，P2/P3 全绿）
-       ├─ gl_spc.c      linux/android    （盲写，待验；GLES3.1+ / 桌面 GL4.3+，见下方说明）
+       ├─ gl_spc.c      linux/android    （✅ 板验 2026-07-13：WSL2 Mesa GLES3.1 surfaceless，
+                        核心计算集 shared/barrier/atomic 全绿；GLES3.1+ / 桌面 GL4.3+，见 §3.2-0）
        └─ cpu_spc.c     全平台（✅ mac 实测：tar cpu@99 SPMD C 直发，§17 M1；
                         desc.kernel_backend=SC_SPC_KERNEL_CPU 强制选用，板端数值对拍基准）
 graph（mpsg_spc.m）/ model（coreml_spc.m）仍 darwin 直连——非 kernel 面，别动。
@@ -23,8 +24,12 @@ graph（mpsg_spc.m）/ model（coreml_spc.m）仍 darwin 直连——非 kernel 
 
 > **GL 后端验证路径说明**：mac 不可验（桌面 GL 冻结 4.1，无 compute/SSBO；
 > 也无原生 GLES/EGL 栈）——所以 mac 恒走 Metal。无需等嵌入式设备：已验
-> Vulkan 的那台 WSL2/Linux 机器可直接验——Mesa llvmpipe 支持桌面 GL 4.5 与
-> GLES 3.1 软实现（EGL surfaceless headless），`GPU_BACKEND=gl` 即可跑；
+> Vulkan 的那台 WSL2/Linux 机器可直接验，`GPU_BACKEND=gl` 跑。**实测（2026-07-13）**：
+> 该 WSL2 的 GL 走 Mesa **d3d12 驱动**，surfaceless 只给 **GLES 3.1**（桌面 GL surfaceless
+> = EGL_BAD_MATCH，纯 llvmpipe GL4.5 需另配）；已补两处（gl_egl.c surfaceless 回退 +
+> gl_env.c 无窗口上下文引导，见 §3.2-0）令其跑通。构建用 GLES 形态：
+> `SCC_TARGET_SUFFIX=<triple>-gles`。GLES3.1 核心只覆盖 shared/barrier/atomic（规约
+> 8386560 实测）；spec/subgroup/f16/窄宽整数 GL 侧天生受限（见 §6 矩阵下方说明）。
 > 真嵌入式板（Mali/Adreno GLES3.1）到位后再补硬件一轮。
 
 - **后端跟随 gpu env**：`sc_gpu_init(desc.backend=...)` 决定一切；spc_init 查
@@ -121,13 +126,20 @@ layout(binding=N)，scc 产物已发射）直接 glBindBufferBase；读回 =
 glMemoryBarrier + glFinish + glMapBufferRange(READ)。
 
 已知坑：
+0. **【已板验 2026-07-13：WSL surfaceless】** GL compute 已在 WSL2 Mesa（d3d12→GLES3.1）
+   跑通 P2 规约（total=8386560）。**两处修复**（gl_env.c/gl_egl.c）：
+   (a) gpu_init(GL) 原不建上下文（glInit 空操作）→ spc_gl_init 见 (null) 上下文报错；
+       现 glInit 无窗口场景即 gl_egl_init + make current，令上下文就绪。
+   (b) gl_egl.c 原硬要 /dev/dri+GBM；无 DRM 环境（WSL）打不开 → 现回退
+       EGL_MESA_platform_surfaceless（仅计算/离屏，memimg 不可用），且上下文
+       桌面 GL 失败自动回退 GLES3.1。构建用 GLES 形态：SCC_TARGET_SUFFIX=<triple>-gles
+       （激活 [*gles*] 段 -DSC_GPU_GLES + -lGLESv2 -lEGL）。真 GPU（有 /dev/dri）走 GBM 路径。
 1. **上下文必须 current**：spc 不建上下文，依赖 gpu env 的 GL 上下文在当前
-   线程 current（gpu_init 后就是）。多线程调 spc_dispatch 会炸——GL 后端
-   单线程使用。
+   线程 current（gpu_init 后就是——见坑 0 的 glInit 引导）。多线程调 spc_dispatch
+   会炸——GL 后端单线程使用。
 2. **init 探测**：`glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT,0,...)`
-   出错 = 上下文低于 3.1/4.3 → 检查 EGL config 请求的 client version
-  （gpu env gl_egl.c 请求 ES3，个别驱动给 3.0 上下文——需显式
-   EGL_CONTEXT_MAJOR/MINOR 3.1，这是 gl_egl.c 侧待验项）。
+   出错 = 上下文低于 3.1/4.3。gl_egl.c 现显式请求 EGL_CONTEXT_MAJOR/MINOR 3.1
+   （桌面 GL core 4.3→4.1 优先，失败回退 GLES3.1），WSL 上得到 GLES3.1 含 compute。
 3. **SSBO/UBO 绑定命名空间独立**：反射 binding 直接用（uniform binding 0 与
    storage binding 0 不冲突）。若板上驱动怪异对不上，用
    glGetProgramResourceIndex 按名对位兜底（未实现，报错再说）。
@@ -170,12 +182,25 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 
 | 能力 | Metal | Vulkan | GLES3.1 | 备注 |
 |---|---|---|---|---|
-| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待验（WSL llvmpipe GLES3.1 可先验，见 §0） | gles 门控 310 |
-| spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
-| subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
-| f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
-| i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ | Metal buffer 内 long 需 MSL 2.3 |
-| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | ✅ 实测（8bit/16bit_storage 存取 + 算术，120+400=520） | ❌ | |
+| 能力 | Metal | Vulkan | GLES3.1 | 备注 |
+|---|---|---|---|---|
+| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | ✅ 实测（WSL2 Mesa GLES3.1 surfaceless，规约 8386560） | GLES 核心 310 |
+| spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ **GL 无此机制**（永不） | 特化常量为 SPIR-V/Metal 专属 |
+| subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ⚠️ 核心无，需扩展 GL_KHR_shader_subgroup_*（本机 WSL 驱动无） | SPIR-V 1.3 |
+| f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ⚠️ 核心无，需 GL_EXT_..._float16（本机 WSL 驱动无） | |
+| i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ **GLES 无 int64**（无核心、无扩展途径） | Metal buffer 内 long 需 MSL 2.3 |
+| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | ✅ 实测（8bit/16bit_storage 存取 + 算术，120+400=520） | ⚠️ 核心无，需 GL_EXT_..._int8/int16（本机 WSL 驱动无） | |
+
+> **GLES 能力天花板（勿误判为设备算力问题）**：GL 后端受 GLES 语言/驱动限制，非 GPU 算力。
+> 依据 compiler/src/shader_caps.h 的能力表（各 api 的核心版本/替代扩展）：
+> - **GL 本身永无**：`spec 常量`（GL 无特化常量概念，消费 GLSL 文本）、`int64`
+>   （GLES 无 64 位整数，连扩展途径都无）。与设备无关，任何 GLES 驱动都给不了。
+> - **GLES 核心无、需驱动扩展**：`subgroup`（GL_KHR_shader_subgroup_*）、`f16`/`int8`/
+>   `int16`（GL_EXT_shader_explicit_arithmetic_types_*）。能否用取决于驱动是否带该扩展。
+>   **本机 WSL2 Mesa 23.2（d3d12→GLES3.1）实测这些扩展全无**（glGetString(GL_EXTENSIONS)
+>   逐一探测）；换带扩展的 GLES 驱动（部分桌面 Mesa / 移动端 Adreno·Mali）才可能可用。
+> - 结论：GL 侧板验的完整能力 = **shared/barrier/atomic + local**（GLES3.1 核心计算集），
+>   其余能力应在 Vulkan/Metal 后端验（已全绿），GL 上属天生受限，不必强求。
 
 ## 7. 板端排错工具链
 
