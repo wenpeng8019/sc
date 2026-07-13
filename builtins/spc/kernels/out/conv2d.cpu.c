@@ -33,27 +33,27 @@ static void conv2d_direct_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Cv_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Cv_n = (const uint32_t*)(Cv_p + 0);
-  const uint32_t* restrict Cv_ci = (const uint32_t*)(Cv_p + 4);
-  const uint32_t* restrict Cv_h = (const uint32_t*)(Cv_p + 8);
-  const uint32_t* restrict Cv_w = (const uint32_t*)(Cv_p + 12);
-  const uint32_t* restrict Cv_co = (const uint32_t*)(Cv_p + 16);
-  const uint32_t* restrict Cv_kh = (const uint32_t*)(Cv_p + 20);
-  const uint32_t* restrict Cv_kw = (const uint32_t*)(Cv_p + 24);
-  const uint32_t* restrict Cv_sh = (const uint32_t*)(Cv_p + 28);
-  const uint32_t* restrict Cv_sw = (const uint32_t*)(Cv_p + 32);
-  const uint32_t* restrict Cv_ph = (const uint32_t*)(Cv_p + 36);
-  const uint32_t* restrict Cv_pw = (const uint32_t*)(Cv_p + 40);
-  const uint32_t* restrict Cv_ho = (const uint32_t*)(Cv_p + 44);
-  const uint32_t* restrict Cv_wo = (const uint32_t*)(Cv_p + 48);
+  const uint32_t* restrict Cv_n = (const uint32_t*)(Cv_p + 0); (void)Cv_n;
+  const uint32_t* restrict Cv_ci = (const uint32_t*)(Cv_p + 4); (void)Cv_ci;
+  const uint32_t* restrict Cv_h = (const uint32_t*)(Cv_p + 8); (void)Cv_h;
+  const uint32_t* restrict Cv_w = (const uint32_t*)(Cv_p + 12); (void)Cv_w;
+  const uint32_t* restrict Cv_co = (const uint32_t*)(Cv_p + 16); (void)Cv_co;
+  const uint32_t* restrict Cv_kh = (const uint32_t*)(Cv_p + 20); (void)Cv_kh;
+  const uint32_t* restrict Cv_kw = (const uint32_t*)(Cv_p + 24); (void)Cv_kw;
+  const uint32_t* restrict Cv_sh = (const uint32_t*)(Cv_p + 28); (void)Cv_sh;
+  const uint32_t* restrict Cv_sw = (const uint32_t*)(Cv_p + 32); (void)Cv_sw;
+  const uint32_t* restrict Cv_ph = (const uint32_t*)(Cv_p + 36); (void)Cv_ph;
+  const uint32_t* restrict Cv_pw = (const uint32_t*)(Cv_p + 40); (void)Cv_pw;
+  const uint32_t* restrict Cv_ho = (const uint32_t*)(Cv_p + 44); (void)Cv_ho;
+  const uint32_t* restrict Cv_wo = (const uint32_t*)(Cv_p + 48); (void)Cv_wo;
   const unsigned char* XBuf_p = (const unsigned char*)bind[1];
-  float* restrict XBuf_x = (float*)(XBuf_p + 0);
+  float* restrict XBuf_x = (float*)(XBuf_p + 0); (void)XBuf_x;
   const unsigned char* WBuf_p = (const unsigned char*)bind[2];
-  float* restrict WBuf_wt = (float*)(WBuf_p + 0);
+  float* restrict WBuf_wt = (float*)(WBuf_p + 0); (void)WBuf_wt;
   const unsigned char* BBuf_p = (const unsigned char*)bind[3];
-  float* restrict BBuf_bias = (float*)(BBuf_p + 0);
+  float* restrict BBuf_bias = (float*)(BBuf_p + 0); (void)BBuf_bias;
   const unsigned char* YBuf_p = (const unsigned char*)bind[4];
-  float* restrict YBuf_y = (float*)(YBuf_p + 0);
+  float* restrict YBuf_y = (float*)(YBuf_p + 0); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {

@@ -33,14 +33,14 @@ static void ew_unary_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Ew_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Ew_n = (const uint32_t*)(Ew_p + 0);
-  const uint32_t* restrict Ew_op = (const uint32_t*)(Ew_p + 4);
+  const uint32_t* restrict Ew_n = (const uint32_t*)(Ew_p + 0); (void)Ew_n;
+  const uint32_t* restrict Ew_op = (const uint32_t*)(Ew_p + 4); (void)Ew_op;
   const unsigned char* ABuf_p = (const unsigned char*)bind[1];
-  float* restrict ABuf_a = (float*)(ABuf_p + 0);
+  float* restrict ABuf_a = (float*)(ABuf_p + 0); (void)ABuf_a;
   const unsigned char* BBuf_p = (const unsigned char*)bind[2];
-  float* restrict BBuf_b = (float*)(BBuf_p + 0);
+  float* restrict BBuf_b = (float*)(BBuf_p + 0); (void)BBuf_b;
   const unsigned char* YBuf_p = (const unsigned char*)bind[3];
-  float* restrict YBuf_y = (float*)(YBuf_p + 0);
+  float* restrict YBuf_y = (float*)(YBuf_p + 0); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
@@ -77,14 +77,14 @@ static void ew_binary_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Ew_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Ew_n = (const uint32_t*)(Ew_p + 0);
-  const uint32_t* restrict Ew_op = (const uint32_t*)(Ew_p + 4);
+  const uint32_t* restrict Ew_n = (const uint32_t*)(Ew_p + 0); (void)Ew_n;
+  const uint32_t* restrict Ew_op = (const uint32_t*)(Ew_p + 4); (void)Ew_op;
   const unsigned char* ABuf_p = (const unsigned char*)bind[1];
-  float* restrict ABuf_a = (float*)(ABuf_p + 0);
+  float* restrict ABuf_a = (float*)(ABuf_p + 0); (void)ABuf_a;
   const unsigned char* BBuf_p = (const unsigned char*)bind[2];
-  float* restrict BBuf_b = (float*)(BBuf_p + 0);
+  float* restrict BBuf_b = (float*)(BBuf_p + 0); (void)BBuf_b;
   const unsigned char* YBuf_p = (const unsigned char*)bind[3];
-  float* restrict YBuf_y = (float*)(YBuf_p + 0);
+  float* restrict YBuf_y = (float*)(YBuf_p + 0); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {

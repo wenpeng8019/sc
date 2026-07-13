@@ -28,6 +28,10 @@ do_build() {
     echo "==> 构建 scc"
     cmake -B "$BUILD_DIR" -S "$ROOT/compiler" -DCMAKE_BUILD_TYPE=Release
     cmake --build "$BUILD_DIR"
+    # spc graph 面算子内核预编（design §18）：产物 out/ 随 git 入库（预编交付），
+    # 此处重编保证与当前编译器 codegen 一致（改 .ss/codegen 后产物不静默过期）。
+    echo "==> 预编 spc 算子内核"
+    SCC="$BUILD_DIR/scc" "$ROOT/builtins/spc/kernels/build.sh"
     echo "==> 完成: $BUILD_DIR/scc"
 }
 

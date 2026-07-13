@@ -33,15 +33,15 @@ static void mm_1d_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Dims_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Dims_m = (const uint32_t*)(Dims_p + 0);
-  const uint32_t* restrict Dims_n = (const uint32_t*)(Dims_p + 4);
-  const uint32_t* restrict Dims_k = (const uint32_t*)(Dims_p + 8);
+  const uint32_t* restrict Dims_m = (const uint32_t*)(Dims_p + 0); (void)Dims_m;
+  const uint32_t* restrict Dims_n = (const uint32_t*)(Dims_p + 4); (void)Dims_n;
+  const uint32_t* restrict Dims_k = (const uint32_t*)(Dims_p + 8); (void)Dims_k;
   const unsigned char* ABuf_p = (const unsigned char*)bind[1];
-  float* restrict ABuf_a = (float*)(ABuf_p + 0);
+  float* restrict ABuf_a = (float*)(ABuf_p + 0); (void)ABuf_a;
   const unsigned char* BBuf_p = (const unsigned char*)bind[2];
-  float* restrict BBuf_b = (float*)(BBuf_p + 0);
+  float* restrict BBuf_b = (float*)(BBuf_p + 0); (void)BBuf_b;
   const unsigned char* CBuf_p = (const unsigned char*)bind[3];
-  float* restrict CBuf_c = (float*)(CBuf_p + 0);
+  float* restrict CBuf_c = (float*)(CBuf_p + 0); (void)CBuf_c;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {

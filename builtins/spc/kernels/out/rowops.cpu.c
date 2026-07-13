@@ -33,13 +33,13 @@ static void softmax_rows_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Ro_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Ro_rows = (const uint32_t*)(Ro_p + 0);
-  const uint32_t* restrict Ro_cols = (const uint32_t*)(Ro_p + 4);
-  const float* restrict Ro_eps = (const float*)(Ro_p + 8);
+  const uint32_t* restrict Ro_rows = (const uint32_t*)(Ro_p + 0); (void)Ro_rows;
+  const uint32_t* restrict Ro_cols = (const uint32_t*)(Ro_p + 4); (void)Ro_cols;
+  const float* restrict Ro_eps = (const float*)(Ro_p + 8); (void)Ro_eps;
   const unsigned char* XBuf_p = (const unsigned char*)bind[1];
-  float* restrict XBuf_x = (float*)(XBuf_p + 0);
+  float* restrict XBuf_x = (float*)(XBuf_p + 0); (void)XBuf_x;
   const unsigned char* YBuf_p = (const unsigned char*)bind[2];
-  float* restrict YBuf_y = (float*)(YBuf_p + 0);
+  float* restrict YBuf_y = (float*)(YBuf_p + 0); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
@@ -75,13 +75,13 @@ static void layernorm_rows_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32
         uint32_t gz0, uint32_t gz1, void* const* bind,
         const uint32_t* spec) {
   const unsigned char* Ro_p = (const unsigned char*)bind[0];
-  const uint32_t* restrict Ro_rows = (const uint32_t*)(Ro_p + 0);
-  const uint32_t* restrict Ro_cols = (const uint32_t*)(Ro_p + 4);
-  const float* restrict Ro_eps = (const float*)(Ro_p + 8);
+  const uint32_t* restrict Ro_rows = (const uint32_t*)(Ro_p + 0); (void)Ro_rows;
+  const uint32_t* restrict Ro_cols = (const uint32_t*)(Ro_p + 4); (void)Ro_cols;
+  const float* restrict Ro_eps = (const float*)(Ro_p + 8); (void)Ro_eps;
   const unsigned char* XBuf_p = (const unsigned char*)bind[1];
-  float* restrict XBuf_x = (float*)(XBuf_p + 0);
+  float* restrict XBuf_x = (float*)(XBuf_p + 0); (void)XBuf_x;
   const unsigned char* YBuf_p = (const unsigned char*)bind[2];
-  float* restrict YBuf_y = (float*)(YBuf_p + 0);
+  float* restrict YBuf_y = (float*)(YBuf_p + 0); (void)YBuf_y;
   (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
