@@ -24,6 +24,10 @@ add src/gl_spc.c
 add src/cpu_spc.c
 add src/mpsg_spc.m
 add src/coreml_spc.m
+# graph 面 .ss kernel 算子预编产物（design §18；改 kernels/*.ss 后重跑 kernels/build.sh）
+add kernels/out/matmul.shader.c
+add kernels/out/matmul_cpu.shader.c
+add kernels/out/matmul_cpu.cpu.c
 
 # === 生命周期 ===
 @fnc spc_init:: i4, desc: const ::sc_spc_desc&

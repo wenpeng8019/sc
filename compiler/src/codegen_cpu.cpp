@@ -389,6 +389,63 @@ bool isBarrierStmt(const Stmt* s) {
            (s->expr->a->text == "barrier" || s->expr->a->text == "memory_barrier");
 }
 
+// 表达式是否引用集合内名字（per-invocation 传染分析用）
+bool usesNames(const Expr* e, const std::unordered_set<std::string>& names) {
+    if (!e) return false;
+    if (e->kind == Expr::Ident && names.count(e->text)) return true;
+    if (usesNames(e->a.get(), names) || usesNames(e->b.get(), names) ||
+        usesNames(e->c.get(), names)) return true;
+    for (const auto& a : e->args) if (usesNames(a.get(), names)) return true;
+    return false;
+}
+
+// 相位分裂的顶层变量分类：per-invocation（每 invocation 不同值，需数组扩展）
+// vs uniform（同值，提升 wg 层）。判定：初值或任一赋值 RHS 引用 gid/lid 或
+// 已判定 per-inv 的变量 → per-inv；传染至不动点（保守正确）。
+void collectAssigns(const Stmt* s, std::vector<const Expr*>& out) {
+    if (!s) return;
+    if (s->expr && s->expr->kind == Expr::Binary &&
+        (s->expr->op == "=" || s->expr->op == "+=" || s->expr->op == "-=" ||
+         s->expr->op == "*=" || s->expr->op == "/="))
+        out.push_back(s->expr.get());
+    for (const auto& x : s->body) collectAssigns(x.get(), out);
+    for (const auto& x : s->elseBody) collectAssigns(x.get(), out);
+}
+std::unordered_set<std::string> collectPerInv(
+        const std::vector<StmtPtr>& body, const CEmit& em) {
+    // 顶层声明名 + 初值
+    std::unordered_map<std::string, const Expr*> topVars;
+    std::vector<const Expr*> assigns;
+    for (const auto& sp : body) {
+        const Stmt* s = sp.get();
+        if (!s) continue;
+        if (s->kind == Stmt::VarS || s->kind == Stmt::LetS)
+            for (const auto& f : s->decls) topVars[f.name] = f.init.get();
+        collectAssigns(s, assigns);
+    }
+    std::unordered_set<std::string> pv;
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& kv : topVars) {
+            if (pv.count(kv.first)) continue;
+            bool isPv = kv.second &&
+                (usesInvocation(kv.second, em) || usesNames(kv.second, pv));
+            if (!isPv) {
+                for (const Expr* a : assigns) {
+                    if (a->a->kind != Expr::Ident || a->a->text != kv.first) continue;
+                    if (usesInvocation(a->b.get(), em) || usesNames(a->b.get(), pv)) {
+                        isPv = true;
+                        break;
+                    }
+                }
+            }
+            if (isPv) { pv.insert(kv.first); changed = true; }
+        }
+    }
+    return pv;
+}
+
 } // namespace
 
 std::string emitCpu(const Program& prog, const GlslTarget& target) {
@@ -525,14 +582,11 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
 
         if (!phased) {
             // ---- M1 路径：三重全局线程循环（无 barrier）----
+            // 向量化：clang/gcc -O3 对规整 SPMD 循环自动兑现（restrict 已给足
+            // 别名保证）；不发显式 pragma——复杂循环体上会产生 -Wpass-failed 警告。
             c << "  for (uint32_t gz = gz0; gz < gz1; gz++)\n"
               << "  for (uint32_t gy = gy0; gy < gy1; gy++) {\n"
               << "    (void)gz; (void)gy;\n"
-              << "#if defined(__clang__)\n"
-              << "#pragma clang loop vectorize(enable)\n"
-              << "#elif defined(__GNUC__)\n"
-              << "#pragma GCC ivdep\n"
-              << "#endif\n"
               << "    for (uint32_t gx = gx0; gx < gx1; gx++) {\n";
             if (usesLid)
                 c << "      const uint32_t lid = gx % " << km.local[0] << "u;\n";
@@ -579,6 +633,8 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
         std::ostringstream body;
         std::vector<const Stmt*> phase;
         std::unordered_set<std::string> wgVars;   // wg 层提升的 uniform 变量名
+        // per-invocation 顶层变量（跨相位存活）→ 数组扩展 X_pv[LX]，相位内 X → X_pv[lid]
+        std::unordered_set<std::string> perInv = collectPerInv(d->body, em);
         int phaseIndent = 4;
         auto flushPhase = [&](int indentLv) {
             if (phase.empty()) return;
@@ -603,12 +659,39 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
                     continue;
                 }
                 if ((s->kind == Stmt::VarS || s->kind == Stmt::LetS) && lv == phaseIndent) {
-                    // 顶层声明 = uniform 变量（跨相位存活，提升到 wg 层）
                     flushPhase(lv);
                     for (const auto& f : s->decls) {
+                        std::string padS((size_t)lv, ' ');
+                        if (perInv.count(f.name)) {
+                            // per-invocation 变量：wg 层数组扩展 + 初始化 lid 循环
+                            //（初值可引用 gid/lid，在循环内求值）
+                            std::string ct = cType(f.type.name);
+                            if (ct.empty())
+                                err("cpu 后端跨相位变量仅支持标量（`" + f.type.name + "`）",
+                                    f.line ? f.line : s->line);
+                            if (!f.type.arrayDims.empty())
+                                err("cpu 后端跨相位变量不支持数组（改用 shared）",
+                                    f.line ? f.line : s->line);
+                            std::string alias = f.name + "_pv";
+                            body << padS << ct << " " << alias << "[" << km.local[0] << "];\n";
+                            if (f.init) {
+                                CEmit ie(m);
+                                ie.memberMap = em.memberMap;   // 初值在旧映射下求值
+                                body << padS << "for (uint32_t lid = 0; lid < "
+                                     << km.local[0] << "u; lid++) {\n"
+                                     << padS << "  const uint32_t gx = wg * " << km.local[0]
+                                     << "u + lid; (void)gx;\n"
+                                     << padS << "  " << alias << "[lid] = "
+                                     << ie.expr(f.init.get()) << ";\n"
+                                     << padS << "}\n";
+                            }
+                            em.memberMap[f.name] = alias + "[lid]";   // 相位内改写
+                            continue;
+                        }
+                        // uniform 变量：提升 wg 层（初值不得引用 gid/lid）
                         if (usesInvocation(f.init.get(), em))
                             err("cpu 后端：跨相位顶层变量 `" + f.name +
-                                "` 初值引用 gid/lid（移进相位内或改用 shared）",
+                                "` 初值引用 gid/lid 但未判定为 per-invocation（内部矛盾，报告 bug）",
                                 f.line ? f.line : s->line);
                         CEmit de(m);
                         de.memberMap = em.memberMap;
@@ -626,7 +709,8 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
                      s->expr->op == "*=" || s->expr->op == "/=") &&
                     s->expr->a && s->expr->a->kind == Expr::Ident &&
                     wgVars.count(s->expr->a->text) &&
-                    !usesInvocation(s->expr->b.get(), em)) {
+                    !usesInvocation(s->expr->b.get(), em) &&
+                    !usesNames(s->expr->b.get(), perInv)) {
                     flushPhase(lv);
                     CEmit ae(m);
                     ae.memberMap = em.memberMap;

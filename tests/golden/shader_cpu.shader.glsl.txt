@@ -75,11 +75,6 @@ static void cs_cpu_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
     (void)gz; (void)gy;
-#if defined(__clang__)
-#pragma clang loop vectorize(enable)
-#elif defined(__GNUC__)
-#pragma GCC ivdep
-#endif
     for (uint32_t gx = gx0; gx < gx1; gx++) {
       const uint32_t lid = gx % 128u;
       const uint32_t wg = gx / 128u;

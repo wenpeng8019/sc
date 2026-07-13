@@ -217,6 +217,16 @@ LIBGL_DEBUG=verbose / EGL_LOG_LEVEL=debug
 失败时的最小化二分：先跑最简 saxpy（spc_kernel/saxpy.ss，无 shared/atomic），
 再上 reduce（shared+barrier+atomic），最后 spec/f16——逐能力定位。
 
+## 9. graph 面算子（design §18：matmul 通用化）
+
+`sc_spc_mm` 派发：mac Metal → MPSGraph 快路径；其余后端（Vulkan/GL/CPU）→
+内置 .ss 算子内核（kernels/out/ 预编入库：mm_tiled 16×16 shared 分块，
+CPU 为 mm_1d 直算变体）。`SC_SPC_GRAPH_KERNEL=1` 强制 mac 也走 .ss 路（对拍）。
+
+板验（Vulkan/GLES）：跑 spc_demo 的 graph 段或自写 spc_mm 对拍（64×64 vs
+ts CPU matmul，allclose 1e-3）。已验：Metal 双路 + CPU（mac）。
+改 kernels/*.ss 后重跑 `builtins/spc/kernels/build.sh`（产物入库）。
+
 ## 8. CPU SPMD 后端（数值对拍基准，§17 M1）
 
 GPU 结果存疑时的参照基准（确定性、可单步调试）：

@@ -330,6 +330,29 @@ fnc main: i4
     spc_destroy_kernel(krn5)
     spc_destroy_buffer(xb5)
     x5->drop()
+
+    # ---- CPU graph 面对拍：spc_mm 经 mm_1d 内核（design §18）----
+    var msh[2]: i4
+    msh[0] = 64
+    msh[1] = 64
+    rand_seed(7)
+    var ma: tensor& = rand_uniform(2, msh, -1.0, 1.0, DT_F4)
+    var mb: tensor& = rand_uniform(2, msh, -1.0, 1.0, DT_F4)
+    var mc: tensor& = zeros(2, msh, DT_F4)
+    if spc_mm(ma, mb, mc) == 0
+        print "[CPU] spc_mm(mm_1d) 失败\n", .
+        fails = fails + 1
+    else
+        var mref: tensor& = ma->matmul(mb)
+        if mc->allclose(mref, 0.001, 0.0001)
+            print "[CPU] graph 面 matmul(mm_1d) 对拍:通过(64x64 vs ts CPU)\n", .
+        else
+            print "[CPU] matmul 对拍不符!\n", .
+            fails = fails + 1
+        mref->drop()
+    ma->drop()
+    mb->drop()
+    mc->drop()
     spc_shutdown()
     gpu_shutdown()
     if fails == 0

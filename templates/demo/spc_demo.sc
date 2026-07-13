@@ -117,6 +117,21 @@ fnc main: i4
         else
             print "[graph] matmul 结果不符!\n"
             fails = fails + 1
+
+        # .ss kernel 通用路对拍（design §18）：强制绕过 MPSGraph 走 mm_tiled 内核
+        ::setenv("SC_SPC_GRAPH_KERNEL", "1", 1)
+        var c_krn: tensor& = zeros(2, msh, DT_F4)
+        if spc_mm(a, b, c_krn) == 0
+            print "[graph] spc_mm(.ss kernel) 失败\n"
+            fails = fails + 1
+        else
+            if c_krn->allclose(c_cpu, 0.001, 0.0001)
+                print "[graph] matmul .ss kernel 路(mm_tiled) vs CPU:通过\n"
+            else
+                print "[graph] matmul .ss kernel 路结果不符!\n"
+                fails = fails + 1
+        ::unsetenv("SC_SPC_GRAPH_KERNEL")
+        c_krn->drop()
         c_cpu->drop()
 
     # ============ 3. model 面:CoreML 推理(倾向 ANE) ============

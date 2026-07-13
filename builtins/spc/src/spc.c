@@ -8,6 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* graph 面 .ss kernel 算子（design §18）：预编内核产物（kernels/out/ 入库，
+ * spc.sc add 编入）——四后端通用；mac Metal 另有 MPSGraph 快路径。 */
+#include "../kernels/out/matmul.shader.h"
+#include "../kernels/out/matmul_cpu.shader.h"
+
 /* gpu env（设备来源；spc 依赖 libgpu.a） */
 extern int sc_gpu_isvalid(void);
 extern int sc_gpu_query_backend(void);
@@ -403,6 +408,85 @@ int sc_spc_dispatch(sc_spc_kernel hnd, int gx, int gy, int gz,
 
 /* ---- graph ------------------------------------------------- */
 
+/* graph 面内部缓存：matmul 内核句柄（惰性创建；shutdown 随句柄池清理） */
+static sc_spc_kernel g_mm_kernel;
+
+/* 当前后端 → 预编产物条目（target tag + 入口名 + 产物 ext） */
+static bool mmPickBlobs(const sc_shader_blob** code, const sc_shader_blob** refl,
+                        const char** entry) {
+    const char* bk = K->name;
+    if (strcmp(bk, "metal") == 0) {
+        *refl = sc_shader_matmul_find("matmul", "metal20000", "reflect.json");
+        *code = sc_shader_matmul_find("mm_tiled", "metal20000", "metal");
+        *entry = "mm_tiled";
+    } else if (strcmp(bk, "vulkan") == 0) {
+        *refl = sc_shader_matmul_find("matmul", "vulkan450", "reflect.json");
+        *code = sc_shader_matmul_find("mm_tiled", "vulkan450", "spv");
+        *entry = "mm_tiled";
+    } else if (strcmp(bk, "gl") == 0) {
+        *refl = sc_shader_matmul_find("matmul", "gles310", "reflect.json");
+        *code = sc_shader_matmul_find("mm_tiled", "gles310", "comp");
+        *entry = "mm_tiled";
+    } else {   /* cpu：1D 变体（相位分裂限 1D，直算 + 多线程分片） */
+        *refl = sc_shader_matmul_cpu_find("matmul_cpu", "cpu99", "reflect.json");
+        *code = *refl;                     /* cpu 后端不消费 code，非空即可 */
+        *entry = "mm_1d";
+    }
+    return *code && *refl;
+}
+
+/* .ss kernel 路径：四后端通用 matmul（design §18 M1） */
+static int spc_mm_kernel(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
+    int M = a->shape[0], Kd = a->shape[1], N = b->shape[1];
+    if (!g_mm_kernel || !lookupKernel(g_mm_kernel)) {   /* 惰性创建（含 shutdown 后重建） */
+        const sc_shader_blob* code = NULL;
+        const sc_shader_blob* refl = NULL;
+        const char* entry = NULL;
+        if (!mmPickBlobs(&code, &refl, &entry)) {
+            spc_log("mm: 无 %s 后端的 matmul 预编条目（kernels/build.sh 重跑？）", K->name);
+            return 0;
+        }
+        sc_spc_kernel_desc kd;
+        memset(&kd, 0, sizeof(kd));
+        kd.code.ptr = code->data;
+        kd.code.size = code->size;
+        kd.entry = entry;
+        kd.reflect_json = (const char*)refl->data;
+        kd.label = "spc.graph.matmul";
+        g_mm_kernel = sc_spc_make_kernel(&kd);
+        if (!g_mm_kernel) return 0;
+    }
+    /* 缓冲：每次临时建/销（M1 正确性优先；缓存优化待性能需求触发） */
+    sc_spc_buffer ab = sc_spc_buffer_from_tensor(a);
+    sc_spc_buffer bb = sc_spc_buffer_from_tensor(b);
+    sc_spc_buffer_desc od;
+    memset(&od, 0, sizeof(od));
+    od.size = (uint64_t)out->numel * 4;
+    sc_spc_buffer ob = sc_spc_make_buffer(&od);
+    int ok = 0;
+    if (ab && bb && ob) {
+        uint32_t dims[3] = {(uint32_t)M, (uint32_t)N, (uint32_t)Kd};
+        sc_spc_bindings bnd;
+        memset(&bnd, 0, sizeof(bnd));
+        bnd.uniforms[0].ptr = dims;
+        bnd.uniforms[0].size = sizeof(dims);
+        bnd.buffers[1] = ab;
+        bnd.buffers[2] = bb;
+        bnd.buffers[3] = ob;
+        int gx = strcmp(K->name, "cpu") == 0 ? M * N : N;
+        int gy = strcmp(K->name, "cpu") == 0 ? 1 : M;
+        ok = sc_spc_dispatch(g_mm_kernel, gx, gy, 1, &bnd);
+        if (ok) {
+            sc_spc_finish();
+            ok = sc_spc_buffer_to_tensor(ob, out);
+        }
+    }
+    if (ab) sc_spc_destroy_buffer(ab);
+    if (bb) sc_spc_destroy_buffer(bb);
+    if (ob) sc_spc_destroy_buffer(ob);
+    return ok;
+}
+
 int sc_spc_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
     if (!S.valid || !a || !b || !out) return 0;
     if (a->ndim != 2 || b->ndim != 2 || out->ndim != 2 ||
@@ -421,11 +505,15 @@ int sc_spc_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
         spc_log("mm: 张量须 C-连续");
         return 0;
     }
+    /* 派发（design §18）：mac Metal = MPSGraph 快路径；其余后端 = .ss kernel；
+     * SC_SPC_GRAPH_KERNEL=1 强制 .ss 路（对拍/调优；每次读取，允许进程内切换）。 */
+    const char* e = getenv("SC_SPC_GRAPH_KERNEL");
+    int force_kernel = (e && e[0] == '1') ? 1 : 0;
 #if P_DARWIN
-    return spc_mpsg_mm(a, b, out);
-#else
-    return 0;
+    if (!force_kernel && strcmp(K->name, "metal") == 0)
+        return spc_mpsg_mm(a, b, out);
 #endif
+    return spc_mm_kernel(a, b, out);
 }
 
 /* ---- model ------------------------------------------------- */
