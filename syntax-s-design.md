@@ -731,3 +731,93 @@ metal 经 SPIRV-Cross→MSL，**glcore/gles 也经 SPIRV-Cross 反译 GLSL**（E
 
 ---
 
+## 17. CPU/DSP 后端路线（`tar cpu`，规划 2026-07-13）
+
+> 结论先行：.ss 的 SPMD 执行模型与 CPU SIMD 的最佳编程抽象（ISPC 模式）
+> 天然同构——**CPU/DSP 是 .ss 的合法 tar 后端**，且实现路线与 sc 体系
+> 完全同构：scc 直发 C 源码，向量化交给目标 C 编译器。
+
+### 17.1 动机与定位
+
+1. **嵌入式无 GPU / GPU 不可用场景的兜底**：同一份 .ss kernel 在纯 CPU
+   板子上跑通（正确性优先，性能靠自动向量化）。
+2. **全平台数值对拍参考**：板端调 Vulkan/GLES 后端时用 CPU 后端对答案
+  （确定性、可单步调试）。
+3. **DSP 的唯一现实入口**：Hexagon HVX / TI C7000 / CEVA / Cadence 的
+   入口都是「厂商 C 工具链 + 自动向量化/pragma」——纯 C 产物 + scc 交叉
+   编译子系统（target 档 + caps 档案）原样复用。
+
+### 17.2 语义映射（SPMD → 标量循环 + 自动向量化）
+
+| .ss / GPU 概念 | CPU/DSP 对映 |
+|---|---|
+| invocation | SIMD lane / 标量循环迭代（编译器向量化） |
+| workgroup | 一个线程处理的迭代片（cache 亲和） |
+| workgroup 间并行 | 线程池（mt 模块现成） |
+| `shared` | workgroup 局部数组（栈上；DSP 映射 scratchpad/TCM，语义比 GPU 更贴合） |
+| `barrier()` | **相位分裂点**（见 17.5 难点） |
+| `atomic_*` | C11 atomics |
+| `local_size` | 内层循环 trip count |
+| spec 常量 | 运行时参数（或编译期宏特化） |
+| f2/i1/u1 等窄标量 | `_Float16`/`int8_t`——窄类型打满向量宽度（NEON 一条 16×i8） |
+
+### 17.3 路线选型
+
+- **路线 A（零成本，已可用）**：SPIR-V → CPU Vulkan 实现（lavapipe/
+  SwiftShader，内部 LLVM 向量化）。Android 模拟器 SwiftShader 已实测跑通
+  我们的 Vulkan 产物。定位：开发期兜底，依赖大、DSP 不可行，非产品路线。
+- **路线 B（选定）**：`tar cpu@99` → codegen_cpu（AST→C，SPMD 循环化，
+  体量对标 codegen_glsl）→ `<stem>.cpu.c` → 目标 C 编译器。运行时 = spc
+  kernel 面第四张 vtable（buffer=malloc、dispatch=mt 线程池分 workgroup）。
+- **路线 C（不做，按需重议）**：自研向量化直发 intrinsics/LLVM IR = 重造
+  LLVM 向量化器，违反自研/开源边界原则；仅当路线 B 实测性能不够时评估。
+
+### 17.4 SIMD ISA 覆盖策略——不逐个适配后端
+
+ISA 全景：ARM NEON（v7/v8 标配）/ SVE·SVE2（armv9 可变长）/ Helium-MVE
+（Cortex-M）；x86 SSE4/AVX2/AVX-512；RISC-V RVV 1.0；DSP 专有 HVX（1024-bit）
+/ TI C7000 / CEVA / Cadence HiFi。
+
+**路线 B 下一份 SPMD C 产物，N 个 ISA 由各自编译器兑现**（clang `-march`
+挑 NEON/SVE/AVX/RVV；DSP 厂商编译器挑各自向量指令）。每个新 ISA 只需两层
+薄配置（均为现成机制）：target 档（`target_flags`）+ caps 档案（能力差异，
+如 f16 硬件支持）。可变长向量（SVE/RVV）对 SPMD 循环天然免疫向量长度问题
+（编译器按 VL 切），比手写 intrinsics 更先进。
+
+### 17.5 语法覆盖度与缺口（诚实清单）
+
+| 指令类别 | 覆盖 | 说明 |
+|---|---|---|
+| 垂直运算（逐 lane 算术/比较/转换，实际 kernel 90%+） | ✅ 完全 | SPMD 天然表达，自动向量化最擅长 |
+| 水平运算（归约/点积） | ✅ 良好 | shared+barrier 树形归约 + subgroup 三件；编译器 reduction idiom 识别 |
+| 数据重排（permute/zip/查表） | ⚠️ 部分 | subgroup_shuffle 是通路；任意 permute 无直接语法，多数可 gather 表达 |
+| DSP 专用（饱和/定点 Q 格式、打包点积 SDOT/VNNI） | ❌ 缺口 | 见下方补法 |
+
+缺口补法遵循「SPIR-V 反向对齐」原则，不为 CPU 单独造语法：
+- **打包点积**（int8 量化 ML 核心）：SPIR-V 有 `SPV_KHR_integer_dot_product`
+ （OpSDotKHR 系）——跟随加 `dot4_i8(...)` 内建，GPU/CPU 双端同源兑现。
+- **饱和/定点算术**：SPIR-V 无对应，等真实 DSP 用例再议专用内建/类型。
+- 「最大驱动并行能力」的杠杆排序：算法级并行度（SPMD 已给足）≫ 数据布局
+  与别名保证（codegen_cpu 发射 `restrict`/对齐/`#pragma omp simd`——自动
+  向量化成败的真正关键）≫ 指令级特调（编译器兑现大半）。前两层做满即达
+  这类硬件 90%+ 可达性能。
+
+**barrier 相位分裂**（实现上最难的一处）：barrier 语义 = 全体到齐 → 把
+kernel 体按 barrier 切相位，每相位一个 lid 循环，跨相位存活的私有变量扩展
+为 local_size 份数组；循环内 barrier（如 reduce 的 while 内）用循环交换
+（lid 循环推到最内）消解。一期语法限制：barrier 仅允许出现在 kernel 顶层
+或顶层循环内（sema 报错超出者），覆盖实际 kernel 绝大多数。
+
+### 17.6 实施分期
+
+1. **最小版**（可与 GPU 板验并行）：无 barrier kernel（saxpy/scale 级）——
+   codegen_cpu 循环化 + spc cpu vtable + 能力表 cpu 列（sampler/subgroup
+   一期 -1 门控），先当数值对拍参考用。
+2. **完整版**：barrier 相位分裂 + shared/atomic + mt 线程池 workgroup 并行。
+3. **DSP 落地**：按真实板子做 target/caps 档（Hexagon/TI 优先），评估
+   dot4_i8 内建与饱和算术需求。
+4. 排期：Vulkan/GLES 板验之后、RKNN model 后端之前；若板验期需要对拍
+   参考，最小版可提前。
+
+---
+
