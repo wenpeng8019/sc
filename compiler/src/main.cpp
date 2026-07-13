@@ -3178,6 +3178,10 @@ int main(int argc, char** argv) {
                 const fs::path abs = fs::absolute(fs::path(input), ec);
                 if (!ec) env = findEnvDir(abs.parent_path());
             }
+            else if (!fromPath.empty()) {   // stdin + --from：以源文件目录为 .scenv 发现基准
+                const fs::path abs = fs::absolute(fs::path(fromPath), ec);
+                if (!ec) env = findEnvDir(abs.parent_path());
+            }
             if (env.empty()) env = findEnvDir(fs::current_path());
         }
         if (!env.empty() && fs::is_directory(env, ec))
