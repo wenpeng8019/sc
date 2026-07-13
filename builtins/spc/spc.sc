@@ -28,6 +28,12 @@ add src/coreml_spc.m
 add kernels/out/matmul.shader.c
 add kernels/out/matmul_cpu.shader.c
 add kernels/out/matmul_cpu.cpu.c
+add kernels/out/conv2d.shader.c
+add kernels/out/conv2d.cpu.c
+add kernels/out/rowops.shader.c
+add kernels/out/rowops.cpu.c
+add kernels/out/elementwise.shader.c
+add kernels/out/elementwise.cpu.c
 
 # === 生命周期 ===
 @fnc spc_init:: i4, desc: const ::sc_spc_desc&
@@ -49,8 +55,13 @@ add kernels/out/matmul_cpu.cpu.c
 @fnc spc_destroy_kernel:: k: u4
 @fnc spc_dispatch:: i4, k: u4, gx: i4, gy: i4, gz: i4, bindings: const ::sc_spc_bindings&
 
-# === graph 面：张量算子（一期 matmul，2D DT_F4 连续） ===
+# === graph 面：张量算子（matmul + §18 M2 nn 算子；全部 2D/4D DT_F4 连续） ===
 @fnc spc_mm:: i4, a: tensor&, b: tensor&, out: tensor&
+@fnc spc_conv2d:: i4, x: tensor&, w: tensor&, bias: tensor&, out: tensor&, stride_h: i4, stride_w: i4, pad_h: i4, pad_w: i4
+@fnc spc_softmax_lastdim:: i4, x: tensor&, out: tensor&
+@fnc spc_layernorm_lastdim:: i4, x: tensor&, out: tensor&, eps: f4
+@fnc spc_ew_unary:: i4, op: i4, x: tensor&, out: tensor&
+@fnc spc_ew_binary:: i4, op: i4, a: tensor&, b: tensor&, out: tensor&
 
 # === model 面：整图推理（mac = CoreML/.mlmodelc；ANE 见 spc.h） ===
 @fnc spc_model_load:: u4, path: const char&, units: i4

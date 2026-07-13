@@ -28,30 +28,18 @@ bool inSet(char c, const char* set) {
 }
 
 // 校验一个成员访问名是否为「非法 swizzle」。返回 true 表示确定非法。
-// 仅当整个名字都落在某个 swizzle 字母表内时才当作 swizzle 处理；
-// 含非 swizzle 字符者视为普通结构体成员，放行（无类型信息，保守不误报）。
+// 仅当整个名字落在**单一** swizzle 字母表内且超长（>4）才判非法；
+// 跨集合混用（如 sw/wg/st）本就不构成 swizzle，视作普通结构体成员名放行——
+// 由 codegen（有类型信息）兜底：基类型确为向量而成员名不匹配时报「无成员」。
 bool illegalSwizzle(const std::string& m) {
-    if (m.empty() || m.size() > 4) {
-        // 全部字符均为 swizzle 字母且长度 >4 才算非法（否则可能是普通成员名）
-        if (m.size() > 4) {
-            for (char c : m)
-                if (!inSet(c, "xyzw") && !inSet(c, "rgba") && !inSet(c, "stpq"))
-                    return false;   // 含非 swizzle 字符 → 普通成员，放行
-            return true;            // 纯 swizzle 字母但超长 → 非法
-        }
-        return false;
-    }
+    if (m.empty() || m.size() <= 4) return false;
     const char* sets[] = {"xyzw", "rgba", "stpq"};
     for (const char* s : sets) {
         bool all = true;
         for (char c : m) if (!inSet(c, s)) { all = false; break; }
-        if (all) return false;      // 完全落在单一集合 → 合法 swizzle
+        if (all) return true;       // 单一集合但超长 → 确定是写错的 swizzle
     }
-    // 是否所有字符都属于某个 swizzle 集合（但跨集合混用）？
-    for (char c : m)
-        if (!inSet(c, "xyzw") && !inSet(c, "rgba") && !inSet(c, "stpq"))
-            return false;           // 含非 swizzle 字符 → 普通成员，放行
-    return true;                    // 纯 swizzle 字母但跨集合混用 → 非法
+    return false;                   // 其余（含跨集合混用）→ 普通成员名，放行
 }
 
 struct Checker {

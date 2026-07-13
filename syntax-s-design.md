@@ -876,23 +876,29 @@ Vulkan/GLES 条目已预编入库，板验照 PORTING §9）**
 | 4 | 验证：四后端 mm vs ts CPU 对拍（spc_demo 扩展）+ mac 上 MPSGraph vs .ss kernel 双路对拍 | demo/golden |
 | 5 | 文档：REFERENCE spc 段、PORTING §9、本节标注 | docs |
 
-**M2 算子批量扩展（nn 前向热点）**
+**M2 算子批量扩展（nn 前向热点）——算子三件 ✅ 2026-07-13（mac 实测）；任务 9 挂起（原因见下）**
 
-| # | 任务 |
-|---|---|
-| 6 | conv2d（im2col+matmul 复用 或 direct tiled） |
-| 7 | softmax / layernorm（行归约类，shared 树形规约复用） |
-| 8 | elementwise 族（relu/gelu/add/mul，无 barrier 直发） |
-| 9 | nn 模块接线：热点前向路径经 spc graph 面（带 CPU 回退，无 gpu 时零依赖不变） |
+| # | 任务 | 状态 |
+|---|---|---|
+| 6 | conv2d（NCHW direct，1D 展平调度；tiled/winograd 留 M3） | ✅ conv2d_direct，Metal+CPU 对拍过 |
+| 7 | softmax / layernorm（末轴行归约，数值语义同 ts：减 max 稳定化/有偏方差） | ✅ rowops.ss，Metal 对拍过 |
+| 8 | elementwise 族（一元 relu/gelu/sigmoid/tanh/silu；二元 add/mul/sub；op 走 uniform 四后端统一） | ✅ ew_unary/ew_binary，gelu 常数与 ts 逐字一致 |
+| 9 | nn 模块接线（热点前向经 spc，CPU 回退） | ⏸ **挂起，需求触发**：接线点与粒度应由真实模型的 profile 决定（哪些层是热点、张量形状/批大小分布）；盲接易选错粒度（逐算子上传/回读的拷贝开销可能吃掉 GPU 收益，需要缓冲驻留策略配合）。前置：有真实 nn 训练/推理场景 + 缓冲驻留（见 M3 备注） |
 
-**M3 量化与融合（性能深水区，需求触发）**
+验证：spc_demo 六算子对拍（matmul 双路/conv2d/softmax/layer_norm/gelu/add）+
+spc_p2_demo CPU 抽查（conv2d/gelu）全绿；Vulkan/GLES 条目已入库待板验（PORTING §9）。
+实现要点：opRun 通用执行器（惰性内核 + 临时缓冲）；反射是文件级资源清单——
+ew_unary 不读 BBuf 但需占位绑定（公共层按清单校验）；顺手修 sema 的 swizzle
+保守误杀（跨集合混用字段名如 sw/wg 放行，codegen 按类型兜底）+ tanh/sinh/cosh 内建。
 
-| # | 任务 |
-|---|---|
-| 10 | i8 量化 matmul（dot4_i8 内建，联动 §17-M3 与 SPV_KHR_integer_dot_product） |
-| 11 | attention 融合算子（flash-attention 简化形态）；conv+bias+relu 融合 |
+**M3 量化与融合（性能深水区）——⏸ 全部挂起，双重触发**
 
-排期：M1 立即；M2 随 nn 需求；M3 需求触发。
+| # | 任务 | 不做原因（触发条件） |
+|---|---|---|
+| 10 | i8 量化 matmul（dot4_i8 内建） | 依赖编译器侧新内建（SPV_KHR_integer_dot_product，§17-M3 联动）+ 量化模型真实需求；无需求先行实现无法验证收益（量化 scale/zero-point 方案应由模型定） |
+| 11 | attention/conv 融合算子 | 融合的价值判断需要 M2-9 接线后的 profile 数据（哪些算子对拆开时的中间张量带宽是真瓶颈）；另需缓冲驻留策略（现 opRun 每次临时建/销缓冲，融合前先做驻留才有意义） |
+
+排期：M1 ✅；M2 算子三件 ✅、接线需求触发；M3 需求触发。
 
 ---
 

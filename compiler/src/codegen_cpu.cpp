@@ -60,6 +60,7 @@ const char* mathFn(const std::string& fn) {
     static const std::unordered_map<std::string, const char*> M = {
         {"sin", "sinf"}, {"cos", "cosf"}, {"tan", "tanf"},
         {"asin", "asinf"}, {"acos", "acosf"}, {"atan", "atanf"},
+        {"sinh", "sinhf"}, {"cosh", "coshf"}, {"tanh", "tanhf"},
         {"exp", "expf"}, {"log", "logf"}, {"exp2", "exp2f"}, {"log2", "log2f"},
         {"pow", "powf"}, {"sqrt", "sqrtf"}, {"floor", "floorf"}, {"ceil", "ceilf"},
         {"round", "roundf"}, {"trunc", "truncf"}, {"abs", "fabsf"},
@@ -303,7 +304,7 @@ std::string emitBlockAliases(const Model& m, CEmit& em, int line) {
             const char* cq = r.storage ? "" : "const ";
             std::string alias = d->name + "_" + f.name;
             os << "  " << cq << ct << "* restrict " << alias << " = ("
-               << cq << ct << "*)(" << d->name << "_p + " << off << ");\n";
+               << cq << ct << "*)(" << d->name << "_p + " << off << "); (void)" << alias << ";\n";
             if (runtimeArr || fixedArr) {
                 em.memberMap[d->name + "." + f.name] = alias;    // 数组：alias[i]
                 if (fixedArr) {

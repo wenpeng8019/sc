@@ -358,7 +358,7 @@ float(i)  int(f)  uint(i)  # 标量转换
 |------|------|
 | 舍入 | `round` `trunc` `floor` `ceil` `fract` |
 | 符号 | `abs` `sign` |
-| 三角 | `sin` `cos` `tan` `asin` `acos` `atan`（一元或 `atan(y,x)`） |
+| 三角 | `sin` `cos` `tan` `asin` `acos` `atan`（一元或 `atan(y,x)`）`sinh` `cosh` `tanh` |
 | 指数 | `exp` `log` `exp2` `log2` `pow` `sqrt` `inversesqrt` |
 | 极值/限制 | `min` `max` `clamp`（标量↔向量自动广播） |
 | 插值 | `mix` `step` `smoothstep` `fma` |

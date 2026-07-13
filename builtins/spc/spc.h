@@ -141,6 +141,24 @@ int  sc_spc_dispatch(sc_spc_kernel k, int gx, int gy, int gz,
 /* out = a @ b（2D，DT_F4，全部 C-连续；out 须预分配 [M,N]）。1 成功 */
 int sc_spc_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out);
 
+/* ---- graph 面：nn 算子（design §18 M2；全部 DT_F4 C-连续、out 预分配）----
+ * 布局与数值语义与 ts CPU 实现逐一对齐（对拍容差 1e-3/1e-4 量级）。 */
+
+/* NCHW direct 卷积：x[N,Ci,H,W] ⊛ w[Co,Ci,Kh,Kw] + bias[Co] → out[N,Co,Ho,Wo]
+ * （zero-pad；bias 必传，与 ts sc_tensor_conv2d 同约）。1 成功 */
+int sc_spc_conv2d(sc_tensor* x, sc_tensor* w, sc_tensor* bias, sc_tensor* out,
+                  int stride_h, int stride_w, int pad_h, int pad_w);
+
+/* 末轴 softmax / layer_norm：输入视作 [rows, cols]（末轴须连续）。
+ * 任意 axis 场景由调用方先 permute/contiguous 成末轴形态。1 成功 */
+int sc_spc_softmax_lastdim(sc_tensor* x, sc_tensor* out);
+int sc_spc_layernorm_lastdim(sc_tensor* x, sc_tensor* out, float eps);
+
+/* 逐元素：一元 op 0=relu 1=gelu(tanh 近似) 2=sigmoid 3=tanh 4=silu；
+ * 二元 op 0=add 1=mul 2=sub（同形状，无广播）。1 成功 */
+int sc_spc_ew_unary(int op, sc_tensor* x, sc_tensor* out);
+int sc_spc_ew_binary(int op, sc_tensor* a, sc_tensor* b, sc_tensor* out);
+
 /* ---- model 面：整图推理（mac = CoreML / ANE） ---------------- */
 
 typedef enum sc_spc_compute_units {

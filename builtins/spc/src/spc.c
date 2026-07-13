@@ -9,9 +9,12 @@
 #include <string.h>
 
 /* graph 面 .ss kernel 算子（design §18）：预编内核产物（kernels/out/ 入库，
- * spc.sc add 编入）——四后端通用；mac Metal 另有 MPSGraph 快路径。 */
+ * spc.sc add 编入）——四后端通用；mac Metal 另有 MPSGraph 快路径（matmul）。 */
 #include "../kernels/out/matmul.shader.h"
 #include "../kernels/out/matmul_cpu.shader.h"
+#include "../kernels/out/conv2d.shader.h"
+#include "../kernels/out/rowops.shader.h"
+#include "../kernels/out/elementwise.shader.h"
 
 /* gpu env（设备来源；spc 依赖 libgpu.a） */
 extern int sc_gpu_isvalid(void);
@@ -411,6 +414,108 @@ int sc_spc_dispatch(sc_spc_kernel hnd, int gx, int gy, int gz,
 /* graph 面内部缓存：matmul 内核句柄（惰性创建；shutdown 随句柄池清理） */
 static sc_spc_kernel g_mm_kernel;
 
+/* 当前后端的预编产物坐标：target tag + code 条目 ext（cpu 不消费 code） */
+static const char* opTargetTag(void) {
+    if (strcmp(K->name, "metal") == 0)  return "metal20000";
+    if (strcmp(K->name, "vulkan") == 0) return "vulkan450";
+    if (strcmp(K->name, "gl") == 0)     return "gles310";
+    return "cpu99";
+}
+static const char* opCodeExt(void) {
+    if (strcmp(K->name, "metal") == 0)  return "metal";
+    if (strcmp(K->name, "vulkan") == 0) return "spv";
+    if (strcmp(K->name, "gl") == 0)     return "comp";
+    return "reflect.json";              /* cpu：code 不消费，指向 reflect 即可 */
+}
+/* 预编条目数组里按 (entry, target, ext) 线性查（数组很小） */
+static const sc_shader_blob* blobFind(const sc_shader_blob* arr, size_t n,
+                                      const char* entry, const char* target,
+                                      const char* ext) {
+    for (size_t i = 0; i < n; i++) {
+        if (entry && strcmp(arr[i].entry, entry) != 0) continue;
+        if (target && strcmp(arr[i].target, target) != 0) continue;
+        if (ext && strcmp(arr[i].ext, ext) != 0) continue;
+        return &arr[i];
+    }
+    return NULL;
+}
+
+/* 通用算子执行器（四目标单文件内核：conv2d/rowops/elementwise）：
+ * 惰性建内核（cache 槽）→ 张量建临时缓冲（binding 1..n_in，out = n_in+1）→
+ * dispatch → 读回 out。正确性优先（缓冲缓存优化待性能需求触发）。 */
+static int opRun(sc_spc_kernel* cache,
+                 const sc_shader_blob* arr, size_t count,
+                 const char* stem, const char* entry,
+                 const void* uni, uint64_t uni_size,
+                 sc_tensor* const* inputs, int n_in,
+                 sc_tensor* out, int gx, int gy) {
+    if (!*cache || !lookupKernel(*cache)) {
+        const char* tag = opTargetTag();
+        const sc_shader_blob* refl = blobFind(arr, count, stem, tag, "reflect.json");
+        const sc_shader_blob* code = blobFind(arr, count, entry, tag, opCodeExt());
+        if (strcmp(K->name, "cpu") == 0) code = refl;   /* cpu 不消费 code */
+        if (!code || !refl) {
+            spc_log("op %s: 无 %s 后端预编条目（kernels/build.sh 重跑？）", entry, K->name);
+            return 0;
+        }
+        sc_spc_kernel_desc kd;
+        memset(&kd, 0, sizeof(kd));
+        kd.code.ptr = code->data;
+        kd.code.size = code->size;
+        kd.entry = entry;
+        kd.reflect_json = (const char*)refl->data;
+        kd.label = entry;
+        *cache = sc_spc_make_kernel(&kd);
+        if (!*cache) return 0;
+    }
+    sc_spc_buffer bufs[SC_SPC_MAX_BINDINGS] = {0};
+    int ok = 1;
+    for (int i = 0; i < n_in && ok; i++) {
+        bufs[i] = sc_spc_buffer_from_tensor(inputs[i]);
+        if (!bufs[i]) ok = 0;
+    }
+    sc_spc_buffer ob = 0;
+    if (ok) {
+        sc_spc_buffer_desc od;
+        memset(&od, 0, sizeof(od));
+        od.size = (uint64_t)out->numel * (uint64_t)spc_dtsize(out->dtype);
+        ob = sc_spc_make_buffer(&od);
+        if (!ob) ok = 0;
+    }
+    if (ok) {
+        sc_spc_bindings bnd;
+        memset(&bnd, 0, sizeof(bnd));
+        bnd.uniforms[0].ptr = uni;
+        bnd.uniforms[0].size = uni_size;
+        for (int i = 0; i < n_in; i++) bnd.buffers[i + 1] = bufs[i];
+        bnd.buffers[n_in + 1] = ob;
+        ok = sc_spc_dispatch(*cache, gx, gy > 0 ? gy : 1, 1, &bnd);
+        if (ok) {
+            sc_spc_finish();
+            ok = sc_spc_buffer_to_tensor(ob, out);
+        }
+    }
+    for (int i = 0; i < n_in; i++)
+        if (bufs[i]) sc_spc_destroy_buffer(bufs[i]);
+    if (ob) sc_spc_destroy_buffer(ob);
+    return ok;
+}
+
+/* 张量前置校验：DT_F4 + C-连续 */
+static int opCheckF4(const char* who, sc_tensor* const* ts, int n) {
+    for (int i = 0; i < n; i++) {
+        if (!ts[i] || ts[i]->dtype != TS_DT_F4) {
+            spc_log("%s: 须 DT_F4 张量", who);
+            return 0;
+        }
+        if (!spc_tscontig(ts[i])) {
+            spc_log("%s: 张量须 C-连续", who);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /* 当前后端 → 预编产物条目（target tag + 入口名 + 产物 ext） */
 static bool mmPickBlobs(const sc_shader_blob** code, const sc_shader_blob** refl,
                         const char** entry) {
@@ -514,6 +619,104 @@ int sc_spc_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out) {
         return spc_mpsg_mm(a, b, out);
 #endif
     return spc_mm_kernel(a, b, out);
+}
+
+/* ---- graph 面：nn 算子（design §18 M2；.ss kernel 全后端） ---- */
+
+static sc_spc_kernel g_conv_kernel, g_sm_kernel, g_ln_kernel,
+                     g_ewu_kernel, g_ewb_kernel;
+
+int sc_spc_conv2d(sc_tensor* x, sc_tensor* w, sc_tensor* bias, sc_tensor* out,
+                  int stride_h, int stride_w, int pad_h, int pad_w) {
+    if (!S.valid) return 0;
+    sc_tensor* ts[4] = {x, w, bias, out};
+    if (!opCheckF4("conv2d", ts, 4)) return 0;
+    if (x->ndim != 4 || w->ndim != 4 || bias->ndim != 1 || out->ndim != 4 ||
+        x->shape[1] != w->shape[1] || w->shape[0] != bias->shape[0] ||
+        out->shape[0] != x->shape[0] || out->shape[1] != w->shape[0]) {
+        spc_log("conv2d: 形状不匹配（x[N,Ci,H,W] w[Co,Ci,Kh,Kw] bias[Co]）");
+        return 0;
+    }
+    uint32_t ho = (uint32_t)((x->shape[2] + 2 * pad_h - w->shape[2]) / stride_h + 1);
+    uint32_t wo = (uint32_t)((x->shape[3] + 2 * pad_w - w->shape[3]) / stride_w + 1);
+    if (out->shape[2] != (int32_t)ho || out->shape[3] != (int32_t)wo) {
+        spc_log("conv2d: out 形状应为 [%d,%d,%u,%u]", x->shape[0], w->shape[0], ho, wo);
+        return 0;
+    }
+    uint32_t uni[13] = {
+        (uint32_t)x->shape[0], (uint32_t)x->shape[1],
+        (uint32_t)x->shape[2], (uint32_t)x->shape[3],
+        (uint32_t)w->shape[0], (uint32_t)w->shape[2], (uint32_t)w->shape[3],
+        (uint32_t)stride_h, (uint32_t)stride_w,
+        (uint32_t)pad_h, (uint32_t)pad_w, ho, wo,
+    };
+    sc_tensor* ins[3] = {x, w, bias};
+    return opRun(&g_conv_kernel, sc_shader_conv2d, SC_SHADER_CONV2D_COUNT,
+                 "conv2d", "conv2d_direct", uni, sizeof(uni),
+                 ins, 3, out, (int)out->numel, 1);
+}
+
+/* 行归约公共前置：末维 = cols，其余展平 = rows */
+static int rowsColsOf(const char* who, sc_tensor* x, sc_tensor* out,
+                      uint32_t* rows, uint32_t* cols) {
+    sc_tensor* ts[2] = {x, out};
+    if (!opCheckF4(who, ts, 2)) return 0;
+    if (x->ndim < 1 || out->numel != x->numel) {
+        spc_log("%s: out 须与 x 同 numel", who);
+        return 0;
+    }
+    *cols = (uint32_t)x->shape[x->ndim - 1];
+    *rows = (uint32_t)(x->numel / *cols);
+    return 1;
+}
+
+int sc_spc_softmax_lastdim(sc_tensor* x, sc_tensor* out) {
+    if (!S.valid) return 0;
+    uint32_t rows, cols;
+    if (!rowsColsOf("softmax", x, out, &rows, &cols)) return 0;
+    struct { uint32_t rows, cols; float eps; } uni = {rows, cols, 0.0f};
+    sc_tensor* ins[1] = {x};
+    return opRun(&g_sm_kernel, sc_shader_rowops, SC_SHADER_ROWOPS_COUNT,
+                 "rowops", "softmax_rows", &uni, sizeof(uni),
+                 ins, 1, out, (int)rows, 1);
+}
+
+int sc_spc_layernorm_lastdim(sc_tensor* x, sc_tensor* out, float eps) {
+    if (!S.valid) return 0;
+    uint32_t rows, cols;
+    if (!rowsColsOf("layernorm", x, out, &rows, &cols)) return 0;
+    struct { uint32_t rows, cols; float eps; } uni = {rows, cols, eps};
+    sc_tensor* ins[1] = {x};
+    return opRun(&g_ln_kernel, sc_shader_rowops, SC_SHADER_ROWOPS_COUNT,
+                 "rowops", "layernorm_rows", &uni, sizeof(uni),
+                 ins, 1, out, (int)rows, 1);
+}
+
+int sc_spc_ew_unary(int op, sc_tensor* x, sc_tensor* out) {
+    if (!S.valid || op < 0 || op > 4) return 0;
+    sc_tensor* ts[2] = {x, out};
+    if (!opCheckF4("ew_unary", ts, 2) || out->numel != x->numel) return 0;
+    struct { uint32_t n, op; } uni = {(uint32_t)x->numel, (uint32_t)op};
+    /* 反射清单含 BBuf（文件级资源）——unary 不读它，绑 x 占位满足公共层校验 */
+    sc_tensor* ins[2] = {x, x};
+    return opRun(&g_ewu_kernel, sc_shader_elementwise, SC_SHADER_ELEMENTWISE_COUNT,
+                 "elementwise", "ew_unary", &uni, sizeof(uni),
+                 ins, 2, out, (int)x->numel, 1);
+}
+
+int sc_spc_ew_binary(int op, sc_tensor* a, sc_tensor* b, sc_tensor* out) {
+    if (!S.valid || op < 0 || op > 2) return 0;
+    sc_tensor* ts[3] = {a, b, out};
+    if (!opCheckF4("ew_binary", ts, 3) ||
+        b->numel != a->numel || out->numel != a->numel) {
+        spc_log("ew_binary: 须同 numel（无广播）");
+        return 0;
+    }
+    struct { uint32_t n, op; } uni = {(uint32_t)a->numel, (uint32_t)op};
+    sc_tensor* ins[2] = {a, b};
+    return opRun(&g_ewb_kernel, sc_shader_elementwise, SC_SHADER_ELEMENTWISE_COUNT,
+                 "elementwise", "ew_binary", &uni, sizeof(uni),
+                 ins, 2, out, (int)a->numel, 1);
 }
 
 /* ---- model ------------------------------------------------- */

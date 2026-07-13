@@ -134,6 +134,106 @@ fnc main: i4
         c_krn->drop()
         c_cpu->drop()
 
+    # ---- §18 M2 nn 算子对拍（.ss kernel 全后端；vs ts CPU 实现）----
+    # conv2d：x[1,3,16,16] ⊛ w[8,3,3,3] + bias[8]，stride 1 pad 1
+    var xsh[4]: i4
+    xsh[0] = 1
+    xsh[1] = 3
+    xsh[2] = 16
+    xsh[3] = 16
+    var wsh[4]: i4
+    wsh[0] = 8
+    wsh[1] = 3
+    wsh[2] = 3
+    wsh[3] = 3
+    var bsh[1]: i4
+    bsh[0] = 8
+    var cx: tensor& = rand_uniform(4, xsh, -1.0, 1.0, DT_F4)
+    var cw: tensor& = rand_uniform(4, wsh, -0.5, 0.5, DT_F4)
+    var cb: tensor& = rand_uniform(1, bsh, -0.1, 0.1, DT_F4)
+    var ysh[4]: i4
+    ysh[0] = 1
+    ysh[1] = 8
+    ysh[2] = 16
+    ysh[3] = 16
+    var cy: tensor& = zeros(4, ysh, DT_F4)
+    if spc_conv2d(cx, cw, cb, cy, 1, 1, 1, 1) == 0
+        print "[graph] spc_conv2d 失败\n"
+        fails = fails + 1
+    else
+        var cref: tensor& = cx->conv2d(cw, cb, 1, 1, 1, 1)
+        if cy->allclose(cref, 0.001, 0.0001)
+            print "[graph] conv2d 1x3x16x16⊛8x3x3x3 vs CPU:通过\n"
+        else
+            print "[graph] conv2d 结果不符!\n"
+            fails = fails + 1
+        cref->drop()
+    cx->drop()
+    cw->drop()
+    cb->drop()
+    cy->drop()
+
+    # softmax / layer_norm（末轴 [32,64]）
+    var rsh[2]: i4
+    rsh[0] = 32
+    rsh[1] = 64
+    var rx: tensor& = rand_uniform(2, rsh, -4.0, 4.0, DT_F4)
+    var ry: tensor& = zeros(2, rsh, DT_F4)
+    if spc_softmax_lastdim(rx, ry) == 0
+        print "[graph] spc_softmax 失败\n"
+        fails = fails + 1
+    else
+        var sref: tensor& = rx->softmax(-1)
+        if ry->allclose(sref, 0.001, 0.0001)
+            print "[graph] softmax [32,64] 末轴 vs CPU:通过\n"
+        else
+            print "[graph] softmax 结果不符!\n"
+            fails = fails + 1
+        sref->drop()
+    var ly: tensor& = zeros(2, rsh, DT_F4)
+    if spc_layernorm_lastdim(rx, ly, 0.00001) == 0
+        print "[graph] spc_layernorm 失败\n"
+        fails = fails + 1
+    else
+        var lref: tensor& = rx->layer_norm(-1, 0.00001)
+        if ly->allclose(lref, 0.001, 0.0001)
+            print "[graph] layer_norm [32,64] 末轴 vs CPU:通过\n"
+        else
+            print "[graph] layer_norm 结果不符!\n"
+            fails = fails + 1
+        lref->drop()
+
+    # elementwise：gelu（一元 op=1）+ add（二元 op=0）
+    var gy: tensor& = zeros(2, rsh, DT_F4)
+    if spc_ew_unary(1, rx, gy) == 0
+        print "[graph] spc_ew_unary 失败\n"
+        fails = fails + 1
+    else
+        var gref: tensor& = rx->gelu()
+        if gy->allclose(gref, 0.001, 0.0001)
+            print "[graph] gelu(ew_unary) vs CPU:通过\n"
+        else
+            print "[graph] gelu 结果不符!\n"
+            fails = fails + 1
+        gref->drop()
+    var ay: tensor& = zeros(2, rsh, DT_F4)
+    if spc_ew_binary(0, rx, ry, ay) == 0
+        print "[graph] spc_ew_binary 失败\n"
+        fails = fails + 1
+    else
+        var aref: tensor& = rx->add(ry)
+        if ay->allclose(aref, 0.001, 0.0001)
+            print "[graph] add(ew_binary) vs CPU:通过\n"
+        else
+            print "[graph] add 结果不符!\n"
+            fails = fails + 1
+        aref->drop()
+    rx->drop()
+    ry->drop()
+    ly->drop()
+    gy->drop()
+    ay->drop()
+
     # ============ 3. model 面:CoreML 推理(倾向 ANE) ============
     var mdl: u4 = spc_model_load("templates/demo/spc_model/tiny.mlmodelc", 3)   # CPU_ANE
     if mdl == 0

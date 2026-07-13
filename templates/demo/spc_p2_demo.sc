@@ -353,6 +353,59 @@ fnc main: i4
     ma->drop()
     mb->drop()
     mc->drop()
+
+    # ---- CPU §18 M2 算子抽查：conv2d（最复杂）+ gelu（tanhf 路径）----
+    var xsh[4]: i4
+    xsh[0] = 1
+    xsh[1] = 2
+    xsh[2] = 8
+    xsh[3] = 8
+    var wsh[4]: i4
+    wsh[0] = 4
+    wsh[1] = 2
+    wsh[2] = 3
+    wsh[3] = 3
+    var bsh[1]: i4
+    bsh[0] = 4
+    var cx: tensor& = rand_uniform(4, xsh, -1.0, 1.0, DT_F4)
+    var cw: tensor& = rand_uniform(4, wsh, -0.5, 0.5, DT_F4)
+    var cb: tensor& = rand_uniform(1, bsh, -0.1, 0.1, DT_F4)
+    var ysh[4]: i4
+    ysh[0] = 1
+    ysh[1] = 4
+    ysh[2] = 8
+    ysh[3] = 8
+    var cy: tensor& = zeros(4, ysh, DT_F4)
+    if spc_conv2d(cx, cw, cb, cy, 1, 1, 1, 1) == 0
+        print "[CPU] spc_conv2d 失败\n", .
+        fails = fails + 1
+    else
+        var cref: tensor& = cx->conv2d(cw, cb, 1, 1, 1, 1)
+        if cy->allclose(cref, 0.001, 0.0001)
+            print "[CPU] conv2d 对拍:通过(1x2x8x8⊛4x2x3x3)\n", .
+        else
+            print "[CPU] conv2d 不符!\n", .
+            fails = fails + 1
+        cref->drop()
+    var gx2: tensor& = rand_uniform(2, msh, -4.0, 4.0, DT_F4)
+    var gy2: tensor& = zeros(2, msh, DT_F4)
+    if spc_ew_unary(1, gx2, gy2) == 0
+        print "[CPU] spc_ew_unary 失败\n", .
+        fails = fails + 1
+    else
+        var gref: tensor& = gx2->gelu()
+        if gy2->allclose(gref, 0.001, 0.0001)
+            print "[CPU] gelu 对拍:通过\n", .
+        else
+            print "[CPU] gelu 不符!\n", .
+            fails = fails + 1
+        gref->drop()
+    cx->drop()
+    cw->drop()
+    cb->drop()
+    cy->drop()
+    gx2->drop()
+    gy2->drop()
     spc_shutdown()
     gpu_shutdown()
     if fails == 0
