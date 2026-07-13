@@ -134,9 +134,21 @@ static struct {
 /* ---- init/shutdown ----------------------------------------- */
 
 static bool glInit(const sc_gpu_desc* desc) {
-    (void)desc;
     memset(&env, 0, sizeof(env));
-    return true;   /* 实际 GL 初始化随首个 surface 创建 */
+#if SC_GPU_GL_EGL_HEADLESS
+    /* 无窗口（headless / compute 场景，如 spc GL 计算）：立即建 headless EGL 上下文
+     * 并 make current，令 gpu_init(GL) 后就有可用上下文（gl_spc 假定上下文已 current）。
+     * 有原生窗口时跳过——窗口 surface 自建上下文。gl_egl_init 无 /dev/dri 会走 surfaceless。 */
+    if (!desc || !desc->surface.native_window) {
+        if (gl_egl_init()) {
+            gl_egl_make_current();
+            if (!env.headlessVao) glGenVertexArrays(1, &env.headlessVao);
+            glBindVertexArray(env.headlessVao);
+        }
+    }
+#endif
+    (void)desc;
+    return true;   /* 窗口路径的 GL 初始化仍随首个 surface 创建 */
 }
 
 static void glShutdown(void) {

@@ -113,13 +113,20 @@ layout(binding=N)，scc 产物已发射）直接 glBindBufferBase；读回 =
 glMemoryBarrier + glFinish + glMapBufferRange(READ)。
 
 已知坑：
+0. **【已板验 2026-07-13：WSL surfaceless】** GL compute 已在 WSL2 Mesa（d3d12→GLES3.1）
+   跑通 P2 规约（total=8386560）。**两处修复**（gl_env.c/gl_egl.c）：
+   (a) gpu_init(GL) 原不建上下文（glInit 空操作）→ spc_gl_init 见 (null) 上下文报错；
+       现 glInit 无窗口场景即 gl_egl_init + make current，令上下文就绪。
+   (b) gl_egl.c 原硬要 /dev/dri+GBM；无 DRM 环境（WSL）打不开 → 现回退
+       EGL_MESA_platform_surfaceless（仅计算/离屏，memimg 不可用），且上下文
+       桌面 GL 失败自动回退 GLES3.1。构建用 GLES 形态：SCC_TARGET_SUFFIX=<triple>-gles
+       （激活 [*gles*] 段 -DSC_GPU_GLES + -lGLESv2 -lEGL）。真 GPU（有 /dev/dri）走 GBM 路径。
 1. **上下文必须 current**：spc 不建上下文，依赖 gpu env 的 GL 上下文在当前
-   线程 current（gpu_init 后就是）。多线程调 spc_dispatch 会炸——GL 后端
-   单线程使用。
+   线程 current（gpu_init 后就是——见坑 0 的 glInit 引导）。多线程调 spc_dispatch
+   会炸——GL 后端单线程使用。
 2. **init 探测**：`glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT,0,...)`
-   出错 = 上下文低于 3.1/4.3 → 检查 EGL config 请求的 client version
-  （gpu env gl_egl.c 请求 ES3，个别驱动给 3.0 上下文——需显式
-   EGL_CONTEXT_MAJOR/MINOR 3.1，这是 gl_egl.c 侧待验项）。
+   出错 = 上下文低于 3.1/4.3。gl_egl.c 现显式请求 EGL_CONTEXT_MAJOR/MINOR 3.1
+   （桌面 GL core 4.3→4.1 优先，失败回退 GLES3.1），WSL 上得到 GLES3.1 含 compute。
 3. **SSBO/UBO 绑定命名空间独立**：反射 binding 直接用（uniform binding 0 与
    storage binding 0 不冲突）。若板上驱动怪异对不上，用
    glGetProgramResourceIndex 按名对位兜底（未实现，报错再说）。
@@ -162,7 +169,7 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 
 | 能力 | Metal | Vulkan | GLES3.1 | 备注 |
 |---|---|---|---|---|
-| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待板验 | gles 门控 310 |
+| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | ✅ 实测（WSL2 Mesa GLES3.1 surfaceless，规约 8386560） | gles 门控 310 |
 | spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
 | subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
 | f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
