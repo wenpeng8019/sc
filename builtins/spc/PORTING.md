@@ -14,10 +14,16 @@
 spc.c（公共层：句柄池/反射解析/校验）
   └─ K（spc_kernel_api vtable，init 时按 gpu_query_backend() 选定，不静默降级）
        ├─ metal_spc.m   darwin   （✅ 实机验证）
-       ├─ vulkan_spc.c  linux/android/win（盲写，待板验）
-       └─ gl_spc.c      linux/android    （盲写，待板验；GLES3.1+ / 桌面 GL4.3+）
+       ├─ vulkan_spc.c  linux/android/win（✅ 板验 2026-07-13：Win AMD 真机 + WSL llvmpipe，P2/P3 全绿）
+       └─ gl_spc.c      linux/android    （盲写，待验；GLES3.1+ / 桌面 GL4.3+，见下方说明）
 graph（mpsg_spc.m）/ model（coreml_spc.m）仍 darwin 直连——非 kernel 面，别动。
 ```
+
+> **GL 后端验证路径说明**：mac 不可验（桌面 GL 冻结 4.1，无 compute/SSBO；
+> 也无原生 GLES/EGL 栈）——所以 mac 恒走 Metal。无需等嵌入式设备：已验
+> Vulkan 的那台 WSL2/Linux 机器可直接验——Mesa llvmpipe 支持桌面 GL 4.5 与
+> GLES 3.1 软实现（EGL surfaceless headless），`GPU_BACKEND=gl` 即可跑；
+> 真嵌入式板（Mali/Adreno GLES3.1）到位后再补硬件一轮。
 
 - **后端跟随 gpu env**：`sc_gpu_init(desc.backend=...)` 决定一切；spc_init 查
   `sc_gpu_query_backend()`（1=Metal 2=GL 3=Vulkan）选 vtable，无对应实现即报错。
@@ -162,7 +168,7 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 
 | 能力 | Metal | Vulkan | GLES3.1 | 备注 |
 |---|---|---|---|---|
-| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待板验 | gles 门控 310 |
+| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待验（WSL llvmpipe GLES3.1 可先验，见 §0） | gles 门控 310 |
 | spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
 | subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
 | f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
