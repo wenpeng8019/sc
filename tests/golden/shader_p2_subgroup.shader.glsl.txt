@@ -1,0 +1,79 @@
+// ===== shader_p2_subgroup.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_sg",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_sg.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_sg.vulkan450.comp =====
+#version 450
+// generated from cs_sg (comp) target vulkan450
+
+layout(set=0, binding=0, std430) buffer XBuf_blk {
+    float x[];
+} XBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    float v = XBuf.x[gl_GlobalInvocationID.x];
+    if (subgroupAll((v > 0.0))) {
+        v = (v * 2.0);
+    }
+    uvec4 bits = subgroupBallot((v > 1.0));
+    float head = subgroupShuffle(v, 0);
+    XBuf.x[gl_GlobalInvocationID.x] = (((v + head) + float((bits.x % 2))) + float((gl_SubgroupSize - gl_SubgroupInvocationID)));
+}
+
+// ===== shader_p2_subgroup.metal20100.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20100, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_sg",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_sg.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_sg.metal20100.comp =====
+#version 450
+// generated from cs_sg (comp) target vulkan450
+
+layout(set=0, binding=0, std430) buffer XBuf_blk {
+    float x[];
+} XBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    float v = XBuf.x[gl_GlobalInvocationID.x];
+    if (subgroupAll((v > 0.0))) {
+        v = (v * 2.0);
+    }
+    uvec4 bits = subgroupBallot((v > 1.0));
+    float head = subgroupShuffle(v, 0);
+    XBuf.x[gl_GlobalInvocationID.x] = (((v + head) + float((bits.x % 2))) + float((gl_SubgroupSize - gl_SubgroupInvocationID)));
+}

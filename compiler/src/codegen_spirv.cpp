@@ -22,6 +22,7 @@
 
 #include <cstring>
 #include <functional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -35,6 +36,7 @@ constexpr uint32_t kMagic   = 0x07230203;
 constexpr uint32_t kVersion = 0x00010000;   // SPIR-V 1.0（Vulkan 1.0 兼容面最大）
 
 enum Op : uint16_t {
+    OpExtension = 10,
     OpExtInstImport = 11, OpExtInst = 12,
     OpMemoryModel = 14, OpEntryPoint = 15, OpExecutionMode = 16,
     OpCapability = 17,
@@ -44,6 +46,7 @@ enum Op : uint16_t {
     OpTypePointer = 32, OpTypeFunction = 33,
     OpConstantTrue = 41, OpConstantFalse = 42, OpConstant = 43,
     OpConstantComposite = 44,
+    OpSpecConstantTrue = 48, OpSpecConstantFalse = 49, OpSpecConstant = 50,
     OpFunction = 54, OpFunctionEnd = 56,
     OpVariable = 59, OpLoad = 61, OpStore = 62, OpAccessChain = 65,
     OpDecorate = 71, OpMemberDecorate = 72,
@@ -60,6 +63,7 @@ enum Op : uint16_t {
     OpImageQueryLod = 105,
     OpImageQueryLevels = 106,
     OpConvertFToU = 109, OpConvertFToS = 110, OpConvertSToF = 111, OpConvertUToF = 112,
+    OpUConvert = 113, OpSConvert = 114, OpFConvert = 115,
     OpBitcast = 124,
     OpSNegate = 126, OpFNegate = 127,
     OpIAdd = 128, OpFAdd = 129, OpISub = 130, OpFSub = 131,
@@ -80,6 +84,13 @@ enum Op : uint16_t {
     OpFOrdLessThanEqual = 188, OpFOrdGreaterThanEqual = 190,
     OpShiftRightLogical = 194, OpShiftRightArithmetic = 195, OpShiftLeftLogical = 196,
     OpBitwiseOr = 197, OpBitwiseXor = 198, OpBitwiseAnd = 199, OpNot = 200,
+    OpControlBarrier = 224, OpMemoryBarrier = 225,
+    OpAtomicExchange = 229, OpAtomicCompareExchange = 230,
+    OpAtomicIAdd = 234, OpAtomicISub = 235,
+    OpAtomicSMin = 236, OpAtomicUMin = 237, OpAtomicSMax = 238, OpAtomicUMax = 239,
+    OpAtomicAnd = 240, OpAtomicOr = 241, OpAtomicXor = 242,
+    OpGroupNonUniformAll = 334, OpGroupNonUniformAny = 335,
+    OpGroupNonUniformBallot = 339, OpGroupNonUniformShuffle = 345,
     OpLoopMerge = 246, OpSelectionMerge = 247,
     OpLabel = 248, OpBranch = 249, OpBranchConditional = 250,
     OpKill = 252, OpReturn = 253, OpReturnValue = 254,
@@ -107,6 +118,7 @@ enum StorageClass : uint32_t {
     ScWorkgroup = 4, ScPrivate = 6, ScFunction = 7, ScPushConstant = 9,
 };
 enum Decoration : uint32_t {
+    DecSpecId = 1,
     DecBlock = 2, DecBufferBlock = 3, DecColMajor = 5, DecArrayStride = 6,
     DecMatrixStride = 7, DecBuiltIn = 11,
     DecNoPerspective = 13, DecFlat = 14, DecCentroid = 16,
@@ -121,6 +133,15 @@ enum BuiltInId : uint32_t {
     BiNumWorkgroups = 24, BiWorkgroupId = 26,
     BiLocalInvocationId = 27, BiGlobalInvocationId = 28,
     BiLocalInvocationIndex = 29, BiSampleId = 18, BiSamplePosition = 19,
+    BiSubgroupSize = 36, BiSubgroupLocalInvocationId = 41,
+};
+// SPIR-V Capability 号（按需追加发射的子集）
+enum CapabilityId : uint32_t {
+    CapFloat16 = 9, CapInt64 = 11, CapInt16 = 22, CapInt8 = 39,
+    CapGroupNonUniform = 61, CapGroupNonUniformVote = 62,
+    CapGroupNonUniformBallot = 64, CapGroupNonUniformShuffle = 65,
+    CapStorageBuffer16BitAccess = 4433, CapUniformAndStorageBuffer16BitAccess = 4434,
+    CapStorageBuffer8BitAccess = 4448, CapUniformAndStorageBuffer8BitAccess = 4449,
 };
 
 // ---- 类型描述（发射期的语义视图，typeId 之外携带足够的选指令信息）--------
@@ -132,6 +153,7 @@ struct TI {                       // TypeInfo
     uint32_t id = 0;              // SPIR-V 类型 id
     K   comp = F32;               // Vec/Mat/Array 的组件标量类别
     int n = 0;                    // Vec: 分量数；Mat: 列数（方阵）；Array: 元素数
+    int bits = 32;                // 标量位宽（P3：f2=16、i8/u8=64、i1/u1=8、i2/u2=16）
     uint32_t elem = 0;            // Array/RArray/Vec/Mat 的元素类型 id
     uint32_t dim = 0;             // Image: SpvDim（0=1D,1=2D,2=3D,3=Cube...）
     bool arrayed = false;         // Image: 是否数组纹理
@@ -176,6 +198,9 @@ struct Builder {
     std::unordered_map<std::string, uint32_t> typeCache;   // 编码串 → id
     std::unordered_map<std::string, TI>       tiCache;     // 编码串 → TI
     std::unordered_map<uint32_t, TI>          tiById;      // typeId → TI
+    std::set<uint32_t> extraCaps;               // 按需追加的 Capability（有序，产物确定）
+    std::set<std::string> extraExts;            // 按需追加的 OpExtension（16bit/8bit storage）
+    bool needSpv13 = false;                     // subgroup 用到 → 版本词升 1.3
 
     uint32_t id() { return next++; }
 
@@ -230,6 +255,43 @@ struct Builder {
     uint32_t tF32()  { return type("f32", [&]{ uint32_t r = id(); put(secTypes, OpTypeFloat, {r, 32}); return r; }, {TI::F32}); }
     uint32_t tI32()  { return type("i32", [&]{ uint32_t r = id(); put(secTypes, OpTypeInt, {r, 32, 1}); return r; }, {TI::I32}); }
     uint32_t tU32()  { return type("u32", [&]{ uint32_t r = id(); put(secTypes, OpTypeInt, {r, 32, 0}); return r; }, {TI::U32}); }
+    // P3 窄/宽标量：类别复用 F32/I32/U32（指令选择谓词不变），bits 区分位宽；
+    // 首次构造时追加对应 Capability（块成员的 storage 能力另在资源装配处补）。
+    uint32_t tF16() {
+        TI ti{TI::F32}; ti.bits = 16;
+        return type("f16", [&]{ extraCaps.insert(CapFloat16);
+            uint32_t r = id(); put(secTypes, OpTypeFloat, {r, 16}); return r; }, ti);
+    }
+    uint32_t tI64() {
+        TI ti{TI::I32}; ti.bits = 64;
+        return type("i64", [&]{ extraCaps.insert(CapInt64);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 64, 1}); return r; }, ti);
+    }
+    uint32_t tU64() {
+        TI ti{TI::U32}; ti.bits = 64;
+        return type("u64", [&]{ extraCaps.insert(CapInt64);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 64, 0}); return r; }, ti);
+    }
+    uint32_t tI16() {
+        TI ti{TI::I32}; ti.bits = 16;
+        return type("i16", [&]{ extraCaps.insert(CapInt16);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 16, 1}); return r; }, ti);
+    }
+    uint32_t tU16() {
+        TI ti{TI::U32}; ti.bits = 16;
+        return type("u16", [&]{ extraCaps.insert(CapInt16);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 16, 0}); return r; }, ti);
+    }
+    uint32_t tI8() {
+        TI ti{TI::I32}; ti.bits = 8;
+        return type("i8", [&]{ extraCaps.insert(CapInt8);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 8, 1}); return r; }, ti);
+    }
+    uint32_t tU8() {
+        TI ti{TI::U32}; ti.bits = 8;
+        return type("u8", [&]{ extraCaps.insert(CapInt8);
+            uint32_t r = id(); put(secTypes, OpTypeInt, {r, 8, 0}); return r; }, ti);
+    }
     uint32_t tVec(uint32_t comp, int n) {
         std::string key = "v" + std::to_string(n) + "_" + std::to_string(comp);
         TI ci = info(comp);
@@ -297,6 +359,25 @@ struct Builder {
     uint32_t constF(float v) { uint32_t b; std::memcpy(&b, &v, 4); return constScalar(tF32(), b); }
     uint32_t constI(int32_t v) { return constScalar(tI32(), (uint32_t)v); }
     uint32_t constU(uint32_t v) { return constScalar(tU32(), v); }
+    // P3：半精度 / 64 位整数常量（f16 单 word 低 16 位；64 位双 word 低先）
+    static uint32_t f32ToF16Bits(float f) {
+        uint32_t x; std::memcpy(&x, &f, 4);
+        uint32_t sign = (x >> 16) & 0x8000u;
+        int32_t  exp  = (int32_t)((x >> 23) & 0xFF) - 127 + 15;
+        uint32_t mant = x & 0x7FFFFFu;
+        if (exp <= 0)  return sign;                  // 下溢→0（略 subnormal）
+        if (exp >= 31) return sign | 0x7C00u;        // 上溢→inf
+        return sign | ((uint32_t)exp << 10) | (mant >> 13);
+    }
+    uint32_t constF16(float v) { return constScalar(tF16(), f32ToF16Bits(v)); }
+    uint32_t const64(uint32_t typeId, uint64_t v) {
+        std::string key = "c64_" + std::to_string(typeId) + "_" + std::to_string(v);
+        auto it = constCache.find(key);
+        if (it != constCache.end()) return it->second;
+        uint32_t r = id();
+        put(secTypes, OpConstant, {typeId, r, (uint32_t)(v & 0xFFFFFFFFu), (uint32_t)(v >> 32)});
+        return constCache[key] = r;
+    }
     uint32_t constBool(bool v) {
         std::string key = v ? "ctrue" : "cfalse";
         auto it = constCache.find(key);
@@ -331,12 +412,21 @@ struct Builder {
     // 汇总为最终字流
     Words finish(uint32_t entryPointId) {
         Words out;
-        out.push_back(kMagic); out.push_back(kVersion);
+        out.push_back(kMagic);
+        // subgroup（GroupNonUniform 系）需 SPIR-V 1.3（Vulkan 1.1）；其余保持 1.0
+        out.push_back(needSpv13 ? 0x00010300u : kVersion);
         out.push_back(0);                    // generator：未注册
         out.push_back(next);                 // id bound
         out.push_back(0);                    // schema
         put(out, OpCapability, {1});         // Capability Shader
         put(out, OpCapability, {50});        // Capability ImageQuery（textureSize）
+        for (uint32_t c : extraCaps)
+            put(out, OpCapability, {c});     // 按需追加（GroupNonUniform 系等）
+        for (const auto& e : extraExts) {    // OpExtension（16bit/8bit storage 等）
+            std::vector<uint32_t> ops;
+            packStr(ops, e);
+            putV(out, OpExtension, ops);
+        }
         {   std::vector<uint32_t> ops = {glsl450};
             packStr(ops, "GLSL.std.450");
             putV(out, OpExtInstImport, ops); }
@@ -349,21 +439,30 @@ struct Builder {
 };
 
 // ---- sc 类型名 → 语义类别 -------------------------------------------------
-struct ScType { TI::K k; int n; };   // n: vec 宽 / mat 阶
+// P3：名字即字节数（与 CPU 侧一致）——f2=16 位浮点、i1/u1=8 位、i2/u2=16 位、
+// i8/u8=64 位；类别仍归 F32/I32/U32（指令选择谓词复用），bits 携位宽。
+struct ScType { TI::K k; int n; int bits = 32; };
 bool scTypeOf(const std::string& name, ScType& out) {
-    if (name == "f4" || name == "float")  { out = {TI::F32, 0}; return true; }
-    if (name == "i1" || name == "i2" || name == "i4" || name == "int")  { out = {TI::I32, 0}; return true; }
-    if (name == "u1" || name == "u2" || name == "u4" || name == "uint") { out = {TI::U32, 0}; return true; }
-    if (name == "bool") { out = {TI::Bool, 0}; return true; }
-    if (name == "vec2") { out = {TI::Vec, 2}; return true; }
-    if (name == "vec3") { out = {TI::Vec, 3}; return true; }
-    if (name == "vec4") { out = {TI::Vec, 4}; return true; }
-    if (name == "ivec2" || name == "uvec2" || name == "bvec2") { out = {TI::Vec, 2}; return true; }
-    if (name == "ivec3" || name == "uvec3" || name == "bvec3") { out = {TI::Vec, 3}; return true; }
-    if (name == "ivec4" || name == "uvec4" || name == "bvec4") { out = {TI::Vec, 4}; return true; }
-    if (name == "mat2") { out = {TI::Mat, 2}; return true; }
-    if (name == "mat3") { out = {TI::Mat, 3}; return true; }
-    if (name == "mat4") { out = {TI::Mat, 4}; return true; }
+    if (name == "f4" || name == "float")  { out = {TI::F32, 0, 32}; return true; }
+    if (name == "f2")                     { out = {TI::F32, 0, 16}; return true; }
+    if (name == "i4" || name == "int")    { out = {TI::I32, 0, 32}; return true; }
+    if (name == "i1")                     { out = {TI::I32, 0, 8};  return true; }
+    if (name == "i2")                     { out = {TI::I32, 0, 16}; return true; }
+    if (name == "i8")                     { out = {TI::I32, 0, 64}; return true; }
+    if (name == "u4" || name == "uint")   { out = {TI::U32, 0, 32}; return true; }
+    if (name == "u1")                     { out = {TI::U32, 0, 8};  return true; }
+    if (name == "u2")                     { out = {TI::U32, 0, 16}; return true; }
+    if (name == "u8")                     { out = {TI::U32, 0, 64}; return true; }
+    if (name == "bool") { out = {TI::Bool, 0, 32}; return true; }
+    if (name == "vec2") { out = {TI::Vec, 2, 32}; return true; }
+    if (name == "vec3") { out = {TI::Vec, 3, 32}; return true; }
+    if (name == "vec4") { out = {TI::Vec, 4, 32}; return true; }
+    if (name == "ivec2" || name == "uvec2" || name == "bvec2") { out = {TI::Vec, 2, 32}; return true; }
+    if (name == "ivec3" || name == "uvec3" || name == "bvec3") { out = {TI::Vec, 3, 32}; return true; }
+    if (name == "ivec4" || name == "uvec4" || name == "bvec4") { out = {TI::Vec, 4, 32}; return true; }
+    if (name == "mat2") { out = {TI::Mat, 2, 32}; return true; }
+    if (name == "mat3") { out = {TI::Mat, 3, 32}; return true; }
+    if (name == "mat4") { out = {TI::Mat, 4, 32}; return true; }
     return false;
 }
 TI::K vecCompKind(const std::string& name) {
@@ -379,7 +478,11 @@ struct Lay { int align, size; };
 int rup(int v, int a) { return a ? ((v + a - 1) / a) * a : v; }
 Lay layOf(const std::string& t, const std::vector<std::string>& dims, bool std430) {
     int a = 4, s = 4;
-    if (t == "vec2" || t == "ivec2" || t == "uvec2" || t == "bvec2") { a = 8;  s = 8;  }
+    // P3 窄/宽标量：对齐 = 尺寸 = 字节数（std140/std430 标量规则）
+    if (t == "f2" || t == "i2" || t == "u2") { a = 2; s = 2; }
+    else if (t == "i1" || t == "u1") { a = 1; s = 1; }
+    else if (t == "i8" || t == "u8") { a = 8; s = 8; }
+    else if (t == "vec2" || t == "ivec2" || t == "uvec2" || t == "bvec2") { a = 8;  s = 8;  }
     else if (t == "vec3" || t == "ivec3" || t == "uvec3" || t == "bvec3") { a = 16; s = 12; }
     else if (t == "vec4" || t == "ivec4" || t == "uvec4" || t == "bvec4") { a = 16; s = 16; }
     else if (t == "mat2") { a = 16; s = 32; }
@@ -408,9 +511,10 @@ struct IoEntry {
 };
 
 // 资源块视图
-struct ResBlock {
-    uint32_t var = 0;                    // Uniform/PushConstant 存储的块变量
+ struct ResBlock {
+    uint32_t var = 0;                    // Uniform/PushConstant/Workgroup 存储的块变量
     uint32_t structType = 0;
+    uint32_t sc = ScUniform;             // 存储类（Uniform / PushConstant / Workgroup）
     std::unordered_map<std::string, int>      memberIdx;
     std::unordered_map<std::string, uint32_t> memberType;  // 成员值类型 id
 };
@@ -441,6 +545,20 @@ struct StageEmitter {
         : b(bb), prog(p), stage(st), structs(ss) {}
 
     [[noreturn]] void err(const std::string& m, int line) const { throw CompileError(m, line); }
+
+    // 标量类别+位宽 → SPIR-V 类型 id（P3：f2/i8/u8/i1/u1/i2/u2）
+    uint32_t scalarTid(const ScType& st) {
+        if (st.k == TI::F32)
+            return st.bits == 16 ? b.tF16() : b.tF32();
+        if (st.k == TI::I32)
+            return st.bits == 64 ? b.tI64() : st.bits == 16 ? b.tI16()
+                 : st.bits == 8  ? b.tI8()  : b.tI32();
+        if (st.k == TI::U32)
+            return st.bits == 64 ? b.tU64() : st.bits == 16 ? b.tU16()
+                 : st.bits == 8  ? b.tU8()  : b.tU32();
+        if (st.k == TI::Bool) return b.tBool();
+        return b.tI32();
+    }
 
     // sc 类型引用 → SPIR-V 值类型 id（标量/向量/矩阵/一维数组）
     // 用户结构体类型 id（包含完整成员类型体系）
@@ -539,9 +657,9 @@ struct StageEmitter {
         }
         uint32_t base;
         switch (st.k) {
-            case TI::F32:  base = b.tF32(); break;
-            case TI::I32:  base = b.tI32(); break;
-            case TI::U32:  base = b.tU32(); break;
+            case TI::F32:  base = scalarTid(st); break;
+            case TI::I32:  base = scalarTid(st); break;
+            case TI::U32:  base = scalarTid(st); break;
             case TI::Bool: base = b.tBool(); break;
             case TI::Vec: {
                 TI::K ck = vecCompKind(t.name);
@@ -632,6 +750,39 @@ struct StageEmitter {
             const bool std430 = a->res == ShaderDeclAttr::Storage;
             const bool push   = a->res == ShaderDeclAttr::Push;
 
+            // shared 共享内存块（P2）：Workgroup 存储类，无 Block/Offset/ArrayStride
+            // 布局装饰（SPIR-V 1.0 Workgroup 无显式布局），无 set/binding。
+            if (a->res == ShaderDeclAttr::Shared) {
+                std::vector<uint32_t> memberTypes;
+                uint32_t structT = b.id();
+                ResBlock rb;
+                size_t mi = 0;
+                for (const auto& f : d->structCommon.fields) {
+                    if (f.synthetic) continue;
+                    if (!f.type.arrayDims.empty() && f.type.arrayDims[0].empty())
+                        err("shared 块不支持运行时数组（需定长）", f.line);
+                    uint32_t mt = typeIdOf(f.type, f.line);   // 定长数组用无 stride 的普通类型
+                    b.memberName(structT, (uint32_t)mi, f.name);
+                    rb.memberIdx[f.name] = (int)mi;
+                    rb.memberType[f.name] = mt;
+                    memberTypes.push_back(mt);
+                    mi++;
+                }
+                {   std::vector<uint32_t> ops = {structT};
+                    ops.insert(ops.end(), memberTypes.begin(), memberTypes.end());
+                    putV(b.secTypes, OpTypeStruct, ops); }
+                b.name(structT, d->name + "_blk");
+                uint32_t ptrT = b.tPtr(ScWorkgroup, structT);
+                uint32_t v = b.id();
+                put(b.secTypes, OpVariable, {ptrT, v, ScWorkgroup});
+                b.name(v, d->name);
+                rb.var = v;
+                rb.structType = structT;
+                rb.sc = ScWorkgroup;
+                resBlocks[d->name] = rb;
+                continue;
+            }
+
             // sampler 资源块：opaque 类型不能进 UBO/SSBO 结构体；拆成独立 UniformConstant 变量。
             bool hasSamplerMember = false;
             bool hasNonSamplerMember = false;
@@ -704,6 +855,21 @@ struct StageEmitter {
             int off = 0;
             for (size_t i = 0; i < d->structCommon.fields.size(); i++) {
                 const auto& f = d->structCommon.fields[i];
+                // P3 窄标量块成员：16/8 位需 storage 能力 + 扩展（SPIR-V 1.0 经 OpExtension）
+                {
+                    ScType stw;
+                    if (scTypeOf(f.type.name, stw) && stw.k != TI::Vec && stw.k != TI::Mat) {
+                        if (stw.bits == 16) {
+                            b.extraCaps.insert(CapStorageBuffer16BitAccess);
+                            b.extraCaps.insert(CapUniformAndStorageBuffer16BitAccess);
+                            b.extraExts.insert("SPV_KHR_16bit_storage");
+                        } else if (stw.bits == 8) {
+                            b.extraCaps.insert(CapStorageBuffer8BitAccess);
+                            b.extraCaps.insert(CapUniformAndStorageBuffer8BitAccess);
+                            b.extraExts.insert("SPV_KHR_8bit_storage");
+                        }
+                    }
+                }
                 uint32_t mt;
                 if (!f.type.arrayDims.empty() && f.type.arrayDims[0].empty()) {
                     // 运行时数组 x[]: T（仅 storage 块末成员）
@@ -765,6 +931,7 @@ struct StageEmitter {
             }
             rb.var = v;
             rb.structType = structT;
+            rb.sc = sc;                  // push 块 = PushConstant 存储类（AccessChain 指针类须同类）
             resBlocks[d->name] = rb;
         }
     }
@@ -808,6 +975,13 @@ struct StageEmitter {
             return true;
         }
         if (sem == "local_invocation_index") { bi = BiLocalInvocationIndex; type = b.tU32(); return true; }
+        if (sem == "subgroup_size" || sem == "subgroup_invocation_id") {
+            bi = sem == "subgroup_size" ? BiSubgroupSize : BiSubgroupLocalInvocationId;
+            type = b.tU32();
+            b.extraCaps.insert(CapGroupNonUniform);   // subgroup 内建需 GroupNonUniform + SPIR-V 1.3
+            b.needSpv13 = true;
+            return true;
+        }
         err("shader 暂不支持内建语义 `" + sem + "`（见 syntax-s §16）", line);
     }
 
@@ -945,12 +1119,28 @@ struct StageEmitter {
             if (from.comp == TI::F32 && to.comp == TI::U32)
                 return {ins(OpConvertFToU, wantType, {v.id}), wantType};
         }
-        if (from.k == TI::I32 && to.k == TI::U32) return {ins(OpBitcast, wantType, {v.id}), wantType};
-        if (from.k == TI::U32 && to.k == TI::I32) return {ins(OpBitcast, wantType, {v.id}), wantType};
-        if (from.k == TI::I32 && to.k == TI::F32) return {ins(OpConvertSToF, wantType, {v.id}), wantType};
-        if (from.k == TI::U32 && to.k == TI::F32) return {ins(OpConvertUToF, wantType, {v.id}), wantType};
-        if (from.k == TI::F32 && to.k == TI::I32) return {ins(OpConvertFToS, wantType, {v.id}), wantType};
-        if (from.k == TI::F32 && to.k == TI::U32) return {ins(OpConvertFToU, wantType, {v.id}), wantType};
+        // 标量：类别 + 位宽通用转换（P3：f2/i8/u8/i1/u1/i2/u2）
+        const bool fromF = from.k == TI::F32, toF = to.k == TI::F32;
+        const bool fromI = from.k == TI::I32, toI = to.k == TI::I32;
+        const bool fromU = from.k == TI::U32, toU = to.k == TI::U32;
+        if (fromF && toF)   // 浮点变宽度（f4↔f2）
+            return {ins(OpFConvert, wantType, {v.id}), wantType};
+        if ((fromI || fromU) && (toI || toU)) {
+            if (from.bits == to.bits)   // 同宽变符号
+                return {ins(OpBitcast, wantType, {v.id}), wantType};
+            if (fromU == toU)           // 同符号变宽度（SConvert 符号扩展 / UConvert 零扩展）
+                return {ins(fromU ? OpUConvert : OpSConvert, wantType, {v.id}), wantType};
+            // 宽度+符号同时变化：先按源符号变宽（U/SConvert 结果符号须与指令一致），再 Bitcast
+            uint32_t midT = fromU
+                ? (to.bits == 64 ? b.tU64() : to.bits == 16 ? b.tU16() : to.bits == 8 ? b.tU8() : b.tU32())
+                : (to.bits == 64 ? b.tI64() : to.bits == 16 ? b.tI16() : to.bits == 8 ? b.tI8() : b.tI32());
+            uint32_t mid = ins(fromU ? OpUConvert : OpSConvert, midT, {v.id});
+            return {ins(OpBitcast, wantType, {mid}), wantType};
+        }
+        if (fromI && toF) return {ins(OpConvertSToF, wantType, {v.id}), wantType};
+        if (fromU && toF) return {ins(OpConvertUToF, wantType, {v.id}), wantType};
+        if (fromF && toI) return {ins(OpConvertFToS, wantType, {v.id}), wantType};
+        if (fromF && toU) return {ins(OpConvertFToU, wantType, {v.id}), wantType};
         err("shader 类型不匹配（无隐式转换路径）", line);
     }
 
@@ -983,7 +1173,7 @@ struct StageEmitter {
                         if (mi == rb->second.memberIdx.end())
                             err("资源块 `" + e->a->text + "` 无成员 `" + e->text + "`", e->line);
                         uint32_t mt = rb->second.memberType[e->text];
-                        uint32_t sc = ScUniform;   // push 块同 AccessChain 形态（sc 记在指针类型里）
+                        uint32_t sc = rb->second.sc;   // Uniform / PushConstant / Workgroup
                         uint32_t ptrT = b.tPtr(sc, mt);
                         uint32_t r = ins(OpAccessChain, ptrT, {rb->second.var, b.constI(mi->second)});
                         return {r, mt, sc};
@@ -1147,9 +1337,7 @@ struct StageEmitter {
                 ScType st;
                 if (!scTypeOf(e->op, st) || st.k == TI::Vec || st.k == TI::Mat)
                     err("shader 暂不支持强转目标 `" + e->op + "`", e->line);
-                uint32_t want = st.k == TI::F32 ? b.tF32() : st.k == TI::U32 ? b.tU32()
-                              : st.k == TI::Bool ? b.tBool() : b.tI32();
-                return coerce(v, want, e->line);
+                return coerce(v, scalarTid(st), e->line);
             }
             default:
                 err("shader 暂不支持该表达式（SPIR-V 直发子集）", e->line);
@@ -1213,15 +1401,22 @@ struct StageEmitter {
             return arith(op, a, v, e->line);
         // 比较
         if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=") {
-            // 标量字面量向另一侧类别看齐
+            // 标量字面量向另一侧类别看齐（位宽取较宽侧，防 64 位截断）
             const TI& ta = b.info(a.type);
             if (a.type != v.type) {
-                if (ta.k == TI::F32 || b.info(v.type).k == TI::F32) {
-                    a = coerce(a, b.tF32(), e->line); v = coerce(v, b.tF32(), e->line);
-                } else if (ta.isUnsigned() || b.info(v.type).isUnsigned()) {
-                    a = coerce(a, b.tU32(), e->line); v = coerce(v, b.tU32(), e->line);
+                const TI& tvv = b.info(v.type);
+                int wb = ta.bits > tvv.bits ? ta.bits : tvv.bits;
+                if (ta.k == TI::F32 || tvv.k == TI::F32) {
+                    uint32_t want = wb == 16 ? b.tF16() : b.tF32();
+                    a = coerce(a, want, e->line); v = coerce(v, want, e->line);
+                } else if (ta.isUnsigned() || tvv.isUnsigned()) {
+                    uint32_t want = wb == 64 ? b.tU64() : wb == 16 ? b.tU16()
+                                  : wb == 8 ? b.tU8() : b.tU32();
+                    a = coerce(a, want, e->line); v = coerce(v, want, e->line);
                 } else {
-                    a = coerce(a, b.tI32(), e->line); v = coerce(v, b.tI32(), e->line);
+                    uint32_t want = wb == 64 ? b.tI64() : wb == 16 ? b.tI16()
+                                  : wb == 8 ? b.tI8() : b.tI32();
+                    a = coerce(a, want, e->line); v = coerce(v, want, e->line);
                 }
             }
             const TI& ti = b.info(a.type);
@@ -1283,13 +1478,21 @@ struct StageEmitter {
         };
         if (ta->k == TI::Vec && tv->k != TI::Vec) { v = splat(v, a.type); tv = &b.info(v.type); }
         else if (tv->k == TI::Vec && ta->k != TI::Vec) { a = splat(a, v.type); ta = &b.info(a.type); }
-        // 标量类别统一（字面量宽容：int 字面量随浮点/无符号侧）
+        // 标量类别统一（字面量宽容：int 字面量随浮点/无符号侧；位宽取较宽侧）
         if (a.type != v.type) {
+            int wb = ta->bits > tv->bits ? ta->bits : tv->bits;
             if (ta->isFloat() || tv->isFloat()) {
-                uint32_t want = ta->k == TI::Vec ? a.type : tv->k == TI::Vec ? v.type : b.tF32();
+                uint32_t want = ta->k == TI::Vec ? a.type : tv->k == TI::Vec ? v.type
+                              : wb == 16 ? b.tF16() : b.tF32();
                 a = coerce(a, want, line); v = coerce(v, want, line);
             } else if (ta->isUnsigned() || tv->isUnsigned()) {
-                a = coerce(a, b.tU32(), line); v = coerce(v, b.tU32(), line);
+                uint32_t want = wb == 64 ? b.tU64() : wb == 16 ? b.tU16()
+                              : wb == 8 ? b.tU8() : b.tU32();
+                a = coerce(a, want, line); v = coerce(v, want, line);
+            } else if (ta->isSigned() && tv->isSigned()) {
+                uint32_t want = wb == 64 ? b.tI64() : wb == 16 ? b.tI16()
+                              : wb == 8 ? b.tI8() : b.tI32();
+                a = coerce(a, want, line); v = coerce(v, want, line);
             } else err("shader 算术两侧类型不一致", line);
             ta = &b.info(a.type);
         }
@@ -1309,8 +1512,84 @@ struct StageEmitter {
         if (!e->a || e->a->kind != Expr::Ident)
             err("shader 暂不支持间接调用", e->line);
         const std::string& fn = e->a->text;
+
+        // —— P2 计算原语：barrier / memory_barrier / atomic_*（参数求值形态特殊，
+        //    首参需指针而非右值，先于通用 rvalue 求值处理）——
+        if (fn == "barrier" || fn == "memory_barrier") {
+            if (fn == "barrier" && stage.shaderStage != ShaderStage::Comp)
+                err("`barrier` 仅 comp 阶段可用", e->line);
+            if (!e->args.empty()) err("`" + fn + "` 不接受参数", e->line);
+            if (fn == "barrier")
+                // Scope Workgroup(2)×2，语义 AcquireRelease|WorkgroupMemory(0x108)
+                put(body, OpControlBarrier, {b.constU(2), b.constU(2), b.constU(0x108)});
+            else
+                // Scope Device(1)，语义 AcquireRelease|UniformMemory|WorkgroupMemory(0x148)
+                put(body, OpMemoryBarrier, {b.constU(1), b.constU(0x148)});
+            return {0, b.tVoid()};
+        }
+        if (fn.rfind("atomic_", 0) == 0) {
+            const std::string op = fn.substr(7);
+            const size_t need = op == "cas" ? 3 : 2;
+            if (e->args.size() != need)
+                err("`" + fn + "` 期望 " + std::to_string(need) + " 个参数", e->line);
+            Ptr p = lvalue(e->args[0].get());
+            if (p.sc != ScUniform && p.sc != ScWorkgroup)
+                err("原子操作仅作用于 storage 块或 shared 成员", e->line);
+            const TI& ti = b.info(p.type);
+            if ((ti.k != TI::I32 && ti.k != TI::U32) || ti.bits != 32)
+                err("原子操作仅支持 i4/u4 标量（32 位；64 位需 Int64Atomics 待后续）", e->line);
+            uint32_t scope = b.constU(1);    // Device
+            uint32_t sem   = b.constU(0);    // Relaxed
+            if (op == "cas") {
+                Val cmp = coerce(rvalue(e->args[1].get()), p.type, e->line);
+                Val val = coerce(rvalue(e->args[2].get()), p.type, e->line);
+                // OpAtomicCompareExchange: ptr scope semEq semUneq value comparator
+                return {ins(OpAtomicCompareExchange, p.type,
+                            {p.id, scope, sem, sem, val.id, cmp.id}), p.type};
+            }
+            Val val = coerce(rvalue(e->args[1].get()), p.type, e->line);
+            uint16_t code =
+                  op == "add" ? OpAtomicIAdd : op == "sub" ? OpAtomicISub
+                : op == "and" ? OpAtomicAnd  : op == "or"  ? OpAtomicOr
+                : op == "xor" ? OpAtomicXor  : op == "exchange" ? OpAtomicExchange
+                : op == "min" ? (ti.k == TI::U32 ? OpAtomicUMin : OpAtomicSMin)
+                : op == "max" ? (ti.k == TI::U32 ? OpAtomicUMax : OpAtomicSMax)
+                : (uint16_t)0;
+            if (!code)
+                err("shader 暂不支持函数 `" + fn + "`（原子族：add/sub/min/max/and/or/xor/exchange/cas）", e->line);
+            return {ins(code, p.type, {p.id, scope, sem, val.id}), p.type};
+        }
+
         std::vector<Val> args;
         for (const auto& a : e->args) args.push_back(rvalue(a.get()));
+
+        // —— P2 subgroup 基础三件（vote/ballot/shuffle，SPIR-V 1.3 GroupNonUniform 系）——
+        if (fn == "subgroup_all" || fn == "subgroup_any" ||
+            fn == "subgroup_ballot" || fn == "subgroup_shuffle") {
+            b.needSpv13 = true;
+            b.extraCaps.insert(CapGroupNonUniform);
+            uint32_t scope = b.constU(3);            // Scope Subgroup
+            if (fn == "subgroup_all" || fn == "subgroup_any") {
+                if (args.size() != 1) err("`" + fn + "` 期望 1 个 bool 参数", e->line);
+                b.extraCaps.insert(CapGroupNonUniformVote);
+                Val p = coerce(args[0], b.tBool(), e->line);
+                uint16_t code = fn == "subgroup_all" ? OpGroupNonUniformAll : OpGroupNonUniformAny;
+                return {ins(code, b.tBool(), {scope, p.id}), b.tBool()};
+            }
+            if (fn == "subgroup_ballot") {
+                if (args.size() != 1) err("`subgroup_ballot` 期望 1 个 bool 参数", e->line);
+                b.extraCaps.insert(CapGroupNonUniformBallot);
+                Val p = coerce(args[0], b.tBool(), e->line);
+                uint32_t uvec4 = b.tVec(b.tU32(), 4);
+                return {ins(OpGroupNonUniformBallot, uvec4, {scope, p.id}), uvec4};
+            }
+            // subgroup_shuffle(value, lane)
+            if (args.size() != 2) err("`subgroup_shuffle` 期望 (值, 通道) 2 个参数", e->line);
+            b.extraCaps.insert(CapGroupNonUniformShuffle);
+            Val lane = coerce(args[1], b.tU32(), e->line);
+            return {ins(OpGroupNonUniformShuffle, args[0].type,
+                        {scope, args[0].id, lane.id}), args[0].type};
+        }
 
         // 向量构造 vecN(...)：分量拼接（成分可为更小向量），不足时逐一 coerce
         ScType st;
@@ -1357,12 +1636,9 @@ struct StageEmitter {
             }
             return {ins(OpCompositeConstruct, stype, ops), stype};
         }
-        // 标量转换 float(x)/int(x)/uint(x)
-        if (scTypeOf(fn, st) && st.k != TI::Vec && st.k != TI::Mat && args.size() == 1) {
-            uint32_t want = st.k == TI::F32 ? b.tF32() : st.k == TI::U32 ? b.tU32()
-                          : st.k == TI::Bool ? b.tBool() : b.tI32();
-            return coerce(args[0], want, e->line);
-        }
+        // 标量转换 float(x)/int(x)/uint(x)（含 P3 窄/宽标量 f2(x)/i8(x)/...）
+        if (scTypeOf(fn, st) && st.k != TI::Vec && st.k != TI::Mat && args.size() == 1)
+            return coerce(args[0], scalarTid(st), e->line);
         // 矩阵构造 matN(列0, 列1, ...)
         if (scTypeOf(fn, st) && st.k == TI::Mat) {
             uint32_t vt = b.tMat(st.n);
@@ -1744,7 +2020,9 @@ struct StageEmitter {
         }
         if (fn == "mod" && args.size() == 2) {
             args[1] = coerce(args[1], args[0].type, e->line);
-            return {ins(OpFMod, args[0].type, {args[0].id, args[1].id}), args[0].type};
+            const TI& ti = b.info(args[0].type);
+            uint16_t code = ti.isFloat() ? OpFMod : ti.isUnsigned() ? OpUMod : OpSRem;
+            return {ins(code, args[0].type, {args[0].id, args[1].id}), args[0].type};
         }
         err("shader 暂不支持函数 `" + fn + "`（辅助函数调用见 M2；内建补全见 syntax-s §16）", e->line);
     }
@@ -2114,16 +2392,84 @@ struct StageEmitter {
         }
 
         // 全局 let 常量（编译期可折叠的顶层 let x = ...）作为 Function 变量，
-        // 在 setupIO 之后、辅助函数之前注入，全阶段可见
+        // 在 setupIO 之后、辅助函数之前注入，全阶段可见。
+        // 尾缀 `spec N` 的 let → OpSpecConstant + SpecId 装饰（管线创建期可覆写）。
         for (const auto& d : prog.decls) {
             if (!d || d->kind != Decl::LetD) continue;
             for (const auto& f : d->structCommon.fields) {
                 if (!f.init) continue;
-                uint32_t cid = constExpr(f.init.get());
-                if (!cid) continue;
-                uint32_t typeId = f.type.name.empty()
-                    ? (b.info(cid).k == TI::F32 ? b.tF32() : b.tI32())
-                    : typeIdOf(f.type, f.line);
+                uint32_t cid = 0, typeId = 0;
+                if (f.shaderAttr && f.shaderAttr->specId >= 0) {
+                    // 特化常量：初值须为数值字面量（可带负号），类型 i4/u4/f4 标量
+                    const Expr* ie = f.init.get();
+                    bool neg = ie->kind == Expr::Unary && ie->op == "-" && ie->a;
+                    const Expr* lit = neg ? ie->a.get() : ie;
+                    if (lit->kind != Expr::IntLit && lit->kind != Expr::FloatLit)
+                        err("spec 特化常量初值须为数值字面量", f.line);
+                    ScType st{TI::I32, 0};
+                    if (!f.type.name.empty()) {
+                        if (!scTypeOf(f.type.name, st) || st.k == TI::Vec ||
+                            st.k == TI::Mat || st.k == TI::Bool || st.bits != 32)
+                            err("spec 特化常量仅支持 i4/u4/f4 标量（32 位）", f.line);
+                    } else {
+                        st.k = lit->kind == Expr::FloatLit ? TI::F32 : TI::I32;
+                    }
+                    uint32_t word = 0;
+                    if (st.k == TI::F32) {
+                        float v = lit->kind == Expr::FloatLit
+                                ? std::strtof(lit->text.c_str(), nullptr)
+                                : (float)std::strtol(lit->text.c_str(), nullptr, 0);
+                        if (neg) v = -v;
+                        std::memcpy(&word, &v, 4);
+                        typeId = b.tF32();
+                    } else {
+                        int32_t v = (int32_t)std::strtol(lit->text.c_str(), nullptr, 0);
+                        if (neg) v = -v;
+                        word = (uint32_t)v;
+                        typeId = st.k == TI::U32 ? b.tU32() : b.tI32();
+                    }
+                    cid = b.id();
+                    put(b.secTypes, OpSpecConstant, {typeId, cid, word});
+                    put(b.secDeco, OpDecorate, {cid, DecSpecId, (uint32_t)f.shaderAttr->specId});
+                    b.name(cid, f.name);   // 名字进反汇编→SPIRV-Cross 的 function_constant 同名
+                } else {
+                    // P3 窄/宽标量 let（f2/i8/u8/i1/u1/i2/u2）：需位宽正确的常量初值
+                    //（OpVariable 初值须为同型常量，不能插转换指令）
+                    ScType stl{TI::I32, 0, 32};
+                    bool narrow = !f.type.name.empty() && scTypeOf(f.type.name, stl) &&
+                                  stl.k != TI::Vec && stl.k != TI::Mat &&
+                                  stl.k != TI::Bool && stl.bits != 32;
+                    if (narrow) {
+                        const Expr* ie = f.init.get();
+                        bool neg = ie->kind == Expr::Unary && ie->op == "-" && ie->a;
+                        const Expr* lit = neg ? ie->a.get() : ie;
+                        if (lit->kind != Expr::IntLit && lit->kind != Expr::FloatLit)
+                            err("窄/宽标量 let 初值须为数值字面量", f.line);
+                        typeId = scalarTid(stl);
+                        if (stl.k == TI::F32) {          // f2
+                            float fv = lit->kind == Expr::FloatLit
+                                     ? std::strtof(lit->text.c_str(), nullptr)
+                                     : (float)std::strtol(lit->text.c_str(), nullptr, 0);
+                            if (neg) fv = -fv;
+                            cid = b.constF16(fv);
+                        } else if (stl.bits == 64) {     // i8/u8
+                            long long lv = std::strtoll(lit->text.c_str(), nullptr, 0);
+                            if (neg) lv = -lv;
+                            cid = b.const64(typeId, (uint64_t)lv);
+                        } else {                          // i1/u1/i2/u2（低位入 word）
+                            long lv = std::strtol(lit->text.c_str(), nullptr, 0);
+                            if (neg) lv = -lv;
+                            uint32_t mask = stl.bits == 8 ? 0xFFu : 0xFFFFu;
+                            cid = b.constScalar(typeId, (uint32_t)lv & mask);
+                        }
+                    } else {
+                        cid = constExpr(f.init.get());
+                        if (!cid) continue;
+                        typeId = f.type.name.empty()
+                            ? (b.info(cid).k == TI::F32 ? b.tF32() : b.tI32())
+                            : typeIdOf(f.type, f.line);
+                    }
+                }
                 uint32_t ptrT = b.tPtr(ScFunction, typeId);
                 uint32_t v = b.id();
                 put(funcVars, OpVariable, {ptrT, v, ScFunction, cid});
@@ -2165,8 +2511,16 @@ struct StageEmitter {
         putV(b.secEntry, OpEntryPoint, ep);
         if (stage.shaderStage == ShaderStage::Frag)
             put(b.secExec, OpExecutionMode, {fnId, 7 /*OriginUpperLeft*/});
-        if (stage.shaderStage == ShaderStage::Comp)
-            put(b.secExec, OpExecutionMode, {fnId, 17 /*LocalSize*/, 64, 1, 1});
+        if (stage.shaderStage == ShaderStage::Comp) {
+            // 工作组尺寸：签名尾 `local X [Y [Z]]` 声明值，未声明默认 64×1×1。
+            uint32_t lx = 64, ly = 1, lz = 1;
+            if (stage.shaderAttr && stage.shaderAttr->local[0] > 0) {
+                lx = (uint32_t)stage.shaderAttr->local[0];
+                ly = (uint32_t)stage.shaderAttr->local[1];
+                lz = (uint32_t)stage.shaderAttr->local[2];
+            }
+            put(b.secExec, OpExecutionMode, {fnId, 17 /*LocalSize*/, lx, ly, lz});
+        }
     }
 };
 

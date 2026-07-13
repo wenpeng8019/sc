@@ -46,8 +46,10 @@ fnc main: i4
     var fails: i4 = 0
 
     # ============ 1. kernel 面:saxpy(y = 2x + 1) ============
-    var brj: shader_blob& = shader_saxpy_get(0)      # reflect.json
-    var bms: shader_blob& = shader_saxpy_get(1)      # cs_saxpy.metal
+    # saxpy 三目标条目(0/1=vulkan、2/3=metal、4/5=gles)；本 demo 是 mac 专属
+    #(graph/model 面 CoreML/MPSGraph)，直取 metal 条目。跨后端选条目见 spc_p2_demo。
+    var brj: shader_blob& = shader_saxpy_get(2)      # metal reflect.json
+    var bms: shader_blob& = shader_saxpy_get(3)      # cs_saxpy.metal
 
     var x: tensor& = arange(0.0, 1024.0, 1.0, DT_F4)
     var y: tensor& = ones_like(x)

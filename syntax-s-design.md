@@ -670,51 +670,64 @@ metal 经 SPIRV-Cross→MSL，**glcore/gles 也经 SPIRV-Cross 反译 GLSL**（E
 
 ### P0 语言核心完备（现有用例的直接缺口）
 
-| 能力 | SPIR-V 落点 | 现状/备注 |
+| 能力 | SPIR-V 落点 | 现状/备注（2026-07-13 复盘） |
 |---|---|---|
-| `for` / `do-while` / `break` / `continue` | OpLoopMerge + OpBranch* | Emitter 现仅 if/while |
-| `switch`/`case` | OpSwitch | |
-| `discard`（frag） | OpKill / OpDemoteToHelperInvocation | |
-| swizzle 写入（`v.xy = ...`） | OpVectorShuffle + OpStore | 读侧已支持 |
-| 结构体值类型完备（嵌套/函数参数/返回/构造） | OpTypeStruct / OpCompositeConstruct | 现仅 I/O 与资源块 |
-| 数组完备（多维/函数参数/动态索引） | OpTypeArray / OpAccessChain | 一维已支持 |
-| 矩阵运算完备（mat*vec、vec*mat、mat*mat、转置/逆/行列式） | OpMatrixTimesVector 等 + GLSL.std.450 | |
-| 内建变量补全（front_facing/point_size/sample_id/…） | BuiltIn 装饰 | 现有 8 个 |
-| 编译期常量折叠 / `let` 常量 | OpConstant / OpSpecConstant（后者 P2） | |
+| `for` / `do-while` / `break` / `continue` | OpLoopMerge + OpBranch* | ✅ |
+| `switch`/`case` | OpSwitch | ✅（if-else 链等价降级，含 through 贯穿；未用 OpSwitch 指令，语义等价） |
+| `discard`（frag） | OpKill | ✅ |
+| swizzle 写入（`v.xy = ...`） | OpVectorShuffle + OpStore | ✅ |
+| 结构体值类型完备（嵌套/函数参数/返回/构造） | OpTypeStruct / OpCompositeConstruct | ✅ |
+| 数组完备（多维/函数参数/动态索引） | OpTypeArray / OpAccessChain | ✅（多维结构体数组仍拒） |
+| 矩阵运算完备（mat*vec、vec*mat、mat*mat、转置/逆/行列式） | OpMatrixTimesVector 等 + GLSL.std.450 | ✅ |
+| 内建变量补全（front_facing/point_size/sample_id/…） | BuiltIn 装饰 | ✅（13+ 个，含 subgroup 两个） |
+| 编译期常量折叠 / `let` 常量 | OpConstant / OpSpecConstant | ✅（含 P3 窄/宽常量） |
 
 ### P1 图形能力补全
 
-| 能力 | SPIR-V 落点 | 备注 |
+| 能力 | SPIR-V 落点 | 备注（2026-07-13 复盘） |
 |---|---|---|
-| 纹理类型族：3D/Cube/Array/Shadow/MS | OpTypeImage 维度/Depth/MS 位 | 现仅 sampler2D |
-| 采样变体：textureLod/Grad/texelFetch/textureSize/Proj | OpImageSample*/OpImageFetch/OpImageQuery* | |
-| image load/store（无采样读写） | OpImageRead/OpImageWrite + Capability StorageImage* | spc kernel 面需要 |
-| derivative：dFdx/dFdy/fwidth | OpDPdx/OpDPdy/OpFwidth | frag 专属门控 |
-| 分离 texture/sampler（SPIR-V 原生形态） | OpTypeSampler + OpSampledImage | 现为 combined |
-| MRT 完备 + 深度输出组合 | Location/BuiltIn FragDepth | ES100 侧已有 gl_FragData |
-| UBO/SSBO 运行时数组 + 动态索引 | OpTypeRuntimeArray + Capability | |
-| push constant 完备（嵌套/数组） | PushConstant storage class | 基础已有 |
+| 纹理类型族：3D/Cube/Array/Shadow/MS | OpTypeImage 维度/Depth/MS 位 | ✅（19 种采样器） |
+| 采样变体：textureLod/Grad/texelFetch/textureSize/Proj | OpImageSample*/OpImageFetch/OpImageQuery* | ✅（含 Gather/Offset/QueryLod/QueryLevels） |
+| image load/store（无采样读写） | OpImageRead/OpImageWrite + Capability StorageImage* | ❌ **未做**（spc kernel 面的图像算子需要时再做；当前用 SSBO 表达图像数据可绕行） |
+| derivative：dFdx/dFdy/fwidth | OpDPdx/OpDPdy/OpFwidth | ✅（frag 门控） |
+| 分离 texture/sampler（SPIR-V 原生形态） | OpTypeSampler + OpSampledImage | ❌ **未做**（combined 形态足够现有用例；D3D 后端时再评估） |
+| MRT 完备 + 深度输出组合 | Location/BuiltIn FragDepth | ✅ |
+| UBO/SSBO 运行时数组 + 动态索引 | OpTypeRuntimeArray + Capability | ✅ |
+| push constant 完备（嵌套/数组） | PushConstant storage class | ✅（含存储类修复，spirv-val 验证） |
 
-### P2 计算深化
+### P2 计算深化（✅ 2026-07-13 全部落地，mac Metal 端到端验证）
 
-| 能力 | SPIR-V 落点 | 备注 |
+| 能力 | SPIR-V 落点 | 状态 |
 |---|---|---|
-| `local_size` 的 .ss 语法 | ExecutionMode LocalSize | 现固定 64×1×1 |
-| shared 共享内存 | Workgroup storage class | |
-| barrier / memoryBarrier | OpControlBarrier / OpMemoryBarrier | |
-| 原子操作 | OpAtomic* | SSBO/shared 上 |
-| 特化常量 | OpSpecConstant* | 管线创建期调参 |
-| subgroup 基础（vote/ballot/shuffle） | Capability GroupNonUniform*（SPIR-V 1.3+） | 提升 SPIR-V 目标版本 |
+| `local_size` 的 .ss 语法 | ExecutionMode LocalSize | ✅ 签名尾 `local X [Y [Z]]`，反射驱动 spc 调度 |
+| shared 共享内存 | Workgroup storage class | ✅ `@def X: {...} shared`，MSL threadgroup 验证 |
+| barrier / memoryBarrier | OpControlBarrier / OpMemoryBarrier | ✅ `barrier()`/`memory_barrier()` |
+| 原子操作 | OpAtomic* | ✅ add/sub/min/max/and/or/xor/exchange/cas，SSBO+shared |
+| 特化常量 | OpSpecConstant* | ✅ `let X: T = v spec N`，反射 spec_constants；运行时传值面待后端适配期 |
+| subgroup 基础（vote/ballot/shuffle） | Capability GroupNonUniform*（SPIR-V 1.3+） | ✅ 版本按需 1.0/1.3 动态；metal vote/ballot 需 2.1 已门控 |
+
+验证：tests/cases/shader_p2_*.ss 四用例（golden 286/0）+ templates/demo/spc_p2_demo.sc
+（Metal host：shared 树形规约 + barrier + atomic_add，n=4096 数值精确）。
+待后续：Vulkan/GLES31 后端适配（spc kernel 面）、spec 常量运行时传值 API。
 
 ### P3 按需远期
 
-| 能力 | SPIR-V 落点 | 触发条件 |
+| 能力 | SPIR-V 落点 | 触发条件/状态 |
 |---|---|---|
-| f16 / i64 / i8 标量 | Capability Float16/Int64/Int8 | 移动端带宽/ML 需求 |
+| f16 / i64 / i8 标量 | Capability Float16/Int64/Int8/Int16 | ✅ 2026-07-13 落地（嵌入式先行）：名字即字节数 f2/i8·u8/i1·u1/i2·u2 真位宽；块成员经 SPV_KHR_16bit/8bit_storage；MSL half/long(2.3+)/char/short 验证；限制：无窄分量向量、原子/spec 仍 32 位 |
 | 几何/细分/mesh/task 阶段 | Capability Geometry/Tessellation/MeshShadingEXT | 有真实用例再做 |
 | buffer_device_address（物理指针） | PhysicalStorageBuffer | Vulkan 高级路径 |
 | ray tracing / ray query | Capability RayTracingKHR | 平台成熟后 |
 | 多视图/多采样高级（sample shading 等） | 相应 Capability | XR 需求 |
+
+### spc kernel 面后端矩阵（2026-07-13，三后端代码全部就位）
+
+- 公共层抽 vtable（spc_kernel_api，按 sc_gpu_query_backend 选定）；
+  graph/model 面仍 darwin 直连。特化常量运行时传值面
+  （kernel_desc.spec_values）同批落地。
+- Metal（metal_spc.m）✅ 实机；Vulkan（vulkan_spc.c，VkSpecializationInfo）
+  与 GL（gl_spc.c，GLES3.1/GL4.3）盲写完成，Android NDK + mingw 交叉编译
+  验证；板端验证手册 = builtins/spc/PORTING.md（换设备必读）。
 
 ---
 

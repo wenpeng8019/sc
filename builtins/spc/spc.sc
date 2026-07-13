@@ -14,10 +14,13 @@
 inc ts.sc
 inc spc.h
 
-# 实现：源码动态编译（同 gpu.sc：平台自守卫 + .m 自动 ObjC；
-# 一期 darwin 专属，非 darwin 目标全部空化为空 .o）
+# 实现：源码动态编译（同 gpu.sc：平台自守卫 + .m 自动 ObjC）。
+# kernel 面按 gpu 后端派发：darwin=Metal、linux/android=GL·Vulkan、win=Vulkan；
+# graph/model 面仍 darwin 专属（非命中平台源文件全部空化为空 .o）。
 add src/spc.c
 add src/metal_spc.m
+add src/vulkan_spc.c
+add src/gl_spc.c
 add src/mpsg_spc.m
 add src/coreml_spc.m
 
@@ -36,6 +39,7 @@ add src/coreml_spc.m
 @fnc spc_destroy_buffer:: buf: u4
 
 # === kernel 面：内核与调度（gx/gy/gz = 全局线程数） ===
+# 特化常量传值：kernel_desc.spec_values/spec_count（见 spc.h；仅 Metal/Vulkan）
 @fnc spc_make_kernel:: u4, desc: const ::sc_spc_kernel_desc&
 @fnc spc_destroy_kernel:: k: u4
 @fnc spc_dispatch:: i4, k: u4, gx: i4, gy: i4, gz: i4, bindings: const ::sc_spc_bindings&

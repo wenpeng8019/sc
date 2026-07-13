@@ -1,0 +1,93 @@
+ss: cs_sg.vulkan450.spv（1920 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p2_subgroup.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_sg",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_sg.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== shader_p2_subgroup.metal20100.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20100, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_sg",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_sg.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_sg.metal20100.metal =====
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+inline uint4 spvSubgroupBallot(bool value)
+{
+    simd_vote vote = simd_ballot(value);
+    // simd_ballot() returns a 64-bit integer-like object, but
+    // SPIR-V callers expect a uint4. We must convert.
+    // FIXME: This won't include higher bits if Apple ever supports
+    // 128 lanes in an SIMD-group.
+    return uint4(as_type<uint2>((simd_vote::vote_t)vote), 0, 0);
+}
+
+template<typename T>
+inline T spvSubgroupShuffle(T value, ushort lane)
+{
+    return simd_shuffle(value, lane);
+}
+
+template<>
+inline bool spvSubgroupShuffle(bool value, ushort lane)
+{
+    return !!simd_shuffle((ushort)value, lane);
+}
+
+template<uint N>
+inline vec<bool, N> spvSubgroupShuffle(vec<bool, N> value, ushort lane)
+{
+    return (vec<bool, N>)simd_shuffle((vec<ushort, N>)value, lane);
+}
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+kernel void cs_sg(device XBuf_blk& XBuf [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]], uint gl_SubgroupInvocationID [[thread_index_in_simdgroup]], uint gl_SubgroupSize [[thread_execution_width]])
+{
+    float v = XBuf.x[gl_GlobalInvocationID.x];
+    if (simd_all(v > 0.0))
+    {
+        v *= 2.0;
+    }
+    uint4 bits = spvSubgroupBallot(v > 1.0);
+    float head = spvSubgroupShuffle(v, uint(0));
+    XBuf.x[gl_GlobalInvocationID.x] = ((v + head) + float(bits.x % uint(2))) + float(gl_SubgroupSize - gl_SubgroupInvocationID);
+}

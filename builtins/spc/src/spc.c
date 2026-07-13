@@ -10,6 +10,10 @@
 
 /* gpu env（设备来源；spc 依赖 libgpu.a） */
 extern int sc_gpu_isvalid(void);
+extern int sc_gpu_query_backend(void);
+
+/* kernel 面后端（init 时按 gpu 实际后端选定；NULL = 未初始化） */
+static const spc_kernel_api* K;
 
 /* ---- 日志 ------------------------------------------------- */
 
@@ -133,6 +137,7 @@ static bool readStr(const char* v, char* out, size_t cap) {
 
 static bool parseReflect(spc_kernel_t* k, const char* json, const char* entry) {
     k->res_count = 0;
+    k->spec_count = 0;
     k->local[0] = 64; k->local[1] = 1; k->local[2] = 1;
     if (!json) return true;   /* 无清单：无绑定内核也合法 */
     const char* end = json + strlen(json);
@@ -160,6 +165,29 @@ static bool parseReflect(spc_kernel_t* k, const char* json, const char* entry) {
                 r->name[sizeof(r->name) - 1] = 0;
                 r->binding = (int)binding;
                 r->storage = strcmp(kind, "storage") == 0;
+            }
+            p = objEnd + 1;
+        }
+    }
+
+    /* spec_constants[]：特化常量 id → 类型（运行时传值对位；Metal 需类型） */
+    const char* specs = findKey(json, end, "spec_constants");
+    if (specs && *specs == '[') {
+        const char* arrEnd = matchBrace(specs, '[', ']');
+        const char* p = specs + 1;
+        while (arrEnd && p < arrEnd) {
+            p = strchr(p, '{');
+            if (!p || p >= arrEnd) break;
+            const char* objEnd = matchBrace(p, '{', '}');
+            if (!objEnd) break;
+            char ty[16] = {0};
+            const char* v;
+            long sid = (v = findKey(p, objEnd, "id")) ? strtol(v, NULL, 10) : -1;
+            if ((v = findKey(p, objEnd, "type"))) readStr(v, ty, sizeof(ty));
+            if (sid >= 0 && k->spec_count < SC_SPC_MAX_BINDINGS) {
+                spc_kernel_spec* s = &k->spec[k->spec_count++];
+                s->id = (int)sid;
+                s->type = ty[0] == 'f' ? 'f' : ty[0] == 'u' ? 'u' : 'i';
             }
             p = objEnd + 1;
         }
@@ -204,12 +232,24 @@ int sc_spc_init(const sc_spc_desc* desc) {
     S.desc.kernel_pool_size = DEF(S.desc.kernel_pool_size, 32);
     S.desc.model_pool_size  = DEF(S.desc.model_pool_size, 8);
 
+    /* kernel 面后端：跟随 gpu env 实际生效后端（不静默降级） */
+    K = NULL;
+    int gb = sc_gpu_query_backend();
 #if P_DARWIN
-    if (!spc_mtl_init()) { spc_log("init: Metal 初始化失败"); return 0; }
-#else
-    spc_log("init: 本平台 spc 后端待补（一期仅 darwin）");
-    return 0;
+    if (gb == 1 /*METAL*/) K = spc_mtl_api();
 #endif
+#if P_LINUX
+    if (gb == 2 /*GL*/)     K = spc_gl_api();
+#endif
+#if P_LINUX || P_WIN
+    if (gb == 3 /*VULKAN*/) K = spc_vk_api();
+#endif
+    if (!K) {
+        spc_log("init: gpu 后端 %d 无对应 spc kernel 实现（darwin=Metal、"
+                "linux/android=GL·Vulkan、win=Vulkan）", gb);
+        return 0;
+    }
+    if (!K->init()) { spc_log("init: %s 后端初始化失败", K->name); return 0; }
 
     poolInit(&S.buffer_pool, S.desc.buffer_pool_size);
     poolInit(&S.kernel_pool, S.desc.kernel_pool_size);
@@ -222,20 +262,21 @@ int sc_spc_init(const sc_spc_desc* desc) {
 }
 
 void sc_spc_shutdown(void) {
-#if P_DARWIN
     if (S.valid) {
+#if P_DARWIN
         for (int i = 1; i < S.model_pool.size; i++)
             if (S.models[i].state == SPC_SLOT_VALID)
                 spc_coreml_destroy(&S.models[i]);
+#endif
         for (int i = 1; i < S.kernel_pool.size; i++)
             if (S.kernels[i].state == SPC_SLOT_VALID)
-                spc_mtl_kernel_destroy(&S.kernels[i]);
+                K->kernel_destroy(&S.kernels[i]);
         for (int i = 1; i < S.buffer_pool.size; i++)
             if (S.buffers[i].state == SPC_SLOT_VALID)
-                spc_mtl_buffer_destroy(&S.buffers[i]);
-        spc_mtl_shutdown();
+                K->buffer_destroy(&S.buffers[i]);
+        K->shutdown();
+        K = NULL;
     }
-#endif
     free(S.buffers); free(S.kernels); free(S.models);
     poolFree(&S.buffer_pool); poolFree(&S.kernel_pool); poolFree(&S.model_pool);
     memset(&S, 0, sizeof(S));
@@ -244,9 +285,7 @@ void sc_spc_shutdown(void) {
 int sc_spc_isvalid(void) { return S.valid ? 1 : 0; }
 
 void sc_spc_finish(void) {
-#if P_DARWIN
-    if (S.valid) spc_mtl_finish();
-#endif
+    if (S.valid) K->finish();
 }
 
 /* ---- buffer ------------------------------------------------ */
@@ -259,10 +298,8 @@ sc_spc_buffer sc_spc_make_buffer(const sc_spc_buffer_desc* desc) {
     memset(b, 0, sizeof(*b));
     b->id = id;
     b->size = desc->size;
-#if P_DARWIN
-    b->state = spc_mtl_buffer_create(b, desc->data, desc->size)
+    b->state = K->buffer_create(b, desc->data, desc->size)
              ? SPC_SLOT_VALID : SPC_SLOT_FAILED;
-#endif
     return id;
 }
 
@@ -293,30 +330,20 @@ int sc_spc_buffer_read(sc_spc_buffer hnd, void* dst, uint64_t size, uint64_t off
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b || b->state != SPC_SLOT_VALID || !dst) return 0;
     if (offset + size > b->size) { spc_log("buffer_read: 越界"); return 0; }
-#if P_DARWIN
-    return spc_mtl_buffer_read(b, dst, size, offset) ? 1 : 0;
-#else
-    return 0;
-#endif
+    return K->buffer_read(b, dst, size, offset) ? 1 : 0;
 }
 
 int sc_spc_buffer_write(sc_spc_buffer hnd, const void* src, uint64_t size, uint64_t offset) {
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b || b->state != SPC_SLOT_VALID || !src) return 0;
     if (offset + size > b->size) { spc_log("buffer_write: 越界"); return 0; }
-#if P_DARWIN
-    return spc_mtl_buffer_write(b, src, size, offset) ? 1 : 0;
-#else
-    return 0;
-#endif
+    return K->buffer_write(b, src, size, offset) ? 1 : 0;
 }
 
 void sc_spc_destroy_buffer(sc_spc_buffer hnd) {
     spc_buffer_t* b = lookupBuffer(hnd);
     if (!S.valid || !b) return;
-#if P_DARWIN
-    if (b->state == SPC_SLOT_VALID) spc_mtl_buffer_destroy(b);
-#endif
+    if (b->state == SPC_SLOT_VALID) K->buffer_destroy(b);
     b->id = 0;
     b->state = SPC_SLOT_FREE;
     poolRelease(&S.buffer_pool, hnd);
@@ -332,19 +359,14 @@ sc_spc_kernel sc_spc_make_kernel(const sc_spc_kernel_desc* desc) {
     memset(k, 0, sizeof(*k));
     k->id = id;
     parseReflect(k, desc->reflect_json, desc->entry);
-#if P_DARWIN
-    k->state = spc_mtl_kernel_create(k, desc) ? SPC_SLOT_VALID
-                                                  : SPC_SLOT_FAILED;
-#endif
+    k->state = K->kernel_create(k, desc) ? SPC_SLOT_VALID : SPC_SLOT_FAILED;
     return id;
 }
 
 void sc_spc_destroy_kernel(sc_spc_kernel hnd) {
     spc_kernel_t* k = lookupKernel(hnd);
     if (!S.valid || !k) return;
-#if P_DARWIN
-    if (k->state == SPC_SLOT_VALID) spc_mtl_kernel_destroy(k);
-#endif
+    if (k->state == SPC_SLOT_VALID) K->kernel_destroy(k);
     k->id = 0;
     k->state = SPC_SLOT_FREE;
     poolRelease(&S.kernel_pool, hnd);
@@ -372,11 +394,7 @@ int sc_spc_dispatch(sc_spc_kernel hnd, int gx, int gy, int gz,
             return 0;
         }
     }
-#if P_DARWIN
-    return spc_mtl_dispatch(k, gx, gy, gz, bindings, bufs) ? 1 : 0;
-#else
-    return 0;
-#endif
+    return K->dispatch(k, gx, gy, gz, bindings, bufs) ? 1 : 0;
 }
 
 /* ---- graph ------------------------------------------------- */

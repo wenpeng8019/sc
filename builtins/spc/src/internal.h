@@ -1,9 +1,11 @@
 /* ============================================================
- * internal.h —— spc 模块内部：资源体、darwin 实现函数声明
+ * internal.h —— spc 模块内部：资源体、kernel 面 vtable、后端声明
  * ============================================================
- * 一期只有 darwin（Metal kernel + MPSGraph + CoreML）真实现，
- * 公共层 spc.c 经 #if P_DARWIN 直连——刻意不抽 vtable，
- * 待二期 Vulkan/RKNN 后端进场时再抽（避免为单实现造抽象）。
+ * 二期抽象：kernel 面（buffer/kernel/dispatch）按后端 vtable 派发——
+ *   metal_spc.m（darwin）/ vulkan_spc.c（linux/android/win）/
+ *   gl_spc.c（GLES3.1 / 桌面 GL4.3 compute）；后端跟随 gpu env 的
+ *   实际生效后端（sc_gpu_query_backend）。
+ * graph/model 面仍 darwin 直连（MPSGraph/CoreML；其它平台待 RKNN 等）。
  * ============================================================ */
 
 #ifndef SC_SPC_INTERNAL_H
@@ -35,11 +37,19 @@ typedef struct spc_kernel_res {
     int  storage;      /* 1 = storage 块，0 = uniform 块 */
 } spc_kernel_res;
 
+/* 反射的特化常量条目（spec_constants[]）：运行时传值时按 id 对位类型 */
+typedef struct spc_kernel_spec {
+    int  id;
+    char type;         /* 'f'=float / 'i'=int / 'u'=uint（Metal 需类型；Vulkan 类型无关） */
+} spc_kernel_spec;
+
 typedef struct spc_kernel_t {
     uint32_t           id;
     spc_slot_state state;
     spc_kernel_res res[SC_SPC_MAX_BINDINGS];
     int                res_count;
+    spc_kernel_spec    spec[SC_SPC_MAX_BINDINGS];   /* 反射 spec_constants */
+    int                spec_count;
     int                local[3];    /* 线程组尺寸（反射清单 local_size；默认 64,1,1） */
     void*              backend;
 } spc_kernel_t;
@@ -75,20 +85,26 @@ static inline bool spc_tscontig(const sc_tensor* t) {
     return true;
 }
 
-/* ---- darwin 实现（metal_spc.m / mpsg_spc.m / coreml_spc.m） -- */
+/* ---- kernel 面 vtable（每后端一张；由 spc.c 按 gpu 后端选择） ---- */
+typedef struct spc_kernel_api {
+    const char* name;
+    bool (*init)(void);
+    void (*shutdown)(void);
+    void (*finish)(void);
+    bool (*buffer_create)(spc_buffer_t* b, const void* data, uint64_t size);
+    void (*buffer_destroy)(spc_buffer_t* b);
+    bool (*buffer_read)(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off);
+    bool (*buffer_write)(spc_buffer_t* b, const void* src, uint64_t size, uint64_t off);
+    bool (*kernel_create)(spc_kernel_t* k, const sc_spc_kernel_desc* desc);
+    void (*kernel_destroy)(spc_kernel_t* k);
+    bool (*dispatch)(spc_kernel_t* k, int gx, int gy, int gz,
+                     const sc_spc_bindings* bnd,
+                     spc_buffer_t* bufs[SC_SPC_MAX_BINDINGS]);
+} spc_kernel_api;
+
+/* 后端 vtable 入口（未编入的后端不声明；平台守卫与 gpu 模块同源） */
 #if P_DARWIN
-bool spc_mtl_init(void);
-void spc_mtl_shutdown(void);
-void spc_mtl_finish(void);
-bool spc_mtl_buffer_create(spc_buffer_t* b, const void* data, uint64_t size);
-void spc_mtl_buffer_destroy(spc_buffer_t* b);
-bool spc_mtl_buffer_read(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off);
-bool spc_mtl_buffer_write(spc_buffer_t* b, const void* src, uint64_t size, uint64_t off);
-bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc);
-void spc_mtl_kernel_destroy(spc_kernel_t* k);
-bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
-                          const sc_spc_bindings* bnd,
-                          spc_buffer_t* bufs[SC_SPC_MAX_BINDINGS]);
+const spc_kernel_api* spc_mtl_api(void);
 
 int  spc_mpsg_mm(sc_tensor* a, sc_tensor* b, sc_tensor* out);
 
@@ -96,6 +112,12 @@ bool spc_coreml_load(spc_model_t* m, const char* path, int units);
 void spc_coreml_destroy(spc_model_t* m);
 bool spc_coreml_run1(spc_model_t* m, sc_tensor* in, sc_tensor* out);
 int  spc_coreml_ane_ratio(spc_model_t* m);
+#endif
+#if P_LINUX || P_WIN
+const spc_kernel_api* spc_vk_api(void);    /* Vulkan compute（vulkan_spc.c） */
+#endif
+#if P_LINUX
+const spc_kernel_api* spc_gl_api(void);    /* GLES3.1 / 桌面 GL4.3 compute（gl_spc.c） */
 #endif
 
 #endif /* SC_SPC_INTERNAL_H */

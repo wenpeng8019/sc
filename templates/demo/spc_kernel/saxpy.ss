@@ -1,12 +1,13 @@
 # saxpy —— spc kernel 面验证:y[i] = a * x[i] + y[i]
 #
-# 编译(产出 cs_saxpy.metal + saxpy.reflect.json):
+# 编译(产出三目标条目:0/1=vulkan reflect/.spv、2/3=metal、4/5=gles):
 #   ./compiler/build/scc templates/demo/spc_kernel/saxpy.ss -o templates/demo/spc_kernel/out/saxpy
 #
 # 说明:dispatch 用精确全局线程数(Metal non-uniform threadgroups),
 # n 越界守卫仍保留(通用做法,兼容需要对齐线程组的后端)。
+# 板端最小化验证首选本内核(无 shared/atomic,见 spc/PORTING.md §7)。
 
-tar metal@2.0
+tar vulkan@450, metal@2.0, gles@310
 
 @def Params: {
     a: f4
@@ -25,6 +26,6 @@ tar metal@2.0
     gid: u4 builtin global_invocation_id
 }
 
-comp cs_saxpy: void, in: CompIn
+comp cs_saxpy: in: CompIn
     if in.gid < Params.n
         YBuf.y[in.gid] = Params.a * XBuf.x[in.gid] + YBuf.y[in.gid]

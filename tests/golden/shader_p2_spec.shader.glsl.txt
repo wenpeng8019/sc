@@ -1,0 +1,81 @@
+// ===== shader_p2_spec.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "spec_constants": [{"name": "TILE", "id": 0, "type": "uint", "default": 64}, {"name": "GAIN", "id": 1, "type": "float", "default": 1.5}],
+  "stages": [
+    {
+      "name": "cs_spec",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_spec.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_spec.vulkan450.comp =====
+#version 450
+// generated from cs_spec (comp) target vulkan450
+
+layout(constant_id = 0) const uint TILE = 64;
+layout(constant_id = 1) const float GAIN = 1.5;
+const float PLAIN = 2.0;
+
+layout(set=0, binding=0, std430) buffer XBuf_blk {
+    float x[];
+} XBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    if ((gl_GlobalInvocationID.x < TILE)) {
+        XBuf.x[gl_GlobalInvocationID.x] = ((XBuf.x[gl_GlobalInvocationID.x] * GAIN) * PLAIN);
+    }
+}
+
+// ===== shader_p2_spec.metal20000.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20000, "explicitBinding": true, "flattenUniforms": false},
+  "spec_constants": [{"name": "TILE", "id": 0, "type": "uint", "default": 64}, {"name": "GAIN", "id": 1, "type": "float", "default": 1.5}],
+  "stages": [
+    {
+      "name": "cs_spec",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_spec.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_spec.metal20000.comp =====
+#version 450
+// generated from cs_spec (comp) target vulkan450
+
+layout(constant_id = 0) const uint TILE = 64;
+layout(constant_id = 1) const float GAIN = 1.5;
+const float PLAIN = 2.0;
+
+layout(set=0, binding=0, std430) buffer XBuf_blk {
+    float x[];
+} XBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    if ((gl_GlobalInvocationID.x < TILE)) {
+        XBuf.x[gl_GlobalInvocationID.x] = ((XBuf.x[gl_GlobalInvocationID.x] * GAIN) * PLAIN);
+    }
+}

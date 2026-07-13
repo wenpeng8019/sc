@@ -1,0 +1,293 @@
+ss: cs_scale.vulkan450.spv（1412 字节）需 -o 输出目录（二进制不入 stdout）
+ss: cs_tile.vulkan450.spv（1392 字节）需 -o 输出目录（二进制不入 stdout）
+ss: cs_default.vulkan450.spv（1392 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p2_local.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_scale",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_scale.comp",
+      "local_size": [128, 1, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_tile",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_tile.comp",
+      "local_size": [8, 8, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_default",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_default.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "a", "type": "float", "offset": 0, "size": 4}, {"name": "n", "type": "uint", "offset": 4, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== shader_p2_local.metal20000.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20000, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_scale",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_scale.comp",
+      "local_size": [128, 1, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_tile",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_tile.comp",
+      "local_size": [8, 8, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_default",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_default.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "a", "type": "float", "offset": 0, "size": 4}, {"name": "n", "type": "uint", "offset": 4, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_scale.metal20000.metal =====
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params_blk
+{
+    float a;
+    uint n;
+};
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+kernel void cs_scale(constant Params_blk& Params [[buffer(0)]], device XBuf_blk& XBuf [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    if (gl_GlobalInvocationID.x < Params.n)
+    {
+        XBuf.x[gl_GlobalInvocationID.x] = Params.a * XBuf.x[gl_GlobalInvocationID.x];
+    }
+}
+
+
+// ===== cs_tile.metal20000.metal =====
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params_blk
+{
+    float a;
+    uint n;
+};
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+kernel void cs_tile(constant Params_blk& Params [[buffer(0)]], device XBuf_blk& XBuf [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    if (gl_GlobalInvocationID.x < Params.n)
+    {
+        XBuf.x[gl_GlobalInvocationID.x] += 1.0;
+    }
+}
+
+
+// ===== cs_default.metal20000.metal =====
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params_blk
+{
+    float a;
+    uint n;
+};
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+kernel void cs_default(constant Params_blk& Params [[buffer(0)]], device XBuf_blk& XBuf [[buffer(1)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    if (gl_GlobalInvocationID.x < Params.n)
+    {
+        XBuf.x[gl_GlobalInvocationID.x] *= 2.0;
+    }
+}
+
+
+// ===== shader_p2_local.glcore430.reflect.json =====
+{
+  "target": {"api": "glcore", "version": 430, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_scale",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_scale.comp",
+      "local_size": [128, 1, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_tile",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_tile.comp",
+      "local_size": [8, 8, 1],
+      "inputs": [],
+      "outputs": []
+    },
+    {
+      "name": "cs_default",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_default.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": -1, "binding": 0, "layout": "std140",
+     "members": [{"name": "a", "type": "float", "offset": 0, "size": 4}, {"name": "n", "type": "uint", "offset": 4, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": -1, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_scale.glcore430.comp =====
+#version 430
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform Params_blk
+{
+    float a;
+    uint n;
+} Params;
+
+layout(binding = 1, std430) buffer XBuf_blk
+{
+    float x[];
+} XBuf;
+
+void main()
+{
+    uint _35 = gl_GlobalInvocationID.x;
+    uint _39 = Params.n;
+    bool _40 = _35 < _39;
+    if (_40)
+    {
+        uint _47 = gl_GlobalInvocationID.x;
+        float _51 = Params.a;
+        uint _54 = gl_GlobalInvocationID.x;
+        float _56 = XBuf.x[_54];
+        float _57 = _51 * _56;
+        XBuf.x[_47] = _57;
+    }
+}
+
+
+// ===== cs_tile.glcore430.comp =====
+#version 430
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform Params_blk
+{
+    float a;
+    uint n;
+} Params;
+
+layout(binding = 1, std430) buffer XBuf_blk
+{
+    float x[];
+} XBuf;
+
+void main()
+{
+    uint _35 = gl_GlobalInvocationID.x;
+    uint _39 = Params.n;
+    bool _40 = _35 < _39;
+    if (_40)
+    {
+        uint _47 = gl_GlobalInvocationID.x;
+        uint _52 = gl_GlobalInvocationID.x;
+        float _54 = XBuf.x[_52];
+        float _56 = _54 + 1.0;
+        XBuf.x[_47] = _56;
+    }
+}
+
+
+// ===== cs_default.glcore430.comp =====
+#version 430
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0, std140) uniform Params_blk
+{
+    float a;
+    uint n;
+} Params;
+
+layout(binding = 1, std430) buffer XBuf_blk
+{
+    float x[];
+} XBuf;
+
+void main()
+{
+    uint _35 = gl_GlobalInvocationID.x;
+    uint _39 = Params.n;
+    bool _40 = _35 < _39;
+    if (_40)
+    {
+        uint _47 = gl_GlobalInvocationID.x;
+        uint _52 = gl_GlobalInvocationID.x;
+        float _54 = XBuf.x[_52];
+        float _56 = _54 * 2.0;
+        XBuf.x[_47] = _56;
+    }
+}

@@ -253,6 +253,17 @@ enum class Cap {
     VertexIdBuiltin,  // builtin vertex_id / instance_id（ES 100 无 gl_VertexID）
     FragDepthBuiltin, // builtin frag_depth（ES 100 经 GL_EXT_frag_depth → gl_FragDepthEXT）
     MultiRenderTarget,// frag 多输出（ES 100 经 GL_EXT_draw_buffers → gl_FragData[i]）
+    SharedMemory,     // shared 共享内存块（Workgroup，P2）
+    ComputeBarrier,   // barrier / memory_barrier（P2）
+    AtomicOp,         // atomic_*（SSBO/shared 上的原子操作，P2）
+    SpecConstant,     // let ... spec N 特化常量（SPIR-V/MSL 专属，P2）
+    SubgroupVote,     // subgroup_all/any + subgroup 内建变量（SPIR-V 1.3，P2）
+    SubgroupBallot,   // subgroup_ballot（P2）
+    SubgroupShuffle,  // subgroup_shuffle（P2；MSL 2.0 即可，vote/ballot 需 2.1）
+    Float16Type,      // f2 半精度标量（P3；SPIR-V Float16 + 16bit_storage）
+    Int64Type,        // i8/u8 64 位整数（P3；SPIR-V Int64）
+    Int8Type,         // i1/u1 8 位整数（P3；SPIR-V Int8 + 8bit_storage）
+    Int16Type,        // i2/u2 16 位整数（P3；SPIR-V Int16 + 16bit_storage）
     CapCount
 };
 
@@ -334,6 +345,72 @@ inline const CapRow& capRow(Cap c) {
             {300, "GL_EXT_draw_buffers", 100}, // ES 100 经扩展 → gl_FragData[i]
             {300, nullptr, 0},
             {10000, nullptr, 0}},
+        /*SharedMemory   */ {"shared 共享内存",
+            {450, nullptr, 0},
+            {430, "GL_ARB_compute_shader", 420},
+            {310, nullptr, 0},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},
+        /*ComputeBarrier */ {"barrier 同步",
+            {450, nullptr, 0},
+            {430, "GL_ARB_compute_shader", 420},
+            {310, nullptr, 0},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},
+        /*AtomicOp       */ {"atomic_* 原子操作",
+            {450, nullptr, 0},
+            {430, "GL_ARB_compute_shader", 420},
+            {310, nullptr, 0},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},
+        /*SpecConstant   */ {"spec 特化常量",
+            {450, nullptr, 0},
+            { -1, nullptr, 0},              // GL 无特化常量（SPIR-V 专属）
+            { -1, nullptr, 0},
+            { -1, nullptr, 0},
+            {10200, nullptr, 0}},           // MSL 1.2+ function_constants
+        /*SubgroupVote   */ {"subgroup vote/内建",
+            {450, nullptr, 0},              // SPIR-V 1.3（Vulkan 1.1 消费端）
+            {430, "GL_KHR_shader_subgroup_vote", 430},
+            {310, "GL_KHR_shader_subgroup_vote", 310},
+            { -1, nullptr, 0},
+            {20100, nullptr, 0}},           // MSL 2.1 simd vote
+        /*SubgroupBallot */ {"subgroup ballot",
+            {450, nullptr, 0},
+            {430, "GL_KHR_shader_subgroup_ballot", 430},
+            {310, "GL_KHR_shader_subgroup_ballot", 310},
+            { -1, nullptr, 0},
+            {20100, nullptr, 0}},
+        /*SubgroupShuffle*/ {"subgroup shuffle",
+            {450, nullptr, 0},
+            {430, "GL_KHR_shader_subgroup_shuffle", 430},
+            {310, "GL_KHR_shader_subgroup_shuffle", 310},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},           // MSL 2.0 已有 simd_shuffle
+        /*Float16Type    */ {"f2 半精度",
+            {450, nullptr, 0},              // SPIR-V Capability Float16（消费端 Vulkan 1.1+ 查 feature）
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_float16", 430},
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_float16", 310},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},           // MSL half 原生
+        /*Int64Type      */ {"i8/u8 64位整数",
+            {450, nullptr, 0},
+            { -1, "GL_ARB_gpu_shader_int64", 400},
+            { -1, nullptr, 0},              // GLES 无 int64 途径
+            { -1, nullptr, 0},
+            {20300, nullptr, 0}},           // MSL 2.3+（buffer 内 long 的下限）
+        /*Int8Type       */ {"i1/u1 8位整数",
+            {450, nullptr, 0},
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_int8", 430},
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_int8", 310},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},           // MSL char 原生
+        /*Int16Type      */ {"i2/u2 16位整数",
+            {450, nullptr, 0},
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_int16", 430},
+            { -1, "GL_EXT_shader_explicit_arithmetic_types_int16", 310},
+            { -1, nullptr, 0},
+            {20000, nullptr, 0}},           // MSL short 原生
     };
     return TABLE[(int)c];
 }

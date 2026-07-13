@@ -40,11 +40,20 @@
 namespace {
 
 // sc 标量类型名 → GLSL 类型名。向量/矩阵/自定义原样透传。
+// P3：名字即字节数——f2/i1/u1/i2/u2/i8/u8 映射显式算术类型
+//（GL_EXT_shader_explicit_arithmetic_types_*，能力表门控）。
 std::string mapType(const std::string& n) {
     if (n == "f4") return "float";
     if (n == "f8") return "double";
-    if (n == "i1" || n == "i2" || n == "i4") return "int";
-    if (n == "u1" || n == "u2" || n == "u4") return "uint";
+    if (n == "f2") return "float16_t";
+    if (n == "i4") return "int";
+    if (n == "u4") return "uint";
+    if (n == "i1") return "int8_t";
+    if (n == "u1") return "uint8_t";
+    if (n == "i2") return "int16_t";
+    if (n == "u2") return "uint16_t";
+    if (n == "i8") return "int64_t";
+    if (n == "u8") return "uint64_t";
     if (n == "bool") return "bool";
     if (n == "void" || n.empty()) return "void";
     return n;   // vec2/3/4、ivec*、mat*、sampler2D 及自定义类型原样保留
@@ -70,6 +79,9 @@ std::string builtinGlsl(const std::string& sem, bool asOutput, const GlslTarget&
     if (sem == "workgroup_id")            return "gl_WorkGroupID";          /* uvec3 */
     if (sem == "num_workgroups")          return "gl_NumWorkGroups";        /* uvec3 */
     if (sem == "local_invocation_index")  return "gl_LocalInvocationIndex"; /* uint */
+    /* subgroup（P2，GL_KHR_shader_subgroup_basic） */
+    if (sem == "subgroup_size")           return "gl_SubgroupSize";          /* uint */
+    if (sem == "subgroup_invocation_id")  return "gl_SubgroupInvocationID";  /* uint */
     return "gl_" + sem;       // 兔底：原样加前缀（未知语义）
 }
 
@@ -86,7 +98,11 @@ int roundUp(int v, int a) { return a ? ((v + a - 1) / a) * a : v; }
 
 Layout layoutOf(const std::string& t, const std::vector<std::string>& dims, bool std430) {
     int a = 4, s = 4;
-    if (t == "vec2" || t == "ivec2" || t == "uvec2" || t == "bvec2") { a = 8;  s = 8;  }
+    // P3 窄/宽标量：对齐 = 尺寸 = 字节数（与 codegen_spirv::layOf 同源）
+    if (t == "f2" || t == "i2" || t == "u2") { a = 2; s = 2; }
+    else if (t == "i1" || t == "u1") { a = 1; s = 1; }
+    else if (t == "i8" || t == "u8") { a = 8; s = 8; }
+    else if (t == "vec2" || t == "ivec2" || t == "uvec2" || t == "bvec2") { a = 8;  s = 8;  }
     else if (t == "vec3" || t == "ivec3" || t == "uvec3" || t == "bvec3") { a = 16; s = 12; }
     else if (t == "vec4" || t == "ivec4" || t == "uvec4" || t == "bvec4") { a = 16; s = 16; }
     else if (t == "mat2") { a = 16; s = 32; }   // std140: 列按 vec4 对齐
@@ -189,6 +205,24 @@ struct Emitter {
             case Expr::Call: {
                 std::string callee = expr(e->a.get());
                 if (legacy && callee == "texture") callee = "texture2D";   // ES 100 无重载 texture()
+                // P2 计算原语：ss 名 → GLSL 内建名
+                if (callee == "memory_barrier") callee = "memoryBarrier";
+                else if (callee == "atomic_add") callee = "atomicAdd";
+                else if (callee == "atomic_sub") {   // GLSL 无 atomicSub → atomicAdd 负值
+                    return "atomicAdd(" + expr(e->args[0].get()) + ", -(" +
+                           expr(e->args[1].get()) + "))";
+                }
+                else if (callee == "atomic_min") callee = "atomicMin";
+                else if (callee == "atomic_max") callee = "atomicMax";
+                else if (callee == "atomic_and") callee = "atomicAnd";
+                else if (callee == "atomic_or")  callee = "atomicOr";
+                else if (callee == "atomic_xor") callee = "atomicXor";
+                else if (callee == "atomic_exchange") callee = "atomicExchange";
+                else if (callee == "atomic_cas") callee = "atomicCompSwap";
+                else if (callee == "subgroup_all") callee = "subgroupAll";
+                else if (callee == "subgroup_any") callee = "subgroupAny";
+                else if (callee == "subgroup_ballot") callee = "subgroupBallot";
+                else if (callee == "subgroup_shuffle") callee = "subgroupShuffle";
                 std::string s = callee + "(";
                 for (size_t i = 0; i < e->args.size(); i++) {
                     if (i) s += ", ";
@@ -382,6 +416,17 @@ std::string emitResources(const Model& m, const GlslTarget& t) {
     std::string out;
     for (const Decl* r : m.resources) {
         auto* a = r->shaderAttr.get();
+        // shared 共享内存块（P2）：struct + shared 实例（成员访问 Tile.data[i] 原样成立）
+        if (a->res == ShaderDeclAttr::Shared) {
+            out += "struct " + r->name + "_blk {\n";
+            for (const auto& f : r->structCommon.fields) {
+                out += "    " + mapType(f.type.name) + " " + f.name;
+                for (const auto& d : f.type.arrayDims) out += "[" + d + "]";
+                out += ";\n";
+            }
+            out += "};\nshared " + r->name + "_blk " + r->name + ";\n";
+            continue;
+        }
         std::string bind;
         auto add = [&](const std::string& s) { bind += (bind.empty() ? "" : ", ") + s; };
         if (a->res == ShaderDeclAttr::Push) bind = "push_constant";   // 仅 Vulkan 抵达（已语义门控）
@@ -480,10 +525,19 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
         return interpPrefix(attr, tp) + "layout(location=" + std::to_string(loc) + ") out ";
     };
 
-    // comp：工作组尺寸（暂无 .ss 语法，固定 64×1×1；反射清单同步携带，
-    // 运行时据此设 threads_per_group）
-    if (isComp)
-        ioDecls += "layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;\n";
+    // comp：工作组尺寸（签名尾 `local X [Y [Z]]` 声明，未声明固定 64×1×1；
+    // 反射清单同步携带，运行时据此设 threads_per_group）
+    if (isComp) {
+        int lx = 64, ly = 1, lz = 1;
+        if (stage.shaderAttr && stage.shaderAttr->local[0] > 0) {
+            lx = stage.shaderAttr->local[0];
+            ly = stage.shaderAttr->local[1];
+            lz = stage.shaderAttr->local[2];
+        }
+        ioDecls += "layout(local_size_x = " + std::to_string(lx) +
+                   ", local_size_y = " + std::to_string(ly) +
+                   ", local_size_z = " + std::to_string(lz) + ") in;\n";
+    }
 
     // —— 输入接口（入参结构体）——
     int autoInLoc = 0;
@@ -610,7 +664,24 @@ std::string emitStage(const Decl& stage, const Model& m, const std::string& prel
 
 std::vector<GlslUnit> emitGlsl(const Program& prog, const GlslTarget& target) {
     Model m = buildModel(prog);
-    std::string prelude = emitResources(m, target);
+    // 顶层 let 常量 → GLSL const 全局（尾缀 `spec N` 的特化常量：Vulkan 发
+    // layout(constant_id=N)，其余目标退化为普通 const 默认值）。
+    std::string lets;
+    for (const auto& d : prog.decls) {
+        if (!d || d->kind != Decl::LetD) continue;
+        for (const auto& f : d->structCommon.fields) {
+            if (!f.init) continue;
+            Emitter em;
+            std::string ty = f.type.name.empty()
+                ? (f.init->kind == Expr::FloatLit ? "float" : "int")
+                : mapType(f.type.name);
+            if (f.shaderAttr && f.shaderAttr->specId >= 0 && target.api == GlApi::Vulkan)
+                lets += "layout(constant_id = " + std::to_string(f.shaderAttr->specId) + ") ";
+            lets += "const " + ty + " " + f.name + " = " + em.expr(f.init.get()) + ";\n";
+        }
+    }
+    if (!lets.empty()) lets += "\n";
+    std::string prelude = lets + emitResources(m, target);
     for (const auto& d : prog.decls)   // 辅助函数放在资源之后、各 main 之前
         if (d && d->kind == Decl::FuncD && d->shaderStage == ShaderStage::None)
             prelude += emitHelper(*d);
@@ -645,6 +716,25 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target,
         }
         j << "},\n";
     }
+    // 特化常量（P2）：管线创建期可覆写的调参面（constant_id / MSL function_constant）
+    {
+        bool any = false;
+        for (const auto& d : prog.decls) {
+            if (!d || d->kind != Decl::LetD) continue;
+            for (const auto& f : d->structCommon.fields) {
+                if (!f.init || !f.shaderAttr || f.shaderAttr->specId < 0) continue;
+                if (!any) { j << "  \"spec_constants\": ["; any = true; }
+                else j << ", ";
+                Emitter em;
+                std::string ty = f.type.name.empty()
+                    ? (f.init->kind == Expr::FloatLit ? "float" : "int")
+                    : mapType(f.type.name);
+                j << "{\"name\": " << jstr(f.name) << ", \"id\": " << f.shaderAttr->specId
+                  << ", \"type\": " << jstr(ty) << ", \"default\": " << em.expr(f.init.get()) << "}";
+            }
+        }
+        if (any) j << "],\n";
+    }
     j << "  \"stages\": [\n";
 
     bool firstStage = true;
@@ -657,8 +747,15 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target,
         j << "      \"stage\": " << jstr(stageExt(d->shaderStage)) << ",\n";
         j << "      \"entry\": \"main\",\n";
         j << "      \"file\": " << jstr(d->name + "." + stageExt(d->shaderStage)) << ",\n";
-        if (d->shaderStage == ShaderStage::Comp)
-            j << "      \"local_size\": [64, 1, 1],\n";   /* 与 emitStage 固定值同步 */
+        if (d->shaderStage == ShaderStage::Comp) {
+            int lx = 64, ly = 1, lz = 1;   /* 与 emitStage 默认值同步 */
+            if (d->shaderAttr && d->shaderAttr->local[0] > 0) {
+                lx = d->shaderAttr->local[0];
+                ly = d->shaderAttr->local[1];
+                lz = d->shaderAttr->local[2];
+            }
+            j << "      \"local_size\": [" << lx << ", " << ly << ", " << lz << "],\n";
+        }
 
         j << "      \"inputs\": [";
         bool firstIn = true; int autoLoc = 0;
@@ -709,6 +806,7 @@ std::string emitReflectionJson(const Program& prog, const GlslTarget& target,
     bool firstRes = true;
     for (const Decl* r : m.resources) {
         auto* a = r->shaderAttr.get();
+        if (a->res == ShaderDeclAttr::Shared) continue;   // shared 非描述符资源，不入清单
         int rset  = useSet ? a->set : -1;              // 仅 Vulkan 发射 set=
         int rbind = explicitBind ? a->binding : -1;    // 低版本无显式 binding → 按名绑定
         if (!firstRes) j << ",\n";

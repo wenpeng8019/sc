@@ -1,0 +1,287 @@
+ss: cs_reduce.vulkan450.spv（3912 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p2_compute.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_reduce",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_reduce.comp",
+      "local_size": [256, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16},
+    {"name": "OutBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "total", "type": "uint", "offset": 0, "size": 4}, {"name": "hist", "type": "uint", "offset": 4, "size": 64}], "size": 80}
+  ]
+}
+
+// ===== shader_p2_compute.metal20000.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20000, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_reduce",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_reduce.comp",
+      "local_size": [256, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16},
+    {"name": "OutBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "total", "type": "uint", "offset": 0, "size": 4}, {"name": "hist", "type": "uint", "offset": 4, "size": 64}], "size": 80}
+  ]
+}
+
+// ===== cs_reduce.metal20000.metal =====
+#pragma clang diagnostic ignored "-Wunused-variable"
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
+
+#include <metal_stdlib>
+#include <simd/simd.h>
+#include <metal_atomic>
+
+using namespace metal;
+
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+    
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+    
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+    
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+    
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
+struct Params_blk
+{
+    uint n;
+};
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+struct OutBuf_blk
+{
+    uint total;
+    uint hist[16];
+};
+
+struct Tile_blk
+{
+    spvUnsafeArray<float, 256> data;
+};
+
+kernel void cs_reduce(constant Params_blk& Params [[buffer(0)]], device XBuf_blk& XBuf [[buffer(1)]], device OutBuf_blk& OutBuf [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]], uint gl_LocalInvocationIndex [[thread_index_in_threadgroup]])
+{
+    threadgroup Tile_blk Tile;
+    if (gl_GlobalInvocationID.x < Params.n)
+    {
+        Tile.data[gl_LocalInvocationIndex] = XBuf.x[gl_GlobalInvocationID.x];
+    }
+    else
+    {
+        Tile.data[gl_LocalInvocationIndex] = 0.0;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint stride = uint(128);
+    while (stride > uint(0))
+    {
+        if (gl_LocalInvocationIndex < stride)
+        {
+            Tile.data[gl_LocalInvocationIndex] += Tile.data[gl_LocalInvocationIndex + stride];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        stride /= uint(2);
+    }
+    if (gl_LocalInvocationIndex == uint(0))
+    {
+        uint _121 = atomic_fetch_add_explicit((device atomic_uint*)&OutBuf.total, uint(Tile.data[0]), memory_order_relaxed);
+        uint _130 = atomic_fetch_max_explicit((device atomic_uint*)&OutBuf.hist[0], uint(Tile.data[0]), memory_order_relaxed);
+        uint _137 = atomic_fetch_min_explicit((device atomic_uint*)&OutBuf.hist[1], uint(Tile.data[0]), memory_order_relaxed);
+        uint _141 = atomic_fetch_or_explicit((device atomic_uint*)&OutBuf.hist[2], uint(1), memory_order_relaxed);
+        uint _147 = atomic_fetch_and_explicit((device atomic_uint*)&OutBuf.hist[3], uint(255), memory_order_relaxed);
+        uint _153 = atomic_fetch_xor_explicit((device atomic_uint*)&OutBuf.hist[4], gl_GlobalInvocationID.x, memory_order_relaxed);
+        uint _158 = atomic_fetch_sub_explicit((device atomic_uint*)&OutBuf.hist[5], uint(1), memory_order_relaxed);
+        uint _164 = atomic_exchange_explicit((device atomic_uint*)&OutBuf.hist[6], gl_GlobalInvocationID.x, memory_order_relaxed);
+        uint _168 = uint(0);
+        uint _170;
+        do
+        {
+            _170 = _168;
+        } while (!atomic_compare_exchange_weak_explicit((device atomic_uint*)&OutBuf.hist[7], &_170, uint(7), memory_order_relaxed, memory_order_relaxed) && _170 == _168);
+    }
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+}
+
+
+// ===== shader_p2_compute.gles310.reflect.json =====
+{
+  "target": {"api": "gles", "version": 310, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_reduce",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_reduce.comp",
+      "local_size": [256, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": -1, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "XBuf", "kind": "storage", "set": -1, "binding": 1, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16},
+    {"name": "OutBuf", "kind": "storage", "set": -1, "binding": 2, "layout": "std430",
+     "members": [{"name": "total", "type": "uint", "offset": 0, "size": 4}, {"name": "hist", "type": "uint", "offset": 4, "size": 64}], "size": 80}
+  ]
+}
+
+// ===== cs_reduce.gles310.comp =====
+#version 310 es
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct Tile_blk
+{
+    float data[256];
+};
+
+layout(binding = 0, std140) uniform Params_blk
+{
+    uint n;
+} Params;
+
+layout(binding = 1, std430) buffer XBuf_blk
+{
+    float x[];
+} XBuf;
+
+layout(binding = 2, std430) buffer OutBuf_blk
+{
+    uint total;
+    uint hist[16];
+} OutBuf;
+
+shared Tile_blk Tile;
+
+void main()
+{
+    uint _47 = gl_GlobalInvocationID.x;
+    uint _51 = Params.n;
+    bool _52 = _47 < _51;
+    if (_52)
+    {
+        uint _64 = gl_GlobalInvocationID.x;
+        float _67 = XBuf.x[_64];
+        Tile.data[gl_LocalInvocationIndex] = _67;
+    }
+    else
+    {
+        Tile.data[gl_LocalInvocationIndex] = 0.0;
+    }
+    barrier();
+    uint _77 = uint(128);
+    uint stride = _77;
+    for (;;)
+    {
+        uint _84 = uint(0);
+        bool _85 = stride > _84;
+        if (_85)
+        {
+            bool _88 = gl_LocalInvocationIndex < stride;
+            if (_88)
+            {
+                float _97 = Tile.data[gl_LocalInvocationIndex];
+                uint _101 = gl_LocalInvocationIndex + stride;
+                float _103 = Tile.data[_101];
+                float _104 = _97 + _103;
+                Tile.data[gl_LocalInvocationIndex] = _104;
+            }
+            barrier();
+            uint _107 = uint(2);
+            uint _108 = stride / _107;
+            stride = _108;
+            continue;
+        }
+        else
+        {
+            break;
+        }
+    }
+    uint _110 = uint(0);
+    bool _111 = gl_LocalInvocationIndex == _110;
+    if (_111)
+    {
+        float _119 = Tile.data[0];
+        uint _120 = uint(_119);
+        uint _121 = atomicAdd(OutBuf.total, _120);
+        float _128 = Tile.data[0];
+        uint _129 = uint(_128);
+        uint _130 = atomicMax(OutBuf.hist[0], _129);
+        float _135 = Tile.data[0];
+        uint _136 = uint(_135);
+        uint _137 = atomicMin(OutBuf.hist[1], _136);
+        uint _140 = uint(1);
+        uint _141 = atomicOr(OutBuf.hist[2], _140);
+        uint _146 = uint(255);
+        uint _147 = atomicAnd(OutBuf.hist[3], _146);
+        uint _152 = gl_GlobalInvocationID.x;
+        uint _153 = atomicXor(OutBuf.hist[4], _152);
+        uint _157 = uint(1);
+        uint _158 = atomicAdd(OutBuf.hist[5], -_157);
+        uint _163 = gl_GlobalInvocationID.x;
+        uint _164 = atomicExchange(OutBuf.hist[6], _163);
+        uint _168 = uint(0);
+        uint _169 = uint(7);
+        uint _170 = atomicCompSwap(OutBuf.hist[7], _168, _169);
+    }
+    memoryBarrierShared();
+    memoryBarrierBuffer();
+}

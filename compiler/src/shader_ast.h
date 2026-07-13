@@ -32,6 +32,9 @@ struct ShaderFieldAttr {
     std::string builtin;        // builtin X（内建语义名，如 position/frag_coord），空 = 无
     // 插值限定词（varying 修饰；整数类型自动补 flat）
     enum Interp { Default = 0, Flat, NoPerspective, Centroid } interp = Default;
+    // 特化常量（P2）：顶层 `let NAME: T = 字面量 spec N` → OpSpecConstant + SpecId N
+    //（管线创建期可覆写；MSL = function_constant，Vulkan = VkSpecializationInfo）
+    int specId = -1;
 };
 
 // 结构体级资源绑定（syntax-s §6）：附着于 @def 结构体（仅 .ss 有意义）。
@@ -39,9 +42,15 @@ struct ShaderFieldAttr {
 //   @def Camera: { mvp: mat4 } uniform set 0 binding 0
 //   @def Lights: { ... } storage set 0 binding 1
 //   @def Push: { ... } push
+// 另兼作 comp 阶段入口的阶段级属性载体（签名尾 `local X [Y [Z]]` → local[3]）。
 struct ShaderDeclAttr {
-    enum Res { None = 0, Uniform, Storage, Push } res = None;
+    // Shared = comp 共享内存块（Workgroup 存储类，无 set/binding）：
+    //   @def Tile: { data[256]: f4 } shared
+    enum Res { None = 0, Uniform, Storage, Push, Shared } res = None;
     int set = -1;               // 描述符 set（push 常量无意义）
     int binding = -1;           // 描述符 binding
+    // comp 工作组尺寸（ExecutionMode LocalSize）：签名尾 `local X [Y [Z]]` 声明，
+    // 缺省补 1；全 0 = 未声明（codegen 用默认 64×1×1）。
+    int local[3] = {0, 0, 0};
 };
 

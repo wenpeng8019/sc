@@ -1202,7 +1202,7 @@ struct Parser {
     }
 
     // 解析 fnc 冒号后的单行项：可能是返回类型，也可能是参数
-    void parseFncVars(StructCommon& structCommon) {
+    void parseFncVars(StructCommon& structCommon, int* shaderLocal = nullptr) {
 
         for (bool haveRet = false;;) {
 
@@ -1212,6 +1212,21 @@ struct Parser {
                 structCommon.variadic = true;
                 advance();
                 return;
+            }
+
+            // GPU/着色器扩展（syntax-s P2）：comp 阶段签名尾 `local X [Y [Z]]` → 工作组尺寸。
+            // 仅 parseShaderStage 传入 shaderLocal 时启用；`local` 后跟整数才成立（与同名参数/类型无歧义）。
+            if (shaderLocal && at(Tok::Ident) && cur().text == "local" && peek().kind == Tok::Int) {
+                advance();                      // 吃掉 local
+                int n = 0;
+                while (n < 3 && at(Tok::Int)) {
+                    int v = std::stoi(advance().text);
+                    if (v < 1) err("local 工作组尺寸期望 ≥1 的整数");
+                    shaderLocal[n++] = v;
+                }
+                for (; n < 3; n++) shaderLocal[n] = 1;   // 缺省维度补 1
+                if (!accept(Tok::Comma)) return;
+                continue;
             }
 
             // 如果看起来像参数（标识符后跟冒号），则解析为参数
@@ -1917,8 +1932,15 @@ struct Parser {
         d->name = advance().text;
         // 可选签名：vert NAME: RetType, param: Type ...（复用普通函数签名解析）。
         // 返回类型 = 阶段输出（varying/片元色），形参 = 阶段输入（顶点属性/varying）。
+        // comp 可在签名尾声明工作组尺寸：`comp cs: in: CompIn, local 64 [1 [1]]`。
         if (accept(Tok::Colon)) {
-            if (!at(Tok::Newline)) parseFncVars(d->structCommon);
+            int ls[3] = {0, 0, 0};
+            if (!at(Tok::Newline)) parseFncVars(d->structCommon, ls);
+            if (ls[0] > 0) {
+                auto a = std::make_shared<ShaderDeclAttr>();
+                a->local[0] = ls[0]; a->local[1] = ls[1]; a->local[2] = ls[2];
+                d->shaderAttr = std::move(a);
+            }
         }
         if (!d->structCommon.type) {                // 无显式返回类型 → void
             d->structCommon.type = std::make_shared<TypeRef>();
@@ -1954,17 +1976,24 @@ struct Parser {
     }
 
     // GPU/着色器扩展（syntax-s §6）：结构体级资源绑定后缀属性（仅 shader 模式）。
-    //   uniform|storage set S binding B   |   push
+    //   uniform|storage set S binding B   |   push   |   shared（comp 共享内存，无 set/binding）
     void parseShaderDeclAttrs(Decl& d) {
         if (!(at(Tok::Ident) &&
-              (cur().text == "uniform" || cur().text == "storage" || cur().text == "push")))
+              (cur().text == "uniform" || cur().text == "storage" ||
+               cur().text == "push" || cur().text == "shared")))
             return;
         auto a = std::make_shared<ShaderDeclAttr>();
         std::string kw = advance().text;
         a->res = kw == "uniform" ? ShaderDeclAttr::Uniform
                : kw == "storage" ? ShaderDeclAttr::Storage
+               : kw == "shared"  ? ShaderDeclAttr::Shared
                                  : ShaderDeclAttr::Push;
-        parseShaderSetBinding(*a);
+        if (a->res == ShaderDeclAttr::Shared) {
+            if (at(Tok::Ident) && (cur().text == "set" || cur().text == "binding"))
+                err("shared 块无 set/binding（非描述符资源）");
+        } else {
+            parseShaderSetBinding(*a);
+        }
         d.shaderAttr = std::move(a);
     }
 
@@ -2832,6 +2861,17 @@ struct Parser {
                             }
                             parseShaderSetBinding(*a);
                             d->shaderAttr = std::move(a);
+                        }
+                        expect(Tok::Newline, "换行");
+                    } else if (shaderMode && d->kind == Decl::LetD) {
+                        // GPU/着色器扩展（P2）：顶层 let 常量，可选尾缀 `spec N` = 特化常量
+                        //   let TILE: u4 = 64 spec 0（管线创建期可调参；constant_id = N）
+                        d->structCommon.fields.push_back(parseVarItem());
+                        if (at(Tok::Ident) && cur().text == "spec" && peek().kind == Tok::Int) {
+                            advance();          // 吃掉 spec
+                            auto& f = d->structCommon.fields.back();
+                            if (!f.shaderAttr) f.shaderAttr = std::make_shared<ShaderFieldAttr>();
+                            f.shaderAttr->specId = std::stoi(advance().text);
                         }
                         expect(Tok::Newline, "换行");
                     } else {

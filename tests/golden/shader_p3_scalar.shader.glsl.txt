@@ -1,0 +1,109 @@
+// ===== shader_p3_scalar.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_f16",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_f16.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "WBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "w", "type": "float16_t", "offset": 0, "size": 2}], "size": 16},
+    {"name": "OBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "acc", "type": "int64_t", "offset": 0, "size": 8}, {"name": "o", "type": "float", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_f16.vulkan450.comp =====
+#version 450
+// generated from cs_f16 (comp) target vulkan450
+
+const float16_t HALF_SCALE = 0.5;
+const int64_t BIG = 1099511627776;
+
+layout(set=0, binding=0, std140) uniform Params_blk {
+    uint n;
+} Params;
+layout(set=0, binding=1, std430) buffer WBuf_blk {
+    float16_t w[];
+} WBuf;
+layout(set=0, binding=2, std430) buffer OBuf_blk {
+    int64_t acc;
+    float o[];
+} OBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    if ((gl_GlobalInvocationID.x < Params.n)) {
+        float16_t h = WBuf.w[gl_GlobalInvocationID.x];
+        h = ((h * HALF_SCALE) + f2(0.25));
+        OBuf.o[gl_GlobalInvocationID.x] = float(h);
+        if ((gl_GlobalInvocationID.x == 0)) {
+            OBuf.acc = (BIG + i8(gl_GlobalInvocationID.x));
+        }
+    }
+}
+
+// ===== shader_p3_scalar.metal20300.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20300, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_f16",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_f16.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "WBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "w", "type": "float16_t", "offset": 0, "size": 2}], "size": 16},
+    {"name": "OBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "acc", "type": "int64_t", "offset": 0, "size": 8}, {"name": "o", "type": "float", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_f16.metal20300.comp =====
+#version 450
+// generated from cs_f16 (comp) target vulkan450
+
+const float16_t HALF_SCALE = 0.5;
+const int64_t BIG = 1099511627776;
+
+layout(set=0, binding=0, std140) uniform Params_blk {
+    uint n;
+} Params;
+layout(set=0, binding=1, std430) buffer WBuf_blk {
+    float16_t w[];
+} WBuf;
+layout(set=0, binding=2, std430) buffer OBuf_blk {
+    int64_t acc;
+    float o[];
+} OBuf;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+    if ((gl_GlobalInvocationID.x < Params.n)) {
+        float16_t h = WBuf.w[gl_GlobalInvocationID.x];
+        h = ((h * HALF_SCALE) + f2(0.25));
+        OBuf.o[gl_GlobalInvocationID.x] = float(h);
+        if ((gl_GlobalInvocationID.x == 0)) {
+            OBuf.acc = (BIG + i8(gl_GlobalInvocationID.x));
+        }
+    }
+}

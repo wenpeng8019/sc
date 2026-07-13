@@ -87,15 +87,30 @@ void sc_spc_destroy_buffer(sc_spc_buffer buf);
 
 /* ---- kernel 面：内核与调度 --------------------------------- */
 
-/* code = scc .ss comp 产物（mac 为 MSL 文本）；entry = comp 阶段函数名；
+/* code = scc .ss comp 产物（按后端：Metal=MSL 文本；Vulkan=.spv 二进制；
+ * GL/GLES=GLSL 文本——用 reflect JSON 的 target.api 或产物条目 target 选对形态）；
+ * entry = comp 阶段函数名；
  * reflect_json = 同批 .reflect.json 内容——运行时据此建立
- * binding 槽 → MSL 参数位 的名字对位（spirv-cross 会重排 MSL 槽），
- * 并取 local_size 作为线程组尺寸。 */
+ * binding 槽 → 后端参数位 的名字对位（spirv-cross 会重排 MSL 槽），
+ * 取 local_size 作为线程组尺寸，并按 spec_constants 对位特化常量类型。 */
+
+/* 特化常量运行时传值（管线创建期覆写 `let X: T = v spec N` 的默认值）：
+ *   id    = constant_id（反射 spec_constants[].id）
+ *   value = 32 位值（f4 用位表示：memcpy float 进来；i4/u4 直接赋）
+ * Metal = MTLFunctionConstantValues；Vulkan = VkSpecializationInfo；
+ * GL/GLES 不支持（GLSL 文本已固化默认值，传入时警告并忽略）。 */
+typedef struct sc_spc_spec_value {
+    int      id;
+    uint32_t value;
+} sc_spc_spec_value;
+
 typedef struct sc_spc_kernel_desc {
     sc_spc_range code;
     const char*  entry;
     const char*  reflect_json;
     const char*  label;
+    const sc_spc_spec_value* spec_values;   /* 可 NULL（全用默认值） */
+    int          spec_count;
 } sc_spc_kernel_desc;
 
 /* 绑定：按反射清单的 binding 槽下标。

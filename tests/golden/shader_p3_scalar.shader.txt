@@ -1,0 +1,86 @@
+ss: cs_f16.vulkan450.spv（2284 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p3_scalar.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_f16",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_f16.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "WBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "w", "type": "float16_t", "offset": 0, "size": 2}], "size": 16},
+    {"name": "OBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "acc", "type": "int64_t", "offset": 0, "size": 8}, {"name": "o", "type": "float", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== shader_p3_scalar.metal20300.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20300, "explicitBinding": true, "flattenUniforms": false},
+  "stages": [
+    {
+      "name": "cs_f16",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_f16.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "Params", "kind": "uniform", "set": 0, "binding": 0, "layout": "std140",
+     "members": [{"name": "n", "type": "uint", "offset": 0, "size": 4}], "size": 16},
+    {"name": "WBuf", "kind": "storage", "set": 0, "binding": 1, "layout": "std430",
+     "members": [{"name": "w", "type": "float16_t", "offset": 0, "size": 2}], "size": 16},
+    {"name": "OBuf", "kind": "storage", "set": 0, "binding": 2, "layout": "std430",
+     "members": [{"name": "acc", "type": "int64_t", "offset": 0, "size": 8}, {"name": "o", "type": "float", "offset": 8, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_f16.metal20300.metal =====
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct Params_blk
+{
+    uint n;
+};
+
+struct WBuf_blk
+{
+    half w[1];
+};
+
+struct OBuf_blk
+{
+    long acc;
+    float o[1];
+};
+
+kernel void cs_f16(constant Params_blk& Params [[buffer(0)]], device WBuf_blk& WBuf [[buffer(1)]], device OBuf_blk& OBuf [[buffer(2)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    half HALF_SCALE = half(0.5);
+    long BIG = 1099511627776l;
+    if (gl_GlobalInvocationID.x < Params.n)
+    {
+        half h = WBuf.w[gl_GlobalInvocationID.x];
+        h = (h * HALF_SCALE) + half(0.25);
+        OBuf.o[gl_GlobalInvocationID.x] = float(h);
+        if (gl_GlobalInvocationID.x == uint(0))
+        {
+            OBuf.acc = BIG + long(ulong(gl_GlobalInvocationID.x));
+        }
+    }
+}

@@ -37,7 +37,7 @@ static struct {
 
 /* ---- 生命周期 ---------------------------------------------- */
 
-bool spc_mtl_init(void) {
+static bool spc_mtl_init(void) {
     memset((void*)&M, 0, sizeof(M));
     M.device = (__bridge id<MTLDevice>)sc_gpu_device();
     if (!M.device) {
@@ -48,7 +48,7 @@ bool spc_mtl_init(void) {
     return M.queue != nil;
 }
 
-void spc_mtl_shutdown(void) {
+static void spc_mtl_shutdown(void) {
     if (M.lastCmd) [M.lastCmd waitUntilCompleted];
     M.lastCmd = nil;
     M.queue = nil;
@@ -56,7 +56,7 @@ void spc_mtl_shutdown(void) {
     memset((void*)&M, 0, sizeof(M));
 }
 
-void spc_mtl_finish(void) {
+static void spc_mtl_finish(void) {
     if (M.lastCmd) {
         [M.lastCmd waitUntilCompleted];
         M.lastCmd = nil;
@@ -65,7 +65,7 @@ void spc_mtl_finish(void) {
 
 /* ---- buffer ------------------------------------------------ */
 
-bool spc_mtl_buffer_create(spc_buffer_t* b, const void* data, uint64_t size) {
+static bool spc_mtl_buffer_create(spc_buffer_t* b, const void* data, uint64_t size) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)calloc(1, sizeof(MtlSpcBuffer));
     if (!m) return false;
     m->buf = data
@@ -76,7 +76,7 @@ bool spc_mtl_buffer_create(spc_buffer_t* b, const void* data, uint64_t size) {
     return true;
 }
 
-void spc_mtl_buffer_destroy(spc_buffer_t* b) {
+static void spc_mtl_buffer_destroy(spc_buffer_t* b) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return;
     m->buf = nil;
@@ -84,7 +84,7 @@ void spc_mtl_buffer_destroy(spc_buffer_t* b) {
     b->backend = NULL;
 }
 
-bool spc_mtl_buffer_read(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off) {
+static bool spc_mtl_buffer_read(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return false;
     spc_mtl_finish();   /* 读回前确保 GPU 写入完成 */
@@ -92,7 +92,7 @@ bool spc_mtl_buffer_read(spc_buffer_t* b, void* dst, uint64_t size, uint64_t off
     return true;
 }
 
-bool spc_mtl_buffer_write(spc_buffer_t* b, const void* src, uint64_t size, uint64_t off) {
+static bool spc_mtl_buffer_write(spc_buffer_t* b, const void* src, uint64_t size, uint64_t off) {
     MtlSpcBuffer* m = (MtlSpcBuffer*)b->backend;
     if (!m) return false;
     memcpy((uint8_t*)m->buf.contents + off, src, size);
@@ -101,7 +101,7 @@ bool spc_mtl_buffer_write(spc_buffer_t* b, const void* src, uint64_t size, uint6
 
 /* ---- kernel ------------------------------------------------ */
 
-bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
+static bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
     MtlSpcKernel* m = (MtlSpcKernel*)calloc(1, sizeof(MtlSpcKernel));
     if (!m) return false;
     for (int i = 0; i < SC_SPC_MAX_BINDINGS; i++) m->mslIndex[i] = -1;
@@ -121,7 +121,29 @@ bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
         return false;
     }
     NSString* entry = desc->entry ? [NSString stringWithUTF8String:desc->entry] : @"main0";
-    id<MTLFunction> fn = [lib newFunctionWithName:entry];
+    id<MTLFunction> fn = nil;
+    if (desc->spec_count > 0 && desc->spec_values) {
+        /* 特化常量传值：id → function_constant(id)，类型按反射 spec_constants 对位 */
+        MTLFunctionConstantValues* cv = [[MTLFunctionConstantValues alloc] init];
+        for (int i = 0; i < desc->spec_count; i++) {
+            const sc_spc_spec_value* sv = &desc->spec_values[i];
+            char ty = 'i';
+            for (int j = 0; j < k->spec_count; j++)
+                if (k->spec[j].id == sv->id) { ty = k->spec[j].type; break; }
+            MTLDataType dt = ty == 'f' ? MTLDataTypeFloat
+                           : ty == 'u' ? MTLDataTypeUInt : MTLDataTypeInt;
+            [cv setConstantValue:&sv->value type:dt atIndex:(NSUInteger)sv->id];
+        }
+        fn = [lib newFunctionWithName:entry constantValues:cv error:&err];
+        if (!fn) {
+            spc_log("metal: 特化入口 %s 创建失败: %s", entry.UTF8String,
+                        err ? err.localizedDescription.UTF8String : "?");
+            free(m);
+            return false;
+        }
+    } else {
+        fn = [lib newFunctionWithName:entry];
+    }
     if (!fn) {
         spc_log("metal: 入口 %s 不存在", entry.UTF8String);
         free(m);
@@ -158,7 +180,7 @@ bool spc_mtl_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
     return true;
 }
 
-void spc_mtl_kernel_destroy(spc_kernel_t* k) {
+static void spc_mtl_kernel_destroy(spc_kernel_t* k) {
     MtlSpcKernel* m = (MtlSpcKernel*)k->backend;
     if (!m) return;
     m->pso = nil;
@@ -166,7 +188,7 @@ void spc_mtl_kernel_destroy(spc_kernel_t* k) {
     k->backend = NULL;
 }
 
-bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
+static bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
                           const sc_spc_bindings* bnd,
                           spc_buffer_t* bufs[SC_SPC_MAX_BINDINGS]) {
     MtlSpcKernel* m = (MtlSpcKernel*)k->backend;
@@ -201,6 +223,20 @@ bool spc_mtl_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
     [cmd commit];
     M.lastCmd = cmd;
     return true;
+}
+
+/* ---- vtable ------------------------------------------------ */
+
+const spc_kernel_api* spc_mtl_api(void) {
+    static const spc_kernel_api api = {
+        "metal",
+        spc_mtl_init, spc_mtl_shutdown, spc_mtl_finish,
+        spc_mtl_buffer_create, spc_mtl_buffer_destroy,
+        spc_mtl_buffer_read, spc_mtl_buffer_write,
+        spc_mtl_kernel_create, spc_mtl_kernel_destroy,
+        spc_mtl_dispatch,
+    };
+    return &api;
 }
 
 #endif /* P_DARWIN */

@@ -247,6 +247,11 @@ SHADER_EMIT=(
     tests/cases/shader_p1_proj.ss
     tests/cases/shader_spec.ss
     tests/cases/shader_spec_use.ss
+    tests/cases/shader_p2_local.ss
+    tests/cases/shader_p2_compute.ss
+    tests/cases/shader_p2_spec.ss
+    tests/cases/shader_p2_subgroup.ss
+    tests/cases/shader_p3_scalar.ss
 )
 
 pass=0 fail=0 upd=0

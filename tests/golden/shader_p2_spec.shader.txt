@@ -1,0 +1,69 @@
+ss: cs_spec.vulkan450.spv（1428 字节）需 -o 输出目录（二进制不入 stdout）
+// ===== shader_p2_spec.vulkan450.reflect.json =====
+{
+  "target": {"api": "vulkan", "version": 450, "explicitBinding": true, "flattenUniforms": false},
+  "spec_constants": [{"name": "TILE", "id": 0, "type": "uint", "default": 64}, {"name": "GAIN", "id": 1, "type": "float", "default": 1.5}],
+  "stages": [
+    {
+      "name": "cs_spec",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_spec.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== shader_p2_spec.metal20000.reflect.json =====
+{
+  "target": {"api": "metal", "version": 20000, "explicitBinding": true, "flattenUniforms": false},
+  "spec_constants": [{"name": "TILE", "id": 0, "type": "uint", "default": 64}, {"name": "GAIN", "id": 1, "type": "float", "default": 1.5}],
+  "stages": [
+    {
+      "name": "cs_spec",
+      "stage": "comp",
+      "entry": "main",
+      "file": "cs_spec.comp",
+      "local_size": [64, 1, 1],
+      "inputs": [],
+      "outputs": []
+    }
+  ],
+  "resources": [
+    {"name": "XBuf", "kind": "storage", "set": 0, "binding": 0, "layout": "std430",
+     "members": [{"name": "x", "type": "float", "offset": 0, "size": 4}], "size": 16}
+  ]
+}
+
+// ===== cs_spec.metal20000.metal =====
+#include <metal_stdlib>
+#include <simd/simd.h>
+
+using namespace metal;
+
+struct XBuf_blk
+{
+    float x[1];
+};
+
+constant uint TILE_tmp [[function_constant(0)]];
+constant uint TILE = is_function_constant_defined(TILE_tmp) ? TILE_tmp : 64u;
+constant float GAIN_tmp [[function_constant(1)]];
+constant float GAIN = is_function_constant_defined(GAIN_tmp) ? GAIN_tmp : 1.5;
+
+kernel void cs_spec(device XBuf_blk& XBuf [[buffer(0)]], uint3 gl_GlobalInvocationID [[thread_position_in_grid]])
+{
+    uint TILE_1 = TILE;
+    float GAIN_1 = GAIN;
+    float PLAIN = 2.0;
+    if (gl_GlobalInvocationID.x < TILE_1)
+    {
+        XBuf.x[gl_GlobalInvocationID.x] = (XBuf.x[gl_GlobalInvocationID.x] * GAIN_1) * PLAIN;
+    }
+}
