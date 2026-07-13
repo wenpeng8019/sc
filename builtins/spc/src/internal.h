@@ -119,5 +119,7 @@ const spc_kernel_api* spc_vk_api(void);    /* Vulkan compute（vulkan_spc.c） *
 #if P_LINUX
 const spc_kernel_api* spc_gl_api(void);    /* GLES3.1 / 桌面 GL4.3 compute（gl_spc.c） */
 #endif
+/* CPU SPMD 后端（cpu_spc.c，全平台；§17） */
+const spc_kernel_api* spc_cpu_api(void);
 
 #endif /* SC_SPC_INTERNAL_H */

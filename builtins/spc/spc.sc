@@ -21,6 +21,7 @@ add src/spc.c
 add src/metal_spc.m
 add src/vulkan_spc.c
 add src/gl_spc.c
+add src/cpu_spc.c
 add src/mpsg_spc.m
 add src/coreml_spc.m
 

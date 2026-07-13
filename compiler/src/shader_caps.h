@@ -32,7 +32,9 @@
 
 // 目标 API 族。Metal 非 GLSL 方言，而是 SPIR-V 转译出的发行后端（MSL）；
 // 其内部 GLSL 中间产物按 Vulkan 语义生成（见 glslIsVulkanFlavor）。
-enum class GlApi { Vulkan, GLCore, GLES, WebGL, Metal, D3D };
+// CPU = SPMD 循环化 C 直发（codegen_cpu，§17）：向量化交目标 C 编译器，
+// 非 GLSL/SPIR-V 链（不过 SPIRV-Cross）。
+enum class GlApi { Vulkan, GLCore, GLES, WebGL, Metal, D3D, CPU };
 
 // 一个转义目标：API 族 + 精确版本号 + 扩展集（来自 caps profile）。
 //   GL 家族：GLSL #version 整数（如 450 / 330 / 300 / 100）。
@@ -48,6 +50,7 @@ struct GlslTarget {
     bool isVulkan() const { return api == GlApi::Vulkan; }
     bool isMetal()  const { return api == GlApi::Metal; }
     bool isD3D()    const { return api == GlApi::D3D; }
+    bool isCPU()    const { return api == GlApi::CPU; }
     // 内部 GLSL 中间产物是否用 Vulkan 语义（Vulkan 目标本身 + Metal/D3D 经 SPIR-V 转译）。
     bool glslIsVulkanFlavor() const { return isVulkan() || isMetal() || isD3D(); }
 
@@ -114,6 +117,10 @@ inline bool validShaderVersion(GlApi api, int v, std::string& hint) {
             if (in({40, 41, 50, 51})) return true;
             hint = "d3d 有效着色模型：40/41/50/51（SM4.0–5.1）";
             return false;
+        case GlApi::CPU:
+            if (v == 99 || v == 11 || v == 17) return true;   // C 标准年份（一期只认 99）
+            hint = "cpu 有效版本：99（C99）/11/17";
+            return false;
     }
     hint = "未知 API";
     return false;
@@ -128,6 +135,7 @@ inline const char* glApiName(GlApi a) {
         case GlApi::WebGL:  return "webgl";
         case GlApi::Metal:  return "metal";
         case GlApi::D3D:    return "d3d";
+        case GlApi::CPU:    return "cpu";
     }
     return "?";
 }
@@ -140,6 +148,7 @@ inline bool parseGlApi(const std::string& s, GlApi& out) {
     if (s == "webgl")                { out = GlApi::WebGL;  return true; }
     if (s == "metal" || s == "msl")  { out = GlApi::Metal;  return true; }
     if (s == "d3d" || s == "hlsl" || s == "d3d11") { out = GlApi::D3D; return true; }
+    if (s == "cpu" || s == "c")      { out = GlApi::CPU;    return true; }
     return false;
 }
 
@@ -425,6 +434,7 @@ inline const CapReq& capReq(Cap c, GlApi a) {
         case GlApi::WebGL:  return r.webgl;
         case GlApi::Metal:  return r.metal;
         case GlApi::D3D:    return r.vulkan;   // HLSL 经 SPIRV-Cross 吃 Vulkan 语义，SM5 能力等同
+        case GlApi::CPU:    return r.vulkan;   // CPU 能力集经 capResolve 特判（版本尺度不同）
     }
     return r.vulkan;
 }
@@ -450,6 +460,33 @@ inline CapVia capResolve(Cap c, const GlslTarget& t, const char** outExt = nullp
         int need = (c == Cap::StorageBuffer || c == Cap::ComputeStage ||
                     c == Cap::DoubleType) ? 50 : 40;
         return (t.version >= need) ? CapVia::Core : CapVia::No;
+    }
+    // CPU（SPMD→C 直发，§17）：版本是 C 标准年份，不能借 GLSL 列阈值。
+    // 一期能力集（M1）：计算面全支持（comp/storage/push/shared/barrier/atomic/
+    // 窄宽标量；C11 atomics/_Float16 由目标工具链兼容层保障）；
+    // 图形面（采样器/导数/MRT 等 frag 专属）与 subgroup/spec 一期不支持：
+    //   采样器 = 软件采样器工作量大；subgroup = 模拟无性能意义；
+    //   spec = M2 参数化后放行（§17.6-9）。
+    if (t.isCPU()) {
+        switch (c) {
+            case Cap::StorageBuffer:
+            case Cap::ComputeStage:
+            case Cap::PushConstant:
+            case Cap::DoubleType:
+            case Cap::DescriptorSet:
+            case Cap::ExplicitBinding:
+            case Cap::UintType:
+            case Cap::SharedMemory:
+            case Cap::ComputeBarrier:
+            case Cap::AtomicOp:
+            case Cap::Float16Type:
+            case Cap::Int64Type:
+            case Cap::Int8Type:
+            case Cap::Int16Type:
+                return CapVia::Core;
+            default:
+                return CapVia::No;   // 图形面内建/采样/subgroup/spec 一期门控
+        }
     }
     const CapReq& q = capReq(c, t.api);
     if (q.core >= 0 && t.version >= q.core) return CapVia::Core;

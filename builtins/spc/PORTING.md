@@ -15,7 +15,9 @@ spc.c（公共层：句柄池/反射解析/校验）
   └─ K（spc_kernel_api vtable，init 时按 gpu_query_backend() 选定，不静默降级）
        ├─ metal_spc.m   darwin   （✅ 实机验证）
        ├─ vulkan_spc.c  linux/android/win（✅ 板验 2026-07-13：Win AMD 真机 + WSL llvmpipe，P2/P3 全绿）
-       └─ gl_spc.c      linux/android    （盲写，待验；GLES3.1+ / 桌面 GL4.3+，见下方说明）
+       ├─ gl_spc.c      linux/android    （盲写，待验；GLES3.1+ / 桌面 GL4.3+，见下方说明）
+       └─ cpu_spc.c     全平台（✅ mac 实测：tar cpu@99 SPMD C 直发，§17 M1；
+                        desc.kernel_backend=SC_SPC_KERNEL_CPU 强制选用，板端数值对拍基准）
 graph（mpsg_spc.m）/ model（coreml_spc.m）仍 darwin 直连——非 kernel 面，别动。
 ```
 
@@ -188,3 +190,20 @@ LIBGL_DEBUG=verbose / EGL_LOG_LEVEL=debug
 
 失败时的最小化二分：先跑最简 saxpy（spc_kernel/saxpy.ss，无 shared/atomic），
 再上 reduce（shared+barrier+atomic），最后 spec/f16——逐能力定位。
+
+## 8. CPU SPMD 后端（数值对拍基准，§17 M1）
+
+GPU 结果存疑时的参照基准（确定性、可单步调试）：
+
+```sh
+# 1) 内核 tar 加 cpu@99（saxpy.ss 已带）→ 产物额外落 <stem>.cpu.c 散文件
+# 2) 宿主 add out/<stem>.cpu.c（构造器自注册）
+# 3) 强制 CPU：sdc.kernel_backend = 1（SC_SPC_KERNEL_CPU）后 spc_init
+#    → 同一套 spc API 跑同一 kernel，数值与 GPU 后端对照
+```
+
+- M1 范围：标量 kernel（无 barrier/shared/atomic/spec/subgroup，M2 落地）；
+  uniform 块限标量成员（数组用 storage）。超出者 scc 编译期报错。
+- 产物是规整 SPMD 循环 + restrict + 向量化提示：`cc -O3 -Rpass=loop-vectorize`
+  可确认向量化（mac 实测 width 4）；交叉编译时 NEON/SVE/AVX/RVV 由目标
+  工具链自动兑现，无需逐 ISA 适配。

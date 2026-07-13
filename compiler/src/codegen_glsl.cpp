@@ -1,4 +1,5 @@
 #include "codegen_glsl.h"
+#include "codegen_cpu.h"
 #include "codegen_spirv.h"
 #include "lexer.h"
 #include "parser.h"
@@ -954,6 +955,14 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
                                 emitReflectionJson(prog, target,
                                                    combo.empty() ? nullptr : &combo), false});
 
+                // ---- cpu 目标（§17）：SPMD 循环化 C 直发，不过 SPIR-V/SPIRV-Cross ----
+                // 产物 <stem><tag>.cpu.c（全部 comp kernel + 注册表），宿主 add 直接编入。
+                if (target.isCPU()) {
+                    arts.push_back({stem + suffix, "comp", ttag, "cpu.c",
+                                    emitCpu(prog, target), false});
+                    continue;
+                }
+
                 // ---- --emit-glsl：自研 codegen_glsl 文本发射（对照 / 兜底通道）----
                 // gl/gles 产该目标方言；vulkan 产 Vulkan-GLSL；metal 产其内部
                 // Vulkan-GLSL(450) 中间语形态。产物 <entry><tag>.<stage ext>。
@@ -1032,12 +1041,25 @@ int compileShaderSource(const std::string& src, const std::string& srcPath,
         // 字节数组 + enum id + 反射 JSON + 按名查询，add 直接链入应用，
         // 零运行时文件路径。文本产物尾部带 NUL（data 可当 C 字符串），
         // size 不含 NUL；.spv 为原始二进制。
+        // cpu 目标产物（.cpu.c）是待编译源码而非运行时字节：落散文件
+        // <base>.cpu.c（宿主 `add` 编入，构造器自注册），不进资源数组。
         {
             // 资源名/符号名取 -o 的 basename（无 -o 已在 files 分支处理）
             std::string base = stem;
             if (!outPath.empty()) {
                 std::filesystem::path op(outPath);
                 if (!op.stem().string().empty()) base = op.stem().string();
+            }
+            {   // cpu 源码产物：落散文件后从资源数组剔除
+                std::vector<Artifact> keep;
+                for (auto& a : arts) {
+                    if (a.ext == "cpu.c") {
+                        if (!write(outDir + "/" + base + ".cpu.c", a.data)) return 1;
+                    } else {
+                        keep.push_back(std::move(a));
+                    }
+                }
+                arts = std::move(keep);
             }
             std::string sym;                       // C 标识符化
             for (char c : base)

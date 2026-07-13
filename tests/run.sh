@@ -252,6 +252,7 @@ SHADER_EMIT=(
     tests/cases/shader_p2_spec.ss
     tests/cases/shader_p2_subgroup.ss
     tests/cases/shader_p3_scalar.ss
+    tests/cases/shader_cpu.ss
 )
 
 pass=0 fail=0 upd=0

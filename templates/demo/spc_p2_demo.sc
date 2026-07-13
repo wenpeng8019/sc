@@ -25,6 +25,8 @@ inc spc.sc
 
 add spc_kernel/out/reduce.shader.c
 add spc_kernel/out/scale_spec.shader.c
+add spc_kernel/out/saxpy.shader.c
+add spc_kernel/out/saxpy.cpu.c
 
 def shader_blob: {
     entry:  const char&
@@ -36,6 +38,7 @@ def shader_blob: {
 }
 @fnc shader_reduce_get:: shader_blob&, i: u8       # 绑 sc_shader_reduce_get
 @fnc shader_scale_spec_get:: shader_blob&, i: u8   # 绑 sc_shader_scale_spec_get
+@fnc shader_saxpy_get:: shader_blob&, i: u8        # 绑 sc_shader_saxpy_get（CPU 对拍用）
 
 # 后端 → reduce.ss 产物 base（条目 = base+0 reflect、base+1 comp）
 fnc reduce_base: u8, backend: i4
@@ -183,6 +186,61 @@ fnc main: i4
     spc_destroy_buffer(xb)
     spc_destroy_buffer(tb)
     x->drop()
+    spc_shutdown()
+
+    # ============ 3. CPU SPMD 后端对拍（§17 M1：saxpy y=2x+1） ============
+    # 重开 spc，强制 kernel_backend=CPU（tar cpu@99 产物 saxpy.cpu.c 已 add 编入，
+    # 构造器自注册；code 字段 CPU 后端不消费，填反射指针满足非空校验）
+    var sdc2: ::sc_spc_desc
+    ::memset(&sdc2, 0, sizeof(::sc_spc_desc))
+    sdc2.kernel_backend = 1             # SC_SPC_KERNEL_CPU
+    if spc_init(&sdc2) == 0
+        print "spc_init(CPU) 失败\n", .
+        return 1
+    var crj: shader_blob& = shader_saxpy_get(6)     # cpu99 reflect 条目
+    var kd3: ::sc_spc_kernel_desc
+    ::memset(&kd3, 0, sizeof(::sc_spc_kernel_desc))
+    kd3.code.ptr  = (crj->data: &)
+    kd3.code.size = crj->size
+    kd3.entry     = "cs_saxpy"
+    kd3.reflect_json = (crj->data: const char&)
+    var krn3: u4 = spc_make_kernel(&kd3)
+    if krn3 == 0
+        print "make_kernel(cpu) 失败\n", .
+        return 1
+    var x3: tensor& = arange(0.0, 4096.0, 1.0, DT_F4)
+    var y3: tensor& = ones_like(x3)
+    var xb3: u4 = spc_buffer_from_tensor(x3)
+    var yb3: u4 = spc_buffer_from_tensor(y3)
+    var prm[2]: u4
+    var pf: f4& = (&prm[0]: f4&)
+    pf[0] = 2.0                          # a = 2.0
+    prm[1] = 4096                        # n
+    var bnd3: ::sc_spc_bindings
+    ::memset(&bnd3, 0, sizeof(::sc_spc_bindings))
+    bnd3.uniforms[0].ptr  = (&prm[0]: &)
+    bnd3.uniforms[0].size = 8
+    bnd3.buffers[1] = xb3
+    bnd3.buffers[2] = yb3
+    if spc_dispatch(krn3, n, 1, 1, &bnd3) == 0
+        print "dispatch(cpu) 失败\n", .
+        return 1
+    spc_finish()
+    spc_buffer_to_tensor(yb3, y3)
+    var e4: tensor& = x3->mul_scalar(2.0)
+    var e5: tensor& = e4->add_scalar(1.0)
+    if y3->allclose(e5, 0.00001, 0.000001)
+        print "[CPU] SPMD 后端 saxpy 对拍:通过(y=2x+1, n=4096, 向量化交目标编译器)\n", .
+    else
+        print "[CPU] saxpy 对拍不符!\n", .
+        fails = fails + 1
+    e4->drop()
+    e5->drop()
+    spc_destroy_kernel(krn3)
+    spc_destroy_buffer(xb3)
+    spc_destroy_buffer(yb3)
+    x3->drop()
+    y3->drop()
     spc_shutdown()
     gpu_shutdown()
     if fails == 0

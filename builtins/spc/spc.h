@@ -58,10 +58,19 @@ enum { SC_SPC_MAX_BINDINGS = 8 };   /* 每内核绑定槽数（= 反射清单 bi
 
 /* ---- 初始化 ---------------------------------------------- */
 
+/* kernel 面后端选择：缺省跟随 gpu env 实际后端（Metal/GL/Vulkan）；
+ * CPU = SPMD 循环化 C 直发（tar cpu@99 产物，宿主 add 编入）——全平台可用，
+ * 有 GPU 时也可强制选用（数值对拍参考 / 无 GPU 兄底）。 */
+typedef enum sc_spc_kernel_backend {
+    SC_SPC_KERNEL_DEFAULT = 0,   /* 跟随 gpu_query_backend() */
+    SC_SPC_KERNEL_CPU,           /* 强制 CPU SPMD 后端 */
+} sc_spc_kernel_backend;
+
 typedef struct sc_spc_desc {
     int buffer_pool_size;    /* 默认 128 */
     int kernel_pool_size;    /* 默认 32 */
     int model_pool_size;     /* 默认 8 */
+    int kernel_backend;      /* sc_spc_kernel_backend；默认跟随 gpu */
 } sc_spc_desc;
 
 int  sc_spc_init(const sc_spc_desc* desc);   /* 1 成功 / 0 失败；须先 sc_gpu_init */

@@ -54,6 +54,7 @@ tar "boards/rk3588.caps"       # 外部设备能力档案
 | `gles` | 100 / 300 / 310 / 320 | ES2.0 的着色语言 = `gles@100` |
 | `webgl` | 100 / 300 | WebGL1 / WebGL2 |
 | `metal`（别名 `msl`） | 1.0–4.x（`@major.minor`） | 经 SPIRV-Cross 产 MSL |
+| `cpu`（别名 `c`） | 99 / 11 / 17（C 标准年份） | SPMD 循环化 C 直发（仅 comp；向量化交目标 C 编译器，见设计文档 §17） |
 
 ### 3.1 设备能力档案（caps profile）
 

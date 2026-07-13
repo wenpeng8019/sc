@@ -232,22 +232,26 @@ int sc_spc_init(const sc_spc_desc* desc) {
     S.desc.kernel_pool_size = DEF(S.desc.kernel_pool_size, 32);
     S.desc.model_pool_size  = DEF(S.desc.model_pool_size, 8);
 
-    /* kernel 面后端：跟随 gpu env 实际生效后端（不静默降级） */
+    /* kernel 面后端：显式强制 CPU，否则跟随 gpu env 实际生效后端（不静默降级） */
     K = NULL;
-    int gb = sc_gpu_query_backend();
+    if (S.desc.kernel_backend == 1 /*SC_SPC_KERNEL_CPU*/) {
+        K = spc_cpu_api();
+    } else {
+        int gb = sc_gpu_query_backend();
 #if P_DARWIN
-    if (gb == 1 /*METAL*/) K = spc_mtl_api();
+        if (gb == 1 /*METAL*/) K = spc_mtl_api();
 #endif
 #if P_LINUX
-    if (gb == 2 /*GL*/)     K = spc_gl_api();
+        if (gb == 2 /*GL*/)     K = spc_gl_api();
 #endif
 #if P_LINUX || P_WIN
-    if (gb == 3 /*VULKAN*/) K = spc_vk_api();
+        if (gb == 3 /*VULKAN*/) K = spc_vk_api();
 #endif
-    if (!K) {
-        spc_log("init: gpu 后端 %d 无对应 spc kernel 实现（darwin=Metal、"
-                "linux/android=GL·Vulkan、win=Vulkan）", gb);
-        return 0;
+        if (!K) {
+            spc_log("init: gpu 后端 %d 无对应 spc kernel 实现（darwin=Metal、"
+                    "linux/android=GL·Vulkan、win=Vulkan；或 desc.kernel_backend=CPU）", gb);
+            return 0;
+        }
     }
     if (!K->init()) { spc_log("init: %s 后端初始化失败", K->name); return 0; }
 
