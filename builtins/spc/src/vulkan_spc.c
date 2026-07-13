@@ -282,6 +282,7 @@ static bool spc_vk_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc
         VkComputePipelineCreateInfo ci;
         memset(&ci, 0, sizeof(ci));
         ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        ci.layout = m->layout;          /* 必设：否则 layout=VK_NULL_HANDLE 非法（VUID-...-11367）*/
         ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
         ci.stage.module = m->shader;
