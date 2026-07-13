@@ -479,13 +479,14 @@ inline CapVia capResolve(Cap c, const GlslTarget& t, const char** outExt = nullp
             case Cap::SharedMemory:
             case Cap::ComputeBarrier:
             case Cap::AtomicOp:
+            case Cap::SpecConstant:
             case Cap::Float16Type:
             case Cap::Int64Type:
             case Cap::Int8Type:
             case Cap::Int16Type:
                 return CapVia::Core;
             default:
-                return CapVia::No;   // 图形面内建/采样/subgroup/spec 一期门控
+                return CapVia::No;   // 图形面内建/采样/subgroup 门控
         }
     }
     const CapReq& q = capReq(c, t.api);

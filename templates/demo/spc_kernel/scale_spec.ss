@@ -1,8 +1,9 @@
-tar vulkan@450, metal@2.0
+tar vulkan@450, metal@2.0, cpu@99
 
 # 特化常量内核：x[i] *= SCALE（SCALE 由管线创建期传值覆写，constant_id=0）。
 # GL 后端无特化常量机制（能力表门控 gles=-1），故单独成文件（reduce.ss 才带 gles）。
-# 条目布局每目标两连 [reflect, cs_scale]：base 0 = vulkan、base 2 = metal。
+# 条目：base 0 = vulkan、2 = metal、4 = cpu reflect（源码另落 out/scale_spec.cpu.c；
+# CPU 的 spec 传值经参数表 8 槽+掩码，见 cpu_spc.c）。
 # 消费方：templates/demo/spc_p2_demo.sc
 
 let SCALE: f4 = 1.0 spec 0      # 运行时可覆写（默认 1.0）

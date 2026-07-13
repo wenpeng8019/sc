@@ -23,13 +23,20 @@
 #include "internal.h"
 #include <stdlib.h>
 #include <string.h>
+#if P_WIN
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
 
 /* ---- 注册链（产物构造器在 main 前调入；容多份产物文件） -------- */
 
 typedef struct sc_spc_cpu_kernel {
     const char* entry;
     void (*fn)(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
-               uint32_t gz0, uint32_t gz1, void* const* bind);
+               uint32_t gz0, uint32_t gz1, void* const* bind,
+               const uint32_t* spec);
     int local[3];
 } sc_spc_cpu_kernel;
 
@@ -65,6 +72,9 @@ typedef struct CpuSpcBuffer {
 
 typedef struct CpuSpcKernel {
     const sc_spc_cpu_kernel* k;
+    /* spec 传值：8 值槽 + 掩码槽 [8]（bit i = id i 已传；产物契约同步） */
+    uint32_t spec[9];
+    bool     has_spec;
 } CpuSpcKernel;
 
 /* ---- 生命周期 ---------------------------------------------- */
@@ -113,12 +123,46 @@ static bool spc_cpu_buffer_write(spc_buffer_t* b, const void* src, uint64_t size
     return true;
 }
 
+/* ---- 多线程分片（M2-8） ------------------------------------ */
+
+enum { SPC_CPU_MAX_THREADS = 16 };
+
+typedef struct CpuSpcJob {
+    void (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+               void* const*, const uint32_t*);
+    uint32_t gx0, gx1, gy, gz;
+    void* const* bind;
+    const uint32_t* spec;
+} CpuSpcJob;
+
+static int spc_cpu_nproc(void) {
+#if P_WIN
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int)si.dwNumberOfProcessors;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (int)n : 1;
+#endif
+}
+
+#if P_WIN
+static DWORD WINAPI spc_cpu_job_win(LPVOID p) {
+    CpuSpcJob* j = (CpuSpcJob*)p;
+    j->fn(j->gx0, j->gx1, 0, j->gy, 0, j->gz, j->bind, j->spec);
+    return 0;
+}
+#else
+static void* spc_cpu_job_posix(void* p) {
+    CpuSpcJob* j = (CpuSpcJob*)p;
+    j->fn(j->gx0, j->gx1, 0, j->gy, 0, j->gz, j->bind, j->spec);
+    return NULL;
+}
+#endif
+
 /* ---- kernel ------------------------------------------------ */
 
 static bool spc_cpu_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* desc) {
-    if (desc->spec_count > 0)
-        spc_log("cpu: M1 暂不支持特化常量传值（M2 参数化，§17.6-9），忽略 %d 项",
-                desc->spec_count);
     const sc_spc_cpu_kernel* ck = cpuFind(desc->entry);
     if (!ck) {
         spc_log("cpu: 内核 %s 未注册（宿主须 `add out/<stem>.cpu.c` 编入 tar cpu 产物）",
@@ -128,6 +172,19 @@ static bool spc_cpu_kernel_create(spc_kernel_t* k, const sc_spc_kernel_desc* des
     CpuSpcKernel* m = (CpuSpcKernel*)calloc(1, sizeof(CpuSpcKernel));
     if (!m) return false;
     m->k = ck;
+    /* 特化常量传值：按 id 入槽 + 置掩码（id ≥ 8 警告忽略） */
+    if (desc->spec_count > 0 && desc->spec_values) {
+        for (int i = 0; i < desc->spec_count; i++) {
+            int id = desc->spec_values[i].id;
+            if (id < 0 || id >= 8) {
+                spc_log("cpu: spec id %d 超槽（支持 0..7），忽略", id);
+                continue;
+            }
+            m->spec[id] = desc->spec_values[i].value;
+            m->spec[8] |= (1u << id);
+            m->has_spec = true;
+        }
+    }
     /* 注册表 local 优先（产物真源）；反射缺省时也一致 */
     k->local[0] = ck->local[0];
     k->local[1] = ck->local[1];
@@ -156,8 +213,55 @@ static bool spc_cpu_dispatch(spc_kernel_t* k, int gx, int gy, int gz,
         else
             bind[r->binding] = (void*)bnd->uniforms[r->binding].ptr;
     }
-    /* M1：单线程整段执行（M2 接 mt 线程池按 workgroup 段分片） */
-    m->k->fn(0, (uint32_t)gx, 0, (uint32_t)gy, 0, (uint32_t)gz, bind);
+
+    /* workgroup 间多线程分片（M2-8）：gx 按 local_x 对齐切段（相位分裂 kernel
+     * 的 wg 序号用绝对坐标，切点必须落在组边界）；小任务单线程直跑。
+     * 每 dispatch 临时建线程（简单可靠；常驻池化待性能需求触发再做）。 */
+    uint32_t lx = (uint32_t)(k->local[0] > 0 ? k->local[0] : 64);
+    uint32_t ngroups = ((uint32_t)gx + lx - 1) / lx;
+    int nthr = spc_cpu_nproc();
+    if (nthr > (int)ngroups) nthr = (int)ngroups;
+    if (gy > 1 || gz > 1) nthr = 1;      /* 多维分片待后续：先单线程保正确 */
+    if (nthr <= 1 || ngroups < 4) {
+        m->k->fn(0, (uint32_t)gx, 0, (uint32_t)gy, 0, (uint32_t)gz, bind,
+                 m->has_spec ? m->spec : NULL);
+        return true;
+    }
+
+    CpuSpcJob jobs[SPC_CPU_MAX_THREADS];
+    if (nthr > SPC_CPU_MAX_THREADS) nthr = SPC_CPU_MAX_THREADS;
+    uint32_t per = (ngroups + (uint32_t)nthr - 1) / (uint32_t)nthr;   /* 每线程组数 */
+    int used = 0;
+    for (int t = 0; t < nthr; t++) {
+        uint32_t g0 = (uint32_t)t * per;
+        if (g0 >= ngroups) break;
+        uint32_t g1 = g0 + per;
+        if (g1 > ngroups) g1 = ngroups;
+        jobs[t].fn = m->k->fn;
+        jobs[t].gx0 = g0 * lx;
+        uint32_t end = g1 * lx;
+        jobs[t].gx1 = end < (uint32_t)gx ? end : (uint32_t)gx;
+        jobs[t].gy = (uint32_t)gy;
+        jobs[t].gz = (uint32_t)gz;
+        jobs[t].bind = bind;
+        jobs[t].spec = m->has_spec ? m->spec : NULL;
+        used = t + 1;
+    }
+#if P_WIN
+    HANDLE th[SPC_CPU_MAX_THREADS];
+    for (int t = 0; t < used; t++)
+        th[t] = CreateThread(NULL, 0, spc_cpu_job_win, &jobs[t], 0, NULL);
+    for (int t = 0; t < used; t++)
+        if (th[t]) { WaitForSingleObject(th[t], INFINITE); CloseHandle(th[t]); }
+#else
+    pthread_t th[SPC_CPU_MAX_THREADS];
+    int started[SPC_CPU_MAX_THREADS];
+    for (int t = 0; t < used; t++)
+        started[t] = pthread_create(&th[t], NULL, spc_cpu_job_posix, &jobs[t]) == 0;
+    for (int t = 0; t < used; t++)
+        if (started[t]) pthread_join(th[t], NULL);
+        else spc_cpu_job_posix(&jobs[t]);    /* 建线程失败：本线程兼跑 */
+#endif
     return true;
 }
 

@@ -1,31 +1,29 @@
 // ============================================================
-// codegen_cpu 实现（syntax-s-design §17，M1 最小版）
+// codegen_cpu 实现（syntax-s-design §17，M1+M2）
 // ============================================================
-// 发射模型：
-//   · 每个 comp kernel → 一个静态 C 函数
-//       static void <entry>_impl(u32 gx0,gx1, gy0,gy1, gz0,gz1, void* const* bind)
-//     函数内自带三重全局线程循环（外 gz/gy、内 gx），内循环给
-//     vectorize 提示——SPMD 语义整体交给目标编译器向量化。
-//   · 资源块 = bind[binding] 基指针 + 编译期偏移别名：
-//       标量成员 → `T* restrict <Blk>_<f> = (T*)(p + off);` 经 (*x) 访问
-//       数组成员 → `T* restrict <Blk>_<f> = (T*)(p + off);` 经 x[i] 访问
-//     布局与 GPU 侧同一事实源规则（uniform=std140 / storage=std430）。
-//   · 计算内建（标量声明惯例）：global_invocation_id→gx、
-//     local_invocation_index→gx % local_x、workgroup_id→gx / local_x。
-//   · 文件尾：注册表 + __attribute__((constructor)) 自注册到 spc cpu 后端
-//     （契约结构 sc_spc_cpu_kernel 与 builtins/spc/src/cpu_spc.c 同步）。
+// 发射模型（两条路径，按 kernel 是否含 barrier 选择）：
+//   ① 无 barrier（M1）：三重全局线程循环，内循环 vectorize 提示。
+//   ② 含 barrier（M2 相位分裂）：workgroup 外循环 + 按 barrier 切相位，
+//     每相位一个 lid 内循环（barrier 语义在相位边界处天然成立）：
+//       顶层 var/let = uniform 变量（每 invocation 同值）提升到 wg 层，
+//       初值引用 gid/lid 则报错（移进相位内或用 shared）；
+//       含 barrier 的顶层 while = 循环交换（条件/步进须 uniform），
+//       体内递归切相位；其它控制流内的 barrier 报错（一期限制）。
+//     shared 块 = wg 层栈数组；atomic_* → GCC/Clang __atomic 内建
+//     （min/max 用 typeof+CAS 循环宏，与产物已用的 GNU 扩展一致）。
+//   顶层 let（含 `spec N`）= kernel 内 const 常量；spec 经参数表传值
+//   （fn 签名尾 const uint32_t* spec，按 id 索引，缺省用默认值）。
 //
-// M1 限制（超出报 CompileError，M2 放行）：
-//   · 仅标量/标量数组（vec*/mat*/sampler 报错）
-//   · uniform 块成员限标量（std140 数组 stride 16 与 C 布局冲突）；push 未支持
-//   · 无 barrier/shared/atomic/subgroup/spec（能力表 cpu 列已门控）
+// 其余同 M1：资源块 bind[binding] 基指针 + restrict 别名；仅标量。
 // ============================================================
 #include "codegen_cpu.h"
 #include "error.h"
 
+#include <functional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -83,6 +81,7 @@ struct Res {                        // 资源块视图
 struct Model {
     std::unordered_map<std::string, const Decl*> structs;
     std::vector<Res> resources;
+    std::vector<const Decl*> shared;    // shared 块（wg 层栈数组）
     const Decl* findStruct(const std::string& n) const {
         auto it = structs.find(n);
         return it == structs.end() ? nullptr : it->second;
@@ -148,9 +147,30 @@ struct CEmit {
                 std::string ct = cType(fn);
                 if (!ct.empty() && ct != "void" && e->args.size() == 1)
                     return "((" + ct + ")" + expr(e->args[0].get()) + ")";
-                if (fn == "barrier" || fn == "memory_barrier" ||
-                    fn.rfind("atomic_", 0) == 0 || fn.rfind("subgroup_", 0) == 0)
-                    err("cpu 后端 M1 暂不支持 `" + fn + "`（M2 落地，见 syntax-s-design §17.6）", e->line);
+                if (fn == "barrier" || fn == "memory_barrier")
+                    err("cpu 后端：barrier 仅支持 kernel 顶层或顶层 while 循环内"
+                        "（相位分裂限制，见 syntax-s-design §17.5）", e->line);
+                if (fn.rfind("atomic_", 0) == 0) {
+                    // __atomic 内建（GNU 扩展，clang/gcc/DSP-clang 通用）；
+                    // 首参是左值表达式，取地址传入
+                    const std::string op = fn.substr(7);
+                    std::string m0 = "&" + expr(e->args[0].get());
+                    std::string v1 = e->args.size() > 1 ? expr(e->args[1].get()) : "";
+                    if (op == "add") return "__atomic_fetch_add(" + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "sub") return "__atomic_fetch_sub(" + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "and") return "__atomic_fetch_and(" + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "or")  return "__atomic_fetch_or("  + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "xor") return "__atomic_fetch_xor(" + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "exchange") return "__atomic_exchange_n(" + m0 + ", " + v1 + ", __ATOMIC_RELAXED)";
+                    if (op == "min") return "SC_ATOMIC_MIN(" + m0 + ", " + v1 + ")";
+                    if (op == "max") return "SC_ATOMIC_MAX(" + m0 + ", " + v1 + ")";
+                    if (op == "cas" && e->args.size() == 3)
+                        return "SC_ATOMIC_CAS(" + m0 + ", " + v1 + ", " +
+                               expr(e->args[2].get()) + ")";
+                    err("cpu 后端不支持 `" + fn + "`", e->line);
+                }
+                if (fn.rfind("subgroup_", 0) == 0)
+                    err("cpu 后端不支持 subgroup（能力门控；模拟无性能意义）", e->line);
                 const char* mf = mathFn(fn);
                 if (!mf) {
                     // 辅助函数（.ss 内 fnc）原名直调
@@ -323,6 +343,52 @@ void mapCompIn(const Model& m, const Decl& stage, CEmit& em, bool& usesLid, bool
     }
 }
 
+// 表达式是否引用 per-invocation 变量（gx/lid 映射）——uniform 性检查用
+bool usesInvocation(const Expr* e, const CEmit& em) {
+    if (!e) return false;
+    if (e->kind == Expr::Ident) {
+        auto it = em.memberMap.find(e->text);
+        if (it != em.memberMap.end() && (it->second == "gx" || it->second == "lid"))
+            return true;
+    }
+    if (e->kind == Expr::Member && e->a && e->a->kind == Expr::Ident) {
+        auto it = em.memberMap.find(e->a->text + "." + e->text);
+        if (it != em.memberMap.end() && (it->second == "gx" || it->second == "lid"))
+            return true;
+    }
+    if (usesInvocation(e->a.get(), em) || usesInvocation(e->b.get(), em) ||
+        usesInvocation(e->c.get(), em)) return true;
+    for (const auto& a : e->args)
+        if (usesInvocation(a.get(), em)) return true;
+    return false;
+}
+
+// 语句/语句序是否含 barrier 调用（相位分裂路径选择）
+bool exprHasBarrier(const Expr* e) {
+    if (!e) return false;
+    if (e->kind == Expr::Call && e->a && e->a->kind == Expr::Ident &&
+        (e->a->text == "barrier" || e->a->text == "memory_barrier")) return true;
+    if (exprHasBarrier(e->a.get()) || exprHasBarrier(e->b.get()) ||
+        exprHasBarrier(e->c.get())) return true;
+    for (const auto& a : e->args) if (exprHasBarrier(a.get())) return true;
+    return false;
+}
+bool stmtHasBarrier(const Stmt* s) {
+    if (!s) return false;
+    if (exprHasBarrier(s->expr.get())) return true;
+    for (const auto& x : s->body) if (stmtHasBarrier(x.get())) return true;
+    for (const auto& x : s->elseBody) if (stmtHasBarrier(x.get())) return true;
+    for (const auto& f : s->decls) if (exprHasBarrier(f.init.get())) return true;
+    return false;
+}
+// 顶层 ExprS 是否恰为裸 barrier()/memory_barrier() 调用
+bool isBarrierStmt(const Stmt* s) {
+    return s && s->kind == Stmt::ExprS && s->expr &&
+           s->expr->kind == Expr::Call && s->expr->a &&
+           s->expr->a->kind == Expr::Ident &&
+           (s->expr->a->text == "barrier" || s->expr->a->text == "memory_barrier");
+}
+
 } // namespace
 
 std::string emitCpu(const Program& prog, const GlslTarget& target) {
@@ -334,10 +400,12 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
             m.structs[d->name] = d.get();
             if (d->shaderAttr && d->shaderAttr->res != ShaderDeclAttr::None) {
                 auto res = d->shaderAttr->res;
-                if (res == ShaderDeclAttr::Shared)
-                    err("cpu 后端 M1 暂不支持 shared（M2 落地，见 syntax-s-design §17.6）", d->line);
+                if (res == ShaderDeclAttr::Shared) {
+                    m.shared.push_back(d.get());    // wg 层栈数组（相位模式声明）
+                    continue;
+                }
                 if (res == ShaderDeclAttr::Push)
-                    err("cpu 后端 M1 暂不支持 push 常量（用 uniform 块）", d->line);
+                    err("cpu 后端暂不支持 push 常量（用 uniform 块）", d->line);
                 m.resources.push_back({d.get(), d->shaderAttr->binding,
                                        res == ShaderDeclAttr::Storage});
             }
@@ -354,12 +422,20 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
       << "#define SC_CLAMPF(x,a,b)  (fminf(fmaxf((x),(a)),(b)))\n"
       << "#define SC_MIXF(a,b,t)    ((a) + ((b) - (a)) * (t))\n"
       << "#define SC_STEPF(e,x)     ((x) < (e) ? 0.0f : 1.0f)\n"
-      << "#define SC_SMOOTHSTEPF(a,b,x) ({ float _t = SC_CLAMPF(((x)-(a))/((b)-(a)),0.0f,1.0f); _t*_t*(3.0f-2.0f*_t); })\n\n"
+      << "#define SC_SMOOTHSTEPF(a,b,x) ({ float _t = SC_CLAMPF(((x)-(a))/((b)-(a)),0.0f,1.0f); _t*_t*(3.0f-2.0f*_t); })\n"
+      << "/* 原子 min/max/cas：typeof + CAS 循环（GNU 扩展，clang/gcc/DSP-clang 通用） */\n"
+      << "#define SC_ATOMIC_MIN(p,v) ({ __typeof__(*(p)) _o = __atomic_load_n((p), __ATOMIC_RELAXED), _v = (v), _n2; \\\n"
+      << "    do { _n2 = _o < _v ? _o : _v; } while (!__atomic_compare_exchange_n((p), &_o, _n2, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)); _o; })\n"
+      << "#define SC_ATOMIC_MAX(p,v) ({ __typeof__(*(p)) _o = __atomic_load_n((p), __ATOMIC_RELAXED), _v = (v), _n2; \\\n"
+      << "    do { _n2 = _o > _v ? _o : _v; } while (!__atomic_compare_exchange_n((p), &_o, _n2, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)); _o; })\n"
+      << "#define SC_ATOMIC_CAS(p,c,v) ({ __typeof__(*(p)) _c = (c); \\\n"
+      << "    __atomic_compare_exchange_n((p), &_c, (v), 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED); _c; })\n\n"
       << "#ifndef SC_SPC_CPU_KERNEL_DEFINED\n#define SC_SPC_CPU_KERNEL_DEFINED\n"
       << "typedef struct sc_spc_cpu_kernel {\n"
       << "    const char* entry;\n"
       << "    void (*fn)(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,\n"
-      << "               uint32_t gz0, uint32_t gz1, void* const* bind);\n"
+      << "               uint32_t gz0, uint32_t gz1, void* const* bind,\n"
+      << "               const uint32_t* spec);\n"
       << "    int local[3];\n"
       << "} sc_spc_cpu_kernel;\n#endif\n"
       << "extern void sc_spc_cpu_register(const sc_spc_cpu_kernel* ks, int n);\n\n";
@@ -407,28 +483,182 @@ std::string emitCpu(const Program& prog, const GlslTarget& target) {
         mapCompIn(m, *d, em, usesLid, usesWg);
         std::string aliases = emitBlockAliases(m, em, d->line);
 
+        // 顶层 let 常量（含 spec）：kernel 头部 const 声明；spec 经参数表按 id 取值
+        std::ostringstream lets;
+        for (const auto& ld : prog.decls) {
+            if (!ld || ld->kind != Decl::LetD) continue;
+            for (const auto& f : ld->structCommon.fields) {
+                if (!f.init) continue;
+                std::string ct = cType(f.type.name.empty() ?
+                    (f.init->kind == Expr::FloatLit ? "f4" : "i4") : f.type.name);
+                if (ct.empty()) err("cpu 后端顶层 let 仅支持标量", f.line);
+                std::string init = em.expr(f.init.get());
+                if (f.shaderAttr && f.shaderAttr->specId >= 0) {
+                    // spec 特化常量：传值数组 8 槽 + 掩码槽 spec[8]（bit i = id i 已传），
+                    // 未传用默认值（与 cpu_spc.c dispatch 装配契约同步）
+                    std::string idx = std::to_string(f.shaderAttr->specId);
+                    std::string hit = "(spec && (spec[8] & (1u<<" + idx + ")))";
+                    if (ct == "float")
+                        lets << "  const float " << f.name << " = " << hit
+                             << " ? *(const float*)&spec[" << idx << "] : " << init << ";\n";
+                    else
+                        lets << "  const " << ct << " " << f.name << " = " << hit
+                             << " ? (" << ct << ")spec[" << idx << "] : " << init << ";\n";
+                } else {
+                    lets << "  const " << ct << " " << f.name << " = " << init << ";\n";
+                }
+            }
+        }
+
+        const bool phased = [&]{
+            for (const auto& s : d->body) if (stmtHasBarrier(s.get())) return true;
+            return false;
+        }();
+
         c << "static void " << d->name
           << "_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,\n"
-          << "        uint32_t gz0, uint32_t gz1, void* const* bind) {\n"
+          << "        uint32_t gz0, uint32_t gz1, void* const* bind,\n"
+          << "        const uint32_t* spec) {\n"
           << aliases
-          << "  (void)bind;\n"
-          << "  for (uint32_t gz = gz0; gz < gz1; gz++)\n"
-          << "  for (uint32_t gy = gy0; gy < gy1; gy++) {\n"
-          << "    (void)gz; (void)gy;\n"
-          << "#if defined(__clang__)\n"
-          << "#pragma clang loop vectorize(enable)\n"
-          << "#elif defined(__GNUC__)\n"
-          << "#pragma GCC ivdep\n"
-          << "#endif\n"
-          << "    for (uint32_t gx = gx0; gx < gx1; gx++) {\n";
-        if (usesLid)
-            c << "      const uint32_t lid = gx % " << km.local[0] << "u;\n";
-        if (usesWg)
-            c << "      const uint32_t wg = gx / " << km.local[0] << "u;\n";
-        em.indent = 6;
-        for (const auto& s : d->body) em.stmt(s.get());
-        c << em.os.str()
-          << "    }\n"
+          << lets.str()
+          << "  (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;\n";
+
+        if (!phased) {
+            // ---- M1 路径：三重全局线程循环（无 barrier）----
+            c << "  for (uint32_t gz = gz0; gz < gz1; gz++)\n"
+              << "  for (uint32_t gy = gy0; gy < gy1; gy++) {\n"
+              << "    (void)gz; (void)gy;\n"
+              << "#if defined(__clang__)\n"
+              << "#pragma clang loop vectorize(enable)\n"
+              << "#elif defined(__GNUC__)\n"
+              << "#pragma GCC ivdep\n"
+              << "#endif\n"
+              << "    for (uint32_t gx = gx0; gx < gx1; gx++) {\n";
+            if (usesLid)
+                c << "      const uint32_t lid = gx % " << km.local[0] << "u;\n";
+            if (usesWg)
+                c << "      const uint32_t wg = gx / " << km.local[0] << "u;\n";
+            em.indent = 6;
+            for (const auto& s : d->body) em.stmt(s.get());
+            c << em.os.str()
+              << "    }\n"
+              << "  }\n"
+              << "}\n\n";
+            continue;
+        }
+
+        // ---- M2 路径：barrier 相位分裂（workgroup 外循环 + 相位 lid 循环）----
+        // 1D 语义（gy/gz 恒 1；多维含 barrier 待后续），lid = 相位循环变量、
+        // wg = workgroup 序号、gx = wg*LX+lid（越界由 kernel n 守卫，与 GPU 组数取整同义）。
+        if (km.local[1] != 1 || km.local[2] != 1)
+            err("cpu 后端相位分裂暂限 1D 工作组（local Y/Z = 1）", d->line);
+        // 内建映射改相位形态：wkid/lid 直接是循环变量
+        for (auto& kv : em.memberMap) {
+            if (kv.second == "wg") { usesWg = true; }
+        }
+        const std::string LX = std::to_string(km.local[0]) + "u";
+        // wg 序号用绝对坐标（gx0/LX 起）：多线程分片时 gx0 按 LX 对齐切割（cpu_spc.c 保证）
+        c << "  for (uint32_t wg = gx0 / " << LX << "; wg < (gx1 + " << LX << " - 1) / "
+          << LX << "; wg++) {\n";
+        // shared 块 → wg 层栈数组/标量
+        for (const Decl* sd : m.shared) {
+            for (const auto& f : sd->structCommon.fields) {
+                if (f.synthetic) continue;
+                std::string ct = cType(f.type.name);
+                if (ct.empty())
+                    err("cpu 后端 shared 块仅支持标量成员", f.line ? f.line : sd->line);
+                std::string alias = sd->name + "_" + f.name;
+                c << "    " << ct << " " << alias;
+                for (const auto& dim : f.type.arrayDims) c << "[" << dim << "]";
+                c << ";\n";
+                em.memberMap[sd->name + "." + f.name] =
+                    f.type.arrayDims.empty() ? ("(" + alias + ")") : alias;
+            }
+        }
+        // 相位发射器：flushPhase 把累积语句包进 lid 循环
+        std::ostringstream body;
+        std::vector<const Stmt*> phase;
+        std::unordered_set<std::string> wgVars;   // wg 层提升的 uniform 变量名
+        int phaseIndent = 4;
+        auto flushPhase = [&](int indentLv) {
+            if (phase.empty()) return;
+            std::string padS((size_t)indentLv, ' ');
+            body << padS << "for (uint32_t lid = 0; lid < " << LX << "; lid++) {\n"
+                 << padS << "  const uint32_t gx = wg * " << LX << " + lid; (void)gx;\n";
+            CEmit pe(m);
+            pe.memberMap = em.memberMap;
+            pe.indent = indentLv + 2;
+            for (const Stmt* s : phase) pe.stmt(s);
+            body << pe.os.str() << padS << "}\n";
+            phase.clear();
+        };
+        // 递归处理语句序列（顶层与含 barrier 的顶层 while 体共用）
+        std::function<void(const std::vector<StmtPtr>&, int)> emitSeq =
+            [&](const std::vector<StmtPtr>& stmts, int lv) {
+            for (const auto& sp : stmts) {
+                const Stmt* s = sp.get();
+                if (!s) continue;
+                if (isBarrierStmt(s)) {              // barrier = 相位边界（CPU 串行天然满足）
+                    flushPhase(lv);
+                    continue;
+                }
+                if ((s->kind == Stmt::VarS || s->kind == Stmt::LetS) && lv == phaseIndent) {
+                    // 顶层声明 = uniform 变量（跨相位存活，提升到 wg 层）
+                    flushPhase(lv);
+                    for (const auto& f : s->decls) {
+                        if (usesInvocation(f.init.get(), em))
+                            err("cpu 后端：跨相位顶层变量 `" + f.name +
+                                "` 初值引用 gid/lid（移进相位内或改用 shared）",
+                                f.line ? f.line : s->line);
+                        CEmit de(m);
+                        de.memberMap = em.memberMap;
+                        de.indent = lv;
+                        de.declLocal(f, s->line);
+                        body << de.os.str();
+                        wgVars.insert(f.name);
+                    }
+                    continue;
+                }
+                // uniform 赋值外提：目标是 wg 层变量且右侧不引用 gid/lid →
+                // 只执行一次（GPU 上每 invocation 同值重复执行，CPU 入 lid 循环会错）
+                if (s->kind == Stmt::ExprS && s->expr && s->expr->kind == Expr::Binary &&
+                    (s->expr->op == "=" || s->expr->op == "+=" || s->expr->op == "-=" ||
+                     s->expr->op == "*=" || s->expr->op == "/=") &&
+                    s->expr->a && s->expr->a->kind == Expr::Ident &&
+                    wgVars.count(s->expr->a->text) &&
+                    !usesInvocation(s->expr->b.get(), em)) {
+                    flushPhase(lv);
+                    CEmit ae(m);
+                    ae.memberMap = em.memberMap;
+                    ae.indent = lv;
+                    ae.pad(); ae.os << ae.expr(s->expr.get()) << ";\n";
+                    body << ae.os.str();
+                    continue;
+                }
+                if (s->kind == Stmt::WhileS && stmtHasBarrier(s)) {
+                    // 循环交换：uniform while 提到 wg 层，体内递归切相位
+                    flushPhase(lv);
+                    if (usesInvocation(s->expr.get(), em))
+                        err("cpu 后端：含 barrier 的循环条件须为 uniform"
+                            "（不得引用 gid/lid）", s->line);
+                    CEmit ce(m);
+                    ce.memberMap = em.memberMap;
+                    std::string padS((size_t)lv, ' ');
+                    body << padS << "while " << ce.cond(s->expr.get()) << " {\n";
+                    emitSeq(s->body, lv + 2);
+                    flushPhase(lv + 2);
+                    body << padS << "}\n";
+                    continue;
+                }
+                if (stmtHasBarrier(s))
+                    err("cpu 后端：barrier 仅支持 kernel 顶层或顶层 while 循环内"
+                        "（相位分裂限制，见 syntax-s-design §17.5）", s->line);
+                phase.push_back(s);
+            }
+        };
+        emitSeq(d->body, phaseIndent);
+        flushPhase(phaseIndent);
+        c << body.str()
           << "  }\n"
           << "}\n\n";
     }

@@ -202,8 +202,11 @@ GPU 结果存疑时的参照基准（确定性、可单步调试）：
 #    → 同一套 spc API 跑同一 kernel，数值与 GPU 后端对照
 ```
 
-- M1 范围：标量 kernel（无 barrier/shared/atomic/spec/subgroup，M2 落地）；
-  uniform 块限标量成员（数组用 storage）。超出者 scc 编译期报错。
+- M2 已落地（mac 实测）：barrier 相位分裂（切相位 + uniform 赋值外提 +
+  循环交换；限 kernel 顶层/顶层 while）、shared（wg 层栈数组）、atomic_*
+ （__atomic 内建 + typeof CAS 宏）、spec 传值（参数表 8 槽+掩码）、
+  workgroup 间多线程分片（pthread/Win32，按 local_x 对齐切段）。
+  未支持：push 块、vec/mat、采样器、subgroup（门控）、含 barrier 的多维工作组。
 - 产物是规整 SPMD 循环 + restrict + 向量化提示：`cc -O3 -Rpass=loop-vectorize`
   可确认向量化（mac 实测 width 4）；交叉编译时 NEON/SVE/AVX/RVV 由目标
   工具链自动兑现，无需逐 ISA 适配。

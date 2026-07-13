@@ -1,10 +1,12 @@
-tar vulkan@450, metal@2.0, gles@310
+tar vulkan@450, metal@2.0, gles@310, cpu@99
 
 # P2 计算深化端到端内核：shared 共享内存树形规约 + barrier + atomic_add。
-# 三目标产物（条目布局每目标两连 [reflect, cs_reduce]，声明序 = base）：
+# 四目标产物（条目布局每目标两连 [reflect, cs_reduce]，声明序 = base）：
 #   base 0 = vulkan（.spv 二进制，spc Vulkan 后端）
 #   base 2 = metal （MSL 文本，spc Metal 后端）
 #   base 4 = gles  （GLSL ES 3.1 文本，spc GL 后端）
+#   条目 6 = cpu reflect（内核源码另落 out/reduce.cpu.c，宿主 add 编入；
+#            相位分裂：barrier 切相位 + uniform 外提，见 design §17）
 # 消费方：templates/demo/spc_p2_demo.sc（按 gpu_query_backend 选 base）
 
 @def Params: {

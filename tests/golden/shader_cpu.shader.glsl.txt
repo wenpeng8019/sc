@@ -34,13 +34,21 @@
 #define SC_MIXF(a,b,t)    ((a) + ((b) - (a)) * (t))
 #define SC_STEPF(e,x)     ((x) < (e) ? 0.0f : 1.0f)
 #define SC_SMOOTHSTEPF(a,b,x) ({ float _t = SC_CLAMPF(((x)-(a))/((b)-(a)),0.0f,1.0f); _t*_t*(3.0f-2.0f*_t); })
+/* 原子 min/max/cas：typeof + CAS 循环（GNU 扩展，clang/gcc/DSP-clang 通用） */
+#define SC_ATOMIC_MIN(p,v) ({ __typeof__(*(p)) _o = __atomic_load_n((p), __ATOMIC_RELAXED), _v = (v), _n2; \
+    do { _n2 = _o < _v ? _o : _v; } while (!__atomic_compare_exchange_n((p), &_o, _n2, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)); _o; })
+#define SC_ATOMIC_MAX(p,v) ({ __typeof__(*(p)) _o = __atomic_load_n((p), __ATOMIC_RELAXED), _v = (v), _n2; \
+    do { _n2 = _o > _v ? _o : _v; } while (!__atomic_compare_exchange_n((p), &_o, _n2, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)); _o; })
+#define SC_ATOMIC_CAS(p,c,v) ({ __typeof__(*(p)) _c = (c); \
+    __atomic_compare_exchange_n((p), &_c, (v), 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED); _c; })
 
 #ifndef SC_SPC_CPU_KERNEL_DEFINED
 #define SC_SPC_CPU_KERNEL_DEFINED
 typedef struct sc_spc_cpu_kernel {
     const char* entry;
     void (*fn)(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
-               uint32_t gz0, uint32_t gz1, void* const* bind);
+               uint32_t gz0, uint32_t gz1, void* const* bind,
+               const uint32_t* spec);
     int local[3];
 } sc_spc_cpu_kernel;
 #endif
@@ -51,7 +59,8 @@ static float lerp1(float a, float b, float t) {
 }
 
 static void cs_cpu_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
-        uint32_t gz0, uint32_t gz1, void* const* bind) {
+        uint32_t gz0, uint32_t gz1, void* const* bind,
+        const uint32_t* spec) {
   const unsigned char* Params_p = (const unsigned char*)bind[0];
   const float* restrict Params_a = (const float*)(Params_p + 0);
   const uint32_t* restrict Params_n = (const uint32_t*)(Params_p + 4);
@@ -62,7 +71,7 @@ static void cs_cpu_impl(uint32_t gx0, uint32_t gx1, uint32_t gy0, uint32_t gy1,
   int64_t* restrict YBuf_big = (int64_t*)(YBuf_p + 8);
   float* restrict YBuf_lut = (float*)(YBuf_p + 16);
   float* restrict YBuf_y = (float*)(YBuf_p + 32);
-  (void)bind;
+  (void)bind; (void)spec; (void)gy0; (void)gy1; (void)gz0; (void)gz1;
   for (uint32_t gz = gz0; gz < gz1; gz++)
   for (uint32_t gy = gy0; gy < gy1; gy++) {
     (void)gz; (void)gy;

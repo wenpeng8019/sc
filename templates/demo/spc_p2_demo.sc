@@ -24,7 +24,9 @@ inc gpu.sc
 inc spc.sc
 
 add spc_kernel/out/reduce.shader.c
+add spc_kernel/out/reduce.cpu.c
 add spc_kernel/out/scale_spec.shader.c
+add spc_kernel/out/scale_spec.cpu.c
 add spc_kernel/out/saxpy.shader.c
 add spc_kernel/out/saxpy.cpu.c
 
@@ -241,6 +243,93 @@ fnc main: i4
     spc_destroy_buffer(yb3)
     x3->drop()
     y3->drop()
+
+    # ---- CPU 相位分裂对拍：reduce（shared+barrier+atomic，M2）----
+    var crj2: shader_blob& = shader_reduce_get(6)     # cpu99 reflect 条目
+    var kd4: ::sc_spc_kernel_desc
+    ::memset(&kd4, 0, sizeof(::sc_spc_kernel_desc))
+    kd4.code.ptr  = (crj2->data: &)
+    kd4.code.size = crj2->size
+    kd4.entry     = "cs_reduce"
+    kd4.reflect_json = (crj2->data: const char&)
+    var krn4: u4 = spc_make_kernel(&kd4)
+    if krn4 == 0
+        print "make_kernel(cpu reduce) 失败\n", .
+        return 1
+    var x4: tensor& = arange(0.0, 4096.0, 1.0, DT_F4)
+    var xb4: u4 = spc_buffer_from_tensor(x4)
+    var zero2: u4 = 0
+    var ob2: ::sc_spc_buffer_desc
+    ::memset(&ob2, 0, sizeof(::sc_spc_buffer_desc))
+    ob2.size = 4
+    ob2.data = (&zero2: const &)
+    var tb2: u4 = spc_make_buffer(&ob2)
+    var bnd4: ::sc_spc_bindings
+    ::memset(&bnd4, 0, sizeof(::sc_spc_bindings))
+    bnd4.uniforms[0].ptr  = (&pn: &)
+    bnd4.uniforms[0].size = 4
+    bnd4.buffers[1] = xb4
+    bnd4.buffers[2] = tb2
+    if spc_dispatch(krn4, n, 1, 1, &bnd4) == 0
+        print "dispatch(cpu reduce) 失败\n", .
+        return 1
+    spc_finish()
+    var total2: u4 = 0
+    spc_buffer_read(tb2, (&total2: &), 4, 0)
+    if total2 == expect
+        print "[CPU] 相位分裂 reduce 对拍:通过(total=", total2, ", barrier 切相位 + uniform 外提)\n", .
+    else
+        print "[CPU] reduce 对拍不符!total=", total2, "\n", .
+        fails = fails + 1
+    spc_destroy_kernel(krn4)
+    spc_destroy_buffer(xb4)
+    spc_destroy_buffer(tb2)
+    x4->drop()
+
+    # ---- CPU spec 传值对拍：cs_scale SCALE=3.0（M2 参数化）----
+    var crj3: shader_blob& = shader_scale_spec_get(4)  # cpu99 reflect 条目
+    var sv2: ::sc_spc_spec_value
+    ::memset(&sv2, 0, sizeof(::sc_spc_spec_value))
+    sv2.id = 0
+    var fv2: f4 = 3.0
+    var fp2: u4& = (&fv2: u4&)
+    sv2.value = fp2[0]
+    var kd5: ::sc_spc_kernel_desc
+    ::memset(&kd5, 0, sizeof(::sc_spc_kernel_desc))
+    kd5.code.ptr  = (crj3->data: &)
+    kd5.code.size = crj3->size
+    kd5.entry     = "cs_scale"
+    kd5.reflect_json = (crj3->data: const char&)
+    kd5.spec_values = &sv2
+    kd5.spec_count  = 1
+    var krn5: u4 = spc_make_kernel(&kd5)
+    if krn5 == 0
+        print "make_kernel(cpu spec) 失败\n", .
+        return 1
+    var x5: tensor& = arange(0.0, 4096.0, 1.0, DT_F4)
+    var xb5: u4 = spc_buffer_from_tensor(x5)
+    var bnd5: ::sc_spc_bindings
+    ::memset(&bnd5, 0, sizeof(::sc_spc_bindings))
+    bnd5.uniforms[0].ptr  = (&pn: &)
+    bnd5.uniforms[0].size = 4
+    bnd5.buffers[1] = xb5
+    if spc_dispatch(krn5, n, 1, 1, &bnd5) == 0
+        print "dispatch(cpu spec) 失败\n", .
+        return 1
+    spc_finish()
+    spc_buffer_to_tensor(xb5, x5)
+    var e6: tensor& = arange(0.0, 4096.0, 1.0, DT_F4)
+    var e7: tensor& = e6->mul_scalar(3.0)
+    if x5->allclose(e7, 0.00001, 0.000001)
+        print "[CPU] spec 传值对拍:通过(SCALE 1.0 → 3.0, 参数表 8 槽+掩码)\n", .
+    else
+        print "[CPU] spec 对拍不符!\n", .
+        fails = fails + 1
+    e6->drop()
+    e7->drop()
+    spc_destroy_kernel(krn5)
+    spc_destroy_buffer(xb5)
+    x5->drop()
     spc_shutdown()
     gpu_shutdown()
     if fails == 0
