@@ -55,6 +55,12 @@ fnc main: i4
     # ---- 环境:gpu(headless)+ spc ----
     var gd: ::sc_gpu_desc
     ::memset(&gd, 0, sizeof(::sc_gpu_desc))
+    # GPU_BACKEND=vulkan 切 Vulkan 后端；=gl 切 GL；缺省=平台首选(mac=Metal,win/linux=GL)
+    var envb: char& = (::getenv("GPU_BACKEND"): char&)
+    if envb != nil && envb[0] == (118: char)        # 'v'
+        gd.backend = 3                              # SC_GPU_BACKEND_VULKAN
+    if envb != nil && envb[0] == (103: char)        # 'g'
+        gd.backend = 2                              # SC_GPU_BACKEND_GL
     if gpu_init(&gd) == 0
         print "gpu_init 失败\n", .
         return 1

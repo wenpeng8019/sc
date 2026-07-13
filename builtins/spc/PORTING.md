@@ -49,9 +49,14 @@ graph（mpsg_spc.m）/ model（coreml_spc.m）仍 darwin 直连——非 kernel 
 ./compiler/build/scc templates/demo/spc_kernel/reduce.ss     -o templates/demo/spc_kernel/out/reduce
 ./compiler/build/scc templates/demo/spc_kernel/scale_spec.ss -o templates/demo/spc_kernel/out/scale_spec
 
-# 2) 跑 demo（按需在 demo 里把 gd.backend 显式设 3=Vulkan；GL 是 linux 默认）
-./compiler/build/scc templates/demo/spc_p2_demo.sc
+# 2) 跑 demo（后端选择：GPU_BACKEND=vulkan / gl 环境变量前缀；缺省=平台首选
+#    mac=Metal、win/linux=GL。demo 已内建该环境变量读取）
+GPU_BACKEND=vulkan ./compiler/build/scc templates/demo/spc_p2_demo.sc   # 或先 --build -o 再跑二进制
 ```
+
+> 已板验平台（2026-07-13）：Windows AMD Radeon（Vulkan 1.4.334，真 GPU，0 校验错误）
+> + Linux WSL2 llvmpipe（Vulkan 1.3.255，CPU）——[P2]/[P3] 全绿。首验即发现并修复
+> 计算管线 layout 漏设（见 §3.1-0）。GLES/桌面 GL 与真实嵌入式板仍待验。
 
 **期望输出**（数值必须逐字一致）：
 
@@ -75,6 +80,11 @@ spc_p2_demo 全部通过
 uniform 小参数每次 dispatch 建临时 uniform buffer。
 
 已知设计取舍/潜在坑：
+0. **【已板验修复 2026-07-13】计算管线 layout 漏设**：`spc_vk_kernel_create`
+   建 `VkComputePipelineCreateInfo` 时漏了 `ci.layout = m->layout`，留 VK_NULL_HANDLE
+   → VUID-VkComputePipelineCreateInfo-None-11367、管线失效（影响全平台所有 Vulkan
+   内核）。已修（Windows AMD 真机 + WSL llvmpipe 双验，见 §6）。板端若拉到旧版报此
+   VUID,更新即可。
 1. **入口名恒 "main"**（`ci.stage.pName`）——scc SPIR-V 的 OpEntryPoint 就叫
    main（entry 字段只用于产物文件名）。若板上报 "entry not found"，
    用 `spirv-dis xx.spv | grep OpEntryPoint` 核对。
@@ -150,8 +160,8 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 
 | 能力 | Metal | Vulkan | GLES3.1 | 备注 |
 |---|---|---|---|---|
-| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | 待板验 | 待板验 | gles 门控 310 |
-| spec 常量传值 | ✅ 实测 | 待板验（VkSpecializationInfo 已写） | ❌ 无机制 | |
+| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | 待板验 | gles 门控 310 |
+| spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
 | subgroup 三件 | ✅ 编译实测（2.1+） | 待板验（需 VK 1.1 实例，见 §3.1-4） | ❌（无核心途径） | SPIR-V 1.3 |
 | f2(f16) | ✅ 编译实测（half） | 待板验（需 16bit_storage feature，见 §3.1-5） | ❌ 门控 | |
 | i8/u8(int64) | ✅ 编译实测（2.3+，long） | 待板验 | ❌ | Metal buffer 内 long 需 MSL 2.3 |
