@@ -2635,9 +2635,15 @@ print “默认浮点=”, pi, “ 定点=”, (pi: “%.2f”)   # (expr: “%f
 print<7> “通道 7 日志”               # <chn> 指定 u1 日志通道（默认 0），透传给 C print
 print<buf> “n=”, n                  # <chn> 为 string 变量 → 追加进该串（不输出 stdout）
 
+# 末项符号 “.” = 输出后立即 flush（stdout 全缓冲时强制刷新，见下）
+print “就绪”, .                     # 输出并 flush；前导逗号可省 → print “就绪”.
+print “a=”, a, “ b=”, b.            # 参数后直接跟 “.”（省略逗号），末项 flush
+print .                            # 仅 flush 无文本
+
 # C printf 兼容模式（有括号）：首参为格式串，实参原样传递
 print(“n=%d s=%s”, 42, “hello”)     # 默认 D 级别
 print(“E: 错误 code=%d”, -1)        # 格式串前缀 “X:” 设级别
+print(“进度 %d%%”, p, .)            # 兼容模式同样支持末项 “.” flush
 ```
 
 - **拼接糖**：字符串字面量直接作为文本（`%` 自动转义）；其余实参按静态类型自动选择
@@ -2652,6 +2658,12 @@ print(“E: 错误 code=%d”, -1)        # 格式串前缀 “X:” 设级别
 - `<chn>` 为 **`string` 变量**时改变去向：不输出 stdout，而是把格式化文本**追加进该串**
   （等价 `s.printf(...)`，无时间戳/级别/通道修饰），用于就地拼装字符串。`string&`/`string@`
   皆可；拼接糖/格式自动补全规则与普通 print 完全一致。
+- **末项 flush（`.`）**：`print` 的最后一项写成符号 `.` 时，输出后立即 `fflush(stdout)`。
+  其前导逗号可省略——`print a, b, c.`、`print a, b, .`、`print .`（仅 flush 无文本）均可，
+  括号兼容模式内亦然（`print(fmt, args, .)`）。用途：stdout 被重定向到管道/文件时是**全
+  缓冲**（非行缓冲），心跳/进度类日志会滞留缓冲区直至填满或正常退出，进程被杀则丢失；
+  末项 `.` 强制刷新保证即时可见（如 Android logcat、iOS --console 管道）。`<chn>` 为
+  `string` 变量的「追加进串」去向不涉及 stdout，`.` 仅置 flush 标志而无副作用。
 - 输出格式 `HH:MM:SS.mmm L| 文本`（`chn!=0` 时加通道标记），自动换行，单次 fprintf
   保证多线程不串行。
 - 运行时环境变量 `SC_LOG=F/E/W/I/D/V` 设过滤级别（默认 D，V 不输出）。

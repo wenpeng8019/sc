@@ -67,7 +67,9 @@ int32_t main(void) {
         sc_thread_run((void (*)(void *))sc_server_rpc, &_rp, sizeof(_rp), (sc_thread **)(&(st)), (uint32_t)0, (uint8_t)0);
     }
     /* line 30 */
-    int32_t r = ({ struct sc_serve _rp = {0}; _rp.x = 7; sq->sync(sq, (void (*)(void *))sc_serve_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _rp._; });
+    int32_t _syncq0;
+    { struct sc_serve _rp = {0}; _rp.x = 7; sq->sync(sq, (void (*)(void *))sc_serve_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)0); _syncq0 = _rp._; }
+    int32_t r = _syncq0;
     /* line 31 */
     printf("delayed response: r=%d\n", r);
     /* line 33 */

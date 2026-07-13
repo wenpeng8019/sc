@@ -22,11 +22,10 @@ fnc on_ui_event: c: ::sc_ui_control&, event: i4, user: &
     if event == 2
         var ck: i4 = ui_control_get_checked(c)
         print "ui-event: 勾选切换 checked=", ck, "\n"
-    ::fflush(nil)
+    print .
 
 fnc on_after_startup:
-    print "hello-android-ui: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-android-ui: 子系统就绪\n".
 
 fnc on_frame:
     return
@@ -39,8 +38,7 @@ fnc on_main_window_created: win: ::sc_window&
 
     g_ui = ui_create(win)
     if g_ui == nil
-        print "hello-android-ui: ui_create 失败\n"
-        ::fflush(nil)
+        print "hello-android-ui: ui_create 失败\n".
         return
 
     # 一组原生控件（Android 设备像素坐标，绝对定位于覆盖层 FrameLayout）
@@ -53,17 +51,14 @@ fnc on_main_window_created: win: ::sc_window&
     ui_control_set_callback(btn, on_ui_event, nil)
     ui_control_set_callback(chk, on_ui_event, nil)
 
-    print "hello-android-ui: 已创建原生控件（label/button/checkbox）\n"
-    ::fflush(nil)
+    print "hello-android-ui: 已创建原生控件（label/button/checkbox）\n".
 
 fnc on_before_cleanup:
     if g_ui != nil
         ui_destroy(g_ui)
         g_ui = nil
-    print "hello-android-ui: cleanup\n"
-    ::fflush(nil)
+    print "hello-android-ui: cleanup\n".
 
 @fnc app_main: i4
-    print "hello-android-ui: 进入 wsi 事件循环\n"
-    ::fflush(nil)
+    print "hello-android-ui: 进入 wsi 事件循环\n".
     return wsi_app_run(on_after_startup, on_main_window_created, on_frame, on_before_cleanup)

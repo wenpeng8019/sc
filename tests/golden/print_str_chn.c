@@ -60,7 +60,7 @@ int32_t main(void) {
     /* line 11 */
     sc_string_printf(((string *)(s).p), "; x=%d y=%d", 7, 8);
     /* line 13 */
-    sc_print((uint8_t)(0), "stdout still works: %d", (int)(n));
+    sc_print((uint8_t)(0), 0, "stdout still works: %d", (int)(n));
     /* line 14 */
     printf("collected string = [%s]\n", sc_string_cstr(((sc_string *)(s).p)));
     /* line 15 */

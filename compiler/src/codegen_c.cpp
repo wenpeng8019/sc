@@ -2383,10 +2383,13 @@ struct CGen {
                     && !localsT.count("print") && !globalsT.count("print") && !funcs.count("print")) {
                     if (e.args.empty())
                         throw CompileError{"print 需要格式串实参", e.line};
+                    // 表达式形式 print(chn, fmt, ...)：原样透传，flush 参数注入为 0
+                    // （chn 后固定第二参；'.' flush 糖仅在语句形式支持）
                     out << "sc_print(";
                     for (size_t i = 0; i < e.args.size(); i++) {
                         if (i) out << ", ";
                         emitExpr(*e.args[i], true);
+                        if (i == 0) out << ", 0";   // chn 后注入 flush=0
                     }
                     out << ")";
                     break;
@@ -5297,7 +5300,8 @@ struct CGen {
         if (s.printCompat) {
             indent();
             if (!strChn.empty()) out << "sc_string_printf(" << strChn;
-            else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << ")";
+            else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << "), "
+                                     << (s.printFlush ? "1" : "0");   // flush 标志（末项 '.'）
             for (auto& argp : s.printArgs) {
                 out << ", ";
                 emitExpr(*argp, true);
@@ -5374,7 +5378,8 @@ struct CGen {
 
         indent();
         if (!strChn.empty()) out << "sc_string_printf(" << strChn << ", " << fmtExpr;
-        else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << "), " << fmtExpr;
+        else                 out << "sc_print((uint8_t)(" << chnName(s.printChn) << "), "
+                                 << (s.printFlush ? "1" : "0") << ", " << fmtExpr;  // flush 标志（末项 '.'）
         for (auto& pv : pvs) {
             out << ", " << pv.pre;
             emitExpr(*pv.e, true);

@@ -414,6 +414,7 @@ struct Stmt {
     std::string printChn;               // PrintS: <chn> 通道的 C 表达式文本（默认 "0"）
     std::vector<ExprPtr> printArgs;     // PrintS: 拼接实参列表（顺序）
     bool printCompat = false;           // PrintS: 括号形式 print(...) → C printf 兼容模式（实参原样传递）
+    bool printFlush = false;            // PrintS: 末项为符号 '.' → 输出后立即 flush（stdout 通道有效）
 
     std::string retOp;                  // RetCallS: 语法糖操作符（"!" ">" "<" ">=" "<=" "!!"）
     bool retProp = false;               // RetCallS: 尾置 ? 错误传播糖（体后 return $）

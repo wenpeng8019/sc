@@ -42,23 +42,19 @@ fnc dump_px: pix: const char&, stride: u4, x: i4, y: i4, tag: const char&
     var g: i4 = (pix[si + 1]: i4)   & 255
     var r: i4 = (pix[si + 2]: i4)   & 255
     var a: i4 = (pix[si + 3]: i4)   & 255
-    print "  ", tag, " (", x, ",", y, ") BGRA = ", b, " ", g, " ", r, " ", a, "\n"
-    ::fflush(nil)
+    print "  ", tag, " (", x, ",", y, ") BGRA = ", b, " ", g, " ", r, " ", a, "\n".
 
 fnc on_after_startup:
-    print "hello-ios-memimg: 子系统就绪，开始 Metal memimg 自检\n"
-    ::fflush(nil)
+    print "hello-ios-memimg: 子系统就绪，开始 Metal memimg 自检\n".
 
     # ---- gpu 初始化（Metal 默认，无 native_window，不建默认 surface） ----
     var gd: ::sc_gpu_desc
     ::memset(&gd, 0, sizeof(::sc_gpu_desc))
     if gpu_init(&gd) == 0
-        print "memimg 自检: gpu_init 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: gpu_init 失败\n".
         return
     var bk: i4 = gpu_query_backend()
-    print "memimg 自检: gpu 后端 ", bk, " (1=Metal)\n"
-    ::fflush(nil)
+    print "memimg 自检: gpu 后端 ", bk, " (1=Metal)\n".
 
     # ---- MEMORY surface（内存交换链，256x256） ----
     var sdc: ::sc_gpu_surface_desc
@@ -68,8 +64,7 @@ fnc on_after_startup:
     sdc.height = 256
     var surf: u4 = gpu_make_surface(&sdc)
     if surf == 0
-        print "memimg 自检: MEMORY surface 创建失败\n"
-        ::fflush(nil)
+        print "memimg 自检: MEMORY surface 创建失败\n".
         gpu_shutdown()
         return
     gpu_make_current(surf)
@@ -77,8 +72,7 @@ fnc on_after_startup:
     var fdd: ::sc_gfx_desc
     ::memset(&fdd, 0, sizeof(::sc_gfx_desc))
     if gfx_init(&fdd) == 0
-        print "memimg 自检: gfx_init 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: gfx_init 失败\n".
         gpu_shutdown()
         return
 
@@ -98,8 +92,7 @@ fnc on_after_startup:
     sd.reflect_json = (brj->data: const char&)
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
-        print "memimg 自检: make_shader 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: make_shader 失败\n".
         return
 
     var pd: ::sc_gfx_pipeline_desc
@@ -107,8 +100,7 @@ fnc on_after_startup:
     pd.shader = shd
     var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
-        print "memimg 自检: make_pipeline 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: make_pipeline 失败\n".
         return
 
     # ---- 渲染一帧到内存交换链（深蓝底：clear BGRA≈76/25/12） ----
@@ -132,27 +124,23 @@ fnc on_after_startup:
     var frm: ::sc_gpu_memory_frame
     ::memset(&frm, 0, sizeof(::sc_gpu_memory_frame))
     if gpu_memory_dequeue(surf, &frm) == 0
-        print "memimg 自检: dequeue 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: dequeue 失败\n".
         return
     var slot: u4 = frm.slot
     var stride: u4 = 0
     var pix: char& = (gpu_memimg_map(frm.img, 0, &stride): char&)
     if pix == nil
-        print "memimg 自检: memimg_map 失败\n"
-        ::fflush(nil)
+        print "memimg 自检: memimg_map 失败\n".
         return
     print "memimg 自检: dequeue slot=", slot, " stride=", stride, "\n"
-    print "memimg 自检: 像素采样（中心应为三角形色、角落应为深蓝底 BGRA≈76/25/12）\n"
-    ::fflush(nil)
+    print "memimg 自检: 像素采样（中心应为三角形色、角落应为深蓝底 BGRA≈76/25/12）\n".
     dump_px(pix, stride, 128, 160, "center")
     dump_px(pix, stride, 5,   5,   "corner-tl")
     dump_px(pix, stride, 250, 250, "corner-br")
     gpu_memimg_unmap(frm.img, 0)
     gpu_memory_enqueue(surf, slot)
 
-    print "memimg 自检: 完成（Metal memimg 回读链路端到端 OK）\n"
-    ::fflush(nil)
+    print "memimg 自检: 完成（Metal memimg 回读链路端到端 OK）\n".
 
     gfx_destroy_pipeline(pip)
     gfx_destroy_shader(shd)
@@ -165,8 +153,7 @@ fnc on_main_window_created: win: ::sc_window&
     var fbw: i4 = 0
     var fbh: i4 = 0
     wsi_win_get_framebuffer_size(win, &fbw, &fbh)
-    print "hello-ios-memimg: 窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "（自检完毕，转窗口三角形）\n"
-    ::fflush(nil)
+    print "hello-ios-memimg: 窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "（自检完毕，转窗口三角形）\n".
 
     # ---- gpu 初始化（Metal；native_window = UIView*，iOS 无 native_display） ----
     var gd: ::sc_gpu_desc
@@ -176,15 +163,13 @@ fnc on_main_window_created: win: ::sc_window&
     gd.surface.width  = fbw
     gd.surface.height = fbh
     if gpu_init(&gd) == 0
-        print "hello-ios-memimg: 窗口 gpu_init 失败\n"
-        ::fflush(nil)
+        print "hello-ios-memimg: 窗口 gpu_init 失败\n".
         return
 
     var fd: ::sc_gfx_desc
     ::memset(&fd, 0, sizeof(::sc_gfx_desc))
     if gfx_init(&fd) == 0
-        print "hello-ios-memimg: 窗口 gfx_init 失败\n"
-        ::fflush(nil)
+        print "hello-ios-memimg: 窗口 gfx_init 失败\n".
         gpu_shutdown()
         return
 
@@ -204,8 +189,7 @@ fnc on_main_window_created: win: ::sc_window&
     sd.reflect_json = (brj->data: const char&)
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
-        print "hello-ios-memimg: 窗口 make_shader 失败\n"
-        ::fflush(nil)
+        print "hello-ios-memimg: 窗口 make_shader 失败\n".
         return
     g_shd = shd
 
@@ -214,13 +198,11 @@ fnc on_main_window_created: win: ::sc_window&
     pd.shader = shd
     var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
-        print "hello-ios-memimg: 窗口 make_pipeline 失败\n"
-        ::fflush(nil)
+        print "hello-ios-memimg: 窗口 make_pipeline 失败\n".
         return
     g_pip   = pip
     g_ready = 1
-    print "hello-ios-memimg: 窗口三角形管线就绪\n"
-    ::fflush(nil)
+    print "hello-ios-memimg: 窗口三角形管线就绪\n".
 
 # 每帧回调（CADisplayLink 驱动）：清屏（深蓝底）+ 画三角形。
 fnc on_frame:
@@ -244,8 +226,7 @@ fnc on_frame:
     gfx_commit()
 
     if g_frames % 60 == 0
-        print "hello-ios-memimg: 窗口帧 ", g_frames, "\n"
-        ::fflush(nil)
+        print "hello-ios-memimg: 窗口帧 ", g_frames, "\n".
 
 fnc on_before_cleanup:
     print "hello-ios-memimg: cleanup\n"

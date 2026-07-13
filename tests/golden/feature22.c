@@ -153,7 +153,7 @@ int32_t main(void) {
     sc_mod_io_init();
     sc_mod_async_init();
     /* line 51 */
-    char *path = "/tmp/sc_feature22.bin";
+    char *path = "sc_feature22.bin";
     /* line 52 */
     printf("== 同步往返 ==\n");
     /* line 53 */

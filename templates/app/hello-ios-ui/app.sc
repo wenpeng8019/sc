@@ -24,12 +24,10 @@ fnc on_ui_event: c: ::sc_ui_control&, event: i4, user: &
         print "ui-event: 按钮点击（target-action 通路验证成功）\n"
     if event == 2
         var ck: i4 = ui_control_get_checked(c)
-        print "ui-event: 开关切换 checked=", ck, "\n"
-    ::fflush(nil)
+        print "ui-event: 开关切换 checked=", ck, "\n".
 
 fnc on_after_startup:
-    print "hello-ios-ui: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-ios-ui: 子系统就绪\n".
 
 fnc on_frame:
     return
@@ -42,8 +40,7 @@ fnc on_main_window_created: win: ::sc_window&
 
     g_ui = ui_create(win)
     if g_ui == nil
-        print "hello-ios-ui: ui_create 失败\n"
-        ::fflush(nil)
+        print "hello-ios-ui: ui_create 失败\n".
         return
 
     # 一组原生控件（iOS 点坐标，绝对定位于根 UIView）
@@ -58,8 +55,7 @@ fnc on_main_window_created: win: ::sc_window&
     ui_control_set_callback(btn, on_ui_event, nil)
     ui_control_set_callback(chk, on_ui_event, nil)
 
-    print "hello-ios-ui: 已创建原生控件（label/button/switch）\n"
-    ::fflush(nil)
+    print "hello-ios-ui: 已创建原生控件（label/button/switch）\n".
 
 fnc on_before_cleanup:
     if g_ui != nil

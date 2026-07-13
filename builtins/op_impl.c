@@ -590,7 +590,7 @@ static int sc_log_sys_on(void) {
     return s;
 }
 
-void sc_print(uint8_t chn, const char *fmt, ...) {
+void sc_print(uint8_t chn, int flush, const char *fmt, ...) {
     if (!fmt) return;
 
     const int lv = (int)chn;                 /* 0=普通 stdout；1..6=F/E/W/I/D/V */
@@ -614,6 +614,11 @@ void sc_print(uint8_t chn, const char *fmt, ...) {
     } else {
         fprintf(stdout, "%s\n", text);
     }
+
+    /* flush 标志（语句形式末项 '.'）：立即刷新 stdout，令输出即时可见——
+     * stdout 重定向到管道/文件（如 Android logcat、iOS console）时默认全缓冲，
+     * 不 flush 则日志滞留缓冲区、进程被杀时丢失。tty 行缓冲下补换行即出，flush 冗余但无害。 */
+    if (flush) fflush(stdout);
 
     /* 可选：镜像到系统日志（跨平台自适应，实现在 platform.h） */
     if (lv >= 1 && lv <= 6 && sc_log_sys_on())

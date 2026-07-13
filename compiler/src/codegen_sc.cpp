@@ -207,12 +207,14 @@ struct SGen {
                         if (i) out << ", ";
                         out << exprToStr(*s.printArgs[i]);
                     }
+                    if (s.printFlush) out << (s.printArgs.empty() ? "." : ", .");
                     out << ")";
                 } else {
                     for (size_t i = 0; i < s.printArgs.size(); i++) {
                         out << (i ? ", " : " ");
                         out << exprToStr(*s.printArgs[i]);
                     }
+                    if (s.printFlush) out << (s.printArgs.empty() ? " ." : ", .");
                 }
                 out << "\n";
                 break;

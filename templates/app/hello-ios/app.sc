@@ -19,8 +19,7 @@ var g_frames: i4 = 0          # 帧计数（跨回调共享，模块级全局）
 
 # 子系统就绪：wsi 已启动、建窗前回调一次（真实 app 可在此做与窗口无关的准备）。
 fnc on_after_startup:
-    print "hello-ios: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-ios: 子系统就绪\n", .
 
 # 主窗口创建：wsi 已自建全屏窗口（iOS 恒全屏，按 UIScreen.bounds 铺满），经回调交付
 # 句柄（恒非 nil），应用不再自己调 wsi_win_create。真实 app 在此初始化 gpu/gfx，并经
@@ -29,17 +28,15 @@ fnc on_main_window_created: win: ::sc_window&
     var w: i4 = 0
     var h: i4 = 0
     wsi_win_get_framebuffer_size(win, &w, &h)
-    print "hello-ios: 主窗口就绪 · 帧缓冲 ", w, " x ", h, "\n"
-    # iOS 上 stdout 非 tty 时全缓冲，刷新以让打印即时可见（真实 app 宜改用 os_log）。
-    ::fflush(nil)
+    # iOS 上 stdout 非 tty 时全缓冲，末项 “.” flush 以让打印即时可见（真实 app 宜改用 os_log）。
+    print "hello-ios: 主窗口就绪 · 帧缓冲 ", w, " x ", h, "\n", .
 
 # 每帧回调（CADisplayLink 驱动）：真实 app 在此更新并渲染 present。
 # 脚手架只做心跳打印（每约 60 帧一次），证明帧循环在跑。
 fnc on_frame:
     g_frames = g_frames + 1
     if g_frames % 60 == 0
-        print "hello-ios: 帧 ", g_frames, "\n"
-        ::fflush(nil)
+        print "hello-ios: 帧 ", g_frames, "\n", .
 
 # 终止前回调：释放资源（脚手架无资源，仅示意）。
 fnc on_before_cleanup:

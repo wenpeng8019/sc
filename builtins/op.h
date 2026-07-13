@@ -706,13 +706,15 @@ void     sc_async_io(void);
  * （始终随工程编译链接）——无需 inc。
  *   - chn：级别/通道（「级别就是通道」）。0=普通 stdout（默认，无着色）；
  *          1..6=F/E/W/I/D/V，按级别着色 stdout（仅 tty）并可镜像系统日志
+ *   - flush：非 0 时输出后立即 fflush(stdout)（语句形式末项符号 '.' 生成 flush=1）；
+ *            0=默认（依 libc 缓冲策略）。string 通道追加不经本函数，无 flush 概念
  *   - 下列裸枚举常量 F/E/W/I/D/V 供 print<级别> 生成的 print((uint8_t)(级别), ...)
  *     编译（与 op.sc 的 def log 对齐）；数值即通道号
  *   - 特例：<chn> 为 string 变量时编译器改生成 string_printf（追加进该串，不走本函数）
  *   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D），首次调用时读取
  *   - 系统日志：环境变量 SC_LOG_SYS 非空 → 额外写系统日志（见 platform.h P_log_sys） */
 enum { sc_F = 1, sc_E = 2, sc_W = 3, sc_I = 4, sc_D = 5, sc_V = 6 };
-void sc_print(uint8_t chn, const char *fmt, ...);
+void sc_print(uint8_t chn, int flush, const char *fmt, ...);
 
 /* ---------------- stringify：JSON 格式化关键字选项 ----------------
  * stringify<选项>(值[, 缓存, 大小]) 由编译器按静态类型生成格式化器（写入独立

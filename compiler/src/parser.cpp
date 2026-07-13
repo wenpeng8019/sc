@@ -1673,6 +1673,10 @@ struct Parser {
                 exprBracket--;
                 e = std::move(ix);
             } else if (atOp(".") || at(Tok::Arrow)) { // 成员访问：expr.field 或 expr->field
+                // 悬挂 '.'（其后紧跟终止符 换行/')'）不作成员访问：成员名缺失本就是错误，
+                // 故留给上层处理——用于 print 末项 flush 糖省略前导逗号（`print a, b.`）。
+                if (atOp(".") && (peek().kind == Tok::Newline || peek().kind == Tok::RParen))
+                    break;
                 auto m = mk(Expr::Member);
                 m->op = at(Tok::Arrow) ? "->" : ".";
                 advance();
@@ -2204,10 +2208,18 @@ struct Parser {
         bool wrapped = false;
         if (at(Tok::LParen)) { advance(); exprBracket++; skipNlInBracket(); wrapped = true; }
         s->printCompat = wrapped;           // 括号形式 = C printf 兼容模式
+        // 末项为符号 '.' → flush 标志：输出后立即刷新（stdout 通道有效）。'.' 直接跟终止符
+        // （换行 / 括号形式的 ')'）时成立，故 `print .`（仅 flush 无文本）、`print x, .`
+        // 与省略前导逗号的 `print a, b.` 均可；.5 等浮点不会误判（其后非终止符）。
+        auto atFlushDot = [&]() {
+            return atOp(".") && (peek().kind == Tok::Newline || peek().kind == Tok::RParen);
+        };
         if (!(wrapped ? at(Tok::RParen) : at(Tok::Newline))) {
             for (;;) {
+                if (atFlushDot()) { advance(); s->printFlush = true; break; }
                 s->printArgs.push_back(parseExpr());
                 if (wrapped) skipNlInBracket();
+                if (atFlushDot()) { advance(); s->printFlush = true; break; }  // 参数后紧跟 '.'（省略前导逗号）
                 if (!accept(Tok::Comma)) break;
                 if (wrapped) skipNlInBracket();
             }

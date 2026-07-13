@@ -831,12 +831,16 @@ def log: [
 #   print<E> "错误：", msg       # 1..6=F/E/W/I/D/V，按级别着色（F紫/E红/W黄/I默认/D青/V灰）
 #   print<s> "x = ", x          # <chn> 为 string 变量 → 不输出 stdout，改「追加进该串」
 #                               # （等价 s.printf(...)：无级别/着色修饰，纯格式化文本）
+#   print "就绪", .              # 末项为符号 '.' → 输出后立即 flush（stdout 通道有效）；
+#                               # 单独 `print .` 仅 flush 无文本。用于管道/文件全缓冲下即时可见
+#                               # （如 Android logcat / iOS console），免手工 ::fflush(nil)
 #   - 输出：按级别着色的一行文本（仅 tty 着色；I=默认色；自动补换行）
 #   - 级别过滤：环境变量 SC_LOG=F/E/W/I/D/V（默认 D；更详尽的级别被丢弃）
 #   - 系统日志：环境变量 SC_LOG_SYS 非空 → 额外写系统日志设施
 #                （Win=OutputDebugString / macOS=os_log / Linux=syslog / Android=logcat ...）
 # C ABI 见 op.h（默认带入），运行时见 op_impl.c（始终链接）。
-@fnc print:: chn: u1, fmt: char&, ...
+# 接口第二参 flush（i4）：非 0 时输出后 fflush(stdout)；语句末项 '.' 生成 flush=1，否则 0。
+@fnc print:: chn: u1, flush: i4, fmt: char&, ...
 
 # ---------------- stringify(...)：JSON 字符串格式化（语言关键字）----------------
 # 语言底层机制（默认导入，无需 inc）：编译器按实参静态类型生成格式化器（写入独立

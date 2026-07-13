@@ -893,11 +893,17 @@ op 模块始终链接，**无需 inc**）。第一参数为通道 `chn`（`print
 print("n=%d s=%s", 42, "hello")    # 通道 0：纯 stdout，无色、不过滤
 print<E>("错误 code=%d", -1)        # 通道 E：错误级别（红），彩色 stdout
 print<W> "内存偏低"                  # 通道 W：警告级别（黄）
+print "就绪", .                      # 末项 “.” = 输出后立即 flush（前导逗号可省 → print "就绪".）
 ```
 
 - 通道即级别：`def log` 枚举 `F/E/W/I/D/V = 1..6`（见 op.sc / op.h）——
   F 致命(紫) / E 错误(红) / W 警告(黄) / I 状态(默认色) / D 调试(青) /
   V 详尽(灰)；无 `<>` 即通道 0，纯 stdout、不着色、不过滤。
+- **末项 flush（`.`）**：`print` 最后一项写成符号 `.` 时，输出后立即 `fflush(stdout)`
+  （C 侧 `sc_print` 的 `flush` 参数置 1）。前导逗号可省——`print a, b.`、`print a, b, .`、
+  `print .`（仅 flush）、括号模式 `print(fmt, args, .)` 均可。用途：stdout 重定向到管道/
+  文件时为全缓冲，心跳/进度日志会滞留缓冲区直至填满或正常退出，进程被杀即丢失；`.` 强制
+  刷新保证即时可见（Android logcat、iOS --console 管道等）。
 - 格式串与 printf 完全一致（vsnprintf 实现，参考 stdc 的简化移植）；
   自动补换行，单行上限 2048 字节（编译期 `-DSC_PRINT_BUF=N` 可覆盖），超出截断。
 - 着色：仅当输出为终端（isatty）且级别为 1..6 时按级别加 ANSI 颜色；

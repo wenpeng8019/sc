@@ -69,7 +69,9 @@ int32_t main(void) {
     /* line 38 */
     int32_t st1 = -(9);
     /* line 39 */
-    int32_t r1 = ({ struct sc_compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))sc_compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(2000)); _rp._; });
+    int32_t _syncq0;
+    { struct sc_compute _rp = {0}; _rp.a = 3; _rp.b = 4; st1 = q->sync(q, (void (*)(void *))sc_compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(2000)); _syncq0 = _rp._; }
+    int32_t r1 = _syncq0;
     /* line 40 */
     printf("ok path: r=%d st=%d\n", r1, st1);
     /* line 41 */
@@ -77,7 +79,9 @@ int32_t main(void) {
     /* line 44 */
     int32_t st2 = -(9);
     /* line 45 */
-    int32_t r2 = ({ struct sc_compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))sc_compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(50)); _rp._; });
+    int32_t _syncq1;
+    { struct sc_compute _rp = {0}; _rp.a = 10; _rp.b = 20; st2 = q->sync(q, (void (*)(void *))sc_compute_rpc, &_rp, sizeof(_rp), (int32_t)0, (int64_t)0, (int64_t)(50)); _syncq1 = _rp._; }
+    int32_t r2 = _syncq1;
     /* line 46 */
     printf("timeout path: r=%d st=%d\n", r2, st2);
     /* line 48 */

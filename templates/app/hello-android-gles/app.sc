@@ -44,16 +44,14 @@ var g_fbh:    i4  = 0
 var g_frames: i4  = 0
 
 fnc on_after_startup:
-    print "hello-android-gles: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-android-gles: 子系统就绪\n".
 
 # 主窗口创建：wsi 已自建全屏窗口，交付 ANativeWindow* 句柄；在此初始化 gpu/gfx/管线。
 fnc on_main_window_created: win: ::sc_window&
     var fbw: i4 = 0
     var fbh: i4 = 0
     wsi_win_get_framebuffer_size(win, &fbw, &fbh)
-    print "hello-android-gles: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n"
-    ::fflush(nil)
+    print "hello-android-gles: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n".
 
     # ---- gpu 初始化（GLES；native_window = ANativeWindow*，native_display = NULL） ----
     var gd: ::sc_gpu_desc
@@ -63,8 +61,7 @@ fnc on_main_window_created: win: ::sc_window&
     gd.surface.width  = fbw
     gd.surface.height = fbh
     if gpu_init(&gd) == 0
-        print "hello-android-gles: gpu_init 失败\n"
-        ::fflush(nil)
+        print "hello-android-gles: gpu_init 失败\n".
         return
     var bk: i4 = gpu_query_backend()
     print "hello-android-gles: gpu 后端 ", bk, " (2=GL)\n"
@@ -73,8 +70,7 @@ fnc on_main_window_created: win: ::sc_window&
     var fd: ::sc_gfx_desc
     ::memset(&fd, 0, sizeof(::sc_gfx_desc))
     if gfx_init(&fd) == 0
-        print "hello-android-gles: gfx_init 失败\n"
-        ::fflush(nil)
+        print "hello-android-gles: gfx_init 失败\n".
         gpu_shutdown()
         return
 
@@ -101,8 +97,7 @@ fnc on_main_window_created: win: ::sc_window&
     sd.label        = "tri"
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
-        print "hello-android-gles: make_shader 失败\n"
-        ::fflush(nil)
+        print "hello-android-gles: make_shader 失败\n".
         return
     g_shd = shd
 
@@ -112,16 +107,14 @@ fnc on_main_window_created: win: ::sc_window&
     pd.label  = "tri"
     var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
-        print "hello-android-gles: make_pipeline 失败\n"
-        ::fflush(nil)
+        print "hello-android-gles: make_pipeline 失败\n".
         return
     g_pip = pip
 
     g_fbw   = fbw
     g_fbh   = fbh
     g_ready = 1
-    print "hello-android-gles: 三角形管线就绪\n"
-    ::fflush(nil)
+    print "hello-android-gles: 三角形管线就绪\n".
 
 # 每帧回调（AChoreographer vsync 驱动）：清屏 + 画三角形。
 fnc on_frame:
@@ -145,8 +138,7 @@ fnc on_frame:
     gfx_commit()
 
     if g_frames % 60 == 0
-        print "hello-android-gles: 帧 ", g_frames, "\n"
-        ::fflush(nil)
+        print "hello-android-gles: 帧 ", g_frames, "\n", .
 
 fnc on_before_cleanup:
     print "hello-android-gles: cleanup\n"

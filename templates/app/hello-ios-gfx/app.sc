@@ -41,16 +41,14 @@ var g_fbh:   i4  = 0
 var g_frames: i4 = 0
 
 fnc on_after_startup:
-    print "hello-ios-gfx: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-ios-gfx: 子系统就绪\n".
 
 # 主窗口创建：wsi 已自建全屏窗口，交付 UIView* 句柄；在此初始化 gpu/gfx/管线。
 fnc on_main_window_created: win: ::sc_window&
     var fbw: i4 = 0
     var fbh: i4 = 0
     wsi_win_get_framebuffer_size(win, &fbw, &fbh)
-    print "hello-ios-gfx: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n"
-    ::fflush(nil)
+    print "hello-ios-gfx: 主窗口就绪 · 帧缓冲 ", fbw, " x ", fbh, "\n".
 
     # ---- gpu 初始化（Metal；native_window = UIView*，iOS 无 native_display） ----
     var gd: ::sc_gpu_desc
@@ -60,8 +58,7 @@ fnc on_main_window_created: win: ::sc_window&
     gd.surface.width  = fbw
     gd.surface.height = fbh
     if gpu_init(&gd) == 0
-        print "hello-ios-gfx: gpu_init 失败\n"
-        ::fflush(nil)
+        print "hello-ios-gfx: gpu_init 失败\n".
         return
     var bk: i4 = gpu_query_backend()
     print "hello-ios-gfx: gpu 后端 ", bk, " (1=Metal)\n"
@@ -70,8 +67,7 @@ fnc on_main_window_created: win: ::sc_window&
     var fd: ::sc_gfx_desc
     ::memset(&fd, 0, sizeof(::sc_gfx_desc))
     if gfx_init(&fd) == 0
-        print "hello-ios-gfx: gfx_init 失败\n"
-        ::fflush(nil)
+        print "hello-ios-gfx: gfx_init 失败\n".
         gpu_shutdown()
         return
 
@@ -98,8 +94,7 @@ fnc on_main_window_created: win: ::sc_window&
     sd.label        = "tri"
     var shd: u4 = gfx_make_shader(&sd)
     if shd == 0
-        print "hello-ios-gfx: make_shader 失败\n"
-        ::fflush(nil)
+        print "hello-ios-gfx: make_shader 失败\n".
         return
     g_shd = shd
 
@@ -109,16 +104,14 @@ fnc on_main_window_created: win: ::sc_window&
     pd.label  = "tri"
     var pip: u4 = gfx_make_pipeline(&pd)
     if pip == 0
-        print "hello-ios-gfx: make_pipeline 失败\n"
-        ::fflush(nil)
+        print "hello-ios-gfx: make_pipeline 失败\n".
         return
     g_pip = pip
 
     g_fbw   = fbw
     g_fbh   = fbh
     g_ready = 1
-    print "hello-ios-gfx: 三角形管线就绪\n"
-    ::fflush(nil)
+    print "hello-ios-gfx: 三角形管线就绪\n".
 
 # 每帧回调（CADisplayLink 驱动）：清屏 + 画三角形。
 fnc on_frame:
@@ -142,8 +135,7 @@ fnc on_frame:
     gfx_commit()
 
     if g_frames % 60 == 0
-        print "hello-ios-gfx: 帧 ", g_frames, "\n"
-        ::fflush(nil)
+        print "hello-ios-gfx: 帧 ", g_frames, "\n".
 
 fnc on_before_cleanup:
     print "hello-ios-gfx: cleanup\n"

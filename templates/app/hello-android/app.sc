@@ -33,8 +33,7 @@ var g_frames: i4 = 0          # 帧计数（跨回调共享，模块级全局）
 
 # 子系统就绪：wsi 已启动、建窗前回调一次（真实 app 可在此做与窗口无关的准备）。
 fnc on_after_startup:
-    print "hello-android: 子系统就绪\n"
-    ::fflush(nil)
+    print "hello-android: 子系统就绪\n", .
 
 # 主窗口创建：wsi 已自建全屏窗口（Android 恒全屏，窗口取自框架交付的 ANativeWindow），
 # 经回调交付句柄（恒非 nil），应用不再自己调 wsi_win_create。真实 app 在此初始化 gpu/gfx
@@ -45,18 +44,17 @@ fnc on_main_window_created: win: ::sc_window&
     var w: i4 = 0
     var h: i4 = 0
     wsi_win_get_framebuffer_size(win, &w, &h)
-    print "hello-android: 主窗口就绪 · 帧缓冲 ", w, " x ", h, "\n"
+    # 末项 “.” = 输出后立即 flush（stdout 全缓冲时强制刷新，保证即时进 logcat）。
     # Android 上 stdout 默认不进 logcat（需 setprop log.redirect-stdio true，见 README）；
-    # 真实 app 宜改用 __android_log_print。此处 flush 保持与 hello-ios 一致的形态。
-    ::fflush(nil)
+    # 真实 app 宜改用 __android_log_print。
+    print "hello-android: 主窗口就绪 · 帧缓冲 ", w, " x ", h, "\n", .
 
 # 每帧回调（AChoreographer vsync 驱动）：真实 app 在此更新并渲染 present。
 # 脚手架只做心跳打印（每约 60 帧一次），证明帧循环在跑。
 fnc on_frame:
     g_frames = g_frames + 1
     if g_frames % 60 == 0
-        print "hello-android: 帧 ", g_frames, "\n"
-        ::fflush(nil)
+        print "hello-android: 帧 ", g_frames, "\n", .
 
 # 终止前回调（Activity 销毁 / 进程退出）：释放资源（脚手架无资源，仅示意）。
 fnc on_before_cleanup:

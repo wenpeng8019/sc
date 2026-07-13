@@ -208,19 +208,19 @@ int32_t main(void) {
     /* line 37 */
     char *nm = "hello";
     /* line 38 */
-    sc_print((uint8_t)(0), "print 基础输出 n=%d s=%s", (int)(nn), nm);
+    sc_print((uint8_t)(0), 0, "print 基础输出 n=%d s=%s", (int)(nn), nm);
     /* line 39 */
-    sc_print((uint8_t)(sc_E), "错误级别示例 code=%d", -(1));
+    sc_print((uint8_t)(sc_E), 0, "错误级别示例 code=%d", -(1));
     /* line 40 */
-    sc_print((uint8_t)(sc_W), "警告级别示例");
+    sc_print((uint8_t)(sc_W), 0, "警告级别示例");
     /* line 41 */
-    sc_print((uint8_t)(sc_V), "详细级别（默认 SC_LOG=D 下本行不输出）");
+    sc_print((uint8_t)(sc_V), 0, "详细级别（默认 SC_LOG=D 下本行不输出）");
     /* line 42 */
-    sc_print((uint8_t)(sc_D), "调试级别示例");
+    sc_print((uint8_t)(sc_D), 0, "调试级别示例");
     /* line 43 */
     double pi = 3.14159;
     /* line 44 */
-    sc_print((uint8_t)(0), "默认浮点=%f 定点=%.2f", (double)(pi), pi);
+    sc_print((uint8_t)(0), 0, "默认浮点=%f 定点=%.2f", (double)(pi), pi);
     /* line 50 */
     sc_string *s = {0};
     /* line 52 */
@@ -232,7 +232,7 @@ int32_t main(void) {
     /* line 55 */
     s = stringify_point(p, (sc_stringify_t){ .compact = 1 });
     /* line 56 */
-    sc_print((uint8_t)(0), "point 值: %s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "point 值: %s", sc_string_cstr(s));
     /* line 57 */
     (sc_string_drop(s), sc_free(s));
     /* line 59 */
@@ -258,13 +258,13 @@ int32_t main(void) {
     /* line 69 */
     s = stringify_node(n, (sc_stringify_t){ .compact = 1 });
     /* line 70 */
-    sc_print((uint8_t)(0), "node 值: %s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "node 值: %s", sc_string_cstr(s));
     /* line 71 */
     (sc_string_drop(s), sc_free(s));
     /* line 74 */
     s = stringify_node(n, (sc_stringify_t){ .compact = 0 });
     /* line 75 */
-    sc_print((uint8_t)(0), "node 美化:\n%s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "node 美化:\n%s", sc_string_cstr(s));
     /* line 76 */
     (sc_string_drop(s), sc_free(s));
     /* line 78 */
@@ -272,7 +272,7 @@ int32_t main(void) {
     /* line 79 */
     s = stringify_node_p(pn, (sc_stringify_t){ .compact = 1 });
     /* line 80 */
-    sc_print((uint8_t)(0), "node 指针: %s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "node 指针: %s", sc_string_cstr(s));
     /* line 81 */
     (sc_string_drop(s), sc_free(s));
     /* line 84 */
@@ -287,7 +287,7 @@ int32_t main(void) {
     /* line 88 */
     s = stringify_i4_a4(arr, (sc_stringify_t){ .compact = 1 });
     /* line 89 */
-    sc_print((uint8_t)(0), "一维数组: %s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "一维数组: %s", sc_string_cstr(s));
     /* line 90 */
     (sc_string_drop(s), sc_free(s));
     /* line 92 */
@@ -295,13 +295,13 @@ int32_t main(void) {
     /* line 93 */
     s = stringify_color(c, (sc_stringify_t){ .compact = 1 });
     /* line 94 */
-    sc_print((uint8_t)(0), "枚举: %s", sc_string_cstr(s));
+    sc_print((uint8_t)(0), 0, "枚举: %s", sc_string_cstr(s));
     /* line 95 */
     (sc_string_drop(s), sc_free(s));
     /* line 98 */
     char buf[64];
     /* line 99 */
-    sc_print((uint8_t)(0), "缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (sc_stringify_t){ .compact = 1 }));
+    sc_print((uint8_t)(0), 0, "缓存形态: %s", stringify_point_buf(p, buf, (uint64_t)(64), (sc_stringify_t){ .compact = 1 }));
     /* line 101 */
     {
         int32_t _ret = 0;

@@ -344,7 +344,11 @@ int32_t main(void) {
         sc_slist * _fr12 = &lst;
         void *_fi12 = (void *)sc_slist_last(_fr12);
         long _fc12 = 0; (void)_fc12;
-        for (; _fi12 != (void *)0; ({ long _fk12 = (2); while (_fk12-- > 0 && _fi12 != (void *)0) _fi12 = ((void *)sc_slist_prev(_fr12, _fi12)); }), _fc12++) {
+        int _ff12 = 1;
+        while (1) {
+            if (!_ff12) { long _fk12 = (2); while (_fk12-- > 0 && _fi12 != (void *)0) _fi12 = ((void *)sc_slist_prev(_fr12, _fi12)); _fc12++; }
+            _ff12 = 0;
+            if (!(_fi12 != (void *)0)) break;
             sc_task * it = (sc_task *)_fi12;
             /* line 154 */
             printf(" %d", it->id);
