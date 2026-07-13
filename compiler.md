@@ -772,16 +772,17 @@ scc mymod --build -o libmymod.dylib            # 动态库（-fPIC -shared + 段
 引用，§9）：搜索顺序为 **相对 `.ss` 源文件目录 → `builtins/gpu/caps/`**；
 随 `--builtins` 目录整体替换，交叉/板级适配时可自带板卡档案。
 
-### 7.9 预编交付产物与构建链（kernels/out、wsi .a）
+### 7.9 预编交付产物与构建链（kernels/out）
 
-builtins 里有两类**预编交付产物随 git 入库**，fresh clone 即可直接消费，
-不引入构建循环：
+`builtins/spc/kernels/*.ss` 经 `kernels/build.sh` 预编为 `out/*.shader.h/.c`
+（多目标字节数组 + 反射，§9），**产物随 git 入库**，`spc.c` 编译期 include/
+`add` 进用户程序——消费方无需具备 `.ss` 离线编译能力。因产物是 builtins 内的
+`.h`/`.c`，它命中 §7.7 的内嵌资源清单，**随 dist 一并嵌入**，也随 `--builtins`
+目录整体替换。
 
-- **spc 算子内核**：`builtins/spc/kernels/*.ss` 经 `kernels/build.sh` 预编为
-  `out/*.shader.h/.c`（多目标字节数组 + 反射，§9），`spc.c` 编译期 include/
-  `add` 进用户程序——消费方无需具备 `.ss` 离线编译能力；
-- **wsi/ui 静态库**：`templates/.scenv/modules/` 下 `lib*.a` 预编入库
-  （改源码后重跑各自 `build.sh`）。
+> 区别于 `templates/.scenv/modules/` 下 wsi/ui 的预编 `lib*.a`：那只是工作区
+> 层面的 git 入库交付（改源码后重跑各自 `build.sh`），在 builtins 之外，
+> 与 scc 资源内嵌无关。
 
 **依赖链是线性的（非循环）**：
 
