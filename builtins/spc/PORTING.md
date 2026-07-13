@@ -169,12 +169,23 @@ kd.spec_values = &sv;  kd.spec_count = 1;
 
 | 能力 | Metal | Vulkan | GLES3.1 | 备注 |
 |---|---|---|---|---|
-| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | ✅ 实测（WSL2 Mesa GLES3.1 surfaceless，规约 8386560） | gles 门控 310 |
-| spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ 无机制 | |
-| subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ❌（无核心途径） | SPIR-V 1.3 |
-| f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ❌ 门控 | |
-| i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ | Metal buffer 内 long 需 MSL 2.3 |
-| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | ✅ 实测（8bit/16bit_storage 存取 + 算术，120+400=520） | ❌ | |
+| local X Y Z / shared / barrier / atomic_* | ✅ 实测 | ✅ 实测（Win AMD 1.4 + WSL llvmpipe 1.3） | ✅ 实测（WSL2 Mesa GLES3.1 surfaceless，规约 8386560） | GLES 核心 310 |
+| spec 常量传值 | ✅ 实测 | ✅ 实测（VkSpecializationInfo，1.0→3.0） | ❌ **GL 无此机制**（永不） | 特化常量为 SPIR-V/Metal 专属 |
+| subgroup 三件 | ✅ 编译实测（2.1+） | ✅ 实测（Win AMD 1.4 + WSL llvmpipe；VK 1.1 实例即可） | ⚠️ 核心无，需扩展 GL_KHR_shader_subgroup_*（本机 WSL 驱动无） | SPIR-V 1.3 |
+| f2(f16) | ✅ 编译实测（half） | ✅ 实测（16bit_storage + shaderFloat16，见 §3.1-5） | ⚠️ 核心无，需 GL_EXT_..._float16（本机 WSL 驱动无） | |
+| i8/u8(int64) | ✅ 编译实测（2.3+，long） | ✅ 实测（shaderInt64，2^40 往返） | ❌ **GLES 无 int64**（无核心、无扩展途径） | Metal buffer 内 long 需 MSL 2.3 |
+| i1/u1(int8)、i2/u2(int16) | ✅ 编译支持 | ✅ 实测（8bit/16bit_storage 存取 + 算术，120+400=520） | ⚠️ 核心无，需 GL_EXT_..._int8/int16（本机 WSL 驱动无） | |
+
+> **GLES 能力天花板（勿误判为设备算力问题）**：GL 后端受 GLES 语言/驱动限制，非 GPU 算力。
+> 依据 compiler/src/shader_caps.h 的能力表（各 api 的核心版本/替代扩展）：
+> - **GL 本身永无**：`spec 常量`（GL 无特化常量概念，消费 GLSL 文本）、`int64`
+>   （GLES 无 64 位整数，连扩展途径都无）。与设备无关，任何 GLES 驱动都给不了。
+> - **GLES 核心无、需驱动扩展**：`subgroup`（GL_KHR_shader_subgroup_*）、`f16`/`int8`/
+>   `int16`（GL_EXT_shader_explicit_arithmetic_types_*）。能否用取决于驱动是否带该扩展。
+>   **本机 WSL2 Mesa 23.2（d3d12→GLES3.1）实测这些扩展全无**（glGetString(GL_EXTENSIONS)
+>   逐一探测）；换带扩展的 GLES 驱动（部分桌面 Mesa / 移动端 Adreno·Mali）才可能可用。
+> - 结论：GL 侧板验的完整能力 = **shared/barrier/atomic + local**（GLES3.1 核心计算集），
+>   其余能力应在 Vulkan/Metal 后端验（已全绿），GL 上属天生受限，不必强求。
 
 ## 7. 板端排错工具链
 
