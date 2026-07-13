@@ -36,6 +36,9 @@ do_build() {
 }
 
 do_dist() {
+    # 内嵌快照取磁盘现状：若本次改了 codegen/.ss，须先用新 scc 刷新 kernels/out
+    # 再嵌入（do_build 已含该步）。fresh clone 时 out/ 随 git 入库，天然自举。
+    do_build
     echo "==> 构建发行版 scc（内嵌 builtins）"
     cmake -B "$BUILD_DIR-dist" -S "$ROOT/compiler" -DCMAKE_BUILD_TYPE=Release -DSCC_EMBED_BUILTINS=ON
     cmake --build "$BUILD_DIR-dist"
@@ -48,14 +51,14 @@ inc adt.sc
 inc mt.sc
 inc mem.sc
 fnc main: i4
-    var s: string
+    var s: string& = string()
     s.append("dist-ok")
     var mu: mutex
     mu.lock()
     var p: & = chunk(128)
     recycle(p)
     mem_teardown()
-    printf("%s\n", s.cstr())
+    ::printf("%s\n", s.cstr())
     mu.unlock()
     mu.drop()
     s.drop()
