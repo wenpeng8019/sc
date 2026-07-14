@@ -12,12 +12,13 @@ inc sys.sc
 inc os.sc
 inc io.sc
 inc adt.sc
-
-# add 顺序即分层：util 最底（无 src 内依赖）← 各功能单元 ← 本入口消费
-add src/util.sc
-add src/sagent_dir.sc
-add src/config.sc
-add src/json.sc
+# src/ 全部为 inc 模块（@ 导出，符号对编译器/插件一致可见；各自可独立 --test）
+inc src/util.sc
+inc src/sagent_dir.sc
+inc src/config.sc
+inc src/json.sc
+inc src/http.sc
+inc src/llm.sc
 
 mix ARGS_S(false, llm, 'l', "llm", "选用 config.sa 的 [llm.<名>] 配置段")
 
@@ -36,6 +37,20 @@ fnc main: i4, argc: i4, argv: char&&
     if sa_streq(cmd, "init")
         return sa_init()
 
-    # 非子命令 = 用户消息，走单次 loop（一期分步实现中）
-    ::printf("sagent: loop 尚未接通（一期任务 2-6），收到消息: %s\n", cmd)
-    return 0
+    # 非子命令 = 用户消息：读配置 → llm request → 打印应答（任务 5 通路）
+    var cfg: sa_cfg
+    ::memset(&cfg, 0, sizeof(::sa_cfg))
+    var lr: i4 = sa_cfg_load(&cfg)
+    if lr == 1
+        ::printf("sagent: 缺 .sagent/config.sa（先跑 sca init）\n")
+        return 1
+    if lr > 1
+        ::printf("sagent: config.sa 第 %d 行格式错误\n", lr)
+        return 1
+
+    var answer: string& = string()
+    var rc: i4 = sa_llm_request(&cfg, ARGS_llm, nil, cmd, answer)
+    if rc == 0
+        ::printf("%s\n", answer->cstr())
+    answer->drop()
+    return rc

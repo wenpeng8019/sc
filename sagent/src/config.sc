@@ -1,10 +1,14 @@
-# config —— .sa 配置解析（被 sagent.sc add 内联）
+# config —— .sa 配置解析模块（inc 引用，@ 导出；可独立 --test）
 # 格式：`[段]` + `key: value`，`#` 行注释，空行忽略。见 PLAN.md §1.3。
 #
 # 存储：扁平键值表（键 = "段.key"，如 "llm.model"），定长槽位（够用原则）。
 # api_key_env 语义（环境变量间接引用）由消费方（llm.sc）处理，解析器只存字面。
 
-def sa_cfg: {
+inc io.sc
+inc os.sc
+inc util.sc
+
+@def sa_cfg: {
     keys[64][96]: char          # "段.key"
     vals[64][512]: char
     count: i4
@@ -26,7 +30,7 @@ fnc sa_cfg_trim_end: i4, s: const char&, from: i4, to: i4
     return j
 
 # 解析一整块 .sa 文本进 cfg。返回 0 成功 / >0 首个坏行行号。
-fnc sa_cfg_parse: i4, cfg: sa_cfg&, text: const char&
+@fnc sa_cfg_parse: i4, cfg: sa_cfg&, text: const char&
     cfg->count = 0
     cfg->err_line = 0
     var sect[64]: char
@@ -100,7 +104,7 @@ fnc sa_cfg_parse: i4, cfg: sa_cfg&, text: const char&
     return 0
 
 # 取值：key 形如 "llm.model"。命中返回值指针，未命中返回 dflt。
-fnc sa_cfg_get: const char&, cfg: sa_cfg&, key: const char&, dflt: const char&
+@fnc sa_cfg_get: const char&, cfg: sa_cfg&, key: const char&, dflt: const char&
     var n: i4 = 0
     while n < cfg->count
         if sa_streq((cfg->keys[n]: const char&), key)
@@ -108,33 +112,8 @@ fnc sa_cfg_get: const char&, cfg: sa_cfg&, key: const char&, dflt: const char&
         n = n + 1
     return dflt
 
-# 读文件全文（malloc，调用方 ::free）。失败返回 nil。
-fnc sa_read_file: char&, path: const char&
-    if !fs_is_file(path)
-        return nil
-    var sz: i8 = fs_size(path)
-    if sz < 0
-        return nil
-    var buf: char& = (::malloc((sz + 1: u8)): char&)
-    if buf == nil
-        return nil
-    var c: com& = file(path, true, 1, 0)
-    if c == nil
-        ::free((buf: &))
-        return nil
-    var n: u4 = (sz: u4)
-    if n > 0
-        var rd: i4 = c->read((buf: &), &n)
-        if rd < 0
-            c->close()
-            ::free((buf: &))
-            return nil
-    buf[n] = 0
-    c->close()
-    return buf
-
 # 载入 .sagent/config.sa。返回 0 成功；1 文件缺失；>1 坏行行号。
-fnc sa_cfg_load: i4, cfg: sa_cfg&
+@fnc sa_cfg_load: i4, cfg: sa_cfg&
     var text: char& = sa_read_file(".sagent/config.sa")
     if text == nil
         return 1

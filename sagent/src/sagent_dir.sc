@@ -1,24 +1,12 @@
-# sagent_dir —— .sagent/ 目录初始化与读写（被 sagent.sc add 内联）
+# sagent_dir —— .sagent/ 目录初始化与读写模块（inc 引用，@ 导出）
 # 目录规范见 OUTLINE.md §4。
-# 依赖（由根单元供给，本文件不 inc）：io.sc（file com）、os.sc（fs_*）、
-# src/util.sc（sa_slen，add 顺序在前）。
 
-# 写整文件（覆盖创建）。返回 0 成功 / <0 失败。
-fnc sa_write_file: i4, path: const char&, text: const char&
-    var c: com& = file(path, true, 0, 1)
-    if c == nil
-        return -1
-    var n: u4 = sa_slen(text)
-    if n > 0
-        var wr: i4 = c->write((text: &), &n)
-        if wr < 0
-            c->close()
-            return -2
-    c->close()
-    return 0
+inc io.sc
+inc os.sc
+inc util.sc
 
 # 初始化 .sagent/ 骨架。已存在时不覆盖（幂等，只补缺）。
-fnc sa_init: i4
+@fnc sa_init: i4
     if fs_exists(".sagent") && !fs_is_dir(".sagent")
         print "sagent: .sagent 已存在且不是目录\n"
         return 1

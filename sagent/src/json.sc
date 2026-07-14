@@ -1,10 +1,13 @@
-# json —— JSON 最小库（被 sagent.sc add 内联；依赖根单元 inc adt.sc）。见 PLAN.md §1.4。
+# json —— JSON 最小库模块（inc 引用，@ 导出；可独立 --test）。见 PLAN.md §1.4。
 # 构造面：转义追加（组装 chat completions 请求体用）。
 # 解析面：扫描式取值器（键定位 + 字符串值反转义），不做完整 DOM。
 # 扫描器正确跳过字符串内容（含转义），值内出现键名不会误匹配。
 
+inc adt.sc
+inc util.sc
+
 # 追加转义后的 JSON 字符串内容（不含首尾引号）。
-fnc sa_json_escape: out: string&, s: const char&
+@fnc sa_json_escape: out: string&, s: const char&
     var i: u4 = 0
     while s[i] != 0
         var c: char = s[i]
@@ -25,7 +28,7 @@ fnc sa_json_escape: out: string&, s: const char&
         i = i + 1
 
 # 追加一个完整 JSON 字符串（含引号）。
-fnc sa_json_str: out: string&, s: const char&
+@fnc sa_json_str: out: string&, s: const char&
     out->append_char((34: char))
     sa_json_escape(out, s)
     out->append_char((34: char))
@@ -136,7 +139,7 @@ fnc sa_json_unescape: i4, t: const char&, i: i4, out: string&
     return 0
 
 # 取键的字符串值（首个命中）。返回 0 成功 / -1 未找到或非字符串。
-fnc sa_json_get_str: i4, t: const char&, key: const char&, out: string&
+@fnc sa_json_get_str: i4, t: const char&, key: const char&, out: string&
     var v: i4 = sa_json_find_key(t, key)
     if v < 0
         return -1
