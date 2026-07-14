@@ -13,6 +13,7 @@ inc os.sc
 inc io.sc
 
 add src/sagent_dir.sc
+add src/config.sc
 
 mix ARGS_S(false, llm, 'l', "llm", "选用 config.sa 的 [llm.<名>] 配置段")
 
