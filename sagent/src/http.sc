@@ -66,3 +66,37 @@ inc util.sc
     else
         resp->clear()
     return code
+
+# ---------- SSE 流式通道（curl -N 子进程，popen 行读） ----------
+
+# 打开 SSE POST 流。返回 popen 句柄（fgets 逐行读，用毕 sa_http_sse_close）；
+# 失败返回 nil。密钥同样走 0600 config 文件（open 后即焚）。
+@fnc sa_http_sse_open: &, url: const char&, auth_bearer: const char&, body: const char&, timeout_s: i4
+    fs_mkdirs(".sagent/tmp")
+    if sa_write_file(".sagent/tmp/req.json", body) != 0
+        return nil
+    var cfg: string& = string()
+    cfg->printf("url = \"%s\"\n", url)
+    cfg->append("request = \"POST\"\n")
+    cfg->append("header = \"Content-Type: application/json\"\n")
+    cfg->append("header = \"Accept: text/event-stream\"\n")
+    if auth_bearer != nil && auth_bearer[0] != 0
+        cfg->printf("header = \"Authorization: Bearer %s\"\n", auth_bearer)
+    cfg->append("data = \"@.sagent/tmp/req.json\"\n")
+    cfg->append("no-buffer\nsilent\nshow-error\n")
+    cfg->printf("max-time = %d\n", timeout_s)
+    ::system("umask 077; : > .sagent/tmp/curl_sse.cfg")
+    var wr: i4 = sa_write_file(".sagent/tmp/curl_sse.cfg", cfg->cstr())
+    cfg->drop()
+    if wr != 0
+        return nil
+    var fp: & = ::popen("curl --config .sagent/tmp/curl_sse.cfg 2> .sagent/tmp/err.txt", "r")
+    # 注意：popen 异步启动，config（含密钥，0600）不能在此删——由 sse_close 清理
+    return fp
+
+# 关闭 SSE 流（并清理含密钥的 config）。返回 curl 退出码（0 正常）。
+@fnc sa_http_sse_close: i4, fp: &
+    ::system("rm -f .sagent/tmp/curl_sse.cfg")
+    if fp == nil
+        return -1
+    return ::pclose(fp)

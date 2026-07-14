@@ -194,12 +194,13 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
     sa_ctx_build(ctx, loop_no, user_msg)
     sa_loop_put(dir, "context.md", ctx->cstr())
 
-    # 2) 调 LLM（协议 prompt + 上下文）
+    # 2) 调 LLM（协议 prompt + 上下文；[llm] stream: on 则 SSE 流式边出边显）
     ::fprintf(::stderr, "sagent: [2/6] 请求 LLM（上下文 %llu 字节）…\n", ctx->len())
+    var stream_on: bool = sa_streq(sa_llm_cfg(cfg, sect, "stream", "off"), "on")
     var proto: string& = string()
     sa_loop_protocol(proto)
     var answer: string& = string()
-    var rc: i4 = sa_llm_request(cfg, sect, proto->cstr(), ctx->cstr(), answer)
+    var rc: i4 = sa_llm_request_ex(cfg, sect, proto->cstr(), ctx->cstr(), answer, stream_on)
     proto->drop()
     ctx->drop()
     if rc != 0
@@ -263,7 +264,8 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         ::system(g->cstr())
         g->drop()
 
-    ::printf("%s\n", answer->cstr())
+    if !stream_on
+        ::printf("%s\n", answer->cstr())
     ::printf("sagent: loop-%03d 完成（动作 %d 块，验证 rc=%d）\n", loop_no, acted, vrc)
     answer->drop()
     dir->drop()
