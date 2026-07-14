@@ -50,6 +50,27 @@ fnc main: i4, argc: i4, argv: char&&
 
     var answer: string& = string()
     var rc: i4 = sa_llm_request(&cfg, ARGS_llm, nil, cmd, answer)
+
+    # loop 档案（OUTLINE §4：context 快照 + 原始响应 + 应答 + state 追加）
+    var dir: string& = string()
+    var loop_no: i4 = sa_loop_open(dir)
+    if loop_no > 0
+        var ctx: string& = string()
+        ctx->printf("# loop-%03d 初始上下文\n\n## 用户消息\n\n%s\n", loop_no, cmd)
+        sa_loop_put(dir, "context.md", ctx->cstr())
+        ctx->drop()
+        var raw: char& = sa_read_file(".sagent/tmp/resp.json")
+        if raw != nil
+            sa_loop_put(dir, "response.json", raw)
+            ::free((raw: &))
+        if rc == 0
+            sa_loop_put(dir, "answer.md", answer->cstr())
+        var st: string& = string()
+        st->printf("- loop-%03d: %s（rc=%d）", loop_no, cmd, rc)
+        sa_state_append(st->cstr())
+        st->drop()
+    dir->drop()
+
     if rc == 0
         ::printf("%s\n", answer->cstr())
     answer->drop()

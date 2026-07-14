@@ -3,7 +3,44 @@
 
 inc io.sc
 inc os.sc
+inc adt.sc
 inc util.sc
+
+# 开启新 loop 档案：取下一个编号并建 .sagent/task/loop-NNN/。
+# 出参 dir 得到目录路径；返回 loop 编号（>0），失败 <0。
+@fnc sa_loop_open: i4, dir: string&
+    if !fs_is_dir(".sagent/task")
+        return -1
+    var n: i4 = 1
+    while n < 1000
+        dir->clear()
+        dir->printf(".sagent/task/loop-%03d", n)
+        if !fs_exists(dir->cstr())
+            fs_mkdirs(dir->cstr())
+            return n
+        n = n + 1
+    return -2
+
+# loop 档案落一个文本文件（<dir>/<name>）。
+@fnc sa_loop_put: i4, dir: string&, name: const char&, text: const char&
+    var p: string& = string()
+    p->printf("%s/%s", dir->cstr(), name)
+    var r: i4 = sa_write_file(p->cstr(), text)
+    p->drop()
+    return r
+
+# state.md 追加一行摘要（已发生序列）。
+@fnc sa_state_append: i4, line: const char&
+    var old: char& = sa_read_file(".sagent/task/state.md")
+    var s: string& = string()
+    if old != nil
+        s->append(old)
+        ::free((old: &))
+    s->append(line)
+    s->append("\n")
+    var r: i4 = sa_write_file(".sagent/task/state.md", s->cstr())
+    s->drop()
+    return r
 
 # 初始化 .sagent/ 骨架。已存在时不覆盖（幂等，只补缺）。
 @fnc sa_init: i4
