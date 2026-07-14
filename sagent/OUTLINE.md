@@ -106,6 +106,7 @@ sca "hi, llm" [opts]
 ```
 .sagent/
   config.sc            # LLM 接入（endpoint/model/密钥引用）、loop 预算、工具白名单
+  prompts/             # 协议 prompt（可手编，loop 自动加载；loop.md/review.md）
   task/                # 当前 task
     goal.md            # 目的 + 最终验证标准
     plan.md            # 待发生：计划（loop 目标队列，可由 LLM/人共同编辑）

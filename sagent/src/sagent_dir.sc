@@ -152,5 +152,12 @@ inc util.sc
     if !fs_exists(".sagent/memory/history.md")
         sa_write_file(".sagent/memory/history.md", "# 事实和计划：发生序列/存在位置/未来方向/事务排期\n")
 
-    print "sagent: .sagent/ 就绪（config.sa + task/ + memory/ + archive/）\n"
+    # prompts 两件（可手编，loop 自动加载；存在则不动）
+    fs_mkdirs(".sagent/prompts")
+    if !fs_exists(".sagent/prompts/loop.md")
+        sa_write_file(".sagent/prompts/loop.md", "你是 sagent 的执行体，在一次 loop 中工作。规则：\n1. 若需执行命令，输出 ```sh 代码块（每行一条命令，只允许白名单工具）；\n2. 代码块外的文字是你的推理与说明，会归档但不执行；\n3. 目标完成或无需动作时不输出代码块；\n4. 修改文件用受控写入：printf/cat 重定向亦须在白名单内；\n5. 不要在应答中输出复盘（陷阱/事实）格式——复盘另有专门环节。\n")
+    if !fs_exists(".sagent/prompts/review.md")
+        sa_write_file(".sagent/prompts/review.md", "对本 loop 复盘。只输出两节 markdown：## 陷阱（失败路径及原因，无则写 无）与 ## 事实（本 loop 确认的新事实）。不要输出代码块。\n")
+
+    print "sagent: .sagent/ 就绪（config.sa + prompts/ + task/ + memory/ + archive/）\n"
     return 0

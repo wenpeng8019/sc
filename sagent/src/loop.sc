@@ -13,13 +13,28 @@ inc llm.sc
 
 # ---------- 任务 7：loop 协议与上下文构造 ----------
 
-# 动作输出协议（system prompt）。
+# 动作输出协议（system prompt）：优先 .sagent/prompts/loop.md（可手编），
+# 缺失回退内置默认（与 init 模板同源）。
 fnc sa_loop_protocol: out: string&
+    var t: char& = sa_read_file(".sagent/prompts/loop.md")
+    if t != nil
+        out->append(t)
+        ::free((t: &))
+        return
     out->append("你是 sagent 的执行体，在一次 loop 中工作。规则：\n")
     out->append("1. 若需执行命令，输出 ```sh 代码块（每行一条命令，只允许白名单工具）；\n")
     out->append("2. 代码块外的文字是你的推理与说明，会归档但不执行；\n")
     out->append("3. 目标完成或无需动作时不输出代码块；\n")
     out->append("4. 修改文件用受控写入：printf/cat 重定向亦须在白名单内。\n")
+
+# 复盘协议：优先 .sagent/prompts/review.md，缺失回退内置。
+fnc sa_review_protocol: out: string&
+    var t: char& = sa_read_file(".sagent/prompts/review.md")
+    if t != nil
+        out->append(t)
+        ::free((t: &))
+        return
+    out->append("对本 loop 复盘。只输出两节 markdown：## 陷阱（失败路径及原因，无则写 无）与 ## 事实（本 loop 确认的新事实）。不要输出代码块。")
 
 # 追加一节选材（文件存在才追加）：## <标题>\n<内容截尾 max 字节>
 fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
@@ -174,11 +189,13 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         return 1
 
     # 1) 构造上下文并归档
+    ::fprintf(::stderr, "sagent: [1/6] loop-%03d 构造上下文\n", loop_no)
     var ctx: string& = string()
     sa_ctx_build(ctx, loop_no, user_msg)
     sa_loop_put(dir, "context.md", ctx->cstr())
 
     # 2) 调 LLM（协议 prompt + 上下文）
+    ::fprintf(::stderr, "sagent: [2/6] 请求 LLM（上下文 %llu 字节）…\n", ctx->len())
     var proto: string& = string()
     sa_loop_protocol(proto)
     var answer: string& = string()
@@ -189,6 +206,7 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         dir->drop()
         answer->drop()
         return rc
+    ::fprintf(::stderr, "sagent: [2/6] 应答 %llu 字节\n", answer->len())
     sa_loop_put(dir, "answer.md", answer->cstr())
     var raw: char& = sa_read_file(".sagent/tmp/resp.json")
     if raw != nil
@@ -205,26 +223,35 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         if sa_actions_extract(answer->cstr(), k, block) != 0
             block->drop()
             break
-        sa_actions_run(block->cstr(), allow, log)
+        ::fprintf(::stderr, "sagent: [3/6] 执行动作块 %d\n", k + 1)
+        var arc: i4 = sa_actions_run(block->cstr(), allow, log)
+        if arc == -100
+            ::fprintf(::stderr, "sagent: [3/6] 动作块 %d 被拒（白名单外）\n", k + 1)
         block->drop()
         acted = acted + 1
         k = k + 1
     if acted == 0
+        ::fprintf(::stderr, "sagent: [3/6] 无动作块\n")
         log->append("### 动作\n\n（应答无动作块）\n\n")
 
     # 4) 验证
+    ::fprintf(::stderr, "sagent: [4/6] 验证\n")
     var vrc: i4 = sa_verify_run(cfg, log)
     sa_loop_put(dir, "actions.md", log->cstr())
 
     # 5) 复盘（第二次 LLM 调用：动作+输出+验证 → 陷阱/事实）
-    var rproto: const char& = "对本 loop 复盘。只输出两节 markdown：## 陷阱（失败路径及原因，无则写 无）与 ## 事实（本 loop 确认的新事实）。不要输出代码块。"
+    ::fprintf(::stderr, "sagent: [5/6] 复盘写回…\n")
+    var rproto: string& = string()
+    sa_review_protocol(rproto)
     var review: string& = string()
-    if sa_llm_request(cfg, sect, rproto, log->cstr(), review) == 0
+    if sa_llm_request(cfg, sect, rproto->cstr(), log->cstr(), review) == 0
         sa_loop_put(dir, "review.md", review->cstr())
+    rproto->drop()
     review->drop()
     log->drop()
 
     # 6) state 追加 + git commit（代码 + .sagent 同一提交）
+    ::fprintf(::stderr, "sagent: [6/6] state 追加 + 提交\n")
     var st: string& = string()
     st->printf("- loop-%03d: %s（动作 %d 块，验证 rc=%d）", loop_no, user_msg, acted, vrc)
     sa_state_append(st->cstr())

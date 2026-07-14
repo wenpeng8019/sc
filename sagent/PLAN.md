@@ -104,11 +104,15 @@ vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
 
 ## 4.4 待办（优先序）
 
-1. 协议 prompt 防泄漏（DeepSeek 实测观察到复盘格式混进动作应答）；
-2. SSE 流式（体验）+ libcurl vendor（任务 4 主路，同签名替换 http.sc）；
-3. M3 决策记忆（OUTLINE §10-M3）：memory/ 四分类读写纪律、结构文件
+1. ✅ prompt 配置化：协议/复盘 prompt 移出硬编码 → `.sagent/prompts/`
+   （loop.md/review.md，init 生成默认可手编，loop 自动加载，缺失回退内置）；
+2. ✅ loop 阶段进度显示（stderr，六阶段； token 级流式属 SSE 范畴另计）；
+3. 协议 prompt 防泄漏（DeepSeek 实测观察到复盘格式混进动作应答）——
+   prompt 配置化后可直接调文渹实验；
+4. SSE 流式（体验）+ libcurl vendor（任务 4 主路，同签名替换 http.sc）；
+5. M3 决策记忆（OUTLINE §10-M3）：memory/ 四分类读写纪律、结构文件
    `scc --graph/--api` 自动再生、上下文选材优化、跨 task 陷阱复用验收；
-4. actions.jsonl 可回放格式（现 actions.md 人读向）。
+6. actions.jsonl 可回放格式（现 actions.md 人读向）。
 
 
 
