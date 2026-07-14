@@ -57,7 +57,7 @@ sagent/
   sagent.sc           # 入口（CLI 解析 + 子命令 init/next/archive/消息）
   build.sh            # 构建/安装（build/install/uninstall/clean → build/sca）
   src/                # 全部为 inc 模块（@ 导出，各自可独立 --test）
-    util.sc           # 基础：slen/streq/文件读写
+    # 文件读写不再封装：各处直接用 com@1 file(...) + com[0]/take（io.sc/mem.sc）
     sagent_dir.sc     # .sagent/ 初始化、loop 档案、plan 队列、归档
     config.sc         # .sa 解析
     json.sc           # JSON 最小库

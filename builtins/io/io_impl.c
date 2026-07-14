@@ -22,21 +22,56 @@ typedef struct sc_file_dev {
     FILE *fp;           /* 文件句柄 */
 } sc_file_dev;
 
-/* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
-static void *sc_file_limit_data(sc_limit *s) { return (char *)s + sizeof(sc_limit); }
+/* com[...] 句柄：数据缓冲独立分配（与 limit 元数据分离），data() 返回其首址。
+ * 独立分配是为了支持 take（零拷贝转移所有权）：取走缓冲后 free 只回收元数据。 */
+typedef struct sc_file_limit {
+    sc_limit base;         /* limit 元数据（首位，(sc_limit*)&fl->base 互转） */
+    void    *buf;          /* 数据缓冲（独立分配；take 可转移，NULL=已被取走） */
+} sc_file_limit;
 
-static sc_limit *sc_file_alloc(sc_com *_this, uint32_t size, void *ending) {
-    (void)_this;
-    sc_limit *s = (sc_limit *)sc_chunk0(sizeof(sc_limit) + (size ? size : 1));
-    if (!s) return NULL;
-    s->size   = size;
-    s->len    = 0;
-    s->data   = sc_file_limit_data;
-    s->ending = (int32_t (*)(sc_limit *))ending;
-    return s;
+static void *sc_file_limit_data(sc_limit *s) { return ((sc_file_limit *)s)->buf; }
+
+/* read-all 哨兵：com[0]（size==0 且无 ending）表示「读取设备剩余全部数据」。
+ * 仅可寻址设备（实现了 seek）支持：以 seek 求当前位置到末尾的剩余字节数，作为定长 size。
+ * 求得后复位读游标到原位置，随后框架定长读循环即可一次读满全部内容（结果长度见 limit.len）。
+ * 返回解析后的有效 size；非哨兵或设备不可寻址时原样返回 size（不可寻址的读全部无从预知缓冲大小）。 */
+static uint32_t sc_limit_all_size(sc_com *c, uint32_t size, void *ending) {
+    if (ending || size != 0 || !c->seek) return size;
+    int64_t cur = c->seek(c, 0, 1);        /* SEEK_CUR：当前位置 */
+    int64_t end = c->seek(c, 0, 2);        /* SEEK_END：总长 */
+    if (cur < 0 || end < cur) return 0;
+    c->seek(c, cur, 0);                    /* SEEK_SET：复位到原位置 */
+    return (uint32_t)(end - cur);
 }
 
-static void sc_file_free(sc_com *_this, sc_limit *s) { (void)_this; sc_recycle(s); }
+static sc_limit *sc_file_alloc(sc_com *_this, uint32_t size, void *ending) {
+    size = sc_limit_all_size(_this, size, ending);   /* read-all 哨兵：seek 求全长 */
+    sc_file_limit *s = (sc_file_limit *)sc_chunk0(sizeof(sc_file_limit));
+    if (!s) return NULL;
+    s->buf = sc_chunk0((size_t)size + 1);            /* +1：末尾恒 NUL（文本读可直接当 C 字符串） */
+    if (!s->buf) { sc_recycle(s); return NULL; }
+    s->base.size   = size;
+    s->base.len    = 0;
+    s->base.data   = sc_file_limit_data;
+    s->base.ending = (int32_t (*)(sc_limit *))ending;
+    return &s->base;
+}
+
+static void sc_file_free(sc_com *_this, sc_limit *s) {
+    (void)_this;
+    sc_file_limit *fl = (sc_file_limit *)s;
+    if (fl->buf) sc_recycle(fl->buf);                /* 缓冲未被 take 走则一并回收 */
+    sc_recycle(fl);
+}
+
+/* take：转移数据缓冲所有权给调用方，返回缓冲基址；摘除后 free 不再回收它。 */
+static void *sc_file_take(sc_com *_this, sc_limit *s) {
+    (void)_this;
+    sc_file_limit *fl = (sc_file_limit *)s;
+    void *b = fl->buf;
+    fl->buf = NULL;                                  /* 转移所有权：free 不再触及此缓冲 */
+    return b;
+}
 
 /* 设备读：读入至多 *size 字节，回写实读字节数；返回 0 可继续 / sc_eof 读完 / <0 错。 */
 static int32_t sc_file_read(sc_com *_this, void *data, uint32_t *size) {
@@ -120,6 +155,7 @@ sc_com *sc_file(const char *name, bool txt, uint8_t read, uint8_t write) {
     d->com.error = sc_file_error;
     d->com.close = sc_file_close;
     d->com.seek  = sc_file_seek;
+    d->com.take  = sc_file_take;
     if (read)  d->com.read  = sc_file_read;
     if (write) d->com.write = sc_file_write;
     /* 异步模式（==2）：自动初始化对应方向 ioq（_buf 惰性分配；com 指针回填） */
@@ -148,21 +184,42 @@ typedef struct sc_stream_dev {
     uint64_t wpos;      /* 写游标 */
 } sc_stream_dev;
 
-/* com[...] 句柄：limit 缓冲紧随 limit 结构之后分配，data() 返回其首址 */
-static void *sc_stream_limit_data(sc_limit *s) { return (char *)s + sizeof(sc_limit); }
+/* com[...] 句柄：数据缓冲独立分配（支持 take 零拷贝转移），data() 返回其首址 */
+typedef struct sc_stream_limit {
+    sc_limit base;         /* limit 元数据（首位） */
+    void    *buf;          /* 数据缓冲（独立分配；take 可转移，NULL=已被取走） */
+} sc_stream_limit;
+
+static void *sc_stream_limit_data(sc_limit *s) { return ((sc_stream_limit *)s)->buf; }
 
 static sc_limit *sc_stream_alloc(sc_com *_this, uint32_t size, void *ending) {
-    (void)_this;
-    sc_limit *s = (sc_limit *)sc_chunk0(sizeof(sc_limit) + (size ? size : 1));
+    size = sc_limit_all_size(_this, size, ending);   /* read-all 哨兵：seek 求全长 */
+    sc_stream_limit *s = (sc_stream_limit *)sc_chunk0(sizeof(sc_stream_limit));
     if (!s) return NULL;
-    s->size   = size;
-    s->len    = 0;
-    s->data   = sc_stream_limit_data;
-    s->ending = (int32_t (*)(sc_limit *))ending;
-    return s;
+    s->buf = sc_chunk0((size_t)size + 1);            /* +1：末尾恒 NUL */
+    if (!s->buf) { sc_recycle(s); return NULL; }
+    s->base.size   = size;
+    s->base.len    = 0;
+    s->base.data   = sc_stream_limit_data;
+    s->base.ending = (int32_t (*)(sc_limit *))ending;
+    return &s->base;
 }
 
-static void sc_stream_free(sc_com *_this, sc_limit *s) { (void)_this; sc_recycle(s); }
+static void sc_stream_free(sc_com *_this, sc_limit *s) {
+    (void)_this;
+    sc_stream_limit *sl = (sc_stream_limit *)s;
+    if (sl->buf) sc_recycle(sl->buf);
+    sc_recycle(sl);
+}
+
+/* take：转移数据缓冲所有权给调用方，返回缓冲基址；摘除后 free 不再回收它。 */
+static void *sc_stream_take(sc_com *_this, sc_limit *s) {
+    (void)_this;
+    sc_stream_limit *sl = (sc_stream_limit *)s;
+    void *b = sl->buf;
+    sl->buf = NULL;
+    return b;
+}
 
 /* 设备读：从绑定内存 rpos 处拷入至多 *size 字节，回写实读字节数；
  * 返回 0 可继续 / sc_eof 读完（rpos 抵 size，读不满）/ <0 错。 */
@@ -236,6 +293,7 @@ sc_com *sc_stream(void *mem, uint64_t size, uint8_t read, uint8_t write) {
     d->com.error = sc_stream_error;
     d->com.close = sc_stream_close;
     d->com.seek  = sc_stream_seek;
+    d->com.take  = sc_stream_take;
     if (read)  d->com.read  = sc_stream_read;
     if (write) d->com.write = sc_stream_write;
     /* 异步模式（==2）：自动初始化对应方向 ioq（内存恒就绪，异步内核立即驱动 io） */

@@ -603,6 +603,11 @@ def operand: {
 #   · 直接调用 com 的每对象方法指针 read/write，一次收发 sizeof(v) 字节；
 #   · size 为 in/out：传入期望字节数，回写实际收发字节数；
 #   · 返回码（见下 io 枚举）由调用方按需检查，框架不介入。
+#   · 字符串写入糖（仅 <<，目标为 char*/const char*/string）：写「字符串内容」而非
+#     指针本身的 sizeof 字节 —— char*/const char* 写 strlen 字节（不含 NUL），
+#     string 写 size 字节（取其 data 缓冲）。故 `com << "文本"` / `com << 变量`
+#     直接落盘内容，无需先算长度再 write。数组（char[N]）与多级指针不适用，仍按
+#     sizeof 语义（保留裸缓冲收发）。字符串糖不作用于 >>（读入目标须为定长缓冲）。
 #
 # 【B】同步 · com[...] 句柄（fnc 内，目标 s 为分身/切片句柄）—— emitComChain
 #   com >> s   展开为：  limit_read(&base, s._);
@@ -619,7 +624,22 @@ def operand: {
 #         否则定长: 若 len>=size → 返回 eof（读满）
 #         若 r==eof → 返回 eof（设备无更多数据）
 #   · 截止策略全在用户的 data()/ending 里，框架只跑这套不变的循环（最小内核）；
+#   · read-all 哨兵（size==0 且无 ending，即 `var s: com[0]`）：内置 file/stream 的
+#     alloc 会对可寻址设备（实现了 seek）自动 seek 求「当前位置→末尾」的剩余全长，
+#     以此为定长 size 分配缓冲，随后一次读满设备全部数据 —— `c >> s` 即整读，
+#     结果长度见 s._->len、缓冲见 s._->data()，无需预先探知文件大小。不可寻址设备
+#     （tcp/ssl 无 seek）不适用，size 仍按 0 处理。read-all 缓冲多分配 1 字节 NUL 结尾，
+#     故整读文本可直接当 C 字符串（数据长度仍见 s._->len）。
+#   · 缓冲取走（零拷贝转移所有权）：`var buf: char& = (s.take(): char&)` 把句柄内部数据缓冲
+#     摘出交调用方（sc 池缓冲，用 mem.sc recycle 释放），s 退域只回收元数据、不双释。配合
+#     com@1（设备退域自动 close）即可「整读文件到自有缓冲」零封装、零拷贝、零手动收尾。
 #   · 句柄是「有界读视图」，仅用于 >> 读流程；com << s（句柄写）不支持，直接编译报错。
+#   · 退域自动释放（半自动句柄）：函数内 `var s: com[...]` 退出作用域时，若 s._ 非 nil
+#     则自动发 free（等价 `s = nil`），无需手动收尾 —— 令 io 整读整写「不封装」。显式
+#     `s = nil` 后 s._ 置空，退域守卫 `if(s._)` 跳过（幂等，不双重释放）。注意：若把句柄
+#     绑定的本体 com 在句柄退域前手动 close（如裸 com& 提前 c->close()），须先 `s = nil`
+#     再 close，否则退域 free 会触及已释放的 com（推荐 com@1 + com[...] 皆自动收尾，
+#     句柄先于设备释放，天然无此隐患）。
 #
 # 【C】同步 · rpc 序列化收发（fnc 内）—— emitComRpcSend / emitComRpcRecv
 #   把 rpc 的「参数」当作一组待收发的值，按声明顺序逐字段过 com（跳过返回槽 _）。
@@ -783,12 +803,23 @@ def io: [
     fnc readable: ret, id: &&           # 读就绪查询（多路复用探测，见上契约）
     fnc writable: ret, id: &&           # 写就绪查询（语义对称）
     fnc close: ret                      # 关闭设备：释放底层资源（nil=无需关闭，OS 回收）
+    #   资源自动化：`var c: com@1 = file(...)`（半自动指针）退域/重新赋值时自动调 close，
+    #   免手动收尾——设备 close 自负全权回收（含结构体本身），故不再叠加 sc_free。
 
     # seek：随机寻址（仅可寻址设备实现，如 file/stream；tcp/ssl/ssh 等流式设备为 nil）。
     #   off    —— 偏移字节数（可负，配合 whence）
     #   whence —— 基准：0=从头绝对(SEEK_SET) / 1=相对当前(SEEK_CUR) / 2=从尾(SEEK_END)
     #   返回   —— 寻址后的绝对位置(>=0) / <0 出错或不支持；c->seek(0, 1) 即取当前位置。
     fnc seek: i8, off: i8, whence: i4   # 随机寻址（可寻址设备实现，nil=流式设备不支持）
+
+    # take：转移句柄 s 的数据缓冲所有权给调用方（零拷贝）。返回缓冲基址（nil=不支持/无缓冲）。
+    #   取走后 s 的 data() 缓冲被摘除，其后 free(s)/退域自动 free 只回收元数据、不再触及缓冲 ——
+    #   缓冲归调用方，自负释放（sc 池缓冲用 mem.sc 的 recycle）。仅内部分配缓冲的可寻址设备
+    #   （file/stream）实现；流式设备为 nil。内建 file/stream 的 com[0] 读全部缓冲多分配 1 字节
+    #   NUL，故取走的缓冲天然以 \0 结尾（文本读可直接当 C 字符串；实际数据长度仍见 s._->len）。
+    #   句柄糖：`var buf: char& = (s.take(): char&)` 即 `s._->_self->take(s._->_self, s._)`——
+    #   整读 `c >> s` 后取走缓冲，s 退域只回收元数据、c（com@1）退域自动 close，零手动收尾亦无拷贝。
+    fnc take: &, s: limit&              # 转移句柄数据缓冲所有权（零拷贝；可寻址设备实现）
 }
 
 # ---------------- async_io：com 设备 io 的就绪事件循环 ----------------

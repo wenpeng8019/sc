@@ -335,10 +335,17 @@ struct CGen {
     // 半自动指针 T@1（单例指针）：物理普通指针 T* + 退域 RAII。退域/重新赋值覆盖旧值时，
     // 若指向对象非 nil 则自动 drop + sc_free 销毁。autoFreeScopes 与 fatScopes 平行逐层登记；
     // autoFreeVars 为本函数内 name→信息映射，供赋值语句拦截（先销毁旧对象再存新指针）。
-    struct AutoFreeVar { std::string name; std::string ctype; std::string dropFn; };
+    //   selfClose：内建 com@1 的析构走实例方法指针 p->close(p)（设备 close 自负全权回收，
+    //   含结构体本身），不再 sc_free（否则双重释放）；与静态 drop + sc_free 路径互斥。
+    struct AutoFreeVar { std::string name; std::string ctype; std::string dropFn; bool selfClose = false; };
     std::vector<std::vector<AutoFreeVar>> autoFreeScopes;
     std::map<std::string, AutoFreeVar> autoFreeVars;
     int autoFreeTmpSeq = 0;
+    // 分身/切片句柄 var s: T[...]（如 com[...]）：退域自动释放——若 s._ 非 nil，
+    // 逆序发 free（等价于 s = nil），使 io 整读整写无需手动 `s = nil` 收尾。
+    // projHandleScopes 与 fatScopes 平行逐层登记；name=句柄名，ent=实体类型 T 名。
+    struct ProjHandleVar { std::string name; std::string ent; };
+    std::vector<std::vector<ProjHandleVar>> projHandleScopes;
     // 本函数内被显式 x.drop()/x->drop() 调用的变量名（预扫描）：move 语义——显式 drop
     // 抑制该变量的退域自动 drop（用户接管其生命周期，避免双重释放）。
     std::set<std::string> manualDropVars;
@@ -2423,6 +2430,28 @@ struct CGen {
                         break;
                     }
                 }
+                // 分身/切片句柄方法糖：s.take()（s 为 com[...] 等句柄）→
+                //   s._->_self->take(s._->_self, s._, 其余实参...)
+                // 句柄本身无方法，转发给其绑定本体的每对象方法指针（隐藏接收者 = s._->_self、
+                // 首个显式参 = 句柄 limit s._）。仅当实体上存在该 MethodPtr 且其首参为 limit&
+                // （take 之类以句柄为操作对象的方法）才拦截，避免误伤普通成员访问。排除 free：
+                // 它释放 limit 元数据却不置空 s._，会与退域自动 free 双重释放——用 `s = nil` 代替。
+                if (e.a->kind == Expr::Member && e.a->op == "." && e.a->a
+                    && e.a->a->kind == Expr::Ident && e.a->text != "free") {
+                    std::string ent = projEntityOf(e.a->a->text);
+                    if (!ent.empty()) {
+                        const Field* mf = methodPtrField(ent, e.a->text);
+                        if (mf && !mf->type.structCommon.fields.empty()
+                            && mf->type.structCommon.fields[0].type.name == "limit") {
+                            std::string h = renderExprStr(*e.a->a);   // 句柄 C 名
+                            out << "(" << h << "._->_self)->" << e.a->text
+                                << "(" << h << "._->_self, " << h << "._";
+                            for (auto& a : e.args) { out << ", "; emitExpr(*a, true); }
+                            out << ")";
+                            break;
+                        }
+                    }
+                }
                 // 顶层方法调用糖：o.m(...) / p->m(...) → T_m(&o/p, ...)
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
@@ -3407,16 +3436,22 @@ struct CGen {
         indent(); out << "}\n";
     }
 
-    // 半自动指针 T@1（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free。
-    void emitAutoFreeDestroy(const std::string& name, const std::string& dropFn) {
+    // 半自动指针 T@1（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free；
+    // com@1 特例：非 nil → 实例方法 p->close(p)（自负全权回收，不再 sc_free）。
+    void emitAutoFreeDestroy(const AutoFreeVar& v) {
         indent();
-        out << "if (" << name << ") { ";
-        if (!dropFn.empty()) out << dropFn << "(" << name << "); ";
-        out << "sc_free(" << name << "); }\n";
+        out << "if (" << v.name << ") { ";
+        if (v.selfClose) {
+            out << v.name << "->close(" << v.name << "); ";
+        } else {
+            if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
+            out << "sc_free(" << v.name << "); ";
+        }
+        out << "}\n";
     }
 
     // 半自动指针 T@1 赋值：先把 RHS 算入临时（避免自指/自销），与旧值不同且旧值非 nil 则
-    // 销毁旧对象（drop + free），再存入新指针。覆盖语义即「设新值自动销毁旧对象」。
+    // 销毁旧对象（drop + free；com@1 走 close），再存入新指针。覆盖语义即「设新值自动销毁旧对象」。
     void emitAutoFreeAssign(const AutoFreeVar& v, const Expr& rhs) {
         std::string tmp = "_af" + std::to_string(autoFreeTmpSeq++);
         indent(); out << "{ " << v.ctype << " *" << tmp << " = ";
@@ -3424,8 +3459,13 @@ struct CGen {
         out << ";\n";
         depth++;
         indent(); out << "if (" << v.name << " != " << tmp << " && " << v.name << ") { ";
-        if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
-        out << "sc_free(" << v.name << "); }\n";
+        if (v.selfClose) {
+            out << v.name << "->close(" << v.name << "); ";
+        } else {
+            if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
+            out << "sc_free(" << v.name << "); ";
+        }
+        out << "}\n";
         indent(); out << v.name << " = " << tmp << ";\n";
         depth--;
         indent(); out << "}\n";
@@ -3491,10 +3531,15 @@ struct CGen {
     // 其前另有 phase0：发出本块登记的 final 钩子（LIFO），先于拆边/断言执行。
     void emitScopeCleanupAt(size_t i, const std::string& skip) {
         emitFinalScope(i);                                       // phase0：final 钩子
+        if (i < projHandleScopes.size())                         // phase0.3：分身/切片句柄退域自动 free
+            for (auto it = projHandleScopes[i].rbegin(); it != projHandleScopes[i].rend(); ++it) {
+                if (it->name == skip) continue;                  // 被移动返回的句柄跳过
+                emitProjectFree(it->name, it->ent);
+            }
         if (i < autoFreeScopes.size())                           // phase0.4：半自动指针 T@1 退域销毁
             for (auto it = autoFreeScopes[i].rbegin(); it != autoFreeScopes[i].rend(); ++it) {
                 if (it->name == skip) continue;                  // 被移动返回的对象跳过
-                emitAutoFreeDestroy(it->name, it->dropFn);
+                emitAutoFreeDestroy(*it);
             }
         if (i < dropScopes.size())                               // phase0.5：栈值对象 RAII 自动 drop
             for (auto it = dropScopes[i].rbegin(); it != dropScopes[i].rend(); ++it) {
@@ -3609,6 +3654,10 @@ struct CGen {
                     }
                 if (f.type.projectArgs && !f.type.projectArgs->empty()) out << ", ";
                 out << "NULL};\n";
+                // 退域自动释放：函数内非 static/tls 句柄登记入当前作用域，
+                // 退出时若 s._ 非 nil 则自动 free（等价 s = nil），免手动收尾。
+                if (inFunc && !isStatic && !isTls && !projHandleScopes.empty())
+                    projHandleScopes.back().push_back({f.name, f.type.name});
                 continue;
             }
             // 自动指针 T@（胖指针根变量）：声明 sc_fat + 绑定（T()=新建 / 调用=移动 /
@@ -3784,10 +3833,17 @@ struct CGen {
             if (inFunc && !isStatic && !isTls && f.type.autoFree
                 && !manualDropVars.count(f.name)) {
                 std::string afBase; int afPtr; resolveType(f.type, afBase, afPtr);
-                const Decl* dm = findMethod(f.type.name, "drop");
-                AutoFreeVar v{f.name, afBase, dm ? scPfx(dm->name) : std::string()};
-                if (!autoFreeScopes.empty()) autoFreeScopes.back().push_back(v);
-                autoFreeVars[f.name] = v;
+                // com@1：设备句柄，析构走实例方法 close（自负全权回收），非静态 drop + sc_free。
+                if (f.type.name == "com") {
+                    AutoFreeVar v{f.name, afBase, std::string(), /*selfClose=*/true};
+                    if (!autoFreeScopes.empty()) autoFreeScopes.back().push_back(v);
+                    autoFreeVars[f.name] = v;
+                } else {
+                    const Decl* dm = findMethod(f.type.name, "drop");
+                    AutoFreeVar v{f.name, afBase, dm ? scPfx(dm->name) : std::string()};
+                    if (!autoFreeScopes.empty()) autoFreeScopes.back().push_back(v);
+                    autoFreeVars[f.name] = v;
+                }
             }
             // Step4b：被 &var 借入胖指针的普通栈变量 → 注入伴生 sc_ref 头；
             // 退域两阶段清理（拆边后）对其 sc_ref_check，捕获借用比目标活得久的悬挂（§4.2/§7.3）。
@@ -3853,6 +3909,7 @@ struct CGen {
         fatFinalScopes.emplace_back();
         dropScopes.emplace_back();
         autoFreeScopes.emplace_back();
+        projHandleScopes.emplace_back();
         // 本作用域直接子标签登记入 labelDepth（进域可见、退域注销），供 goto 跨域清理定位。
         size_t scopeIdx = fatScopes.size() - 1;
         for (auto& s : stmts)
@@ -3869,6 +3926,7 @@ struct CGen {
         fatFinalScopes.pop_back();
         dropScopes.pop_back();
         autoFreeScopes.pop_back();
+        projHandleScopes.pop_back();
     }
 
     // 循环体：登记 break/continue 边界（= 体作用域层）后发出语句
@@ -4312,6 +4370,38 @@ struct CGen {
                 out << ", " << o.target->text << "._);\n";
                 continue;
             }
+            // 字符串写入糖（仅 <<）：操作数为 C 字符串（char*/const char*，写 strlen 字节，
+            //   不含 NUL）或 string（写 size 字节，取其 data 缓冲）→ 写「字符串内容」而非
+            //   指针本身的 sizeof 字节。数组（char[N]）与多级指针不适用，保持 sizeof 语义。
+            if (o.send) {
+                VType tvt;
+                if (exprVType(*o.target, tvt) && tvt.arr == 0) {
+                    const bool isCStr = (tvt.name == "char" && tvt.ptr == 1);
+                    const bool isStr  = (tvt.name == "string" && tvt.ptr >= 1);
+                    if (isCStr || isStr) {
+                        if (!declaredSz) { indent(); out << "uint32_t _scsz;\n"; declaredSz = true; }
+                        indent();
+                        if (isCStr) {
+                            out << "_scsz = (uint32_t)strlen((const char *)(";
+                            emitExpr(*o.target, true);
+                            out << ")); ";
+                        } else {
+                            out << "_scsz = (uint32_t)((";
+                            emitExpr(*o.target, true);
+                            out << ")->size); ";
+                        }
+                        emitExpr(base, true);
+                        out << (isPtr ? "->" : ".") << "write(";
+                        if (isPtr) emitExpr(base, true);
+                        else { out << "&("; emitExpr(base, true); out << ")"; }
+                        out << ", (void *)(";
+                        if (isCStr) emitExpr(*o.target, true);
+                        else { out << "("; emitExpr(*o.target, true); out << ")->data"; }
+                        out << "), &_scsz);\n";
+                        continue;
+                    }
+                }
+            }
             // 普通变量：直接 write/read（同步收发 sizeof 字节）
             if (!declaredSz) { indent(); out << "uint32_t _scsz;\n"; declaredSz = true; }
             const char* method = o.send ? "write" : "read";
@@ -4550,32 +4640,41 @@ struct CGen {
     //   s = nil  →  if (s._) { T_free(s._->_self, s._); s._ = NULL; }
     //   s = 本体 →  s._ = T_alloc(&本体, s.p1, s.p2, ...); s._->_self = &本体;
     // alloc/free 可为类方法（T_xxx(&recv,...)）或 MethodPtr 字段（recv.xxx(&recv,...)）。
+    // 分身/切片句柄释放（= s = nil）：if (s._) { free(s._->_self, s._); s._ = NULL; }
+    //   free 接收者 = 本体 = s._->_self；alloc/free 可为类方法或 MethodPtr 字段。
+    void emitProjectFree(const std::string& s, const std::string& ent) {
+        const Decl* fr = findMethod(ent, "free");
+        const Field* frF = fr ? nullptr : methodPtrField(ent, "free");
+        indent(); out << "if (" << s << "._) { ";
+        if (fr) out << scPfx(fr->name) << "(" << s << "._->_self, " << s << "._); ";
+        else if (frF) out << s << "._->_self->free(" << s << "._->_self, " << s << "._); ";
+        out << s << "._ = NULL; }\n";
+    }
+
     void emitProjectAssign(const std::string& s, const std::string& ent, const Expr& rhs) {
         const bool isNil = rhs.kind == Expr::Ident && rhs.text == "nil";
-        const Decl* fr = findMethod(ent, "free");
         const Decl* al = findMethod(ent, "alloc");
-        const Field* frF = fr ? nullptr : methodPtrField(ent, "free");
         const Field* alF = al ? nullptr : methodPtrField(ent, "alloc");
         if (isNil) {
-            indent(); out << "if (" << s << "._) { ";
-            // free 接收者 = 本体 = s._->_self
-            if (fr) out << scPfx(fr->name) << "(" << s << "._->_self, " << s << "._); ";
-            else if (frF) out << s << "._->_self->free(" << s << "._->_self, " << s << "._); ";
-            out << s << "._ = NULL; }\n";
+            emitProjectFree(s, ent);
             return;
         }
         indent();
         out << s << "._ = ";
         const std::vector<Field>* alParams = al ? &al->structCommon.fields
                                           : (alF ? &alF->type.structCommon.fields : nullptr);
-        if (al) out << scPfx(al->name) << "(&";           // 类方法：T_alloc(&本体, ...)
-        else if (alF) { emitExpr(rhs, true); out << ".alloc(&"; }  // 字段：本体.alloc(&本体, ...)
-        else out << "(&";
+        // 本体可为值型 com 或指针型 com&（io 设备 file()/stream() 返回 com&）：
+        //   值型取址传 &本体；指针型本身即地址，直传本体。
+        VType _rvt; const bool rhsPtr = exprVType(rhs, _rvt) && _rvt.ptr >= 1;
+        const char* amp = rhsPtr ? "" : "&";
+        if (al) out << scPfx(al->name) << "(" << amp;     // 类方法：T_alloc(&本体/本体, ...)
+        else if (alF) { emitExpr(rhs, true); out << (rhsPtr ? "->" : ".") << "alloc(" << amp; }  // 字段
+        else out << "(" << amp;
         emitExpr(rhs, true);
         if (alParams) for (auto& p : *alParams) out << ", " << s << "." << p.name;
         out << ");\n";
         indent();
-        out << s << "._->_self = &";
+        out << s << "._->_self = " << amp;
         emitExpr(rhs, true);
         out << ";\n";
     }
@@ -7070,6 +7169,39 @@ struct CGen {
         if (!emitted.empty()) out << "\n";
     }
 
+    // 根模块导出注入（@@）聚合的前向声明（仅用于导出头 runHeader）：本模块【导出签名/导出
+    //   字段】引用到的根注入聚合，其完整定义只在消费单元 .c 末位的 scm_<root>.h 中——而本
+    //   导出头会被其它单元 include 在该末位注入之前。为使导出原型里的 sc_<T>* 指针可编译，
+    //   这里为被引用到的根注入聚合发前向声明（不完整类型）。按值使用已由语义层拦截，指针
+    //   形态有前向声明即足；完整定义仍由末位根头提供，两处 typedef 同类型兼容重声明（C 合法）。
+    void emitRootPreludeFwdDecls() {
+        std::unordered_set<std::string> refs;   // 导出声明签名/字段引用到的类型名
+        bool hasRp = false;
+        for (auto& d : prog.decls) {
+            if (d->rootPrelude && (d->kind == Decl::StructD || d->kind == Decl::UnionD))
+                hasRp = true;
+            if (!d->exported || d->external) continue;
+            for (auto& f : d->structCommon.fields)
+                if (!f.type.name.empty()) refs.insert(f.type.name);
+            if (d->structCommon.type && !d->structCommon.type->name.empty())
+                refs.insert(d->structCommon.type->name);
+        }
+        if (!hasRp || refs.empty()) return;
+        bool any = false;
+        std::unordered_set<std::string> emitted;
+        for (auto& d : prog.decls) {   // 按声明序发出（确定性，golden 稳定）
+            if (!d->rootPrelude || (d->kind != Decl::StructD && d->kind != Decl::UnionD))
+                continue;
+            if (d->name.empty() || !refs.count(d->name)) continue;
+            if (!emitted.insert(d->name).second) continue;
+            const bool asUnion = d->kind == Decl::UnionD && !d->tagged;
+            out << "typedef " << (asUnion ? "union" : "struct")
+                << " " << scPfx(d->name) << " " << scPfx(d->name) << ";\n";
+            any = true;
+        }
+        if (any) out << "\n";
+    }
+
     // ---------------- 主流程：两遍扫描输出 ----------------
     // 第一遍：类型定义 + 全局变量 + 函数原型声明（forward declaration）
     // 第二遍：函数体实现
@@ -7868,6 +8000,10 @@ struct CGen {
 
         // 头文件同样先输出导出结构/联合的前置声明，减少声明顺序耦合
         emitForwardAggrDecls(true);
+
+        // 根模块导出注入（@@）聚合：若被本模块导出签名/字段引用，为其发前向声明——
+        //   完整定义仅在消费单元 .c 末位的 scm_<root>.h，而本导出头会更早被 include。
+        emitRootPreludeFwdDecls();
 
         // 类型注册表：导出签名可能引用聚合/别名/枚举/类/函数类型（含跨模块 external 类型，
         //   如 op 的 token）。须在发射签名前填充，令 mapType_ 正确加 sc_ 前缀——否则 external

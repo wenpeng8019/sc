@@ -5,7 +5,7 @@
 
 inc os.sc
 inc adt.sc
-inc util.sc
+inc io.sc
 
 add http_curl.c                  # libcurl shim（链接自描述见同目录 .sc 段配置）
 
@@ -18,24 +18,26 @@ add http_curl.c                  # libcurl shim（链接自描述见同目录 .s
 
 # 发 HTTPS POST（JSON）。返回 HTTP 状态码（>0）；传输失败 <0。
 # 响应体填入 resp；同时落 .sagent/tmp/resp.json（loop 原始响应归档契约）。
-@fnc sa_http_post: i4, url: const char&, auth_bearer: const char&, body: const char&, timeout_s: i4, resp: string&
+@fnc http_post: i4, url: const char&, auth_bearer: const char&, body: const char&, timeout_s: i4, resp: string&
     var raw: char& = nil
     var code: i4 = sa_curl_post(url, auth_bearer, body, timeout_s, &raw)
     if raw != nil
         resp->assign(raw)
         fs_mkdirs(".sagent/tmp")
-        sa_write_file(".sagent/tmp/resp.json", raw)
+        var wc: com@1 = file(".sagent/tmp/resp.json", true, 0, 1)
+        if wc != nil
+            wc << raw
         sa_curl_free(raw)
     else
         resp->clear()
     return code
 
-# 打开 SSE POST 流。返回句柄（sa_http_sse_line 逐行读，用毕 close）；失败 nil。
-@fnc sa_http_sse_open: &, url: const char&, auth_bearer: const char&, body: const char&, timeout_s: i4
+# 打开 SSE POST 流。返回句柄（http_sse_line 逐行读，用毕 close）；失败 nil。
+@fnc http_sse_open: &, url: const char&, auth_bearer: const char&, body: const char&, timeout_s: i4
     return sa_curl_sse_open(url, auth_bearer, body, timeout_s)
 
 # 取下一行（换行已剥）。1=得一行（填 out）/ 0=流结束 / <0=错误。
-@fnc sa_http_sse_line: i4, p: &, out: string&
+@fnc http_sse_line: i4, p: &, out: string&
     var line: char& = nil
     var r: i4 = sa_curl_sse_line(p, &line)
     if r == 1 && line != nil
@@ -45,5 +47,5 @@ add http_curl.c                  # libcurl shim（链接自描述见同目录 .s
     return r
 
 # 关闭 SSE 流。返回 HTTP 状态码（传输失败 <0）。
-@fnc sa_http_sse_close: i4, p: &
+@fnc http_sse_close: i4, p: &
     return sa_curl_sse_close(p)

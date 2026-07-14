@@ -4,7 +4,7 @@
 inc io.sc
 inc os.sc
 inc adt.sc
-inc util.sc
+inc mem.sc
 
 # 开启新 loop 档案：取下一个编号并建 .sagent/task/loop-NNN/。
 # 出参 dir 得到目录路径；返回 loop 编号（>0），失败 <0。
@@ -25,20 +25,34 @@ inc util.sc
 @fnc sa_loop_put: i4, dir: string&, name: const char&, text: const char&
     var p: string& = string()
     p->printf("%s/%s", dir->cstr(), name)
-    var r: i4 = sa_write_file(p->cstr(), text)
+    var c: com@1 = file(p->cstr(), true, 0, 1)
+    var r: i4 = -1
+    if c != nil
+        c << text
+        r = 0
     p->drop()
     return r
 
 # state.md 追加一行摘要（已发生序列）。
 @fnc sa_state_append: i4, line: const char&
-    var old: char& = sa_read_file(".sagent/task/state.md")
+    var rc: com@1 = file(".sagent/task/state.md", true, 1, 0)
+    var old: char& = nil
+    if rc != nil
+        var rs: com[0]
+        rs = rc
+        rc >> rs
+        old = (rs.take(): char&)
     var s: string& = string()
     if old != nil
         s->append(old)
-        ::free((old: &))
+        recycle((old: &))
     s->append(line)
     s->append("\n")
-    var r: i4 = sa_write_file(".sagent/task/state.md", s->cstr())
+    var wc: com@1 = file(".sagent/task/state.md", true, 0, 1)
+    var r: i4 = -1
+    if wc != nil
+        wc << s
+        r = 0
     s->drop()
     return r
 
@@ -46,7 +60,13 @@ inc util.sc
 
 # 取 plan.md 首个未完成项（"- [ ] xxx" 的 xxx）。命中返回 0；队列空 -1。
 @fnc sa_plan_next: i4, msg: string&
-    var t: char& = sa_read_file(".sagent/task/plan.md")
+    var rc: com@1 = file(".sagent/task/plan.md", true, 1, 0)
+    var t: char& = nil
+    if rc != nil
+        var rs: com[0]
+        rs = rc
+        rc >> rs
+        t = (rs.take(): char&)
     if t == nil
         return -1
     var i: i4 = 0
@@ -58,16 +78,22 @@ inc util.sc
         if t[b] == (45: char) && t[b+1] == (32: char) && t[b+2] == (91: char) && t[b+3] == (32: char) && t[b+4] == (93: char) && t[b+5] == (32: char)
             msg->clear()
             msg->append_n((t + b + 6: const char&), (i - b - 6: u8))
-            ::free((t: &))
+            recycle((t: &))
             return 0
         if t[i] != 0
             i = i + 1
-    ::free((t: &))
+    recycle((t: &))
     return -1
 
 # 把 plan.md 中首个未完成项标记完成（[ ] → [x]）。返回 0 成功。
 @fnc sa_plan_done: i4
-    var t: char& = sa_read_file(".sagent/task/plan.md")
+    var rc: com@1 = file(".sagent/task/plan.md", true, 1, 0)
+    var t: char& = nil
+    if rc != nil
+        var rs: com[0]
+        rs = rc
+        rc >> rs
+        t = (rs.take(): char&)
     if t == nil
         return -1
     var i: i4 = 0
@@ -77,12 +103,16 @@ inc util.sc
             i = i + 1
         if t[b] == (45: char) && t[b+1] == (32: char) && t[b+2] == (91: char) && t[b+3] == (32: char) && t[b+4] == (93: char)
             t[b+3] = (120: char)          # 'x'
-            var r: i4 = sa_write_file(".sagent/task/plan.md", t)
-            ::free((t: &))
+            var wc: com@1 = file(".sagent/task/plan.md", true, 0, 1)
+            var r: i4 = -1
+            if wc != nil
+                wc << t
+                r = 0
+            recycle((t: &))
             return r
         if t[i] != 0
             i = i + 1
-    ::free((t: &))
+    recycle((t: &))
     return -1
 
 # 现有 loop 档案数（预算判断用）。
@@ -130,34 +160,54 @@ inc util.sc
     # config.sa 模板（存在则不动，保护用户配置）
     if !fs_exists(".sagent/config.sa")
         var cfg: const char& = "# sagent 配置（格式：[段] + key: value；# 注释）\n# 多 provider：[llm] 为默认；[llm.<名>] 为备选段（--llm <名> 选用，缺键兜底到 [llm]）\n\n[llm]\nendpoint: https://api.deepseek.com/v1/chat/completions\nmodel: deepseek-chat\napi_key_env: DEEPSEEK_API_KEY\ntimeout: 120\n\n[llm.openai]\nendpoint: https://api.openai.com/v1/chat/completions\nmodel: gpt-4o-mini\napi_key_env: OPENAI_API_KEY\n\n[loop]\nbudget: 10\n# verify: 验证命令（如 scc x.sc --test）；commit: on 则每 loop 自动提交\ncommit: off\n\n[tools]\nallow: scc git curl ls cat echo test\n"
-        if sa_write_file(".sagent/config.sa", cfg) != 0
+        var c: com@1 = file(".sagent/config.sa", true, 0, 1)
+        if c == nil
             print "sagent: 写 config.sa 失败\n"
             return 1
+        c << cfg
 
     # task 三件（存在则不动）
     if !fs_exists(".sagent/task/goal.md")
-        sa_write_file(".sagent/task/goal.md", "# 目的与最终验证标准\n\n（待解构：目的 / 术语定义 / 边界 / 可判定的验收标准）\n")
+        var c: com@1 = file(".sagent/task/goal.md", true, 0, 1)
+        if c != nil
+            c << "# 目的与最终验证标准\n\n（待解构：目的 / 术语定义 / 边界 / 可判定的验收标准）\n"
     if !fs_exists(".sagent/task/plan.md")
-        sa_write_file(".sagent/task/plan.md", "# 计划（loop 目标队列）\n\n- [ ] （待入队：每项须有可判定标准）\n")
+        var c: com@1 = file(".sagent/task/plan.md", true, 0, 1)
+        if c != nil
+            c << "# 计划（loop 目标队列）\n\n- [ ] （待入队：每项须有可判定标准）\n"
     if !fs_exists(".sagent/task/state.md")
-        sa_write_file(".sagent/task/state.md", "# 已发生序列（每 loop 追加一行）\n")
+        var c: com@1 = file(".sagent/task/state.md", true, 0, 1)
+        if c != nil
+            c << "# 已发生序列（每 loop 追加一行）\n"
 
     # memory 四件（存在则不动）
     if !fs_exists(".sagent/memory/structure.md")
-        sa_write_file(".sagent/memory/structure.md", "# 结构和关系：空间/概念/意义/理解\n\n（工具可再生部分由 scc --graph/--api 生成，人工只注释）\n")
+        var c: com@1 = file(".sagent/memory/structure.md", true, 0, 1)
+        if c != nil
+            c << "# 结构和关系：空间/概念/意义/理解\n\n（工具可再生部分由 scc --graph/--api 生成，人工只注释）\n"
     if !fs_exists(".sagent/memory/paths.md")
-        sa_write_file(".sagent/memory/paths.md", "# 条件和发生：实在/域/范围（路径、分支）\n")
+        var c: com@1 = file(".sagent/memory/paths.md", true, 0, 1)
+        if c != nil
+            c << "# 条件和发生：实在/域/范围（路径、分支）\n"
     if !fs_exists(".sagent/memory/facts.md")
-        sa_write_file(".sagent/memory/facts.md", "# 前提和习惯：约束/风格/优化/事实\n")
+        var c: com@1 = file(".sagent/memory/facts.md", true, 0, 1)
+        if c != nil
+            c << "# 前提和习惯：约束/风格/优化/事实\n"
     if !fs_exists(".sagent/memory/history.md")
-        sa_write_file(".sagent/memory/history.md", "# 事实和计划：发生序列/存在位置/未来方向/事务排期\n")
+        var c: com@1 = file(".sagent/memory/history.md", true, 0, 1)
+        if c != nil
+            c << "# 事实和计划：发生序列/存在位置/未来方向/事务排期\n"
 
     # prompts 两件（可手编，loop 自动加载；存在则不动）
     fs_mkdirs(".sagent/prompts")
     if !fs_exists(".sagent/prompts/loop.md")
-        sa_write_file(".sagent/prompts/loop.md", "你是 sagent 的执行体，在一次 loop 中工作。规则：\n1. 若需执行命令，输出 ```sh 代码块（每行一条命令，只允许白名单工具）；\n2. 代码块外的文字是你的推理与说明，会归档但不执行；\n3. 目标完成或无需动作时不输出代码块；\n4. 修改文件用受控写入：printf/cat 重定向亦须在白名单内；\n5. 不要在应答中输出复盘（陷阱/事实）格式——复盘另有专门环节。\n")
+        var c: com@1 = file(".sagent/prompts/loop.md", true, 0, 1)
+        if c != nil
+            c << "你是 sagent 的执行体，在一次 loop 中工作。规则：\n1. 若需执行命令，输出 ```sh 代码块（每行一条命令，只允许白名单工具）；\n2. 代码块外的文字是你的推理与说明，会归档但不执行；\n3. 目标完成或无需动作时不输出代码块；\n4. 修改文件用受控写入：printf/cat 重定向亦须在白名单内；\n5. 不要在应答中输出复盘（陷阱/事实）格式——复盘另有专门环节。\n"
     if !fs_exists(".sagent/prompts/review.md")
-        sa_write_file(".sagent/prompts/review.md", "对本 loop 复盘。只输出两节 markdown：## 陷阱（失败路径及原因，无则写 无）与 ## 事实（本 loop 确认的新事实）。不要输出代码块。\n")
+        var c: com@1 = file(".sagent/prompts/review.md", true, 0, 1)
+        if c != nil
+            c << "对本 loop 复盘。只输出两节 markdown：## 陷阱（失败路径及原因，无则写 无）与 ## 事实（本 loop 确认的新事实）。不要输出代码块。\n"
 
     print "sagent: .sagent/ 就绪（config.sa + prompts/ + task/ + memory/ + archive/）\n"
     return 0

@@ -1884,6 +1884,9 @@ static void mergeRootPrelude(Program& prog, const std::filesystem::path& rootPat
             if (skipRootSelf) continue;
             md->external = true;
             md->origin = origin;
+            md->rootPrelude = true;   // 标记：来自根自身 @导出（注入）——其 C 定义仅由末位
+                                      //   scm_<root>.h 提供。出现在消费单元导出签名/字段里须用
+                                      //   指针形态（导出头为其发前向声明）；语义层拦按值使用。
             prog.decls.push_back(std::move(md));
         }
     } catch (...) {
@@ -2126,7 +2129,7 @@ static bool fileHasRootMarker(const std::filesystem::path& p) {
 // 在目录中发现 @@ 标注的根模块（显式声明的全局前奏提供者）。返回其规范路径，未找到返回空。
 //   不递归；跳过点文件（含语法插件的临时 .sc_ast_*.tmp.sc）。多个 @@ 时按排序取首并告警（根应唯一）。
 //   该扫描是「编译器对接语法插件」的静态发现入口：编辑期间依赖单元据此并入根 @导出，符号不再未定义。
-static std::filesystem::path findRootModule(const std::filesystem::path& dir) {
+static std::filesystem::path scanDirForRootModule(const std::filesystem::path& dir) {
     std::error_code ec;
     if (dir.empty() || !std::filesystem::is_directory(dir, ec) || ec) return {};
     std::vector<std::filesystem::path> entries;
@@ -2148,6 +2151,23 @@ static std::filesystem::path findRootModule(const std::filesystem::path& dir) {
         std::cerr << "警告: 目录下存在多个 @@ 根模块，取 "
                   << roots.front().filename().string() << "（根模块应唯一）\n";
     return std::filesystem::weakly_canonical(roots.front());
+}
+
+// 从给定目录起【向上逐级】查找 @@ 根模块：先本目录，未命中则父目录，直至文件系统根。
+//   祖先目录的 @@ 根治理其整棵子树（与「根的构建图含本单元」的心智模型一致），使**子目录中**
+//   的依赖单元被单独编译（编辑器诊断 / --test / 单文件分析）时也能发现根、并入其 @导出——
+//   否则形如 <proj>/sagent.sc(根) + <proj>/src/*.sc(模块) 的分层布局下，src 里的单元单独打开
+//   即因根类型「未定义」而报错。取【最近】的祖先根（最具体）。找不到返回空。
+static std::filesystem::path findRootModule(const std::filesystem::path& startDir) {
+    std::filesystem::path dir = startDir;
+    for (int guard = 0; guard < 64 && !dir.empty(); ++guard) {
+        auto found = scanDirForRootModule(dir);
+        if (!found.empty()) return found;
+        auto parent = dir.parent_path();
+        if (parent == dir || parent.empty()) break;                // 抵达文件系统根
+        dir = parent;
+    }
+    return {};
 }
 
 // 取某源文件所在目录（用于根模块发现的扫描基准）。

@@ -186,6 +186,7 @@ NEGATIVE=(
     tests/cases/mod_export_init_bad.sc
     tests/cases/mod_private_export_bad.sc
     tests/cases/dep_cycle_bad.sc
+    tests/cases/rp_byval_bad/rp_byval_bad.sc
 )
 
 # 运行时守卫触发用例：编译并运行（带 --check），比对程序 stderr 报错（golden .trap）。
@@ -215,10 +216,13 @@ TEST_RUN=(
     tests/cases/add_sc_test.sc
     tests/cases/inl_test.sc
     tests/cases/io_seek_test.sc
+    tests/cases/io_sugar_test.sc
+    tests/cases/io_auto_test.sc
     tests/cases/rsa_proxy_test.sc
     tests/cases/ssl_test.sc
     tests/cases/ws_test.sc
     tests/cases/securechn_test.sc
+    tests/cases/rp_ptr/rp_ptr.sc
 )
 
 # 程序结构依赖图（proggraph）：--graph=unit 导出 JSON，快照锁定节点/边结构。

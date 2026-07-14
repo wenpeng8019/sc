@@ -682,6 +682,12 @@ struct sc_com {
      * whence：0=SEEK_SET(从头绝对) / 1=SEEK_CUR(相对当前) / 2=SEEK_END(相对尾部)；
      * 返回寻址后的绝对位置(>=0) / <0 出错或不支持。seek(0, 1) 即取当前位置。 */
     int64_t (*seek)(struct sc_com *_this, int64_t off, int32_t whence);
+    /* take：转移句柄 s 的数据缓冲所有权给调用方（零拷贝），返回缓冲基址（NULL=不支持/无缓冲）。
+     * 取走后 s 的 data() 缓冲被摘除，free(s) 不再回收它——调用方自负释放（sc 池缓冲用
+     * mem.sc 的 recycle）。仅内部分配缓冲的可寻址设备（file/stream）实现；流式设备为 NULL。
+     * 内建 file/stream 的 com[0] 读全部缓冲多分配 1 字节 NUL，故 take 出的缓冲天然以 \0 结尾
+     * （文本读可直接当 C 字符串；数据长度仍见 s->len）。 */
+    void   *(*take)(struct sc_com *_this, struct sc_limit *s);
 };
 
 /* com 异步收发桥接：rpc 体内 com >> v / com << v 由编译器整合 await 时生成对其的调用，

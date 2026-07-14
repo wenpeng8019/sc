@@ -4,10 +4,9 @@
 # 扫描器正确跳过字符串内容（含转义），值内出现键名不会误匹配。
 
 inc adt.sc
-inc util.sc
 
 # 追加转义后的 JSON 字符串内容（不含首尾引号）。
-@fnc sa_json_escape: out: string&, s: const char&
+@fnc json_escape: out: string&, s: const char&
     var i: u4 = 0
     while s[i] != 0
         var c: char = s[i]
@@ -28,13 +27,13 @@ inc util.sc
         i = i + 1
 
 # 追加一个完整 JSON 字符串（含引号）。
-@fnc sa_json_str: out: string&, s: const char&
+@fnc json_str: out: string&, s: const char&
     out->append_char((34: char))
-    sa_json_escape(out, s)
+    json_escape(out, s)
     out->append_char((34: char))
 
 # 跳过一个字符串 token：i 指向开引号，返回闭引号后下标；未闭合返回 -1。
-fnc sa_json_skip_str: i4, t: const char&, i: i4
+fnc json_skip_str: i4, t: const char&, i: i4
     var j: i4 = i + 1
     while t[j] != 0
         if t[j] == (92: char)                 # 转义：跳过下一字符
@@ -49,8 +48,8 @@ fnc sa_json_skip_str: i4, t: const char&, i: i4
 
 # 定位键：返回 "key": 之后值起始下标（跳过空白）；未找到返回 -1。
 # 扫描时跳过所有字符串 token，仅当字符串后紧跟 ':' 才视为键并比对。
-fnc sa_json_find_key: i4, t: const char&, key: const char&
-    var klen: u4 = sa_slen(key)
+fnc json_find_key: i4, t: const char&, key: const char&
+    var klen: u4 = (::strlen(key): u4)
     var i: i4 = 0
     while t[i] != 0
         if t[i] != (34: char)
@@ -58,7 +57,7 @@ fnc sa_json_find_key: i4, t: const char&, key: const char&
             continue
         # 字符串 token：记录内容区间
         var b: i4 = i + 1
-        var e: i4 = sa_json_skip_str(t, i)
+        var e: i4 = json_skip_str(t, i)
         if e < 0
             return -1
         i = e
@@ -88,7 +87,7 @@ fnc sa_json_find_key: i4, t: const char&, key: const char&
     return -1
 
 # 反转义字符串值到 out：i 指向开引号。返回 0 成功 / -1 格式错。
-fnc sa_json_unescape: i4, t: const char&, i: i4, out: string&
+fnc json_unescape: i4, t: const char&, i: i4, out: string&
     if t[i] != (34: char)
         return -1
     var j: i4 = i + 1
@@ -139,40 +138,40 @@ fnc sa_json_unescape: i4, t: const char&, i: i4, out: string&
     return 0
 
 # 取键的字符串值（首个命中）。返回 0 成功 / -1 未找到或非字符串。
-@fnc sa_json_get_str: i4, t: const char&, key: const char&, out: string&
-    var v: i4 = sa_json_find_key(t, key)
+@fnc json_get_str: i4, t: const char&, key: const char&, out: string&
+    var v: i4 = json_find_key(t, key)
     if v < 0
         return -1
-    return sa_json_unescape(t, v, out)
+    return json_unescape(t, v, out)
 
 tst "json 转义：控制字符与引号反斜杠"
     var s: string& = string()
-    sa_json_str(s, "a\"b\\c\nd\te")
+    json_str(s, "a\"b\\c\nd\te")
     assert s->equals("\"a\\\"b\\\\c\\nd\\te\"")
     s->drop()
 
 tst "json 取值：chat completions 响应样例"
     var resp: const char& = "{\"id\":\"cc-1\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"你好！\\n有什么可以帮你？\"},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":20}}"
     var out: string& = string()
-    assert sa_json_get_str(resp, "content", out) == 0
+    assert json_get_str(resp, "content", out) == 0
     assert out->equals("你好！\n有什么可以帮你？")
     out->drop()
 
 tst "json 取值：值内键名不误匹配"
     var t: const char& = "{\"note\":\"content: fake\",\"content\":\"real\"}"
     var out: string& = string()
-    assert sa_json_get_str(t, "content", out) == 0
+    assert json_get_str(t, "content", out) == 0
     assert out->equals("real")
     out->drop()
 
 tst "json 取值：error.message 与 \\u 转义"
     var t: const char& = "{\"error\":{\"message\":\"bad \\u0041 key\",\"type\":\"auth\"}}"
     var out: string& = string()
-    assert sa_json_get_str(t, "message", out) == 0
+    assert json_get_str(t, "message", out) == 0
     assert out->equals("bad A key")
     out->drop()
 
 tst "json 取值：未找到返回 -1"
     var out: string& = string()
-    assert sa_json_get_str("{\"a\":1}", "missing", out) == -1
+    assert json_get_str("{\"a\":1}", "missing", out) == -1
     out->drop()

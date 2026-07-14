@@ -1,0 +1,5 @@
+ok 1 - << 写 const char* / char* 内容（写 strlen 字节，非指针）
+ok 2 - << 写 string 内容（写 size 字节，取 data）
+ok 3 - >> com[0] 读全部（哨兵 size=0 → seek 求全长一次读满）
+1..3
+==> 测试通过 3，失败 0，跳过 0

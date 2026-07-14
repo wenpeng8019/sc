@@ -510,6 +510,11 @@ struct Decl {
     bool externAnalyzed = false;    // 仅 external IncD：是否已确定该来源的符号全集
                                     //（.sc 合并 / libclang 解析 / 退化读到头文件）→ 允许"导入未使用"警告
     bool exported = false;          // @前缀标记：导出对象（--emit-c 时生成 .h 声明）
+    bool rootPrelude = false;       // 根模块导出注入（@@）：本 external 声明来自根自身 @导出，
+                                    //   被 mergeRootPrelude 并入本消费单元。其 C 定义仅由末位注入的
+                                    //   scm_<root>.h 提供（不在本单元 .c 顶部）。故该类型若出现在本单元
+                                    //   【导出签名/导出字段】里只能用指针形态（导出头为其发前向声明，
+                                    //   为不完整类型）；按值会因缺完整定义而编译失败——语义层据此拦截。
     bool genTypeHeader = false;     // 编译器合成的 future_id 枚举：转译工程下写入 type.h（各 .c #include），
                                     //   emit-sc 不输出；stdout/内联模式则就地内联进 .c（自包含）
     bool testSkip = false;          // TestD: tst.skip 形态（跳过执行，报告记 skipped）

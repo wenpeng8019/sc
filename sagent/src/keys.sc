@@ -5,23 +5,30 @@
 
 inc os.sc
 inc adt.sc
-inc util.sc
+inc io.sc
+inc mem.sc
 
 # keys 文件路径（$HOME/.sagent/keys）。
-fnc sa_keys_path: out: string&
+fnc keys_path: out: string&
     var home: const char& = (::getenv("HOME"): const char&)
     out->clear()
     out->printf("%s/.sagent/keys", home != nil ? home : ".")
 
 # 查 ENV 条目。命中返回 0 并填 val；未命中 -1。
-@fnc sa_keys_get: i4, env_name: const char&, val: string&
+@fnc keys_get: i4, env_name: const char&, val: string&
     var p: string& = string()
-    sa_keys_path(p)
-    var t: char& = sa_read_file(p->cstr())
+    keys_path(p)
+    var rc: com@1 = file(p->cstr(), true, 1, 0)
+    var t: char& = nil
+    if rc != nil
+        var rs: com[0]
+        rs = rc
+        rc >> rs
+        t = (rs.take(): char&)
     p->drop()
     if t == nil
         return -1
-    var nlen: u4 = sa_slen(env_name)
+    var nlen: u4 = (::strlen(env_name): u4)
     var i: i4 = 0
     var r: i4 = -1
     while t[i] != 0
@@ -44,13 +51,13 @@ fnc sa_keys_path: out: string&
                 break
         if t[i] != 0
             i = i + 1
-    ::free((t: &))
+    recycle((t: &))
     return r
 
 # 写/替换 ENV 条目（0600 权限，目录自动创建）。返回 0 成功。
-@fnc sa_keys_put: i4, env_name: const char&, val: const char&
+@fnc keys_put: i4, env_name: const char&, val: const char&
     var p: string& = string()
-    sa_keys_path(p)
+    keys_path(p)
     # 目录 + 0600 占位
     var dir: string& = string()
     var home: const char& = (::getenv("HOME"): const char&)
@@ -59,8 +66,14 @@ fnc sa_keys_path: out: string&
     dir->drop()
     # 读旧内容，滤掉同名行
     var s: string& = string()
-    var t: char& = sa_read_file(p->cstr())
-    var nlen: u4 = sa_slen(env_name)
+    var rc: com@1 = file(p->cstr(), true, 1, 0)
+    var t: char& = nil
+    if rc != nil
+        var rs: com[0]
+        rs = rc
+        rc >> rs
+        t = (rs.take(): char&)
+    var nlen: u4 = (::strlen(env_name): u4)
     if t != nil
         var i: i4 = 0
         while t[i] != 0
@@ -81,14 +94,18 @@ fnc sa_keys_path: out: string&
                 s->append("\n")
             if t[i] != 0
                 i = i + 1
-        ::free((t: &))
+        recycle((t: &))
     s->printf("%s=%s\n", env_name, val)
     # 先建 0600 空文件再写（防窗口期）
     var cmdl: string& = string()
     cmdl->printf("umask 077; : > '%s'", p->cstr())
     ::system(cmdl->cstr())
     cmdl->drop()
-    var r: i4 = sa_write_file(p->cstr(), s->cstr())
+    var wc: com@1 = file(p->cstr(), true, 0, 1)
+    var r: i4 = -1
+    if wc != nil
+        wc << s
+        r = 0
     s->drop()
     p->drop()
     return r
@@ -106,7 +123,7 @@ fnc sa_keys_path: out: string&
         ::fprintf(::stderr, "\n")
     if got == nil
         return -1
-    var n: u4 = sa_slen((buf: const char&))
+    var n: u4 = (::strlen((buf: const char&)): u4)
     while n > 0 && (buf[n-1] == (10: char) || buf[n-1] == (13: char))
         buf[n-1] = 0
         n = n - 1

@@ -2018,6 +2018,19 @@ struct Checker {
     }
 
     void checkFatBoundaries() const {
+        // 根模块导出注入（@@）类型集合：这些聚合来自根自身 @导出，其 C 定义仅由末位注入的
+        //   scm_<root>.h 提供。若出现在本消费单元的【导出签名/导出字段】里，导出头只能为其
+        //   发前向声明（不完整类型），故只准指针形态、禁按值——否则消费方 include 本模块导出
+        //   头时该类型尚无完整定义，C 编译报错。
+        std::unordered_set<std::string> rootPreludeAggrs;
+        for (auto& d : prog.decls)
+            if (d->rootPrelude && (d->kind == Decl::StructD || d->kind == Decl::UnionD)
+                && !d->name.empty())
+                rootPreludeAggrs.insert(d->name);
+        auto rootPreludeByValue = [&](const TypeRef& t) {
+            return !t.name.empty() && rootPreludeAggrs.count(t.name)
+                && t.ptr == 0 && !t.fat && !t.thin && !t.project && t.arrayDims.empty();
+        };
         for (auto& d : prog.decls) {
             // 全局 var/let 的 T@ 数组：进程退出由 destructor 钩子逐元素拆边（带 drop），
             // 与局部数组同等放行；结构字段 / 函数参数 / tls 仍未实现引用图清理 → 报错。
@@ -2053,6 +2066,32 @@ struct Checker {
             if ((d->kind == Decl::FuncD || d->kind == Decl::FuncTypeD)
                 && (d->exported || d->isRpc || d->cImpl))
                 checkAbiFatFn(*d);
+
+            // 根注入类型跨模块导出守卫（@@）：导出函数的参数/返回、导出聚合的字段若按值
+            //   使用根注入聚合类型，导出头无其完整定义（仅前向声明）→ 编译失败。强制指针形态。
+            //   仅查本模块【自身】导出面（!external）：注入进来的 external 副本不落本模块导出头，
+            //   且根自身导出面的 metric/app_report 同处根头（定义先于原型）本就安全。
+            if ((d->kind == Decl::FuncD || d->kind == Decl::FuncTypeD) && d->exported && !d->external) {
+                for (auto& p : d->structCommon.fields)
+                    if (rootPreludeByValue(p.type))
+                        err(p.line ? p.line : d->line,
+                            "导出函数参数 '" + p.name + "' 按值使用根注入类型 '" + p.type.name +
+                            "'（经 @@ 根模块导出注入）：导出头仅能为其发前向声明（不完整类型），"
+                            "请改用引用形态 '" + p.type.name + "&'");
+                if (d->structCommon.type && rootPreludeByValue(*d->structCommon.type))
+                    err(d->line,
+                        "导出函数按值返回根注入类型 '" + d->structCommon.type->name +
+                        "'（经 @@ 根模块导出注入）：导出头仅能为其发前向声明（不完整类型），"
+                        "请改用引用形态 '" + d->structCommon.type->name + "&'");
+            }
+            if ((d->kind == Decl::StructD || d->kind == Decl::UnionD) && d->exported && !d->external)
+                for (auto& f : d->structCommon.fields)
+                    if (rootPreludeByValue(f.type))
+                        err(f.line ? f.line : d->line,
+                            "导出聚合 '" + d->name + "' 的字段 '" + f.name +
+                            "' 按值内嵌根注入类型 '" + f.type.name +
+                            "'（经 @@ 根模块导出注入）：导出头仅能为其发前向声明（不完整类型），"
+                            "请改用引用形态 '" + f.type.name + "&'");
         }
     }
 
