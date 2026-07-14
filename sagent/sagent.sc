@@ -11,27 +11,15 @@
 inc sys.sc
 inc os.sc
 inc io.sc
+inc adt.sc
 
+# add 顺序即分层：util 最底（无 src 内依赖）← 各功能单元 ← 本入口消费
+add src/util.sc
 add src/sagent_dir.sc
 add src/config.sc
+add src/json.sc
 
 mix ARGS_S(false, llm, 'l', "llm", "选用 config.sa 的 [llm.<名>] 配置段")
-
-# C 风格 strlen（sc FFI 惯例：不依赖 libc 头解析）。
-fnc sa_slen: u4, s: const char&
-    var i: u4 = 0
-    while s[i] != 0
-        i = i + 1
-    return i
-
-# 字符串等值比较（数值比较惯例，print 坑规避）。
-fnc sa_streq: bool, a: const char&, b: const char&
-    var i: u4 = 0
-    while a[i] != 0 && b[i] != 0
-        if a[i] != b[i]
-            return false
-        i = i + 1
-    return a[i] == b[i]
 
 fnc main: i4, argc: i4, argv: char&&
     ARGS_usage("<init | \"消息\">",

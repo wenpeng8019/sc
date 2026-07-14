@@ -1,7 +1,7 @@
 # sagent_dir —— .sagent/ 目录初始化与读写（被 sagent.sc add 内联）
 # 目录规范见 OUTLINE.md §4。
-
-inc io.sc
+# 依赖（由根单元供给，本文件不 inc）：io.sc（file com）、os.sc（fs_*）、
+# src/util.sc（sa_slen，add 顺序在前）。
 
 # 写整文件（覆盖创建）。返回 0 成功 / <0 失败。
 fnc sa_write_file: i4, path: const char&, text: const char&
