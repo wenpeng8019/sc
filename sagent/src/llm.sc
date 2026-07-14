@@ -20,16 +20,21 @@ inc http.sc
     sa_json_str(out, user_msg)
     out->append("}]}")
 
-# 取段内键值：键 = "llm.<name>" 或 "llm.<段>.<name>"。
+# 取段内键值：键 = "llm.<段>.<name>"，未命中兜底到基段 "llm.<name>"
+# （provider 段只需写差异项，timeout 等公共项写在 [llm]，同 gptme/codex 范式）。
 fnc sa_llm_cfg: const char&, cfg: sa_cfg&, sect: const char&, name: const char&, dflt: const char&
     var k: string& = string()
-    if sect == nil || sect[0] == 0
-        k->printf("llm.%s", name)
-    else
+    if sect != nil && sect[0] != 0
         k->printf("llm.%s.%s", sect, name)
-    var v: const char& = sa_cfg_get(cfg, k->cstr(), dflt)
+        var v: const char& = sa_cfg_get(cfg, k->cstr(), nil)
+        if v != nil
+            k->drop()
+            return v
+        k->clear()
+    k->printf("llm.%s", name)
+    var v2: const char& = sa_cfg_get(cfg, k->cstr(), dflt)
     k->drop()
-    return v
+    return v2
 
 # 单次请求。cfg 取 [llm]（或 --llm 指定的 [llm.<段>]）；answer 出参。
 # 返回 0 成功；非 0 失败（原因已打印）。

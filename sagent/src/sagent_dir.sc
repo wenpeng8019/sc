@@ -54,7 +54,7 @@ inc util.sc
 
     # config.sa 模板（存在则不动，保护用户配置）
     if !fs_exists(".sagent/config.sa")
-        var cfg: const char& = "# sagent 配置（格式：[段] + key: value；# 注释）\n\n[llm]\nendpoint: https://api.openai.com/v1/chat/completions\nmodel: gpt-4o-mini\napi_key_env: OPENAI_API_KEY\ntimeout: 120\n\n[loop]\nbudget: 10\n\n[tools]\nallow: scc git curl\n"
+        var cfg: const char& = "# sagent 配置（格式：[段] + key: value；# 注释）\n# 多 provider：[llm] 为默认；[llm.<名>] 为备选段（--llm <名> 选用，缺键兜底到 [llm]）\n\n[llm]\nendpoint: https://api.deepseek.com/v1/chat/completions\nmodel: deepseek-chat\napi_key_env: DEEPSEEK_API_KEY\ntimeout: 120\n\n[llm.openai]\nendpoint: https://api.openai.com/v1/chat/completions\nmodel: gpt-4o-mini\napi_key_env: OPENAI_API_KEY\n\n[loop]\nbudget: 10\n# verify: 验证命令（如 scc x.sc --test）；commit: on 则每 loop 自动提交\ncommit: off\n\n[tools]\nallow: scc git curl ls cat echo test\n"
         if sa_write_file(".sagent/config.sa", cfg) != 0
             print "sagent: 写 config.sa 失败\n"
             return 1
