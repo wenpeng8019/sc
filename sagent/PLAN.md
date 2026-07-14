@@ -1,8 +1,8 @@
-# sagent 一期实施方案（基功立项）
+# sagent 实施方案（立项 2026-07-14；同日 M1+M2 已达成）
 
-> 纲领见 [OUTLINE.md](OUTLINE.md)。本文档是工程落地方案与实施计划，
-> 一期目标 = 基功四件：**命令行程序、`.sa` 配置、curl vendor、llm request**
-> ——即纲领 §10-M1"最小可用 loop"的基建前半，打通"sca 起手 → LLM 应答"。
+> 纲领见 [OUTLINE.md](OUTLINE.md)。本文档是工程落地方案与实施计划。
+> 进度：**一期（任务 1-6）✅ → 二期（任务 7-11）✅ → M1 DeepSeek 真实验收 ✅
+> → M2 task 编排 ✅**；待做：SSE 流式、libcurl vendor（任务 4 主路）、M3 决策记忆。
 
 ## 1. 技术决策
 
@@ -54,41 +54,61 @@ builtins 现无 JSON。一期在 sagent 内实现 `src/json.sc` 最小集：
 sagent/
   OUTLINE.md          # 纲领（需求 + 设计，事实源）
   PLAN.md             # 本文档（方案 + 实施计划）
-  sagent.sc           # 入口（CLI 解析 + 子命令分发）
-  src/
+  sagent.sc           # 入口（CLI 解析 + 子命令 init/next/archive/消息）
+  build.sh            # 构建/安装（build/install/uninstall/clean → build/sca）
+  src/                # 全部为 inc 模块（@ 导出，各自可独立 --test）
+    util.sc           # 基础：slen/streq/文件读写
+    sagent_dir.sc     # .sagent/ 初始化、loop 档案、plan 队列、归档
     config.sc         # .sa 解析
     json.sc           # JSON 最小库
-    http.sc           # libcurl 绑定（回退：系统 curl 子进程）
-    llm.sc            # chat completions 请求组装/响应提取
-    sagent_dir.sc     # .sagent/ 目录初始化与读写
-  tests/              # 单测（scc --test）
+    http.sc           # 系统 curl 子进程（libcurl vendor 后同签名替换）
+    llm.sc            # chat completions 组装/提取（多 provider 段兜底）
+    loop.sc           # loop 全生命周期编排
+  scripts/
+    coding.sh         # coding agent 编排模板
   refs/               # 参考项目 clone（gitignore）
-vendor/curl/          # libcurl 源码（mbedtls 后端）
+vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
 ```
 
-## 4. 一期任务分解
+## 4. 一期任务分解（✅ 全部完成 2026-07-14）
 
-| # | 任务 | 内容 | 验收 |
-|---|---|---|---|
-| 1 | CLI 骨架 | sagent.sc 入口：`init` / `"消息"` / `--llm` / `--help`；ARGS 机制 | `sca init` 生成 `.sagent/` 骨架（config.sa 模板 + task/ + memory/ 四件空文件） |
-| 2 | `.sa` 解析 | 段 + 键值解析、env 引用展开、默认值 | 单测：解析 config.sa 模板全键；坏格式报行号 |
-| 3 | JSON 最小库 | 构造（转义）+ 取值器 | 单测：请求体组装往返、响应样例提取、UTF-8/转义边界 |
-| 4 | curl vendor | vendor/curl 入库、mbedtls 后端构建脚本、http.sc 绑定 http_post | HTTPS POST httpbin 往返；构建受阻则先走系统 curl 回退并记录 |
-| 5 | llm request | OpenAI 兼容 /chat/completions 非流式；system+user 组装；错误处理（非 200/超时/配额） | `sca "hi, llm"` 打印模型回答 |
-| 6 | loop 档案雏形 | 应答落 `.sagent/task/loop-001/`（context.md 快照 + 原始响应） | 文件齐备，git 可审计 |
+| # | 状态 | 任务 | 内容 | 验收 |
+|---|---|---|---|---|
+| 1 | ✅ | CLI 骨架 | sagent.sc 入口：`init` / `"消息"` / `--llm` / `--help`；ARGS 机制 | `sca init` 生成 `.sagent/` 骨架（config.sa 模板 + task/ + memory/ 四件空文件） |
+| 2 | ✅ | `.sa` 解析 | 段 + 键值解析、env 引用展开、默认值 | 单测 4/4；坏格式报行号 |
+| 3 | ✅ | JSON 最小库 | 构造（转义）+ 取值器 | 单测 5/5：组装往返、响应提取、\u→UTF-8、防误匹配 |
+| 4 | ⚠️ 回退路径 | curl 通路 | **已落系统 curl 子进程**（密钥 0600 config 不进命令行）；libcurl vendor 主路待做（同签名替换） | mock/真实 POST 往返 ✅ |
+| 5 | ✅ | llm request | OpenAI 兼容非流式；system+user 组装；非 200 提 error.message | `sca "hi"` 打印应答（mock + DeepSeek 真实） |
+| 6 | ✅ | loop 档案雏形 | loop-NNN/（context/response/answer）+ state 追加 | 档案齐备，git 可审计 |
 
 一期完成 = 纲领 §10-M1 的前半（起手到应答）；后半（工具调用执行、scc 验证、
 复盘写回、git commit）为二期，任务分解：
 
-## 4.2 二期任务分解（loop 全生命周期后半，2026-07-14 启动）
+## 4.2 二期任务分解（loop 全生命周期后半，✅ 全部完成 2026-07-14）
 
-| # | 任务 | 内容 | 验收 |
-|---|---|---|---|
-| 7 | loop 协议与上下文构造 | system prompt（动作输出协议：```sh 块）；上下文 = goal/plan/state 尾部 + 上一 loop review + 用户消息（OUTLINE §5 选材 1/3） | context.md 含四类选材 |
-| 8 | 动作解析与受控执行 | 提取应答中 ```sh 块 → 白名单校验（config [tools] allow，逐行首词）→ 执行并捕获输出 → actions.md 记录 | 违例块拒执行并记录；输出入档 |
-| 9 | 验证步 | config [loop] verify 命令（如 scc xx --test）；执行记录 rc/输出（OUTLINE §7：判非产差异） | verify 结果入档 |
-| 10 | 复盘写回 | 第二次 LLM 调用（动作+输出+验证结果 → 陷阱/事实）→ review.md；state.md 追加 | review.md 生成 |
-| 11 | git commit | 代码 + .sagent 同一提交（config [loop] commit: on/off），一 loop 一 commit | 提交含两类变更 |
+| # | 状态 | 任务 | 内容 | 验收 |
+|---|---|---|---|---|
+| 7 | ✅ | loop 协议与上下文构造 | system prompt（动作输出协议：```sh 块）；上下文 = goal/plan/state 尾部 + 上一 loop review + 用户消息（OUTLINE §5 选材 1/3） | context.md 含四类选材 |
+| 8 | ✅ | 动作解析与受控执行 | ```sh 块提取 → 白名单校验（逐行首词，违例整块拒执行）→ actions.md | 单测 3/3；输出入档 |
+| 9 | ✅ | 验证步 | config [loop] verify 命令；判非产差异（OUTLINE §7） | verify 结果入档 |
+| 10 | ✅ | 复盘写回 | 二次 LLM 调用（陷阱/事实）→ review.md；state 追加 | review.md 生成（DeepSeek 实测） |
+| 11 | ✅ | git commit | 代码 + .sagent 同提交（[loop] commit: on），一 loop 一 commit | 提交含两类变更 |
+
+## 4.3 M2 task 编排（✅ 完成 2026-07-14）
+
+- plan 队列原语：`sa_plan_next`/`sa_plan_done`（loop 验证通过才标 `[x]`）；
+- `sca next`：预算门槛 + 退出码协议（42=队列空 43=预算尽 10=验证未过）；
+- `sca archive [名]`：task → archive/NNN-名/ 闭包封存，重建骨架；
+- [scripts/coding.sh](scripts/coding.sh)：编排模板（循环/终止三态在脚本，
+  sca 保持原子——公理 4：换 agent 类型 = 换脚本）。
+
+## 4.4 待办（优先序）
+
+1. 协议 prompt 防泄漏（DeepSeek 实测观察到复盘格式混进动作应答）；
+2. SSE 流式（体验）+ libcurl vendor（任务 4 主路，同签名替换 http.sc）；
+3. M3 决策记忆（OUTLINE §10-M3）：memory/ 四分类读写纪律、结构文件
+   `scc --graph/--api` 自动再生、上下文选材优化、跨 task 陷阱复用验收；
+4. actions.jsonl 可回放格式（现 actions.md 人读向）。
 
 
 
