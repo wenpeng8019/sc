@@ -42,6 +42,81 @@ inc util.sc
     s->drop()
     return r
 
+# ---------- M2：plan 队列原语 ----------
+
+# 取 plan.md 首个未完成项（"- [ ] xxx" 的 xxx）。命中返回 0；队列空 -1。
+@fnc sa_plan_next: i4, msg: string&
+    var t: char& = sa_read_file(".sagent/task/plan.md")
+    if t == nil
+        return -1
+    var i: i4 = 0
+    while t[i] != 0
+        var b: i4 = i
+        while t[i] != 0 && t[i] != (10: char)
+            i = i + 1
+        # 匹配行首 "- [ ] "
+        if t[b] == (45: char) && t[b+1] == (32: char) && t[b+2] == (91: char) && t[b+3] == (32: char) && t[b+4] == (93: char) && t[b+5] == (32: char)
+            msg->clear()
+            msg->append_n((t + b + 6: const char&), (i - b - 6: u8))
+            ::free((t: &))
+            return 0
+        if t[i] != 0
+            i = i + 1
+    ::free((t: &))
+    return -1
+
+# 把 plan.md 中首个未完成项标记完成（[ ] → [x]）。返回 0 成功。
+@fnc sa_plan_done: i4
+    var t: char& = sa_read_file(".sagent/task/plan.md")
+    if t == nil
+        return -1
+    var i: i4 = 0
+    while t[i] != 0
+        var b: i4 = i
+        while t[i] != 0 && t[i] != (10: char)
+            i = i + 1
+        if t[b] == (45: char) && t[b+1] == (32: char) && t[b+2] == (91: char) && t[b+3] == (32: char) && t[b+4] == (93: char)
+            t[b+3] = (120: char)          # 'x'
+            var r: i4 = sa_write_file(".sagent/task/plan.md", t)
+            ::free((t: &))
+            return r
+        if t[i] != 0
+            i = i + 1
+    ::free((t: &))
+    return -1
+
+# 现有 loop 档案数（预算判断用）。
+@fnc sa_loop_count: i4
+    var n: i4 = 0
+    var p: string& = string()
+    while n < 1000
+        p->clear()
+        p->printf(".sagent/task/loop-%03d", n + 1)
+        if !fs_exists(p->cstr())
+            break
+        n = n + 1
+    p->drop()
+    return n
+
+# task 归档（闭包封存）：task/ 整体移入 archive/NNN-<名>/，重建空骨架。
+@fnc sa_archive: i4, name: const char&
+    if !fs_is_dir(".sagent/task")
+        return -1
+    var n: i4 = 1
+    var dst: string& = string()
+    while n < 1000
+        dst->clear()
+        dst->printf(".sagent/archive/%03d-%s", n, name != nil && name[0] != 0 ? name : "task")
+        if !fs_exists(dst->cstr())
+            break
+        n = n + 1
+    fs_mkdirs(".sagent/archive")
+    var r: i4 = fs_rename(".sagent/task", dst->cstr())
+    dst->drop()
+    if r != 0
+        return -2
+    return 0
+
 # 初始化 .sagent/ 骨架。已存在时不覆盖（幂等，只补缺）。
 @fnc sa_init: i4
     if fs_exists(".sagent") && !fs_is_dir(".sagent")
