@@ -18,6 +18,7 @@ inc src/sagent_dir.sc
 inc src/config.sc
 inc src/json.sc
 inc src/http.sc
+inc src/keys.sc
 inc src/llm.sc
 inc src/loop.sc
 

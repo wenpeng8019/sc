@@ -6,6 +6,7 @@ inc util.sc
 inc config.sc
 inc json.sc
 inc http.sc
+inc keys.sc
 
 # 组装请求体：{"model":..., "messages":[{system},{user}]}
 @fnc sa_llm_body: out: string&, model: const char&, sys_msg: const char&, user_msg: const char&
@@ -45,14 +46,35 @@ fnc sa_llm_cfg: const char&, cfg: sa_cfg&, sect: const char&, name: const char&,
         ::printf("sagent: config.sa 缺 endpoint/model\n")
         return 1
 
-    # 密钥：api_key_env 存环境变量名，运行时取值
+    # 密钥三级解析：env → ~/.sagent/keys（0600 用户级）→ 交互输入（关回显）
     var bearer: const char& = nil
+    var kbuf: string& = string()          # 文件/交互来源的密钥缓冲（活到请求后）
+    var asked: bool = false               # 本次为交互输入（成功后询问保存）
     var key_env: const char& = sa_llm_cfg(cfg, sect, "api_key_env", nil)
     if key_env != nil && key_env[0] != 0
         bearer = (::getenv(key_env): const char&)
         if bearer == nil
-            ::printf("sagent: 环境变量 %s 未设置（api_key_env）\n", key_env)
-            return 2
+            if sa_keys_get(key_env, kbuf) == 0
+                if kbuf->equals("!")       # "不再提示"标记
+                    ::printf("sagent: %s 未设置且已选择不再提示（export 或编辑 ~/.sagent/keys 恢复）\n", key_env)
+                    kbuf->drop()
+                    return 2
+                bearer = (kbuf->cstr(): const char&)
+            else if ::isatty(0) != 0
+                var pr: string& = string()
+                pr->printf("sagent: 输入 %s（回显已关）: ", key_env)
+                if sa_prompt_line(pr->cstr(), true, kbuf) != 0 || kbuf->len() == 0
+                    pr->drop()
+                    kbuf->drop()
+                    ::printf("sagent: 未输入密钥\n")
+                    return 2
+                pr->drop()
+                bearer = (kbuf->cstr(): const char&)
+                asked = true
+            else
+                ::printf("sagent: 环境变量 %s 未设置（api_key_env；非交互终端不可输入）\n", key_env)
+                kbuf->drop()
+                return 2
 
     # 超时（秒，十进制）
     var tos: const char& = sa_llm_cfg(cfg, sect, "timeout", "120")
@@ -74,6 +96,7 @@ fnc sa_llm_cfg: const char&, cfg: sa_cfg&, sect: const char&, name: const char&,
     if code < 0
         ::printf("sagent: http 通路失败（%d）\n", code)
         resp->drop()
+        kbuf->drop()
         return 3
     if code != 200
         var em: string& = string()
@@ -83,12 +106,28 @@ fnc sa_llm_cfg: const char&, cfg: sa_cfg&, sect: const char&, name: const char&,
             ::printf("sagent: HTTP %d: %s\n", code, resp->cstr())
         em->drop()
         resp->drop()
+        kbuf->drop()
         return 4
+
+    # 交互输入的密钥验证成功（200）：询问保存 / 不保存 / 不再提示
+    if asked
+        var ans: string& = string()
+        if sa_prompt_line("sagent: 密钥有效。保存到 ~/.sagent/keys？[y=保存 / n=仅本次 / x=不再提示]: ", false, ans) == 0
+            if ans->equals("y") || ans->equals("Y")
+                if sa_keys_put(key_env, kbuf->cstr()) == 0
+                    ::fprintf(::stderr, "sagent: 已保存（0600）\n")
+            else if ans->equals("x") || ans->equals("X")
+                sa_keys_put(key_env, "!")
+                ::fprintf(::stderr, "sagent: 已记不再提示（编辑 ~/.sagent/keys 可恢复）\n")
+        ans->drop()
+
     if sa_json_get_str(resp->cstr(), "content", answer) != 0
         ::printf("sagent: 响应缺 content: %s\n", resp->cstr())
         resp->drop()
+        kbuf->drop()
         return 5
     resp->drop()
+    kbuf->drop()
     return 0
 
 tst "llm 请求体组装：含 system 与转义"
