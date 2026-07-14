@@ -48,8 +48,12 @@ fnc sa_llm_stream_exec: i4, endpoint: const char&, bearer: const char&, body: co
         ::printf("sagent: SSE 通道打开失败\n")
         return 3
     var errbuf: string& = string()
-    var buf[8192]: char
-    while ::fgets((buf: &), 8192, fp) != nil
+    var lnb: string& = string()
+    while true
+        var lr: i4 = sa_http_sse_line(fp, lnb)
+        if lr <= 0
+            break
+        var buf: char& = lnb->cstr()
         # 只处理 "data: " 行；其它行（错误 JSON/注释）收入 errbuf
         if buf[0] == (100: char) && buf[1] == (97: char) && buf[2] == (116: char) && buf[3] == (97: char) && buf[4] == (58: char)
             var p: i4 = 5
@@ -63,8 +67,10 @@ fnc sa_llm_stream_exec: i4, endpoint: const char&, bearer: const char&, body: co
                 ::fflush(::stdout)
                 answer->append(chunk->cstr())
             chunk->drop()
-        else if buf[0] != (10: char) && buf[0] != (13: char) && buf[0] != 0
-            errbuf->append((buf: const char&))
+        else if buf[0] != 0
+            errbuf->append(buf)
+            errbuf->append("\n")
+    lnb->drop()
     var rc: i4 = sa_http_sse_close(fp)
     if answer->len() == 0
         var em: string& = string()

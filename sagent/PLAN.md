@@ -77,7 +77,7 @@ vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
 | 1 | ✅ | CLI 骨架 | sagent.sc 入口：`init` / `"消息"` / `--llm` / `--help`；ARGS 机制 | `sca init` 生成 `.sagent/` 骨架（config.sa 模板 + task/ + memory/ 四件空文件） |
 | 2 | ✅ | `.sa` 解析 | 段 + 键值解析、env 引用展开、默认值 | 单测 4/4；坏格式报行号 |
 | 3 | ✅ | JSON 最小库 | 构造（转义）+ 取值器 | 单测 5/5：组装往返、响应提取、\u→UTF-8、防误匹配 |
-| 4 | ⚠️ 回退路径 | curl 通路 | **已落系统 curl 子进程**（密钥 0600 config 不进命令行）；libcurl vendor 主路待做（同签名替换） | mock/真实 POST 往返 ✅ |
+| 4 | ✅ | curl 通路 | **libcurl vendor 主路已落**（vendor/curl 8.21.0+mbedtls，HTTP(S) 最小化；src/http_curl.c shim，密钥只在内存）；子进程回退保留于 src/http_sh.sc | libcurl 两通道 DeepSeek 真实验收 |
 | 5 | ✅ | llm request | OpenAI 兼容非流式；system+user 组装；非 200 提 error.message | `sca "hi"` 打印应答（mock + DeepSeek 真实） |
 | 6 | ✅ | loop 档案雏形 | loop-NNN/（context/response/answer）+ state 追加 | 档案齐备，git 可审计 |
 
@@ -111,8 +111,11 @@ vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
 4. ✅ SSE 流式：`[llm] stream: on` —— http.sc SSE 通道（curl -N + popen 行读，
    密钥 config 由 close 清理防 popen 竞态）+ llm.sc delta 解析边出边显；
    DeepSeek 真实流式验收。复盘调用保持非流式；
-5. libcurl vendor（任务 4 主路，vendor/curl+mbedtls，同签名替换 http.sc
-   两通道）；
+5. ✅ libcurl vendor：vendor/curl（8.21.0 裁剪入库）+ 跨平台 build.sh
+   （mbedtls 直编 library/*.c 同 scc 做法；HTTP(S)-only 最小化；TAG/CMAKE_EXTRA
+   透传交叉）；src/http_curl.c shim（post + SSE multi 行缓冲），链接自描述在
+   src/.sc 段配置（模块独立 --test 也自动链上）；密钥只在内存不再落临时文件；
+   回退实现保留 src/http_sh.sc；
 6. M3 决策记忆（OUTLINE §10-M3）：memory/ 四分类读写纪律、结构文件
    `scc --graph/--api` 自动再生、上下文选材优化、跨 task 陷阱复用验收；
 7. actions.jsonl 可回放格式（现 actions.md 人读向）。
