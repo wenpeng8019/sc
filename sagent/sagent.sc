@@ -19,6 +19,7 @@ inc src/config.sc
 inc src/json.sc
 inc src/http.sc
 inc src/llm.sc
+inc src/loop.sc
 
 mix ARGS_S(false, llm, 'l', "llm", "选用 config.sa 的 [llm.<名>] 配置段")
 
@@ -37,7 +38,7 @@ fnc main: i4, argc: i4, argv: char&&
     if sa_streq(cmd, "init")
         return sa_init()
 
-    # 非子命令 = 用户消息：读配置 → llm request → 打印应答（任务 5 通路）
+    # 非子命令 = 用户消息：读配置 → 单次 loop 全生命周期（OUTLINE §2）
     var cfg: sa_cfg
     ::memset(&cfg, 0, sizeof(::sa_cfg))
     var lr: i4 = sa_cfg_load(&cfg)
@@ -48,30 +49,5 @@ fnc main: i4, argc: i4, argv: char&&
         ::printf("sagent: config.sa 第 %d 行格式错误\n", lr)
         return 1
 
-    var answer: string& = string()
-    var rc: i4 = sa_llm_request(&cfg, ARGS_llm, nil, cmd, answer)
-
-    # loop 档案（OUTLINE §4：context 快照 + 原始响应 + 应答 + state 追加）
-    var dir: string& = string()
-    var loop_no: i4 = sa_loop_open(dir)
-    if loop_no > 0
-        var ctx: string& = string()
-        ctx->printf("# loop-%03d 初始上下文\n\n## 用户消息\n\n%s\n", loop_no, cmd)
-        sa_loop_put(dir, "context.md", ctx->cstr())
-        ctx->drop()
-        var raw: char& = sa_read_file(".sagent/tmp/resp.json")
-        if raw != nil
-            sa_loop_put(dir, "response.json", raw)
-            ::free((raw: &))
-        if rc == 0
-            sa_loop_put(dir, "answer.md", answer->cstr())
-        var st: string& = string()
-        st->printf("- loop-%03d: %s（rc=%d）", loop_no, cmd, rc)
-        sa_state_append(st->cstr())
-        st->drop()
-    dir->drop()
-
-    if rc == 0
-        ::printf("%s\n", answer->cstr())
-    answer->drop()
+    var rc: i4 = sa_loop_run(&cfg, ARGS_llm, cmd)
     return rc

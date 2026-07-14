@@ -78,7 +78,19 @@ vendor/curl/          # libcurl 源码（mbedtls 后端）
 | 6 | loop 档案雏形 | 应答落 `.sagent/task/loop-001/`（context.md 快照 + 原始响应） | 文件齐备，git 可审计 |
 
 一期完成 = 纲领 §10-M1 的前半（起手到应答）；后半（工具调用执行、scc 验证、
-复盘写回、git commit）列二期，另起任务分解。
+复盘写回、git commit）为二期，任务分解：
+
+## 4.2 二期任务分解（loop 全生命周期后半，2026-07-14 启动）
+
+| # | 任务 | 内容 | 验收 |
+|---|---|---|---|
+| 7 | loop 协议与上下文构造 | system prompt（动作输出协议：```sh 块）；上下文 = goal/plan/state 尾部 + 上一 loop review + 用户消息（OUTLINE §5 选材 1/3） | context.md 含四类选材 |
+| 8 | 动作解析与受控执行 | 提取应答中 ```sh 块 → 白名单校验（config [tools] allow，逐行首词）→ 执行并捕获输出 → actions.md 记录 | 违例块拒执行并记录；输出入档 |
+| 9 | 验证步 | config [loop] verify 命令（如 scc xx --test）；执行记录 rc/输出（OUTLINE §7：判非产差异） | verify 结果入档 |
+| 10 | 复盘写回 | 第二次 LLM 调用（动作+输出+验证结果 → 陷阱/事实）→ review.md；state.md 追加 | review.md 生成 |
+| 11 | git commit | 代码 + .sagent 同一提交（config [loop] commit: on/off），一 loop 一 commit | 提交含两类变更 |
+
+
 
 ## 5. 风险与备选
 
