@@ -598,98 +598,98 @@ int32_t main(void) {
     /* line 338 */
     {
         int32_t _ret = 0;
-        if (ld) { sc_tensor_drop(ld); sc_free(ld); }
-        if (shf) { sc_tensor_drop(shf); sc_free(shf); }
-        if (pm) { sc_tensor_drop(pm); sc_free(pm); }
-        if (ri) { sc_tensor_drop(ri); sc_free(ri); }
-        if (rnd) { sc_tensor_drop(rnd); sc_free(rnd); }
-        if (ru) { sc_tensor_drop(ru); sc_free(ru); }
-        if (gy) { sc_tensor_drop(gy); sc_free(gy); }
-        if (gx) { sc_tensor_drop(gx); sc_free(gx); }
-        if (ya) { sc_tensor_drop(ya); sc_free(ya); }
-        if (xa) { sc_tensor_drop(xa); sc_free(xa); }
-        if (trm) { sc_tensor_drop(trm); sc_free(trm); }
-        if (p2a) { sc_tensor_drop(p2a); sc_free(p2a); }
-        if (p2m) { sc_tensor_drop(p2m); sc_free(p2m); }
-        if (c2d) { sc_tensor_drop(c2d); sc_free(c2d); }
-        if (b2d) { sc_tensor_drop(b2d); sc_free(b2d); }
-        if (w2d) { sc_tensor_drop(w2d); sc_free(w2d); }
-        if (x2d) { sc_tensor_drop(x2d); sc_free(x2d); }
-        if (x2raw) { sc_tensor_drop(x2raw); sc_free(x2raw); }
-        if (p1a) { sc_tensor_drop(p1a); sc_free(p1a); }
-        if (p1m) { sc_tensor_drop(p1m); sc_free(p1m); }
-        if (c1d) { sc_tensor_drop(c1d); sc_free(c1d); }
-        if (b1d) { sc_tensor_drop(b1d); sc_free(b1d); }
-        if (w1d) { sc_tensor_drop(w1d); sc_free(w1d); }
-        if (x1d) { sc_tensor_drop(x1d); sc_free(x1d); }
-        if (x1raw) { sc_tensor_drop(x1raw); sc_free(x1raw); }
-        if (sdc) { sc_tensor_drop(sdc); sc_free(sdc); }
-        if (sd) { sc_tensor_drop(sd); sc_free(sd); }
-        if (v3) { sc_tensor_drop(v3); sc_free(v3); }
-        if (k3) { sc_tensor_drop(k3); sc_free(k3); }
-        if (q3) { sc_tensor_drop(q3); sc_free(q3); }
-        if (adm) { sc_tensor_drop(adm); sc_free(adm); }
-        if (ones22) { sc_tensor_drop(ones22); sc_free(ones22); }
-        if (bm) { sc_tensor_drop(bm); sc_free(bm); }
-        if (du) { sc_tensor_drop(du); sc_free(du); }
-        if (bu) { sc_tensor_drop(bu); sc_free(bu); }
-        if (Rm) { sc_tensor_drop(Rm); sc_free(Rm); }
-        if (Qm) { sc_tensor_drop(Qm); sc_free(Qm); }
-        if (evecs) { sc_tensor_drop(evecs); sc_free(evecs); }
-        if (evals) { sc_tensor_drop(evals); sc_free(evals); }
-        if (Lc) { sc_tensor_drop(Lc); sc_free(Lc); }
-        if (xx) { sc_tensor_drop(xx); sc_free(xx); }
-        if (bb) { sc_tensor_drop(bb); sc_free(bb); }
-        if (Mi) { sc_tensor_drop(Mi); sc_free(Mi); }
-        if (M) { sc_tensor_drop(M); sc_free(M); }
-        if (tl) { sc_tensor_drop(tl); sc_free(tl); }
-        if (tu) { sc_tensor_drop(tu); sc_free(tu); }
-        if (a2) { sc_tensor_drop(a2); sc_free(a2); }
-        if (cn) { sc_tensor_drop(cn); sc_free(cn); }
-        if (sn) { sc_tensor_drop(sn); sc_free(sn); }
-        if (dr_eval) { sc_tensor_drop(dr_eval); sc_free(dr_eval); }
-        if (dr) { sc_tensor_drop(dr); sc_free(dr); }
-        if (ln) { sc_tensor_drop(ln); sc_free(ln); }
-        if (bct) { sc_tensor_drop(bct); sc_free(bct); }
-        if (mset) { sc_tensor_drop(mset); sc_free(mset); }
-        if (tgt) { sc_tensor_drop(tgt); sc_free(tgt); }
-        if (gl) { sc_tensor_drop(gl); sc_free(gl); }
-        if (lr) { sc_tensor_drop(lr); sc_free(lr); }
-        if (lsm) { sc_tensor_drop(lsm); sc_free(lsm); }
-        if (ro) { sc_tensor_drop(ro); sc_free(ro); }
-        if (pd) { sc_tensor_drop(pd); sc_free(pd); }
-        if (ssrc) { sc_tensor_drop(ssrc); sc_free(ssrc); }
-        if (sc0) { sc_tensor_drop(sc0); sc_free(sc0); }
-        if (go) { sc_tensor_drop(go); sc_free(go); }
-        if (gi) { sc_tensor_drop(gi); sc_free(gi); }
-        if (nz) { sc_tensor_drop(nz); sc_free(nz); }
-        if (cat) { sc_tensor_drop(cat); sc_free(cat); }
-        if (ou) { sc_tensor_drop(ou); sc_free(ou); }
-        if (cs) { sc_tensor_drop(cs); sc_free(cs); }
-        if (fl) { sc_tensor_drop(fl); sc_free(fl); }
-        if (r0) { sc_tensor_drop(r0); sc_free(r0); }
-        if (sl) { sc_tensor_drop(sl); sc_free(sl); }
-        if (wh) { sc_tensor_drop(wh); sc_free(wh); }
-        if (gt) { sc_tensor_drop(gt); sc_free(gt); }
-        if (cl) { sc_tensor_drop(cl); sc_free(cl); }
-        if (ab) { sc_tensor_drop(ab); sc_free(ab); }
-        if (ls) { sc_tensor_drop(ls); sc_free(ls); }
-        if (ey) { sc_tensor_drop(ey); sc_free(ey); }
-        if (tc) { sc_tensor_drop(tc); sc_free(tc); }
-        if (t) { sc_tensor_drop(t); sc_free(t); }
-        if (rl) { sc_tensor_drop(rl); sc_free(rl); }
-        if (ng) { sc_tensor_drop(ng); sc_free(ng); }
-        if (am) { sc_tensor_drop(am); sc_free(am); }
-        if (mn) { sc_tensor_drop(mn); sc_free(mn); }
-        if (sm) { sc_tensor_drop(sm); sc_free(sm); }
-        if (mm) { sc_tensor_drop(mm); sc_free(mm); }
-        if (d) { sc_tensor_drop(d); sc_free(d); }
-        if (bc) { sc_tensor_drop(bc); sc_free(bc); }
-        if (row) { sc_tensor_drop(row); sc_free(row); }
-        if (c) { sc_tensor_drop(c); sc_free(c); }
-        if (b2) { sc_tensor_drop(b2); sc_free(b2); }
-        if (b) { sc_tensor_drop(b); sc_free(b); }
-        if (a) { sc_tensor_drop(a); sc_free(a); }
+        sc_ptr_drop_slot((void *)&(ld), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(shf), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(pm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ri), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(rnd), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ru), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(gy), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(gx), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ya), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(xa), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(trm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(p2a), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(p2m), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(c2d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(b2d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(w2d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(x2d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(x2raw), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(p1a), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(p1m), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(c1d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(b1d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(w1d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(x1d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(x1raw), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sdc), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sd), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(v3), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(k3), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(q3), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(adm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ones22), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(bm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(du), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(bu), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(Rm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(Qm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(evecs), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(evals), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(Lc), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(xx), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(bb), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(Mi), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(M), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(tl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(tu), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(a2), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(cn), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sn), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(dr_eval), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(dr), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ln), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(bct), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(mset), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(tgt), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(gl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(lr), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(lsm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ro), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(pd), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ssrc), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sc0), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(go), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(gi), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(nz), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(cat), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ou), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(cs), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(fl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(r0), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(wh), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(gt), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(cl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ab), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ls), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ey), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(tc), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(t), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(rl), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(ng), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(am), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(mn), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(sm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(mm), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(d), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(bc), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(row), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(c), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(b2), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(b), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(a), (void (*)(void *))sc_tensor_drop);
         sc_mod_ts_drop();
         return _ret;
     }

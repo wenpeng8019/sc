@@ -346,8 +346,9 @@ struct CGen {
     // projHandleScopes 与 fatScopes 平行逐层登记；name=句柄名，ent=实体类型 T 名。
     struct ProjHandleVar { std::string name; std::string ent; };
     std::vector<std::vector<ProjHandleVar>> projHandleScopes;
-    // 本函数内被显式 x.drop()/x->drop() 调用的变量名（预扫描）：move 语义——显式 drop
-    // 抑制该变量的退域自动 drop（用户接管其生命周期，避免双重释放）。
+    // 本函数内被显式值对象 x.drop() 调用的变量名（预扫描）：move 语义——显式 drop
+    // 抑制该变量的退域自动 drop（值对象没有可置 nil 的所有权槽）。堆专属 x->drop()
+    // 由 sc_ptr_drop_slot 清空指针并与 T@1 的退域析构汇合，不登记到这里。
     std::set<std::string> manualDropVars;
     // 本函数内被 &var 借入胖指针的普通栈变量名集合（预扫描得出，决定声明处注入 ref 头）。
     std::set<std::string> fatBorrowVars;
@@ -1374,13 +1375,14 @@ struct CGen {
         else out << "sc_fat_unbind_d(&" << lvAddr << ", " << dtorArg << ");\n";
     }
 
-    // RAII 预扫描：收集本函数内被显式 x.drop()/x->drop() 调用的变量名（move 语义抑制），
+    // RAII 预扫描：收集本函数内被显式值对象 x.drop() 调用的变量名（move 语义抑制），
     // 以及被显式取址 &x 的变量名（可能经别名指针管理生命周期，保守抑制以免双重释放）。
     // 注意：方法调用 o.m() 的接收者取址是 codegen 隐式注入，AST 中无 & 节点，不会误伤。
     void scanManualDropsExpr(const Expr* e) {
         if (!e) return;
         if (e->kind == Expr::Call && e->a && e->a->kind == Expr::Member
-            && e->a->text == "drop" && e->a->a && e->a->a->kind == Expr::Ident)
+            && e->a->op == "." && e->a->text == "drop"
+            && e->a->a && e->a->a->kind == Expr::Ident)
             manualDropVars.insert(e->a->a->text);
         if (e->kind == Expr::Unary && e->op == "&" && e->a && e->a->kind == Expr::Ident)
             manualDropVars.insert(e->a->text);
@@ -2297,7 +2299,7 @@ struct CGen {
                             }
                             out << "((void *)";
                             emitRawSrc();
-                            out << ")";
+                            out << "))";
                             break;
                         }
 
@@ -2456,17 +2458,13 @@ struct CGen {
                 if (e.a->kind == Expr::Member && !callableField(*e.a)) {
                     VType base;
                     if (exprVType(*e.a->a, base) && base.arr == 0 && base.ptr <= 1) {
-                        // 堆专属类型 NAME& 的普通指针 .drop()：先调用户 drop（释放内部资源，
-                        // 若有），再 sc_free 结构体块本身。无用户 drop → 仅 sc_free（默认析构）。
+                        // 堆专属类型 NAME& 的普通指针 .drop()：交给运行时安全析构。
+                        // 可寻址接收者在析构前置 nil；nil/重复显式析构均为空操作。无用户
+                        // drop 时仍只回收结构体块本身（默认析构）。
                         // 胖指针 NAME@ 由运行时 sc_fat_on_zero_d 释放，不在此拦截。
                         if (e.a->text == "drop" && e.args.empty() && !base.fat
                             && base.ptr == 1 && isHeapOnly(base.name)) {
-                            const Decl* dm = findMethod(base.name, "drop");
-                            out << "(";
-                            if (dm) { out << scPfx(dm->name) << "("; emitExpr(*e.a->a); out << "), "; }
-                            out << "sc_free(";
-                            emitExpr(*e.a->a);
-                            out << "))";
+                            emitHeapDrop(*e.a->a, findMethod(base.name, "drop"));
                             break;
                         }
                         // 维度调用糖：cls 实例 o.Dim(args) → T_hyper_impl(&o._class, SC_DIM_Dim, args)
@@ -2902,6 +2900,26 @@ struct CGen {
                     else { out << "("; emitExpr(*e.a, true); out << ")._class"; }
                     out << ")";
                     break;
+                }
+                // future.get() 的结果在 C ABI 中是 void*，标量实际经 intptr_t/uintptr_t
+                // 擦除保存。显式写法 `f->get(): i4` 不能直接生成 `(int32_t)(void*)`，否则
+                // 在 64 位平台上会触发「从 void* 转较小整数」警告，并依赖实现定义行为。
+                // await 状态机由 emitFutureGetCast() 走同一条中间整数类型；这里保持一致。
+                if (e.castPtr == 0 && e.a && e.a->kind == Expr::Call
+                    && e.a->a && e.a->a->kind == Expr::Member
+                    && e.a->a->text == "get" && e.a->a->a) {
+                    VType recv;
+                    if (exprVType(*e.a->a->a, recv) && recv.name == "future"
+                        && recv.ptr == 1) {
+                        const char cls = scalarClass(e.op);
+                        if (cls == 'i' || cls == 'u' || cls == 'b' || cls == 'c') {
+                            out << "(" << mapType_(e.op) << ")("
+                                << (cls == 'u' ? "uintptr_t" : "intptr_t") << ")(";
+                            emitExpr(*e.a, true);
+                            out << ")";
+                            break;
+                        }
+                    }
                 }
                 // (expr: type&) → ((T*)(expr))；含类型限定符 (expr: const T&) → ((const T*)(expr))
                 // 源为自动指针（T@/object@/裸 @）→ 裸指针：取 .p（实体基址，零成本借用读，
@@ -3439,15 +3457,20 @@ struct CGen {
     // 半自动指针 T@1（单例指针）销毁旧对象：非 nil → drop（若有）+ sc_free；
     // com@1 特例：非 nil → 实例方法 p->close(p)（自负全权回收，不再 sc_free）。
     void emitAutoFreeDestroy(const AutoFreeVar& v) {
-        indent();
-        out << "if (" << v.name << ") { ";
         if (v.selfClose) {
+            indent();
+            out << "if (" << v.name << ") { ";
             out << v.name << "->close(" << v.name << "); ";
+            out << "}\n";
         } else {
-            if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
-            out << "sc_free(" << v.name << "); ";
+            indent();
+            out << "sc_ptr_drop_slot((void *)&(" << v.name << "), ";
+            if (!v.dropFn.empty())
+                out << "(void (*)(void *))" << v.dropFn;
+            else
+                out << "NULL";
+            out << ");\n";
         }
-        out << "}\n";
     }
 
     // 半自动指针 T@1 赋值：先把 RHS 算入临时（避免自指/自销），与旧值不同且旧值非 nil 则
@@ -3458,12 +3481,16 @@ struct CGen {
         emitExpr(rhs, true);
         out << ";\n";
         depth++;
-        indent(); out << "if (" << v.name << " != " << tmp << " && " << v.name << ") { ";
+        indent(); out << "if (" << v.name << " != " << tmp << ") { ";
         if (v.selfClose) {
             out << v.name << "->close(" << v.name << "); ";
         } else {
-            if (!v.dropFn.empty()) out << v.dropFn << "(" << v.name << "); ";
-            out << "sc_free(" << v.name << "); ";
+            out << "sc_ptr_drop_slot((void *)&(" << v.name << "), ";
+            if (!v.dropFn.empty())
+                out << "(void (*)(void *))" << v.dropFn;
+            else
+                out << "NULL";
+            out << "); ";
         }
         out << "}\n";
         indent(); out << v.name << " = " << tmp << ";\n";
@@ -3828,10 +3855,10 @@ struct CGen {
                 if (dm && !dropScopes.empty())
                     dropScopes.back().push_back({f.name, scPfx(dm->name)});
             }
-            // 半自动指针 T@1（单例指针）：物理普通指针，登记退域销毁（非 nil → drop + free），
-            // 并入 autoFreeVars 供赋值拦截（设新值先销旧）。manualDropVars（move）则交用户接管。
-            if (inFunc && !isStatic && !isTls && f.type.autoFree
-                && !manualDropVars.count(f.name)) {
+            // 半自动指针 T@1（单例指针）：物理普通指针，始终登记退域销毁（非 nil → drop + free），
+            // 并入 autoFreeVars 供赋值拦截（设新值先销旧）。显式 drop 已由 slot 辅助置 nil，
+            // 因而退域守卫会自然跳过；不能用 manualDropVars 抑制，否则条件分支会泄漏。
+            if (inFunc && !isStatic && !isTls && f.type.autoFree) {
                 std::string afBase; int afPtr; resolveType(f.type, afBase, afPtr);
                 // com@1：设备句柄，析构走实例方法 close（自负全权回收），非静态 drop + sc_free。
                 if (f.type.name == "com") {
@@ -4704,6 +4731,34 @@ struct CGen {
         emitExpr(e, true);
         std::swap(tmp, out);
         return tmp.str();
+    }
+
+    // 堆指针接收者是否可取地址。可取地址时使用 slot 版本，保证接收者只求值一次，
+    // 并在析构前将原指针清空；函数返回值等临时表达式则退化为指针版本，仅做 nil 守卫。
+    static bool isDropSlotExpr(const Expr& e) {
+        switch (e.kind) {
+            case Expr::Ident:
+            case Expr::Member:
+            case Expr::Index:
+                return true;
+            case Expr::Unary:
+                return e.op == "*";
+            default:
+                return false;
+        }
+    }
+
+    void emitHeapDrop(const Expr& receiver, const Decl* dropMethod) {
+        const bool slot = isDropSlotExpr(receiver);
+        out << (slot ? "sc_ptr_drop_slot((void *)&(" : "sc_ptr_drop(");
+        emitExpr(receiver);
+        if (slot) out << ")";
+        out << ", ";
+        if (dropMethod)
+            out << "(void (*)(void *))" << scPfx(dropMethod->name);
+        else
+            out << "NULL";
+        out << ")";
     }
 
     // inl 真内联块展开：调用点原地展开为 { 形参临时=实参; 块体; 尾标签:; }

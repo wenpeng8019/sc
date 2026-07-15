@@ -42,7 +42,7 @@ static inline sc_future *sc_future__new_tagged(int _id, void *_ctx) {
 
 static int32_t sc_async_proc(sc_future_id id, sc_future *f) {
     /* line 42 */
-    int32_t v = ((int32_t)(sc_future_get(f)));
+    int32_t v = (int32_t)(intptr_t)(sc_future_get(f));
     /* line 43 */
     sc_sess *s = ((sc_sess*)(sc_future_ctx(f)));
     /* line 44 */

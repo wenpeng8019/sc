@@ -234,7 +234,7 @@ int32_t main(void) {
     /* line 56 */
     sc_print((uint8_t)(0), 0, "point 值: %s", sc_string_cstr(s));
     /* line 57 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 59 */
     sc_node n = {0};
     /* line 60 */
@@ -260,13 +260,13 @@ int32_t main(void) {
     /* line 70 */
     sc_print((uint8_t)(0), 0, "node 值: %s", sc_string_cstr(s));
     /* line 71 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 74 */
     s = stringify_node(n, (sc_stringify_t){ .compact = 0 });
     /* line 75 */
     sc_print((uint8_t)(0), 0, "node 美化:\n%s", sc_string_cstr(s));
     /* line 76 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 78 */
     sc_node *pn = &(n);
     /* line 79 */
@@ -274,7 +274,7 @@ int32_t main(void) {
     /* line 80 */
     sc_print((uint8_t)(0), 0, "node 指针: %s", sc_string_cstr(s));
     /* line 81 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 84 */
     int32_t arr[4];
     /* line 85 */
@@ -289,7 +289,7 @@ int32_t main(void) {
     /* line 89 */
     sc_print((uint8_t)(0), 0, "一维数组: %s", sc_string_cstr(s));
     /* line 90 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 92 */
     sc_color c = sc_Green;
     /* line 93 */
@@ -297,7 +297,7 @@ int32_t main(void) {
     /* line 94 */
     sc_print((uint8_t)(0), 0, "枚举: %s", sc_string_cstr(s));
     /* line 95 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 98 */
     char buf[64];
     /* line 99 */

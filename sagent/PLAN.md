@@ -61,7 +61,7 @@ sagent/
   build.sh            # 构建/安装（build/install/uninstall/clean → build/sca）
   src/                # 全部为 inc 模块（@ 导出，各自可独立 --test）
     # 文件读写不再封装：各处直接用 com@1 file(...) + com[0]/take（io.sc/mem.sc）
-    sagent_dir.sc     # .sagent/ 初始化、loop 档案、plan 队列、归档
+    repo.sc            # agent 仓库：.sagent/ 初始化、loop 档案、plan 队列、归档
     # .sa 解析已并入 sagent.sc
     # JSON 由 templates/.scenv/modules/json 提供，不在 sagent 内复制
     # http.sc 来自 templates/.scenv/modules/http，不再复制到 sagent/src
@@ -100,7 +100,7 @@ vendor/yyjson/        # yyjson 性能/布局参考，不参与构建
 
 ## 4.3 M2 task 编排（✅ 完成 2026-07-14）
 
-- plan 队列原语：`sa_plan_next`/`sa_plan_done`（loop 验证通过才标 `[x]`）；
+- plan 队列原语：`repo_plan_next`/`repo_plan_done`（loop 验证通过才标 `[x]`）；
 - `sca next`：预算门槛 + 退出码协议（42=队列空 43=预算尽 10=验证未过）；
 - `sca archive [名]`：task → archive/NNN-名/ 闭包封存，重建骨架；
 - [scripts/coding.sh](scripts/coding.sh)：编排模板（循环/终止三态在脚本，

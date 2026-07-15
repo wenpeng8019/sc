@@ -128,11 +128,11 @@ int32_t main(void) {
     /* line 69 */
     {
         int32_t _ret = 0;
-        if (opt) { sc_optim_drop(opt); sc_free(opt); }
-        if (fc) { sc_linear_drop(fc); sc_free(fc); }
-        if (emb) { sc_embed_drop(emb); sc_free(emb); }
-        if (tt) { sc_tensor_drop(tt); sc_free(tt); }
-        if (idxt) { sc_tensor_drop(idxt); sc_free(idxt); }
+        sc_ptr_drop_slot((void *)&(opt), (void (*)(void *))sc_optim_drop);
+        sc_ptr_drop_slot((void *)&(fc), (void (*)(void *))sc_linear_drop);
+        sc_ptr_drop_slot((void *)&(emb), (void (*)(void *))sc_embed_drop);
+        sc_ptr_drop_slot((void *)&(tt), (void (*)(void *))sc_tensor_drop);
+        sc_ptr_drop_slot((void *)&(idxt), (void (*)(void *))sc_tensor_drop);
         sc_mod_nn_drop();
         sc_mod_ts_drop();
         return _ret;

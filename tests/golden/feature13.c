@@ -197,13 +197,13 @@ int32_t main(void) {
     /* line 199 */
     sc_async_loop(NULL);
     /* line 200 */
-    printf("both ret = %d\n", ((int32_t)(sc_future_get(fc))));
+    printf("both ret = %d\n", (int32_t)(intptr_t)(sc_future_get(fc)));
     /* line 203 */
     sc_future *fd = sc_compute__async(3);
     /* line 204 */
     sc_async_loop(NULL);
     /* line 205 */
-    printf("compute ret = %d\n", ((int32_t)(sc_future_get(fd))));
+    printf("compute ret = %d\n", (int32_t)(intptr_t)(sc_future_get(fd)));
     /* line 207 */
     sc_async_final();
     /* line 208 */

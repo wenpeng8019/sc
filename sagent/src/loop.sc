@@ -6,7 +6,7 @@ inc io.sc
 inc os.sc
 inc adt.sc
 inc mem.sc
-inc sagent_dir.sc
+inc repo.sc
 inc json.sc
 inc llm.sc
 
@@ -14,7 +14,7 @@ inc llm.sc
 
 # 动作输出协议（system prompt）：优先 .sagent/prompts/loop.md（可手编），
 # 缺失回退内置默认（与 init 模板同源）。
-fnc sa_loop_protocol: out: string&
+fnc loop_protocol: out: string&
     var rc: com@1 = file(".sagent/prompts/loop.md", true, 1, 0)
     var t: char& = nil
     if rc != nil
@@ -74,10 +74,9 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
     sa_ctx_section(ctx, "计划（plan）", ".sagent/task/plan.md", 4096)
     sa_ctx_section(ctx, "已发生（state 尾部）", ".sagent/task/state.md", 2048)
     if loop_no > 1
-        var prev: string& = string()
+        var prev: string@1 = string()
         prev->printf(".sagent/task/loop-%03d/review.md", loop_no - 1)
         sa_ctx_section(ctx, "上一 loop 复盘", prev->cstr(), 4096)
-        prev->drop()
     ctx->printf("## 用户消息\n\n%s\n", user_msg)
 
 # ---------- 任务 8：动作解析与受控执行 ----------
@@ -154,13 +153,11 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         var b: i4 = i
         while block[i] != 0 && block[i] != (10: char)
             i = i + 1
-        var line: string& = string()
+        var line: string@1 = string()
         line->append_n((block + b: const char&), (i - b: u8))
         if !sa_tool_allowed(allow, line->cstr())
             log->printf("### 拒执行（白名单外）\n\n```sh\n%s\n```\n\n", line->cstr())
-            line->drop()
             return -100
-        line->drop()
         if block[i] != 0
             i = i + 1
     # 落盘执行
@@ -192,10 +189,9 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
     if vcmd == nil || vcmd[0] == 0
         log->append("### 验证\n\n（未配置 loop.verify，跳过）\n\n")
         return 0
-    var full: string& = string()
+    var full: string@1 = string()
     full->printf("%s > .sagent/tmp/verify_out.txt 2>&1", vcmd)
     var rc: i4 = ::system(full->cstr())
-    full->drop()
     var oc: com@1 = file(".sagent/tmp/verify_out.txt", true, 1, 0)
     var outp: char& = nil
     if oc != nil
@@ -212,35 +208,30 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
 # ---------- 任务 10-11：复盘写回 + git commit（编排主体） ----------
 
 # 单次 loop 全生命周期。返回 0 = 本 loop 收敛（验证通过）。
-@fnc sa_loop_run: i4, cfg: cfg&, sect: const char&, user_msg: const char&
-    var dir: string& = string()
-    var loop_no: i4 = sa_loop_open(dir)
+@fnc loop_run: i4, cfg: cfg&, sect: const char&, user_msg: const char&
+    var dir: string@1 = string()
+    var loop_no: i4 = repo_loop_open(dir)
     if loop_no < 0
-        ::printf("sagent: 无法开启 loop 档案（先跑 sca init）\n")
-        dir->drop()
+        print "sagent: 无法开启 loop 档案（先跑 sca init）\n"
         return 1
 
     # 1) 构造上下文并归档
-    ::fprintf(::stderr, "sagent: [1/6] loop-%03d 构造上下文\n", loop_no)
-    var ctx: string& = string()
+    print "sagent: [1/6] loop-", loop_no, " 构造上下文\n"
+    var ctx: string@1 = string()
     sa_ctx_build(ctx, loop_no, user_msg)
-    sa_loop_put(dir, "context.md", ctx->cstr())
+    repo_loop_put(dir, "context.md", ctx->cstr())
 
     # 2) 调 LLM（协议 prompt + 上下文；[llm] stream: on 则 SSE 流式边出边显）
-    ::fprintf(::stderr, "sagent: [2/6] 请求 LLM（上下文 %llu 字节）…\n", ctx->len())
+    print "sagent: [2/6] 请求 LLM（上下文 ", ctx->len(), " 字节）…\n"
     var stream_on: bool = ::strcmp(llm_cfg(cfg, sect, "stream", "off"), "on") == 0
-    var proto: string& = string()
-    sa_loop_protocol(proto)
-    var answer: string& = string()
+    var proto: string@1 = string()
+    loop_protocol(proto)
+    var answer: string@1 = string()
     var rc: i4 = llm_request_ex(cfg, sect, proto->cstr(), ctx->cstr(), answer, stream_on)
-    proto->drop()
-    ctx->drop()
     if rc != 0
-        dir->drop()
-        answer->drop()
         return rc
-    ::fprintf(::stderr, "sagent: [2/6] 应答 %llu 字节\n", answer->len())
-    sa_loop_put(dir, "answer.md", answer->cstr())
+    print "sagent: [2/6] 应答 ", answer->len(), " 字节\n"
+    repo_loop_put(dir, "answer.md", answer->cstr())
     var rawc: com@1 = file(".sagent/tmp/resp.json", true, 1, 0)
     var raw: char& = nil
     if rawc != nil
@@ -249,75 +240,65 @@ fnc sa_ctx_section: ctx: string&, title: const char&, path: const char&, max: i4
         rawc >> rs
         raw = (rs.take(): char&)
     if raw != nil
-        sa_loop_put(dir, "response.json", raw)
+        repo_loop_put(dir, "response.json", raw)
         recycle((raw: &))
 
     # 3) 执行动作块（白名单受控）
     var allow: const char& = cfg_get(cfg, "tools.allow", "")
-    var log: string& = string()
+    var log: string@1 = string()
     var k: i4 = 0
     var acted: i4 = 0
     while k < 16
-        var block: string& = string()
+        var block: string@1 = string()
         if sa_actions_extract(answer->cstr(), k, block) != 0
-            block->drop()
             break
-        ::fprintf(::stderr, "sagent: [3/6] 执行动作块 %d\n", k + 1)
+        print "sagent: [3/6] 执行动作块 ", k + 1, "\n"
         var arc: i4 = sa_actions_run(block->cstr(), allow, log)
         if arc == -100
-            ::fprintf(::stderr, "sagent: [3/6] 动作块 %d 被拒（白名单外）\n", k + 1)
-        block->drop()
+            print "sagent: [3/6] 动作块 ", k + 1, " 被拒（白名单外）\n"
         acted = acted + 1
         k = k + 1
     if acted == 0
-        ::fprintf(::stderr, "sagent: [3/6] 无动作块\n")
+        print "sagent: [3/6] 无动作块\n"
         log->append("### 动作\n\n（应答无动作块）\n\n")
 
     # 4) 验证
-    ::fprintf(::stderr, "sagent: [4/6] 验证\n")
+    print "sagent: [4/6] 验证\n"
     var vrc: i4 = sa_verify_run(cfg, log)
-    sa_loop_put(dir, "actions.md", log->cstr())
+    repo_loop_put(dir, "actions.md", log->cstr())
 
     # 5) 复盘（第二次 LLM 调用：动作+输出+验证 → 陷阱/事实）
-    ::fprintf(::stderr, "sagent: [5/6] 复盘写回…\n")
-    var rproto: string& = string()
+    print "sagent: [5/6] 复盘写回…\n"
+    var rproto: string@1 = string()
     sa_review_protocol(rproto)
-    var review: string& = string()
+    var review: string@1 = string()
     if llm_request(cfg, sect, rproto->cstr(), log->cstr(), review) == 0
-        sa_loop_put(dir, "review.md", review->cstr())
-    rproto->drop()
-    review->drop()
-    log->drop()
+        repo_loop_put(dir, "review.md", review->cstr())
 
     # 6) state 追加 + git commit（代码 + .sagent 同一提交）
-    ::fprintf(::stderr, "sagent: [6/6] state 追加 + 提交\n")
-    var st: string& = string()
+    print "sagent: [6/6] state 追加 + 提交\n"
+    var st: string@1 = string()
     st->printf("- loop-%03d: %s（动作 %d 块，验证 rc=%d）", loop_no, user_msg, acted, vrc)
-    sa_state_append(st->cstr())
-    st->drop()
+    repo_state_append(st->cstr())
     var cmt: const char& = cfg_get(cfg, "loop.commit", "off")
     if ::strcmp(cmt, "on") == 0
-        var g: string& = string()
+        var g: string@1 = string()
         g->printf("git add -A > /dev/null 2>&1 && git commit -q -m 'sca loop-%03d: %s'", loop_no, user_msg)
         ::system(g->cstr())
-        g->drop()
 
     if !stream_on
-        ::printf("%s\n", answer->cstr())
-    ::printf("sagent: loop-%03d 完成（动作 %d 块，验证 rc=%d）\n", loop_no, acted, vrc)
-    answer->drop()
-    dir->drop()
+        print answer->cstr(), "\n"
+    print "sagent: loop-", loop_no, " 完成（动作 ", acted, " 块，验证 rc=", vrc, "）\n"
     return vrc == 0 ? 0 : 10
 
 tst "动作提取：单块与多块"
     var a: const char& = "先看\n```sh\nls -1\n```\n再来\n```sh\ngit status\n```\n完"
-    var b: string& = string()
+    var b: string@1 = string()
     assert sa_actions_extract(a, 0, b) == 0
     assert b->equals("ls -1\n")
     assert sa_actions_extract(a, 1, b) == 0
     assert b->equals("git status\n")
     assert sa_actions_extract(a, 2, b) == -1
-    b->drop()
 
 tst "白名单：首词匹配"
     assert sa_tool_allowed("scc git curl", "git status")
@@ -326,6 +307,5 @@ tst "白名单：首词匹配"
     assert sa_tool_allowed("scc git curl", "")
 
 tst "受控执行：白名单外整块拒执行"
-    var log: string& = string()
+    var log: string@1 = string()
     assert sa_actions_run("echo hi\nrm -rf x\n", "echo", log) == -100
-    log->drop()

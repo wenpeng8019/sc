@@ -110,6 +110,7 @@ POSITIVE=(
     tests/cases/cast.sc
     tests/cases/expr.sc
     tests/cases/auto_ptr.sc
+    tests/cases/drop_idempotent.sc
     tests/cases/object_at.sc
     tests/cases/bare_at.sc
     tests/cases/list_at.sc

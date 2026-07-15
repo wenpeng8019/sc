@@ -16,7 +16,7 @@ fnc keys_path: out: string&
 
 # 查 ENV 条目。命中返回 0 并填 val；未命中 -1。
 @fnc keys_get: i4, env_name: const char&, val: string&
-    var p: string& = string()
+    var p: string@1 = string()
     keys_path(p)
     var rc: com@1 = file(p->cstr(), true, 1, 0)
     var t: char& = nil
@@ -25,7 +25,6 @@ fnc keys_path: out: string&
         rs = rc
         rc >> rs
         t = (rs.take(): char&)
-    p->drop()
     if t == nil
         return -1
     var nlen: u4 = (::strlen(env_name): u4)
@@ -56,16 +55,16 @@ fnc keys_path: out: string&
 
 # 写/替换 ENV 条目（0600 权限，目录自动创建）。返回 0 成功。
 @fnc keys_put: i4, env_name: const char&, val: const char&
-    var p: string& = string()
+    var p: string@1 = string()
     keys_path(p)
     # 目录 + 0600 占位
-    var dir: string& = string()
+    var dir: string@1 = string()
     var home: const char& = (::getenv("HOME"): const char&)
     dir->printf("%s/.sagent", home != nil ? home : ".")
     fs_mkdirs(dir->cstr())
-    dir->drop()
+
     # 读旧内容，滤掉同名行
-    var s: string& = string()
+    var s: string@1 = string()
     var rc: com@1 = file(p->cstr(), true, 1, 0)
     var t: char& = nil
     if rc != nil
@@ -97,30 +96,27 @@ fnc keys_path: out: string&
         recycle((t: &))
     s->printf("%s=%s\n", env_name, val)
     # 先建 0600 空文件再写（防窗口期）
-    var cmdl: string& = string()
+    var cmdl: string@1 = string()
     cmdl->printf("umask 077; : > '%s'", p->cstr())
     ::system(cmdl->cstr())
-    cmdl->drop()
     var wc: com@1 = file(p->cstr(), true, 0, 1)
     var r: i4 = -1
     if wc != nil
         wc << s
         r = 0
-    s->drop()
-    p->drop()
     return r
 
 # 交互读取一行（提示写 stderr；echo_off=true 时关回显，用于密钥）。
 # 成功返回 0 并填 out（去尾换行）；EOF/失败 -1。
 @fnc sa_prompt_line: i4, prompt: const char&, echo_off: bool, out: string&
-    ::fprintf(::stderr, "%s", prompt)
+    print prompt, .
     if echo_off
         ::system("stty -echo 2>/dev/null")
     var buf[512]: char
     var got: & = ::fgets((buf: &), 512, ::stdin)
     if echo_off
         ::system("stty echo 2>/dev/null")
-        ::fprintf(::stderr, "\n")
+        print "\n", .
     if got == nil
         return -1
     var n: u4 = (::strlen((buf: const char&)): u4)

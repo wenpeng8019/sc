@@ -505,10 +505,9 @@ fnc json_write_node: bool, doc: json_doc&, node: i4, out: string&, pretty: bool,
     if n->kind == 2
         return out->append_n(s + n->off, n->len)
     if n->kind == 3
-        var tmp: string& = string()
+        var tmp: string@1 = string()
         json_string(doc, node, tmp)
         var ok: bool = json_write_string(out, tmp->cstr())
-        tmp->drop()
         return ok
     var open: char = n->kind == 4 ? (91: char) : (123: char)
     var close: char = n->kind == 4 ? (93: char) : (125: char)
@@ -524,7 +523,7 @@ fnc json_write_node: bool, doc: json_doc&, node: i4, out: string&, pretty: bool,
             json_indent(out, depth + 1)
         var child: json_node& = (doc->nodes.at(x): json_node&)
         if n->kind == 5
-            var ks: string& = string()
+            var ks: string@1 = string()
             # Reuse the same decoder by using a temporary view node.
             var save_off: u4 = child->off
             var save_len: u4 = child->len
@@ -537,7 +536,6 @@ fnc json_write_node: bool, doc: json_doc&, node: i4, out: string&, pretty: bool,
             child->off = save_off
             child->len = save_len
             json_write_string(out, ks->cstr())
-            ks->drop()
             out->append(pretty ? ": " : ":")
         if !json_write_node(doc, x, out, pretty, depth + 1)
             return false
@@ -559,11 +557,10 @@ fnc json_write_node: bool, doc: json_doc&, node: i4, out: string&, pretty: bool,
 
 # 保留轻量构造 API，便于请求体组装和旧调用方迁移。
 @fnc json_escape: out: string&, s: const char&
-    var tmp: string& = string()
+    var tmp: string@1 = string()
     json_write_string(tmp, s)
     if tmp->len() >= 2
         out->append_n(tmp->cstr() + 1, tmp->len() - 2)
-    tmp->drop()
 
 @fnc json_str: out: string&, s: const char&
     json_write_string(out, s)
@@ -600,21 +597,19 @@ tst "json 严格数字和 unicode"
     var d: json_doc
     json_init(&d)
     assert json_parse(&d, "{\"s\":\"A\\u0041\\uD83D\\uDE00\",\"n\":-1.5e+2}") == 0
-    var s: string& = string()
+    var s: string@1 = string()
     assert json_string(&d, json_get(&d, d.root, "s"), s) == 0
     assert s->equals("AA😀")
     assert json_number(&d, json_get(&d, d.root, "n")) < -149
-    s->drop()
     json_drop(&d)
 
 tst "json 序列化往返"
     var d: json_doc
     json_init(&d)
-    var out: string& = string()
+    var out: string@1 = string()
     assert json_parse(&d, "{\"message\":\"a\\n b\",\"items\":[1,false]}") == 0
     assert json_write(&d, d.root, out, false)
     assert out->equals("{\"message\":\"a\\n b\",\"items\":[1,false]}")
-    out->drop()
     json_drop(&d)
 
 tst "json in-situ：零拷贝借用可写缓冲区"
@@ -624,8 +619,7 @@ tst "json in-situ：零拷贝借用可写缓冲区"
     ::strcpy(buf, "{\"name\":\"sc\",\"n\":7}")
     assert json_parse_inplace(&d, &buf[0]) == 0
     assert d.borrowed
-    var s: string& = string()
+    var s: string@1 = string()
     assert json_string(&d, json_get(&d, d.root, "name"), s) == 0
     assert s->equals("sc")
-    s->drop()
     json_drop(&d)

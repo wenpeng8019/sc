@@ -1,4 +1,4 @@
-# sagent_dir —— .sagent/ 目录初始化与读写模块（inc 引用，@ 导出）
+# repo —— agent 项目持久化仓库（.sagent/）（inc 引用，@ 导出）
 # 目录规范见 OUTLINE.md §4。
 
 inc io.sc
@@ -8,7 +8,7 @@ inc mem.sc
 
 # 开启新 loop 档案：取下一个编号并建 .sagent/task/loop-NNN/。
 # 出参 dir 得到目录路径；返回 loop 编号（>0），失败 <0。
-@fnc sa_loop_open: i4, dir: string&
+@fnc repo_loop_open: i4, dir: string&
     if !fs_is_dir(".sagent/task")
         return -1
     var n: i4 = 1
@@ -22,19 +22,18 @@ inc mem.sc
     return -2
 
 # loop 档案落一个文本文件（<dir>/<name>）。
-@fnc sa_loop_put: i4, dir: string&, name: const char&, text: const char&
-    var p: string& = string()
+@fnc repo_loop_put: i4, dir: string&, name: const char&, text: const char&
+    var p: string@1 = string()
     p->printf("%s/%s", dir->cstr(), name)
     var c: com@1 = file(p->cstr(), true, 0, 1)
     var r: i4 = -1
     if c != nil
         c << text
         r = 0
-    p->drop()
     return r
 
 # state.md 追加一行摘要（已发生序列）。
-@fnc sa_state_append: i4, line: const char&
+@fnc repo_state_append: i4, line: const char&
     var rc: com@1 = file(".sagent/task/state.md", true, 1, 0)
     var old: char& = nil
     if rc != nil
@@ -42,7 +41,7 @@ inc mem.sc
         rs = rc
         rc >> rs
         old = (rs.take(): char&)
-    var s: string& = string()
+    var s: string@1 = string()
     if old != nil
         s->append(old)
         recycle((old: &))
@@ -53,13 +52,12 @@ inc mem.sc
     if wc != nil
         wc << s
         r = 0
-    s->drop()
     return r
 
 # ---------- M2：plan 队列原语 ----------
 
 # 取 plan.md 首个未完成项（"- [ ] xxx" 的 xxx）。命中返回 0；队列空 -1。
-@fnc sa_plan_next: i4, msg: string&
+@fnc repo_plan_next: i4, msg: string&
     var rc: com@1 = file(".sagent/task/plan.md", true, 1, 0)
     var t: char& = nil
     if rc != nil
@@ -86,7 +84,7 @@ inc mem.sc
     return -1
 
 # 把 plan.md 中首个未完成项标记完成（[ ] → [x]）。返回 0 成功。
-@fnc sa_plan_done: i4
+@fnc repo_plan_done: i4
     var rc: com@1 = file(".sagent/task/plan.md", true, 1, 0)
     var t: char& = nil
     if rc != nil
@@ -116,24 +114,23 @@ inc mem.sc
     return -1
 
 # 现有 loop 档案数（预算判断用）。
-@fnc sa_loop_count: i4
+@fnc repo_loop_count: i4
     var n: i4 = 0
-    var p: string& = string()
+    var p: string@1 = string()
     while n < 1000
         p->clear()
         p->printf(".sagent/task/loop-%03d", n + 1)
         if !fs_exists(p->cstr())
             break
         n = n + 1
-    p->drop()
     return n
 
 # task 归档（闭包封存）：task/ 整体移入 archive/NNN-<名>/，重建空骨架。
-@fnc sa_archive: i4, name: const char&
+@fnc repo_archive: i4, name: const char&
     if !fs_is_dir(".sagent/task")
         return -1
     var n: i4 = 1
-    var dst: string& = string()
+    var dst: string@1 = string()
     while n < 1000
         dst->clear()
         dst->printf(".sagent/archive/%03d-%s", n, name != nil && name[0] != 0 ? name : "task")
@@ -142,13 +139,12 @@ inc mem.sc
         n = n + 1
     fs_mkdirs(".sagent/archive")
     var r: i4 = fs_rename(".sagent/task", dst->cstr())
-    dst->drop()
     if r != 0
         return -2
     return 0
 
 # 初始化 .sagent/ 骨架。已存在时不覆盖（幂等，只补缺）。
-@fnc sa_init: i4
+@fnc repo_init: i4
     if fs_exists(".sagent") && !fs_is_dir(".sagent")
         print "sagent: .sagent 已存在且不是目录\n"
         return 1

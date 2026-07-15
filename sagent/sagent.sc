@@ -15,7 +15,7 @@ inc io.sc
 inc adt.sc
 inc mem.sc
 
-inc src/sagent_dir.sc
+inc src/repo.sc
 inc json.sc
 inc http.sc
 inc src/keys.sc
@@ -44,16 +44,16 @@ fnc main: i4, argc: i4, argv: char&&
     var cmd: char& = argv[argc - pos_count]
 
     if ::strcmp(cmd, "init") == 0
-        return sa_init()
+        return repo_init()
 
     if ::strcmp(cmd, "archive") == 0
         # 可选第二位置参数 = 归档名
         var aname: const char& = pos_count >= 2 ? (argv[argc - pos_count + 1]: const char&) : nil
-        if sa_archive(aname) != 0
-            ::printf("sagent: 归档失败（无 task 或移动失败）\n")
+        if repo_archive(aname) != 0
+            print "sagent: 归档失败（无 task 或移动失败）\n"
             return 1
-        sa_init()                          # 重建空骨架，开启下一 task
-        ::printf("sagent: task 已归档，新 task 就绪\n")
+        repo_init()                        # 重建空骨架，开启下一 task
+        print "sagent: task 已归档，新 task 就绪\n"
         return 0
 
     # 读配置（next 与消息路径共用）
@@ -61,10 +61,10 @@ fnc main: i4, argc: i4, argv: char&&
     ::memset(&cfg, 0, sizeof(::cfg))
     var lr: i4 = cfg_load(&cfg)
     if lr == 1
-        ::printf("sagent: 缺 .sagent/config.sa（先跑 sca init）\n")
+        print "sagent: 缺 .sagent/config.sa（先跑 sca init）\n"
         return 1
     if lr > 1
-        ::printf("sagent: config.sa 第 %d 行格式错误\n", lr)
+        print "sagent: config.sa 第 ", lr, " 行格式错误\n"
         return 1
 
     if ::strcmp(cmd, "next") == 0
@@ -75,23 +75,21 @@ fnc main: i4, argc: i4, argv: char&&
         while bs[bi] >= (48: char) && bs[bi] <= (57: char)
             budget = budget * 10 + ((bs[bi]: i4) - 48)
             bi = bi + 1
-        if budget > 0 && sa_loop_count() >= budget
-            ::printf("sagent: loop 预算耗尽（%d）\n", budget)
+        if budget > 0 && repo_loop_count() >= budget
+            print "sagent: loop 预算耗尽（", budget, "）\n"
             return 43
-        var msg: string& = string()
-        if sa_plan_next(msg) != 0
-            ::printf("sagent: plan 队列空\n")
-            msg->drop()
+        var msg: string@1 = string()
+        if repo_plan_next(msg) != 0
+            print "sagent: plan 队列空\n"
             return 42
-        ::printf("sagent: 消费计划项: %s\n", msg->cstr())
-        var nrc: i4 = sa_loop_run(&cfg, ARGS_llm, msg->cstr())
+        print "sagent: 消费计划项: ", msg->cstr(), "\n"
+        var nrc: i4 = loop_run(&cfg, ARGS_llm, msg->cstr())
         if nrc == 0
-            sa_plan_done()                 # 本 loop 验证通过才标记完成
-        msg->drop()
+            repo_plan_done()               # 本 loop 验证通过才标记完成
         return nrc
 
     # 非子命令 = 用户消息：单次 loop 全生命周期（OUTLINE §2）
-    var rc: i4 = sa_loop_run(&cfg, ARGS_llm, cmd)
+    var rc: i4 = loop_run(&cfg, ARGS_llm, cmd)
     return rc
 
 # 行内截段：跳过前导空白。返回新下标。

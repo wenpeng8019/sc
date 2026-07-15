@@ -145,9 +145,9 @@ int32_t main(void) {
     /* line 62 */
     sc_list_drop(lp);
     /* line 63 */
-    (sc_string_drop(part), sc_free(part));
+    sc_ptr_drop_slot((void *)&(part), (void (*)(void *))sc_string_drop);
     /* line 64 */
-    (sc_string_drop(s), sc_free(s));
+    sc_ptr_drop_slot((void *)&(s), (void (*)(void *))sc_string_drop);
     /* line 67 */
     sc_string *hs = sc_string__new();
     /* line 68 */
@@ -155,7 +155,7 @@ int32_t main(void) {
     /* line 69 */
     printf("heap: %s\n", sc_string_cstr(hs));
     /* line 70 */
-    (sc_string_drop(hs), sc_free(hs));
+    sc_ptr_drop_slot((void *)&(hs), (void (*)(void *))sc_string_drop);
     /* line 71 */
     {
         int32_t _ret = 0;

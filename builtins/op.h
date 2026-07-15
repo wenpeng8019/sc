@@ -147,6 +147,26 @@ void *sc_realloc(void *p, size_t n);
 void  sc_free(void *p);
 #endif
 
+/* ---------------- 堆专属对象的安全析构 ----------------
+ * sc_ptr_drop：对一个普通堆指针执行「用户 drop（若有）+ sc_free」，nil 是空操作。
+ * sc_ptr_drop_slot：在执行前把调用方的指针槽位置为 NULL，再析构对象；用于编译器
+ * 发出的 p->drop()，因此显式析构、T@1 退域析构和条件分支可以安全汇合，不会二次释放。
+ * slot 通过 memcpy 读写，避免把任意 T** 强转为 void** 后违反 C 的严格别名规则。 */
+static inline void sc_ptr_drop(void *p, void (*drop)(void *)) {
+    if (!p) return;
+    if (drop) drop(p);
+    sc_free(p);
+}
+static inline void sc_ptr_drop_slot(void *slot, void (*drop)(void *)) {
+    if (!slot) return;
+    void *p = NULL;
+    memcpy(&p, slot, sizeof(p));
+    if (!p) return;
+    void *nil = NULL;
+    memcpy(slot, &nil, sizeof(nil));
+    sc_ptr_drop(p, drop);
+}
+
 /* ---------------- 确定性池化分配 sc_chunk / sc_chunk0 / sc_refit / sc_recycle ----------------
  * 与 sc_alloc/sc_free（随 SC_POOL 在 libc↔mem 间切换）不同，本组恒走 mem 池
  * （chunk/chunk0/refit/recycle）——不受 SC_POOL 开关影响，始终池化。完整对应
