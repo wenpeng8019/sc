@@ -63,6 +63,12 @@ vendor/bgfx/
 templates/.scenv/modules/ssh/libssh2.a
 templates/.scenv/modules/ssh/libssh2.*.a
 
+# http 组件 libcurl + mbedTLS 静态库（由 modules/http/build.sh 生成）
+templates/.scenv/modules/http/libcurl.a
+templates/.scenv/modules/http/libcurl.*.a
+templates/.scenv/modules/http/libmbedtls_all.a
+templates/.scenv/modules/http/libmbedtls_all.*.a
+
 # plib 跨平台库模板构建产物
 templates/plib/*.a
 # 模块库 host 默认档（lib<名>.a）= 本地构建产物，不入库；
@@ -73,3 +79,6 @@ templates/.scenv/modules/layout/liblayout.a
 
 # .scenv 虚拟环境缓存（交叉编译中间物、模块库缓存等）
 templates/.scenv/cache/
+
+# JSON 性能参考源码（本地 clone，不参与构建）
+vendor/yyjson/

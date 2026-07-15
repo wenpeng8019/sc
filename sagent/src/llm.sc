@@ -38,19 +38,34 @@ inc keys.sc
     k->drop()
     return v2
 
-# SSE 流式执行：逐 data: 块提 delta.content，边打印（stdout 即时 flush）边累积。
-# 返回 0 成功；非 0 失败（已打印原因）。
+# 流式响应执行：使用通用 HTTP 请求取得响应体，再按应用层协议解析 data 块。
+# HTTP 组件不包含 SSE 语义；这里仅处理 OpenAI 兼容响应格式。
 fnc llm_stream_exec: i4, endpoint: const char&, bearer: const char&, body: const char&, timeout_s: i4, answer: string&
-    var fp: & = http_sse_open(endpoint, bearer, body, timeout_s)
-    if fp == nil
-        ::printf("sagent: SSE 通道打开失败\n")
+    var hdr: string& = string()
+    hdr->append("Content-Type: application/json\n")
+    if bearer != nil && bearer[0] != 0
+        hdr->printf("Authorization: Bearer %s\n", bearer)
+    var resp: string& = string()
+    var code: i4 = http_request("POST", endpoint, body, hdr->cstr(), timeout_s, resp)
+    hdr->drop()
+    if code < 0
+        ::printf("sagent: HTTP 通路失败（%d）\n", code)
+        resp->drop()
         return 3
     var errbuf: string& = string()
     var lnb: string& = string()
-    while true
-        var lr: i4 = http_sse_line(fp, lnb)
-        if lr <= 0
-            break
+    var all: char& = resp->cstr()
+    var pos: i4 = 0
+    while all[pos] != 0
+        lnb->clear()
+        while all[pos] != 0 && all[pos] != (10: char)
+            var one[2]: char
+            one[0] = all[pos]
+            one[1] = 0
+            lnb->append(one)
+            pos = pos + 1
+        if all[pos] == (10: char)
+            pos = pos + 1
         var buf: char& = lnb->cstr()
         # 只处理 "data: " 行；其它行（错误 JSON/注释）收入 errbuf
         if buf[0] == (100: char) && buf[1] == (97: char) && buf[2] == (116: char) && buf[3] == (97: char) && buf[4] == (58: char)
@@ -69,13 +84,12 @@ fnc llm_stream_exec: i4, endpoint: const char&, bearer: const char&, body: const
             errbuf->append(buf)
             errbuf->append("\n")
     lnb->drop()
-    var rc: i4 = http_sse_close(fp)
     if answer->len() == 0
         var em: string& = string()
         if errbuf->len() > 0 && json_get_str(errbuf->cstr(), "message", em) == 0
             ::printf("sagent: SSE 错误: %s\n", em->cstr())
         else
-            ::printf("sagent: SSE 无内容（curl rc=%d）%s\n", rc, errbuf->cstr())
+            ::printf("sagent: 流式响应无内容（HTTP %d）%s\n", code, errbuf->cstr())
         em->drop()
         errbuf->drop()
         return 4
@@ -150,7 +164,12 @@ fnc llm_stream_exec: i4, endpoint: const char&, bearer: const char&, body: const
         kbuf->drop()
         return src
     var resp: string& = string()
-    var code: i4 = http_post(endpoint, bearer, body->cstr(), timeout_s, resp)
+    var hdr: string& = string()
+    hdr->append("Content-Type: application/json\n")
+    if bearer != nil && bearer[0] != 0
+        hdr->printf("Authorization: Bearer %s\n", bearer)
+    var code: i4 = http_request("POST", endpoint, body->cstr(), hdr->cstr(), timeout_s, resp)
+    hdr->drop()
     body->drop()
 
     if code < 0

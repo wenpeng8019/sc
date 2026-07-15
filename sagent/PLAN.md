@@ -2,7 +2,7 @@
 
 > 纲领见 [OUTLINE.md](OUTLINE.md)。本文档是工程落地方案与实施计划。
 > 进度：**一期（任务 1-6）✅ → 二期（任务 7-11）✅ → M1 DeepSeek 真实验收 ✅
-> → M2 task 编排 ✅**；待做：SSE 流式、libcurl vendor（任务 4 主路）、M3 决策记忆。
+> → M2 task 编排 ✅**；待做：M3 决策记忆。
 
 ## 1. 技术决策
 
@@ -17,7 +17,7 @@ sagent 直接用 sc 语言编写（`scc sagent/sagent.sc` 即跑，`--build` 出
 - **理由**：LLM API 需要 HTTP/1.1 chunked、SSE 流式、重定向、代理、超时控制
   ——在 ssl_com（裸 TLS）上自研 HTTP 协议层不值；libcurl 是事实标准且
   mbedtls 后端与既有 vendor 无缝；
-- **绑定面**：sagent 内部模块 `src/http.sc`（`@fnc` 绑 easy API 最小集：
+- **绑定面**：默认扩展组件 `templates/.scenv/modules/http/http.sc`（`@fnc` 绑 easy API 最小集：
   init/setopt/perform/写回调），**先非流式**（一期），SSE 流式二期；
 - **回退**：libcurl 构建受阻时，临时用系统 `curl` 子进程（os.sc exec）保
   llm request 通路不被阻塞——两条路共用同一 `http_post()` 签名。
@@ -29,12 +29,15 @@ sagent 直接用 sc 语言编写（`scc sagent/sagent.sc` 即跑，`--build` 出
   环境变量名，不落盘）/timeout；`[loop]` 预算；`[tools]` 白名单；
 - 多 provider 为多个 `[llm.<名>]` 段，`--llm <名>` 选用。
 
-### 1.4 JSON 最小库
-builtins 现无 JSON。一期在 sagent 内实现 `src/json.sc` 最小集：
-- 构造：对象/数组/字符串转义（组装 chat completions 请求体）；
-- 解析：定位取值（`choices[0].message.content`、`error.message`）——
-  流式取值器足够，不做完整 DOM；
-- 成熟后评估升格 builtins（同 kernels"先局部后提升"惯例）。
+### 1.4 JSON 默认组件
+`templates/.scenv/modules/json/` 是标准通用 JSON 组件，sagent 通过裸名
+`inc json.sc` 使用；组件保持纯 sc 实现，不把 C 后端作为性能捷径。解析器采用
+连续 source + 连续 node tape：字符串/数字保留切片，数组/对象只存 first/last/next
+索引，避免逐节点分配和指针追逐；支持 RFC 8259 的 null/bool/number/string/
+array/object、严格数字、转义与 surrogate pair、DOM 查询和序列化。
+
+实现策略参考 yyjson：优先保证连续存储、单次线性扫描、原文切片和批量容量增长；
+后续用相同数据集做 benchmark，再针对 sc 生成的 C 热点优化。
 
 ## 2. 脚手架参考（refs/，git 忽略，shallow clone）
 
@@ -59,15 +62,16 @@ sagent/
   src/                # 全部为 inc 模块（@ 导出，各自可独立 --test）
     # 文件读写不再封装：各处直接用 com@1 file(...) + com[0]/take（io.sc/mem.sc）
     sagent_dir.sc     # .sagent/ 初始化、loop 档案、plan 队列、归档
-    config.sc         # .sa 解析
-    json.sc           # JSON 最小库
-    http.sc           # 系统 curl 子进程（libcurl vendor 后同签名替换）
+    # .sa 解析已并入 sagent.sc
+    # JSON 由 templates/.scenv/modules/json 提供，不在 sagent 内复制
+    # http.sc 来自 templates/.scenv/modules/http，不再复制到 sagent/src
     llm.sc            # chat completions 组装/提取（多 provider 段兜底）
     loop.sc           # loop 全生命周期编排
   scripts/
     coding.sh         # coding agent 编排模板
   refs/               # 参考项目 clone（gitignore）
-vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
+vendor/curl/          # libcurl 源码（mbedTLS 后端，由默认 http 组件构建）
+vendor/yyjson/        # yyjson 性能/布局参考，不参与构建
 ```
 
 ## 4. 一期任务分解（✅ 全部完成 2026-07-14）
@@ -76,8 +80,8 @@ vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
 |---|---|---|---|---|
 | 1 | ✅ | CLI 骨架 | sagent.sc 入口：`init` / `"消息"` / `--llm` / `--help`；ARGS 机制 | `sca init` 生成 `.sagent/` 骨架（config.sa 模板 + task/ + memory/ 四件空文件） |
 | 2 | ✅ | `.sa` 解析 | 段 + 键值解析、env 引用展开、默认值 | 单测 4/4；坏格式报行号 |
-| 3 | ✅ | JSON 最小库 | 构造（转义）+ 取值器 | 单测 5/5：组装往返、响应提取、\u→UTF-8、防误匹配 |
-| 4 | ✅ | curl 通路 | **libcurl vendor 主路已落**（vendor/curl 8.21.0+mbedtls，HTTP(S) 最小化；src/http_curl.c shim，密钥只在内存）；子进程回退保留于 src/http_sh.sc | libcurl 两通道 DeepSeek 真实验收 |
+| 3 | ✅ | JSON 默认组件 | 纯 sc 连续 tape DOM：解析、查询、序列化、转义 | 组件单测：嵌套结构、严格数字、\u→UTF-8、往返 |
+| 4 | ✅ | HTTP 通路 | **默认 http 扩展组件已落**（templates/.scenv/modules/http：vendor/curl 8.21.0+mbedtls，HTTP(S) 最小化；http_impl.c shim，密钥只在内存） | libcurl 两通道 DeepSeek 真实验收 |
 | 5 | ✅ | llm request | OpenAI 兼容非流式；system+user 组装；非 200 提 error.message | `sca "hi"` 打印应答（mock + DeepSeek 真实） |
 | 6 | ✅ | loop 档案雏形 | loop-NNN/（context/response/answer）+ state 追加 | 档案齐备，git 可审计 |
 
@@ -108,14 +112,13 @@ vendor/curl/          # （待做）libcurl 源码（mbedtls 后端）
    （loop.md/review.md，init 生成默认可手编，loop 自动加载，缺失回退内置）；
 2. ✅ loop 阶段进度显示（stderr，六阶段；token 级流式见第 4 项）；
 3. ✅ 协议 prompt 防泄漏：默认 loop.md 第 5 条 + DeepSeek 实测应答干净；
-4. ✅ SSE 流式：`[llm] stream: on` —— http.sc SSE 通道（curl -N + popen 行读，
-   密钥 config 由 close 清理防 popen 竞态）+ llm.sc delta 解析边出边显；
+4. ✅ 流式响应：`[llm] stream: on` —— 通用 http 请求取得响应体，llm.sc 在
+  应用层解析 OpenAI 兼容 data 块；不再保留系统 curl 子进程回退。
    DeepSeek 真实流式验收。复盘调用保持非流式；
-5. ✅ libcurl vendor：vendor/curl（8.21.0 裁剪入库）+ 跨平台 build.sh
-   （mbedtls 直编 library/*.c 同 scc 做法；HTTP(S)-only 最小化；TAG/CMAKE_EXTRA
-   透传交叉）；src/http_curl.c shim（post + SSE multi 行缓冲），链接自描述在
-   src/.sc 段配置（模块独立 --test 也自动链上）；密钥只在内存不再落临时文件；
-   回退实现保留 src/http_sh.sc；
+5. ✅ 默认 http 扩展组件：`templates/.scenv/modules/http/` 已接入，
+  从 vendor/curl（8.21.0）+ mbedTLS 构建目标变体（HTTP(S)-only 最小化；
+  TAG/CMAKE_EXTRA 透传交叉）；http_impl.c native shim（通用请求 API），
+  链接自描述在模块 `.sc` 段配置；密钥只在内存不再落临时文件；
 6. M3 决策记忆（OUTLINE §10-M3）：memory/ 四分类读写纪律、结构文件
    `scc --graph/--api` 自动再生、上下文选材优化、跨 task 陷阱复用验收；
 7. actions.jsonl 可回放格式（现 actions.md 人读向）。

@@ -16,8 +16,8 @@ inc adt.sc
 inc mem.sc
 
 inc src/sagent_dir.sc
-inc src/json.sc
-inc src/http.sc
+inc json.sc
+inc http.sc
 inc src/keys.sc
 inc src/llm.sc
 inc src/loop.sc

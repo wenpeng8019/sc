@@ -103,6 +103,31 @@ function runScc(args, input) {
     });
 }
 
+// 从当前文档向上发现 .scenv，使编辑器诊断与项目真实构建使用同一模块域。
+function findScEnv(startDir) {
+    let dir = startDir;
+    for (let i = 0; i < 64; i++) {
+        const env = path.join(dir, '.scenv');
+        if (fs.existsSync(path.join(env, 'modules'))) return env;
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    // sagent 等子项目可能位于仓库根下，但 .scenv 放在 templates/ 中；
+    // 这时它不是源文件路径的祖先，需要按工作区根补查标准环境位置。
+    for (const folder of vscode.workspace.workspaceFolders || []) {
+        const root = folder.uri.fsPath;
+        const candidates = [
+            path.join(root, '.scenv'),
+            path.join(root, 'templates', '.scenv')
+        ];
+        for (const env of candidates) {
+            if (fs.existsSync(path.join(env, 'modules'))) return env;
+        }
+    }
+    return null;
+}
+
 // uri → { version, ast }，保留最近一次解析成功的 AST
 const astCache = new Map();
 
@@ -114,7 +139,10 @@ async function runAstOnText(doc, text) {
     const tmp = path.join(dir, `.sc_ast_${process.pid}_${++astSeq}.tmp.sc`);
     try {
         fs.writeFileSync(tmp, text);
-        const out = await runScc([tmp, '--ast'], '');
+        const args = [tmp, '--ast'];
+        const env = findScEnv(dir);
+        if (env) args.push('--env', env);
+        const out = await runScc(args, '');
         return JSON.parse(out);
     } finally {
         try { fs.unlinkSync(tmp); } catch { /* 已删除 */ }

@@ -23,13 +23,15 @@ do_build() {
         echo "sagent: 未找到 scc（$SCC）——先在仓库根 ./build.sh build" >&2
         exit 1
     fi
-    # libcurl vendor（首次自动构建；TAG/CMAKE_EXTRA 透传可交叉；链接自描述在 src/.sc 段配置）
-    if [ ! -f "../vendor/curl/out/${TAG:-host}/lib/libcurl.a" ]; then
-        echo "==> 首次构建 libcurl vendor（一次性）"
-        ../vendor/curl/build.sh
+    # http 默认扩展组件（首次自动构建；TAG/CMAKE_EXTRA 透传可交叉）。
+    # sagent 位于 templates/.scenv 之外，显式指定该环境以启用裸名 inc http.sc。
+    HTTP="../templates/.scenv/modules/http"
+    if [ ! -f "$HTTP/libcurl.a" ] || [ ! -f "$HTTP/libmbedtls_all.a" ]; then
+        echo "==> 首次构建 http/libcurl 组件"
+        "$HTTP/build.sh"
     fi
     mkdir -p build
-    "$SCC" sagent.sc --build -o build/sca
+    "$SCC" sagent.sc --env ../templates/.scenv --build -o build/sca
     echo "sagent: 构建完成 → $(pwd)/build/sca"
 }
 
